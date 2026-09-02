@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 
 const MODELS_ENDPOINT = 'https://nano-gpt.com/api/v1/models?detailed=true&sort=favorites'
+const CHAT_ENDPOINT = 'https://nano-gpt.com/api/v1/chat/completions'
 
 type NanoModel = {
   id: string
@@ -13,14 +14,27 @@ type ModelsResponse = {
   message?: string
 }
 
+type ChatResponse = {
+  choices?: Array<{
+    message?: {
+      content?: string
+    }
+  }>
+  error?: string | { message?: string }
+  message?: string
+}
+
 export default function App() {
   const [prompt, setPrompt] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [models, setModels] = useState<NanoModel[]>([])
   const [selectedModel, setSelectedModel] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [isGenerating, setIsGenerating] = useState(false)
   const [message, setMessage] = useState('Enter an API key, then refresh the model list.')
   const [hasError, setHasError] = useState(false)
+  const [generationMessage, setGenerationMessage] = useState('')
+  const [generationError, setGenerationError] = useState(false)
 
   const modelOptions = useMemo(
     () =>
@@ -73,6 +87,76 @@ export default function App() {
       setMessage(error instanceof Error ? error.message : 'Could not load the model list.')
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  async function generateContinuation() {
+    const trimmedKey = apiKey.trim()
+    const story = prompt.trim()
+
+    setGenerationError(false)
+
+    if (!trimmedKey) {
+      setGenerationError(true)
+      setGenerationMessage('Enter your NanoGPT API key before generating.')
+      return
+    }
+
+    if (!selectedModel) {
+      setGenerationError(true)
+      setGenerationMessage('Choose a model before generating.')
+      return
+    }
+
+    if (!story) {
+      setGenerationError(true)
+      setGenerationMessage('Add some story text before generating.')
+      return
+    }
+
+    setIsGenerating(true)
+    setGenerationMessage('Generating continuation…')
+
+    try {
+      const response = await fetch(CHAT_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${trimmedKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: selectedModel,
+          messages: [
+            {
+              role: 'user',
+              content: `${story}\n\nContinue the story.`,
+            },
+          ],
+        }),
+      })
+
+      const payload = (await response.json().catch(() => ({}))) as ChatResponse
+
+      if (!response.ok) {
+        const apiMessage =
+          typeof payload.error === 'string' ? payload.error : payload.error?.message
+        throw new Error(apiMessage || payload.message || `NanoGPT returned ${response.status}.`)
+      }
+
+      const continuation = payload.choices?.[0]?.message?.content?.trim()
+
+      if (!continuation) {
+        throw new Error('NanoGPT returned an empty continuation.')
+      }
+
+      setPrompt(`${prompt.trimEnd()}\n\n${continuation}`)
+      setGenerationMessage('Continuation added to the text.')
+    } catch (error) {
+      setGenerationError(true)
+      setGenerationMessage(error instanceof Error ? error.message : 'Could not generate a continuation.')
+    } finally {
+      setIsGenerating(false)
     }
   }
 
@@ -133,6 +217,22 @@ export default function App() {
           <p className={hasError ? 'status error' : 'status'} role="status">
             {message}
           </p>
+        </div>
+
+        <div className="generation-actions">
+          <button
+            className="generate-button"
+            type="button"
+            onClick={generateContinuation}
+            disabled={isGenerating || isLoading}
+          >
+            {isGenerating ? 'Generating…' : 'Generate'}
+          </button>
+          {generationMessage ? (
+            <p className={generationError ? 'status error' : 'status'} role="status">
+              {generationMessage}
+            </p>
+          ) : null}
         </div>
       </section>
     </main>
