@@ -154,6 +154,21 @@ button:disabled {
   color: #fca5a5;
 }
 
+.generation-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1.75rem;
+}
+
+.generation-actions .status {
+  margin: 0;
+}
+
+.generate-button {
+  min-width: 8rem;
+}
+
 @media (max-width: 38rem) {
   .key-row {
     grid-template-columns: 1fr;
@@ -161,5 +176,10 @@ button:disabled {
 
   button {
     width: 100%;
+  }
+
+  .generation-actions {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
