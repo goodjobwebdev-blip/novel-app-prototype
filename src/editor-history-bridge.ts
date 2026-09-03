@@ -15,10 +15,23 @@ function runHistoryAction(action: 'undo' | 'redo') {
 
 document.addEventListener('pointerdown', (event) => {
   const target = event.target as HTMLElement | null
-  const button = target?.closest<HTMLButtonElement>('button[aria-label="Undo editor change"], button[aria-label="Redo editor change"]')
+  const button = target?.closest<HTMLButtonElement>('.generate-actions button')
   if (!button) return
+
+  const label = button.getAttribute('aria-label') ?? ''
 
   event.preventDefault()
   event.stopPropagation()
-  runHistoryAction(button.getAttribute('aria-label')?.startsWith('Undo') ? 'undo' : 'redo')
+
+  if (label === 'Undo editor change') {
+    runHistoryAction('undo')
+    return
+  }
+
+  if (label === 'Redo editor change') {
+    runHistoryAction('redo')
+    return
+  }
+
+  button.click()
 }, true)
