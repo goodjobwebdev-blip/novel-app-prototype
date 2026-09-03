@@ -14,6 +14,7 @@
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.24);
+  pointer-events: auto;
 }
 
 .generate-actions button {
@@ -29,6 +30,7 @@
   line-height: 1;
   cursor: pointer;
   touch-action: manipulation;
+  pointer-events: auto;
 }
 
 .generate-actions button:active {
