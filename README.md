@@ -1,6 +1,6 @@
 # Novel App Prototype
 
-This repository contains the first deployment prototype for a local-first novel-writing app. The current interface intentionally displays only **Hello world**.
+This repository contains an evolving prototype for a personal, local-first novel-writing app.
 
 See [the product specification](docs/PRODUCT_SPEC.md) for the app's purpose, confirmed constraints, and undecided areas.
 
