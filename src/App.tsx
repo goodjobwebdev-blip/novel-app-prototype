@@ -6,6 +6,7 @@ import {
   CircleHelp,
   Home,
   Image as ImageIcon,
+  Plus,
   RefreshCw,
   Search,
   SlidersHorizontal,
@@ -163,15 +164,35 @@ export default function App({ onHome, onBack, onSaved }: AiSettingsProps) {
 }
 
 function SettingsPlaceholder({ tab }: { tab: Exclude<SettingsTab, 'ai'> }) {
-  const content = {
-    context: { Icon: SlidersHorizontal, eyebrow: 'Context', title: 'Context management', description: 'Control how scenes, summaries, notes, and Codex entries are assembled for generation.', items: ['Context budget and priority', 'Automatic summary selection', 'Include or exclude book sources'] },
-    appearance: { Icon: Type, eyebrow: 'UI', title: 'Reading surface', description: 'Choose editor typography, spacing, themes, and motion preferences.', items: ['Editor font, size, and line height', 'Paragraph spacing and first-line indent', 'Theme library and custom theme editor'] },
-    speech: { Icon: Volume2, eyebrow: 'Speech', title: 'Speech settings', description: 'Configure dictation for the editor and Arc, plus read-aloud voices.', items: ['Dictation language and microphone', 'Editor and Arc insertion behavior', 'Read-aloud voice and speed'] },
-    images: { Icon: ImageIcon, eyebrow: 'Images', title: 'Image settings', description: 'Set defaults for character, location, and reference image generation.', items: ['Image provider and model', 'Default style and aspect ratio', 'Storage and attachment preferences'] },
-  }[tab]
+  if (tab === 'appearance') return <AppearanceSettings />
+
+  const content = tab === 'context'
+    ? { Icon: SlidersHorizontal, title: 'Context defaults' }
+    : tab === 'speech'
+      ? { Icon: Volume2, title: 'Speech defaults' }
+      : { Icon: ImageIcon, title: 'Image defaults' }
   const Icon = content.Icon
-  return <section className="placeholder-settings">
-    <div className="page-heading"><div><p>{content.eyebrow}</p><h1 id="page-title">{content.title}</h1><span>{content.description}</span></div><Icon aria-hidden="true" /></div>
-    <div className="settings-card placeholder-card"><Icon aria-hidden="true" /><strong>Reserved for a later implementation</strong><p>This screen is part of the approved settings structure. Its controls are intentionally placeholders for now.</p><ul>{content.items.map((item) => <li key={item}>{item}</li>)}</ul></div>
+  return <section className="compact-settings-empty" aria-labelledby="page-title">
+    <Icon aria-hidden="true" />
+    <h1 id="page-title">{content.title}</h1>
+    <p>Saved as the starting point for new books.</p>
+  </section>
+}
+
+function AppearanceSettings() {
+  const [textSize, setTextSize] = useState(21)
+  const [theme, setTheme] = useState<'night' | 'paper'>('night')
+
+  return <section className="appearance-settings">
+    <div className="page-heading"><div><p>Default UI</p><h1 id="page-title">Reading surface</h1><span>These values are copied when a new book is created.</span></div><Type aria-hidden="true" /></div>
+    <div className="settings-card appearance-card">
+      <label className="appearance-field"><span>Editor font</span><select defaultValue="Iowan Old Style"><option>Iowan Old Style</option><option>Literata</option><option>Source Serif</option></select></label>
+      <label className="appearance-field"><span>Text size <b>{textSize} px</b></span><input type="range" min="16" max="30" value={textSize} onChange={(event) => setTextSize(Number(event.target.value))} /></label>
+      <div className="theme-grid" aria-label="Default theme">
+        <button className={`theme-card ${theme === 'night' ? 'selected' : ''}`} type="button" onClick={() => setTheme('night')}><i className="theme-night" /><span>Ink at Night</span>{theme === 'night' && <Check aria-hidden="true" />}</button>
+        <button className={`theme-card ${theme === 'paper' ? 'selected' : ''}`} type="button" onClick={() => setTheme('paper')}><i className="theme-paper" /><span>Paper</span>{theme === 'paper' && <Check aria-hidden="true" />}</button>
+      </div>
+      <button className="create-theme" type="button"><Plus aria-hidden="true" /> Create theme</button>
+    </div>
   </section>
 }
