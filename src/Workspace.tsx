@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import AiSettings from './App'
+import MarkdownEditor from './MarkdownEditor'
 
 type Screen = 'home' | 'editor' | 'chat' | 'settings'
 type RightTab = 'outline' | 'notes' | 'codex' | 'chat'
@@ -17,19 +18,19 @@ const chats = [
   ['Ideas for Act II', 'Three possible costs for crossing…', 'Aug 31'],
 ]
 
-const story = [
-  ['heading', '# The City Beneath the Tide'],
-  ['meta', "_Chapter Seven · The Cartographer's Door_"],
-  ['body', 'Mara found the door at low tide, where the old maps insisted there was only sea.'],
-  ['body', 'It stood alone in the blue hour—cedar darkened by salt, a brass handle warm beneath her palm. Behind it, something knocked **three times**.'],
-  ['body', 'She opened her notebook and wrote the rule exactly as her father had taught her:'],
-  ['quote', '> Never answer a door that remembers your name.'],
-  ['body', 'Then the voice on the other side whispered, _Mara Vale_, and every compass in her satchel turned toward it.'],
-]
+const initialStoryMarkdown = `# The City Beneath the Tide
 
-function renderLine(raw: string) {
-  return raw.replace(/^# |^> /, '').replaceAll('**', '').replaceAll('_', '')
-}
+_Chapter Seven · The Cartographer's Door_
+
+Mara found the door at low tide, where the old maps insisted there was only sea.
+
+It stood alone in the blue hour—cedar darkened by salt, a brass handle warm beneath her palm. Behind it, something knocked **three times**.
+
+She opened her notebook and wrote the rule exactly as her father had taught her:
+
+> Never answer a door that remembers your name.
+
+Then the voice on the other side whispered, _Mara Vale_, and every compass in her satchel turned toward it.`
 
 export default function Workspace() {
   const [screen, setScreen] = useState<Screen>('home')
@@ -39,7 +40,7 @@ export default function Workspace() {
   const [chatPanel, setChatPanel] = useState<ChatPanel>('list')
   const [activeChat, setActiveChat] = useState('Mara’s motivation')
   const [arcOpen, setArcOpen] = useState(false)
-  const [activeLine, setActiveLine] = useState(2)
+  const [storyMarkdown, setStoryMarkdown] = useState(initialStoryMarkdown)
   const [chatEdit, setChatEdit] = useState(false)
   const [aiReady, setAiReady] = useState(false)
 
@@ -71,7 +72,7 @@ export default function Workspace() {
 
       {screen === 'editor' ? <article className="story-editor">
         <small className="page-number">07</small><p className="document-path">Outline / Chapter 7 / Scene 2</p>
-        {story.map(([kind, raw], index) => <div className={`editor-line ${kind} ${activeLine === index ? 'active' : ''}`} key={`${kind}-${index}`} onClick={() => setActiveLine(index)}>{activeLine === index ? <textarea defaultValue={raw} rows={kind === 'body' ? 2 : 1} /> : <p>{renderLine(raw)}</p>}</div>)}
+        <MarkdownEditor value={storyMarkdown} onChange={setStoryMarkdown} ariaLabel="Scene Markdown editor" />
       </article> : <section className="conversation">
         <header><small>Book chat</small><h1>{activeChat}</h1><p>Context: Chapter 7 · Codex</p></header>
         <div className="messages">
