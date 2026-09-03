@@ -40,7 +40,13 @@ function formatContext(value?: number) {
   return `${Math.round(value / 1000)}k context`
 }
 
-export default function App() {
+type AiSettingsProps = {
+  onHome?: () => void
+  onBack?: () => void
+  onSaved?: () => void
+}
+
+export default function App({ onHome, onBack, onSaved }: AiSettingsProps) {
   const [settings, setSettings] = useState<Settings>(initialSettings)
   const [models, setModels] = useState<Model[]>([])
   const [promptTab, setPromptTab] = useState<keyof Prompts>('story')
@@ -91,17 +97,18 @@ export default function App() {
     } finally { setLoading(false) }
   }
   function toggleFavorite(id: string) { update('favorites', settings.favorites.includes(id) ? settings.favorites.filter((favorite) => favorite !== id) : [...settings.favorites, id]) }
-  function saveDefaults() { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); setSaved(true); setStatus('AI defaults saved on this device. New books will copy them.'); setStatusKind('success') }
+  function saveDefaults() { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); setSaved(true); setStatus('AI defaults saved on this device. New books will copy them.'); setStatusKind('success'); onSaved?.() }
 
   return (
     <main className="app-shell">
       <aside className="settings-rail" aria-label="Default settings navigation">
-        <div className="rail-header"><button className="home-button" type="button" aria-label="Back to library"><span>⌂</span><b>Home</b></button><div><small>Defaults</small><strong>New books</strong></div></div>
+        <div className="rail-header"><button className="home-button" type="button" aria-label="Back to library" onClick={onHome}><span>⌂</span><b>Home</b></button><div><small>Defaults</small><strong>New books</strong></div></div>
         <nav><button className="active" type="button"><span>✦</span>AI</button><button type="button" disabled><span>◫</span>Context</button><button type="button" disabled><span>Aa</span>UI</button><button type="button" disabled><span>◖</span>Speech</button><button type="button" disabled><span>◇</span>Images</button></nav>
         <p>Defaults are copied into a new book. After that, each book keeps its own settings.</p>
       </aside>
 
       <section className="settings-page" aria-labelledby="page-title">
+        {onBack && <button className="settings-back" type="button" onClick={onBack}>← Back to book</button>}
         <header className="page-heading"><div><p>Default AI</p><h1 id="page-title">Models & prompts</h1><span>Configure the writing and support models used when a book is created.</span></div><div className={`save-state ${saved ? 'saved' : ''}`}><i />{saved ? 'Saved' : 'Unsaved changes'}</div></header>
 
         <section className="settings-card provider-card">
