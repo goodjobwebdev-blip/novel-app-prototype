@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import './markdown-editor.css'
 
 type MarkdownEditorProps = {
@@ -8,6 +8,14 @@ type MarkdownEditorProps = {
   className?: string
 }
 
+export type MarkdownEditorHandle = {
+  generate: () => boolean
+  insertSpeech: () => boolean
+  undo: () => boolean
+  redo: () => boolean
+  regenerate: () => boolean
+}
+
 type CodeMirrorModules = {
   EditorState: any
   EditorView: any
@@ -15,9 +23,12 @@ type CodeMirrorModules = {
   ViewPlugin: any
   keymap: any
   history: any
+  undo: any
+  redo: any
   historyKeymap: any
   defaultKeymap: any
   markdown: any
+  Transaction: any
 }
 
 const codeMirrorUrls = {
@@ -27,6 +38,8 @@ const codeMirrorUrls = {
   markdown: 'https://esm.sh/@codemirror/lang-markdown@6.3.3',
 }
 
+const GENERATION_TEXT = 'generation placeholder'
+const SPEECH_TEXT = 'speech placeholder'
 let modulePromise: Promise<CodeMirrorModules> | null = null
 
 function loadCodeMirror() {
@@ -43,9 +56,12 @@ function loadCodeMirror() {
       ViewPlugin: view.ViewPlugin,
       keymap: view.keymap,
       history: commands.history,
+      undo: commands.undo,
+      redo: commands.redo,
       historyKeymap: commands.historyKeymap,
       defaultKeymap: commands.defaultKeymap,
       markdown: markdownLanguage.markdown,
+      Transaction: state.Transaction,
     }))
   }
   return modulePromise
@@ -181,18 +197,75 @@ function formattingKeymap() {
   ]
 }
 
-export default function MarkdownEditor({ value, onChange, ariaLabel = 'Markdown editor', className = '' }: MarkdownEditorProps) {
+function appendLine(view: any, text: string) {
+  const current = view.state.doc.toString()
+  const prefix = current.length === 0 || current.endsWith('\n') ? '' : '\n'
+  const insert = `${prefix}${text}`
+  const from = current.length
+  view.dispatch({
+    changes: { from, insert },
+    selection: { anchor: from + insert.length },
+    scrollIntoView: true,
+  })
+  view.focus()
+  return true
+}
+
+function insertAtSelection(view: any, text: string) {
+  const selection = view.state.selection.main
+  view.dispatch({
+    changes: { from: selection.from, to: selection.to, insert: text },
+    selection: { anchor: selection.from + text.length },
+    scrollIntoView: true,
+  })
+  view.focus()
+  return true
+}
+
+function regenerateLatest(view: any) {
+  const current = view.state.doc.toString()
+  const pattern = new RegExp(`(^|\\n)${GENERATION_TEXT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\n|$)`, 'g')
+  let latest: RegExpExecArray | null = null
+  for (const match of current.matchAll(pattern)) latest = match as RegExpExecArray
+  if (!latest || latest.index === undefined) return false
+
+  const prefixLength = latest[1]?.length ?? 0
+  const from = latest.index + prefixLength
+  const to = from + GENERATION_TEXT.length
+  view.dispatch({
+    changes: { from, to, insert: GENERATION_TEXT },
+    selection: { anchor: to },
+    scrollIntoView: true,
+  })
+  view.focus()
+  return true
+}
+
+const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor(
+  { value, onChange, ariaLabel = 'Markdown editor', className = '' },
+  ref,
+) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<any>(null)
   const onChangeRef = useRef(onChange)
+  const commandsRef = useRef<{ undo: any; redo: any; Transaction: any } | null>(null)
 
   useEffect(() => { onChangeRef.current = onChange }, [onChange])
+
+  useImperativeHandle(ref, () => ({
+    generate: () => viewRef.current ? appendLine(viewRef.current, GENERATION_TEXT) : false,
+    insertSpeech: () => viewRef.current ? insertAtSelection(viewRef.current, SPEECH_TEXT) : false,
+    undo: () => Boolean(viewRef.current && commandsRef.current?.undo(viewRef.current)),
+    redo: () => Boolean(viewRef.current && commandsRef.current?.redo(viewRef.current)),
+    regenerate: () => viewRef.current ? regenerateLatest(viewRef.current) : false,
+  }), [])
 
   useEffect(() => {
     let cancelled = false
 
-    loadCodeMirror().then(({ EditorState, EditorView, Decoration, ViewPlugin, keymap, history, historyKeymap, defaultKeymap, markdown }) => {
+    loadCodeMirror().then(({ EditorState, EditorView, Decoration, ViewPlugin, keymap, history, undo, redo, historyKeymap, defaultKeymap, markdown, Transaction }) => {
       if (cancelled || !hostRef.current) return
+      commandsRef.current = { undo, redo, Transaction }
 
       const livePreview = ViewPlugin.fromClass(class {
         decorations: any
@@ -240,16 +313,23 @@ export default function MarkdownEditor({ value, onChange, ariaLabel = 'Markdown 
       cancelled = true
       viewRef.current?.destroy()
       viewRef.current = null
+      commandsRef.current = null
     }
   }, [ariaLabel])
 
   useEffect(() => {
     const view = viewRef.current
-    if (!view) return
+    const commands = commandsRef.current
+    if (!view || !commands) return
     const current = view.state.doc.toString()
     if (current === value) return
-    view.dispatch({ changes: { from: 0, to: current.length, insert: value } })
+    view.dispatch({
+      changes: { from: 0, to: current.length, insert: value },
+      annotations: commands.Transaction.addToHistory.of(false),
+    })
   }, [value])
 
   return <div ref={hostRef} className={`markdown-editor ${className}`.trim()} />
-}
+})
+
+export default MarkdownEditor

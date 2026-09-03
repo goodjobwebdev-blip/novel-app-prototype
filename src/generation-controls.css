@@ -1,0 +1,62 @@
+.generate-trigger {
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.generate-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem;
+  border-radius: 999px;
+  background: rgba(20, 18, 17, 0.78);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.24);
+}
+
+.generate-actions button {
+  width: 2.25rem;
+  height: 2.25rem;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.generate-actions button:active {
+  transform: scale(0.96);
+}
+
+.save-state.error {
+  opacity: 1;
+}
+
+.save-state.error i {
+  background: #d87a6e;
+}
+
+.save-state.saving i,
+.save-state.loading i {
+  opacity: 0.55;
+}
+
+@media (max-width: 520px) {
+  .generate-actions {
+    gap: 0.18rem;
+    padding: 0.24rem;
+  }
+
+  .generate-actions button {
+    width: 2.05rem;
+    height: 2.05rem;
+    font-size: 0.92rem;
+  }
+}
