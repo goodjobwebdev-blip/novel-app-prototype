@@ -1,10 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import AiSettings from './App'
-import MarkdownEditor from './MarkdownEditor'
+import MarkdownEditor, { type MarkdownEditorHandle } from './MarkdownEditor'
+import {
+  PROTOTYPE_SCENE_ID,
+  createSnapshot,
+  ensurePrototypeSeed,
+  getEntity,
+  saveDocumentContent,
+  type SnapshotReason,
+} from './persistence'
+import './generation-controls.css'
 
 type Screen = 'home' | 'editor' | 'chat' | 'settings'
 type RightTab = 'outline' | 'notes' | 'codex' | 'chat'
 type ChatPanel = 'list' | 'settings'
+type SaveState = 'loading' | 'saving' | 'saved' | 'error'
 
 const books = [
   { title: 'The City Beneath the Tide', series: 'Atlas of Lost Coasts · Book II', edited: 'Edited 12 minutes ago', cover: 'tide' },
@@ -41,13 +51,137 @@ export default function Workspace() {
   const [activeChat, setActiveChat] = useState('Mara’s motivation')
   const [arcOpen, setArcOpen] = useState(false)
   const [storyMarkdown, setStoryMarkdown] = useState(initialStoryMarkdown)
+  const [arcPrompt, setArcPrompt] = useState('Let Mara step through. Keep the reveal quiet and unsettling.')
   const [chatEdit, setChatEdit] = useState(false)
   const [aiReady, setAiReady] = useState(false)
+  const [saveState, setSaveState] = useState<SaveState>('loading')
+  const editorRef = useRef<MarkdownEditorHandle | null>(null)
+  const promptRef = useRef<HTMLTextAreaElement | null>(null)
+  const storyRef = useRef(initialStoryMarkdown)
+  const storageReadyRef = useRef(false)
+  const changedSinceSnapshotRef = useRef(false)
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => { setAiReady(Boolean(localStorage.getItem('arc-ai-defaults-v1'))) }, [])
 
-  function openSettings(from: Screen) { setReturnScreen(from); setScreen('settings'); setRightOpen(false) }
-  function openChat(title: string) { setActiveChat(title); setChatPanel('settings'); setScreen('chat'); setRightOpen(false) }
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        await ensurePrototypeSeed(initialStoryMarkdown)
+        const scene = await getEntity(PROTOTYPE_SCENE_ID)
+        if (cancelled) return
+        const content = typeof scene?.content === 'string' ? scene.content : initialStoryMarkdown
+        storyRef.current = content
+        setStoryMarkdown(content)
+        storageReadyRef.current = true
+        setSaveState('saved')
+      } catch (error) {
+        console.error('Failed to initialize local persistence', error)
+        if (!cancelled) setSaveState('error')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  async function flushDocument(reason: SnapshotReason = 'autosave', snapshot = false) {
+    if (!storageReadyRef.current) return
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+    setSaveState('saving')
+    try {
+      await saveDocumentContent(PROTOTYPE_SCENE_ID, storyRef.current)
+      if (snapshot && changedSinceSnapshotRef.current) {
+        await createSnapshot(PROTOTYPE_SCENE_ID, reason, storyRef.current)
+        changedSinceSnapshotRef.current = false
+      }
+      setSaveState('saved')
+    } catch (error) {
+      console.error('Failed to persist document', error)
+      setSaveState('error')
+    }
+  }
+
+  useEffect(() => {
+    if (!storageReadyRef.current) return
+    saveTimerRef.current = setTimeout(() => { void flushDocument('autosave', false) }, 750)
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    }
+  }, [storyMarkdown])
+
+  useEffect(() => {
+    const snapshotInterval = window.setInterval(() => {
+      if (changedSinceSnapshotRef.current) void flushDocument('autosave', true)
+    }, 3 * 60 * 1000)
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden' && changedSinceSnapshotRef.current) void flushDocument('lifecycle', true)
+    }
+    const handlePageHide = () => {
+      if (changedSinceSnapshotRef.current) void flushDocument('lifecycle', true)
+      else void flushDocument('lifecycle', false)
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+    window.addEventListener('pagehide', handlePageHide)
+    return () => {
+      window.clearInterval(snapshotInterval)
+      document.removeEventListener('visibilitychange', handleVisibility)
+      window.removeEventListener('pagehide', handlePageHide)
+    }
+  }, [])
+
+  function handleStoryChange(value: string) {
+    storyRef.current = value
+    changedSinceSnapshotRef.current = true
+    setStoryMarkdown(value)
+    if (storageReadyRef.current) setSaveState('saving')
+  }
+
+  function openSettings(from: Screen) {
+    if (from === 'editor' && changedSinceSnapshotRef.current) void flushDocument('navigation', true)
+    setReturnScreen(from)
+    setScreen('settings')
+    setRightOpen(false)
+  }
+
+  function openChat(title: string) {
+    if (screen === 'editor' && changedSinceSnapshotRef.current) void flushDocument('navigation', true)
+    setActiveChat(title)
+    setChatPanel('settings')
+    setScreen('chat')
+    setRightOpen(false)
+  }
+
+  function generate() {
+    if (editorRef.current?.generate()) void flushDocument('generation', true)
+  }
+
+  function regenerate() {
+    if (editorRef.current?.regenerate()) void flushDocument('generation', true)
+  }
+
+  function insertEditorSpeech() {
+    editorRef.current?.insertSpeech()
+  }
+
+  function insertPromptSpeech() {
+    const input = promptRef.current
+    const start = input?.selectionStart ?? arcPrompt.length
+    const end = input?.selectionEnd ?? start
+    const insert = 'speech placeholder'
+    const next = `${arcPrompt.slice(0, start)}${insert}${arcPrompt.slice(end)}`
+    setArcPrompt(next)
+    requestAnimationFrame(() => {
+      const target = promptRef.current
+      if (!target) return
+      const cursor = start + insert.length
+      target.focus()
+      target.setSelectionRange(cursor, cursor)
+    })
+  }
 
   if (screen === 'settings') return <AiSettings onHome={() => setScreen('home')} onBack={() => setScreen(returnScreen)} onSaved={() => setAiReady(true)} />
 
@@ -66,13 +200,13 @@ export default function Workspace() {
     <main className={`workspace-screen ${screen === 'chat' ? 'chat-active' : ''}`}>
       <header className="floating-controls">
         <button type="button" onClick={() => openSettings(screen)} aria-label="Open settings">››</button>
-        <span><i /> Saved</span>
+        <span className={`save-state ${saveState}`} title={saveState === 'error' ? 'Local save failed; your current editor text remains in memory.' : undefined}><i /> {saveState === 'loading' ? 'Loading' : saveState === 'saving' ? 'Saving' : saveState === 'error' ? 'Save failed' : 'Saved'}</span>
         <button type="button" onClick={() => setRightOpen(true)} aria-label="Open book workspace">‹‹</button>
       </header>
 
       {screen === 'editor' ? <article className="story-editor">
         <small className="page-number">07</small><p className="document-path">Outline / Chapter 7 / Scene 2</p>
-        <MarkdownEditor value={storyMarkdown} onChange={setStoryMarkdown} ariaLabel="Scene Markdown editor" />
+        <MarkdownEditor ref={editorRef} value={storyMarkdown} onChange={handleStoryChange} ariaLabel="Scene Markdown editor" />
       </article> : <section className="conversation">
         <header><small>Book chat</small><h1>{activeChat}</h1><p>Context: Chapter 7 · Codex</p></header>
         <div className="messages">
@@ -83,8 +217,8 @@ export default function Workspace() {
         </div>
       </section>}
 
-      {screen === 'editor' && <div className="editor-bottom"><button type="button" onClick={() => setArcOpen(true)}>▱</button><button className="play" type="button">▶</button></div>}
-      {screen === 'editor' && arcOpen && <section className="arc-drawer"><div><small>ARC</small><span>Guide the next passage</span><button type="button" onClick={() => setArcOpen(false)}>×</button></div><div className="arc-compose"><textarea defaultValue="Let Mara step through. Keep the reveal quiet and unsettling."/><button type="button">↗</button><button className="play" type="button">▶</button></div></section>}
+      {screen === 'editor' && <div className="editor-bottom"><button type="button" onClick={() => setArcOpen(true)} aria-label="Open generation input">▱</button><GenerateControl onGenerate={generate} onMicro={insertEditorSpeech} onMicro2={insertPromptSpeech} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} /></div>}
+      {screen === 'editor' && arcOpen && <section className="arc-drawer"><div><small>ARC</small><span>Guide the next passage</span><button type="button" onClick={() => setArcOpen(false)}>×</button></div><div className="arc-compose"><textarea ref={promptRef} value={arcPrompt} onChange={(event) => setArcPrompt(event.target.value)}/><button type="button" aria-label="Expand prompt">↗</button><button className="play" type="button" onClick={generate} aria-label="Generate">▶</button></div></section>}
       {screen === 'chat' && <section className="chat-composer"><small>Chapter 7 + Codex⌄</small><div><button type="button">◖</button><textarea defaultValue="Compare Mara’s choice with what she promised Elias."/><button className="send" type="button">➤</button></div></section>}
 
       {rightOpen && <aside className="book-panel">
@@ -94,6 +228,55 @@ export default function Workspace() {
       </aside>}
     </main>
   )
+}
+
+function GenerateControl({ onGenerate, onMicro, onMicro2, onUndo, onRedo, onRegenerate }: {
+  onGenerate: () => void
+  onMicro: () => void
+  onMicro2: () => void
+  onUndo: () => void
+  onRedo: () => void
+  onRegenerate: () => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const longPressRef = useRef(false)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function cancelTimer() {
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = null
+  }
+
+  if (expanded) return <div className="generate-actions" role="toolbar" aria-label="Generate actions">
+    <button type="button" onClick={onMicro} aria-label="Insert speech placeholder into editor" title="Micro">🎙</button>
+    <button type="button" onClick={onMicro2} aria-label="Insert speech placeholder into generation input" title="Micro 2">🎤</button>
+    <button type="button" onClick={onUndo} aria-label="Undo editor change" title="Back / Undo">↶</button>
+    <button type="button" onClick={onRedo} aria-label="Redo editor change" title="Forward / Redo">↷</button>
+    <button type="button" onClick={onRegenerate} aria-label="Regenerate latest result" title="Regenerate">⟳</button>
+    <button type="button" onClick={() => setExpanded(false)} aria-label="Collapse generate actions" title="Collapse">×</button>
+  </div>
+
+  return <button
+    className="play generate-trigger"
+    type="button"
+    aria-label="Generate. Press and hold for more actions."
+    onContextMenu={(event) => event.preventDefault()}
+    onPointerDown={() => {
+      longPressRef.current = false
+      cancelTimer()
+      timerRef.current = setTimeout(() => {
+        longPressRef.current = true
+        setExpanded(true)
+      }, 450)
+    }}
+    onPointerUp={() => {
+      cancelTimer()
+      if (!longPressRef.current) onGenerate()
+    }}
+    onPointerCancel={cancelTimer}
+    onPointerLeave={cancelTimer}
+    onClick={(event) => { if (event.detail === 0) onGenerate() }}
+  >▶</button>
 }
 
 function Outline() { return <section className="outline"><div className="panel-title"><div><small>Manuscript</small><h2>Outline</h2></div><button>＋</button></div><div className="tree"><p><b>⌄</b><span><small>Act I</small>The doors remember</span><i>▣</i></p><div><p><b>⌄</b><span><small>Chapter 7</small>The Cartographer’s Door</span><i>↻</i></p><div><p className="selected"><span><small>Scene 2</small>The voice beyond</span><i>↻</i></p><p><span><small>Scene 3</small>Crossing</span><i>□</i></p></div><p><b>›</b><span><small>Chapter 8</small>What the sea kept</span><i>□</i></p></div><p><b>›</b><span><small>Act II</small>The map without coastlines</span><i>□</i></p></div></section> }
