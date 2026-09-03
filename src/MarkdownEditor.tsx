@@ -226,6 +226,12 @@ function regenerateLatest(view: EditorView) {
   return true
 }
 
+function runHistoryCommand(view: EditorView | null, command: (target: EditorView) => boolean) {
+  if (!view) return false
+  view.focus()
+  return command(view)
+}
+
 const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor(
   { value, onChange, ariaLabel = 'Markdown editor', className = '' },
   ref,
@@ -239,8 +245,8 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
   useImperativeHandle(ref, () => ({
     generate: () => viewRef.current ? appendLine(viewRef.current, GENERATION_TEXT) : false,
     insertSpeech: () => viewRef.current ? insertAtSelection(viewRef.current, SPEECH_TEXT) : false,
-    undo: () => Boolean(viewRef.current && undo(viewRef.current)),
-    redo: () => Boolean(viewRef.current && redo(viewRef.current)),
+    undo: () => runHistoryCommand(viewRef.current, undo),
+    redo: () => runHistoryCommand(viewRef.current, redo),
     regenerate: () => viewRef.current ? regenerateLatest(viewRef.current) : false,
   }), [])
 
