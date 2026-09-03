@@ -1,6 +1,6 @@
 # Novel App Prototype
 
-This repository contains the first deployment prototype for a local-first novel-writing app. The current interface intentionally displays only **Hello world**.
+This repository contains a deployment prototype for a local-first novel-writing app. The current working slice is the **AI defaults** screen: provider connection, model loading and selection, favorites, system prompts, and device-local saving.
 
 ## How the pipeline works
 
