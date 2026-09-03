@@ -12,6 +12,7 @@ type CodeMirrorModules = {
   EditorState: any
   EditorView: any
   Decoration: any
+  ViewPlugin: any
   keymap: any
   history: any
   historyKeymap: any
@@ -39,6 +40,7 @@ function loadCodeMirror() {
       EditorState: state.EditorState,
       EditorView: view.EditorView,
       Decoration: view.Decoration,
+      ViewPlugin: view.ViewPlugin,
       keymap: view.keymap,
       history: commands.history,
       historyKeymap: commands.historyKeymap,
@@ -51,8 +53,12 @@ function loadCodeMirror() {
 
 function rangesForInactiveLine(lineText: string, lineFrom: number, Decoration: any) {
   const ranges: any[] = []
-  const hidden = (from: number, to: number) => ranges.push(Decoration.replace({}).range(lineFrom + from, lineFrom + to))
-  const mark = (from: number, to: number, className: string) => ranges.push(Decoration.mark({ class: className }).range(lineFrom + from, lineFrom + to))
+  const hidden = (from: number, to: number) => {
+    if (to > from) ranges.push(Decoration.replace({}).range(lineFrom + from, lineFrom + to))
+  }
+  const mark = (from: number, to: number, className: string) => {
+    if (to > from) ranges.push(Decoration.mark({ class: className }).range(lineFrom + from, lineFrom + to))
+  }
 
   const heading = lineText.match(/^(#{1,6})\s+/)
   if (heading) {
@@ -121,6 +127,19 @@ function rangesForInactiveLine(lineText: string, lineFrom: number, Decoration: a
   return ranges
 }
 
+function buildLivePreviewDecorations(state: any, Decoration: any) {
+  const activeLine = state.doc.lineAt(state.selection.main.head).number
+  const ranges: any[] = []
+
+  for (let lineNumber = 1; lineNumber <= state.doc.lines; lineNumber += 1) {
+    if (lineNumber === activeLine) continue
+    const line = state.doc.line(lineNumber)
+    ranges.push(...rangesForInactiveLine(line.text, line.from, Decoration))
+  }
+
+  return Decoration.set(ranges, true)
+}
+
 class BulletWidget {
   label: string
   constructor(label: string) { this.label = label }
@@ -172,18 +191,23 @@ export default function MarkdownEditor({ value, onChange, ariaLabel = 'Markdown 
   useEffect(() => {
     let cancelled = false
 
-    loadCodeMirror().then(({ EditorState, EditorView, Decoration, keymap, history, historyKeymap, defaultKeymap, markdown }) => {
+    loadCodeMirror().then(({ EditorState, EditorView, Decoration, ViewPlugin, keymap, history, historyKeymap, defaultKeymap, markdown }) => {
       if (cancelled || !hostRef.current) return
 
-      const livePreview = EditorView.decorations.compute(['doc', 'selection'], (state: any) => {
-        const activeLine = state.doc.lineAt(state.selection.main.head).number
-        const ranges: any[] = []
-        for (let lineNumber = 1; lineNumber <= state.doc.lines; lineNumber += 1) {
-          if (lineNumber === activeLine) continue
-          const line = state.doc.line(lineNumber)
-          ranges.push(...rangesForInactiveLine(line.text, line.from, Decoration))
+      const livePreview = ViewPlugin.fromClass(class {
+        decorations: any
+
+        constructor(view: any) {
+          this.decorations = buildLivePreviewDecorations(view.state, Decoration)
         }
-        return Decoration.set(ranges, true)
+
+        update(update: any) {
+          if (update.docChanged || update.selectionSet || update.viewportChanged) {
+            this.decorations = buildLivePreviewDecorations(update.view.state, Decoration)
+          }
+        }
+      }, {
+        decorations: (plugin: any) => plugin.decorations,
       })
 
       const state = EditorState.create({
@@ -199,9 +223,9 @@ export default function MarkdownEditor({ value, onChange, ariaLabel = 'Markdown 
             if (update.docChanged) onChangeRef.current(update.state.doc.toString())
           }),
           EditorView.theme({
-            '&': { backgroundColor: 'transparent' },
-            '.cm-scroller': { fontFamily: 'inherit' },
-            '.cm-content': { caretColor: 'var(--accent-bright)' },
+            '&': { backgroundColor: 'transparent', width: '100%', maxWidth: '100%' },
+            '.cm-scroller': { fontFamily: 'inherit', maxWidth: '100%' },
+            '.cm-content': { caretColor: 'var(--accent-bright)', minWidth: '0' },
             '.cm-cursor': { borderLeftColor: 'var(--accent-bright)' },
             '.cm-selectionBackground, ::selection': { backgroundColor: 'rgba(198,168,107,.18)' },
             '.cm-activeLine': { backgroundColor: 'rgba(255,255,255,.018)' },
