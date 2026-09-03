@@ -1,0 +1,56 @@
+.markdown-editor {
+  width: 100%;
+  color: var(--ink);
+  font: 19px/1.78 var(--serif);
+}
+
+.markdown-editor .cm-editor {
+  min-height: 48vh;
+  outline: none;
+}
+
+.markdown-editor .cm-scroller {
+  overflow: visible;
+}
+
+.markdown-editor .cm-content {
+  padding: 0;
+  white-space: pre-wrap;
+}
+
+.markdown-editor .cm-line {
+  padding: 2px 0;
+}
+
+.markdown-editor .cm-activeLine {
+  border-radius: 6px;
+}
+
+.markdown-editor .cm-gutters {
+  display: none;
+}
+
+.markdown-editor .cm-live-heading {
+  display: inline;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -.02em;
+}
+
+.markdown-editor .cm-live-heading-1 { font-size: 2rem; }
+.markdown-editor .cm-live-heading-2 { font-size: 1.65rem; }
+.markdown-editor .cm-live-heading-3 { font-size: 1.38rem; }
+.markdown-editor .cm-live-heading-4 { font-size: 1.2rem; }
+.markdown-editor .cm-live-heading-5 { font-size: 1.08rem; }
+.markdown-editor .cm-live-heading-6 { font-size: 1rem; }
+.markdown-editor .cm-live-bold { font-weight: 700; }
+.markdown-editor .cm-live-italic { font-style: italic; }
+.markdown-editor .cm-live-strike { text-decoration: line-through; color: var(--soft); }
+.markdown-editor .cm-live-link { color: var(--accent-bright); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.markdown-editor .cm-live-quote { color: var(--soft); font-style: italic; }
+.markdown-editor .cm-live-list-marker { display: inline-block; min-width: 1.35em; color: var(--accent); }
+.markdown-editor .cm-live-rule { display: inline-block; width: 100%; height: 1px; margin: .7em 0 .35em; vertical-align: middle; background: var(--line); }
+
+@media (max-width: 600px) {
+  .markdown-editor { font-size: 17px; line-height: 1.72; }
+}
