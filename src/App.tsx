@@ -14,37 +14,22 @@ import {
   Type,
   Volume2,
 } from 'lucide-react'
+import {
+  AI_SETTINGS_STORAGE_KEY,
+  defaultAiPrompts,
+  initialAiSettings,
+  loadAiSettings,
+  type AiPrompts,
+  type AiProvider,
+  type AiSettings,
+} from './ai-settings'
 
-type Provider = 'openrouter' | 'nanogpt' | 'openai' | 'compatible'
 type Model = { id: string; name?: string; context_length?: number; pricing?: { prompt?: string; completion?: string }; architecture?: { modality?: string } }
-type Prompts = { story: string; summarize: string; titles: string }
-type Settings = { provider: Provider; apiKey: string; baseUrl: string; mainModel: string; supportModel: string; favorites: string[]; prompts: Prompts }
 type SettingsTab = 'ai' | 'context' | 'appearance' | 'speech' | 'images'
 
-const STORAGE_KEY = 'arc-ai-defaults-v1'
-const defaultPrompts: Prompts = {
-  story: `You are the story writer for {{book.title}}.
+const providerLabels: Record<AiProvider, string> = { openrouter: 'OpenRouter', nanogpt: 'nano-gpt.com', openai: 'OpenAI', compatible: 'OpenAI-compatible' }
 
-{% if scene.pov %}
-Stay close to {{scene.pov}} and preserve the established voice.
-{% endif %}
-
-Continue from {{scene.text}} without summarizing it.`,
-  summarize: `Summarize {{target.type}} for future story context.
-
-Keep names, decisions, promises, and unresolved questions.
-{% if target.previous_summary %}
-Update the existing summary instead of starting over.
-{% endif %}`,
-  titles: `Generate concise names or titles for {{target.type}}.
-
-Tone: {{book.style}}
-Return {{count}} distinct options without commentary.`,
-}
-const initialSettings: Settings = { provider: 'nanogpt', apiKey: '', baseUrl: 'https://nano-gpt.com/api/v1', mainModel: '', supportModel: '', favorites: [], prompts: defaultPrompts }
-const providerLabels: Record<Provider, string> = { openrouter: 'OpenRouter', nanogpt: 'nano-gpt.com', openai: 'OpenAI', compatible: 'OpenAI-compatible' }
-
-function endpointFor(settings: Settings) {
+function endpointFor(settings: AiSettings) {
   if (settings.provider === 'openrouter') return 'https://openrouter.ai/api/v1/models'
   if (settings.provider === 'openai') return 'https://api.openai.com/v1/models'
   if (settings.provider === 'nanogpt') return 'https://nano-gpt.com/api/v1/models?detailed=true&sort=favorites'
@@ -63,9 +48,9 @@ type AiSettingsProps = {
 }
 
 export default function App({ onHome, onBack, onSaved }: AiSettingsProps) {
-  const [settings, setSettings] = useState<Settings>(initialSettings)
+  const [settings, setSettings] = useState<AiSettings>(initialAiSettings)
   const [models, setModels] = useState<Model[]>([])
-  const [promptTab, setPromptTab] = useState<keyof Prompts>('story')
+  const [promptTab, setPromptTab] = useState<keyof AiPrompts>('story')
   const [modelSearch, setModelSearch] = useState('')
   const [showKey, setShowKey] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -75,11 +60,10 @@ export default function App({ onHome, onBack, onSaved }: AiSettingsProps) {
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('ai')
 
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY)
+    const stored = localStorage.getItem(AI_SETTINGS_STORAGE_KEY)
     if (!stored) return
     try {
-      const parsed = JSON.parse(stored) as Partial<Settings>
-      setSettings({ ...initialSettings, ...parsed, prompts: { ...defaultPrompts, ...parsed.prompts }, favorites: Array.isArray(parsed.favorites) ? parsed.favorites : [] })
+      setSettings(loadAiSettings())
       setStatus('Saved AI defaults loaded from this device.')
       setStatusKind('success')
     } catch {
@@ -93,8 +77,8 @@ export default function App({ onHome, onBack, onSaved }: AiSettingsProps) {
     return models.filter((model) => !query || `${model.id} ${model.name ?? ''}`.toLowerCase().includes(query)).sort((a, b) => Number(settings.favorites.includes(b.id)) - Number(settings.favorites.includes(a.id))).slice(0, 8)
   }, [modelSearch, models, settings.favorites])
 
-  function update<K extends keyof Settings>(key: K, value: Settings[K]) { setSettings((current) => ({ ...current, [key]: value })); setSaved(false) }
-  function selectProvider(provider: Provider) {
+  function update<K extends keyof AiSettings>(key: K, value: AiSettings[K]) { setSettings((current) => ({ ...current, [key]: value })); setSaved(false) }
+  function selectProvider(provider: AiProvider) {
     const baseUrl = provider === 'nanogpt' ? 'https://nano-gpt.com/api/v1' : provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : provider === 'openai' ? 'https://api.openai.com/v1' : settings.baseUrl
     setSettings((current) => ({ ...current, provider, baseUrl, mainModel: '', supportModel: '' }))
     setModels([]); setStatus('Provider changed. Reload its model list when ready.'); setStatusKind('quiet'); setSaved(false)
@@ -114,7 +98,7 @@ export default function App({ onHome, onBack, onSaved }: AiSettingsProps) {
     } finally { setLoading(false) }
   }
   function toggleFavorite(id: string) { update('favorites', settings.favorites.includes(id) ? settings.favorites.filter((favorite) => favorite !== id) : [...settings.favorites, id]) }
-  function saveDefaults() { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); setSaved(true); setStatus('AI defaults saved on this device. New books will copy them.'); setStatusKind('success'); onSaved?.() }
+  function saveDefaults() { localStorage.setItem(AI_SETTINGS_STORAGE_KEY, JSON.stringify(settings)); setSaved(true); setStatus('AI defaults saved on this device. New books will copy them.'); setStatusKind('success'); onSaved?.() }
 
   return (
     <main className="app-shell">
@@ -135,7 +119,7 @@ export default function App({ onHome, onBack, onSaved }: AiSettingsProps) {
 
         <section className="settings-card provider-card">
           <div className="card-heading"><div><span>01</span><h2>Provider</h2></div><p>Connection details stay in this browser.</p></div>
-          <div className="provider-grid">{(Object.keys(providerLabels) as Provider[]).map((provider) => <button key={provider} className={settings.provider === provider ? 'selected' : ''} type="button" onClick={() => selectProvider(provider)}><i>{provider === 'nanogpt' ? 'N' : provider === 'openrouter' ? 'O' : provider === 'openai' ? 'AI' : '{ }'}</i><span><strong>{providerLabels[provider]}</strong><small>{provider === 'compatible' ? 'Custom endpoint' : 'Managed endpoint'}</small></span><b>{settings.provider === provider ? '✓' : ''}</b></button>)}</div>
+          <div className="provider-grid">{(Object.keys(providerLabels) as AiProvider[]).map((provider) => <button key={provider} className={settings.provider === provider ? 'selected' : ''} type="button" onClick={() => selectProvider(provider)}><i>{provider === 'nanogpt' ? 'N' : provider === 'openrouter' ? 'O' : provider === 'openai' ? 'AI' : '{ }'}</i><span><strong>{providerLabels[provider]}</strong><small>{provider === 'compatible' ? 'Custom endpoint' : 'Managed endpoint'}</small></span><b>{settings.provider === provider ? '✓' : ''}</b></button>)}</div>
           <div className="connection-fields">
             {settings.provider === 'compatible' && <label><span>Endpoint URL</span><input value={settings.baseUrl} onChange={(event) => update('baseUrl', event.target.value)} placeholder="https://provider.example/v1" /></label>}
             <label><span>API key</span><div className="input-action"><input type={showKey ? 'text' : 'password'} value={settings.apiKey} onChange={(event) => update('apiKey', event.target.value)} placeholder="Enter API key" autoComplete="off" spellCheck={false} /><button type="button" onClick={() => setShowKey((value) => !value)}>{showKey ? 'Hide' : 'Show'}</button></div></label>
@@ -154,7 +138,7 @@ export default function App({ onHome, onBack, onSaved }: AiSettingsProps) {
           <div className="card-heading"><div><span>03</span><h2>System prompts</h2></div><button className="help-button" type="button" title="Use {{variable}} for values and {% if condition %}…{% endif %} for optional instructions."><CircleHelp aria-hidden="true" /><b>Prompt syntax</b></button></div>
           <div className="prompt-tabs" role="tablist">{([['story', 'Story'], ['summarize', 'Summarize'], ['titles', 'Titles & names']] as const).map(([key, label]) => <button key={key} className={promptTab === key ? 'active' : ''} type="button" onClick={() => setPromptTab(key)}>{label}</button>)}</div>
           <textarea className="prompt-editor" value={settings.prompts[promptTab]} onChange={(event) => update('prompts', { ...settings.prompts, [promptTab]: event.target.value })} spellCheck={false} />
-          <div className="prompt-footer"><span>Variables: <code>{'{{book.title}}'}</code> <code>{'{{scene.pov}}'}</code> <code>{'{{target.type}}'}</code></span><button type="button" onClick={() => update('prompts', { ...settings.prompts, [promptTab]: defaultPrompts[promptTab] })}>Reset default</button></div>
+          <div className="prompt-footer"><span>Variables: <code>{'{{book.title}}'}</code> <code>{'{{scene.pov}}'}</code> <code>{'{{target.type}}'}</code></span><button type="button" onClick={() => update('prompts', { ...settings.prompts, [promptTab]: defaultAiPrompts[promptTab] })}>Reset default</button></div>
         </section>
         <footer className="save-bar"><div><strong>AI defaults</strong><span>{settings.mainModel ? 'Ready to save for new books' : 'Choose models now or save them later'}</span></div><button type="button" onClick={saveDefaults}><Check aria-hidden="true" /> Save defaults</button></footer>
         </> : <SettingsPlaceholder tab={settingsTab} />}

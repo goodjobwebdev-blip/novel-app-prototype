@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
-import { defaultKeymap, history, historyKeymap, redo, undo } from '@codemirror/commands'
+import { defaultKeymap, history, historyKeymap, isolateHistory, redo, undo } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
 import { syntaxTree } from '@codemirror/language'
 import { EditorState, Transaction } from '@codemirror/state'
@@ -22,14 +22,41 @@ type MarkdownEditorProps = {
 }
 
 export type MarkdownEditorHandle = {
-  generate: () => boolean
+  beginGeneration: (mode?: 'generate' | 'regenerate') => GenerationContext | null
+  appendGenerationChunk: (text: string) => boolean
+  finishGeneration: (status: GenerationStatus) => GenerationResult | null
   insertSpeech: () => boolean
   undo: () => boolean
   redo: () => boolean
-  regenerate: () => boolean
 }
 
-const GENERATION_TEXT = 'generation placeholder'
+export type GenerationStatus = 'complete' | 'cancelled' | 'error'
+
+export type GenerationContext = {
+  sceneText: string
+  insertionPosition: number
+}
+
+export type GenerationResult = GenerationContext & {
+  resultDocument: string
+  generatedText: string
+  status: GenerationStatus
+}
+
+type GenerationRecord = GenerationResult & {
+  preDocument: string
+}
+
+type ActiveGeneration = {
+  mode: 'generate' | 'regenerate'
+  preDocument: string
+  insertionPosition: number
+  historyTime: number
+  generatedText: string
+  generatedTo: number
+  resultDocument: string
+}
+
 const SPEECH_TEXT = 'speech placeholder'
 
 class ListMarkerWidget extends WidgetType {
@@ -182,20 +209,6 @@ function formattingKeymap() {
   ]
 }
 
-function appendLine(view: EditorView, text: string) {
-  const current = view.state.doc.toString()
-  const prefix = current.length === 0 || current.endsWith('\n') ? '' : '\n'
-  const insert = `${prefix}${text}`
-  const from = current.length
-  view.dispatch({
-    changes: { from, insert },
-    selection: { anchor: from + insert.length },
-    scrollIntoView: true,
-  })
-  view.focus()
-  return true
-}
-
 function insertAtSelection(view: EditorView, text: string) {
   const selection = view.state.selection.main
   view.dispatch({
@@ -207,22 +220,84 @@ function insertAtSelection(view: EditorView, text: string) {
   return true
 }
 
-function regenerateLatest(view: EditorView) {
-  const current = view.state.doc.toString()
-  const pattern = new RegExp(`(^|\\n)${GENERATION_TEXT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\n|$)`, 'g')
-  let latest: RegExpExecArray | null = null
-  for (const matchResult of current.matchAll(pattern)) latest = matchResult as RegExpExecArray
-  if (!latest || latest.index === undefined) return false
+function generationSeparators(document: string, position: number) {
+  const before = document.slice(0, position)
+  const after = document.slice(position)
+  const beforeSeparator = !before ? '' : before.endsWith('\n\n') ? '' : before.endsWith('\n') ? '\n' : '\n\n'
+  const afterSeparator = !after ? '' : after.startsWith('\n\n') ? '' : after.startsWith('\n') ? '\n' : '\n\n'
+  return { beforeSeparator, afterSeparator }
+}
 
-  const prefixLength = latest[1]?.length ?? 0
-  const from = latest.index + prefixLength
-  const to = from + GENERATION_TEXT.length
+function beginGeneration(
+  view: EditorView,
+  mode: 'generate' | 'regenerate',
+  latest: GenerationRecord | null,
+): ActiveGeneration | null {
+  const current = view.state.doc.toString()
+  if (mode === 'regenerate') {
+    if (!latest || current !== latest.resultDocument) return null
+    return {
+      mode,
+      preDocument: latest.preDocument,
+      insertionPosition: latest.insertionPosition,
+      historyTime: Date.now(),
+      generatedText: '',
+      generatedTo: latest.insertionPosition,
+      resultDocument: current,
+    }
+  }
+
+  const position = view.state.selection.main.head
+  return {
+    mode,
+    preDocument: current,
+    insertionPosition: position,
+    historyTime: Date.now(),
+    generatedText: '',
+    generatedTo: position,
+    resultDocument: current,
+  }
+}
+
+function appendGenerationChunk(view: EditorView, session: ActiveGeneration, text: string) {
+  if (!text) return true
+  const current = view.state.doc.toString()
+  if (current !== session.resultDocument) throw new Error('The scene changed while generation was in progress.')
+
+  const annotations = [
+    Transaction.time.of(session.historyTime),
+    Transaction.userEvent.of('input.type.generate'),
+  ]
+
+  if (!session.generatedText) {
+    const { beforeSeparator, afterSeparator } = generationSeparators(session.preDocument, session.insertionPosition)
+    const insertion = `${beforeSeparator}${text}${afterSeparator}`
+    const generatedFrom = session.insertionPosition + beforeSeparator.length
+    const generatedTo = generatedFrom + text.length
+    const nextDocument = `${session.preDocument.slice(0, session.insertionPosition)}${insertion}${session.preDocument.slice(session.insertionPosition)}`
+
+    view.dispatch({
+      changes: session.mode === 'regenerate'
+        ? { from: 0, to: current.length, insert: nextDocument }
+        : { from: session.insertionPosition, insert: insertion },
+      selection: { anchor: generatedTo },
+      scrollIntoView: true,
+      annotations: [...annotations, isolateHistory.of('before')],
+    })
+    view.focus()
+    session.generatedTo = generatedTo
+    session.generatedText = text
+    session.resultDocument = nextDocument
+    return true
+  }
+
   view.dispatch({
-    changes: { from, to, insert: GENERATION_TEXT },
-    selection: { anchor: to },
-    scrollIntoView: true,
+    changes: { from: session.generatedTo, insert: text },
+    annotations,
   })
-  view.focus()
+  session.generatedText += text
+  session.generatedTo += text.length
+  session.resultDocument = view.state.doc.toString()
   return true
 }
 
@@ -239,15 +314,44 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
   const hostRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<EditorView | null>(null)
   const onChangeRef = useRef(onChange)
+  const activeGenerationRef = useRef<ActiveGeneration | null>(null)
+  const latestGenerationRef = useRef<GenerationRecord | null>(null)
 
   useEffect(() => { onChangeRef.current = onChange }, [onChange])
 
   useImperativeHandle(ref, () => ({
-    generate: () => viewRef.current ? appendLine(viewRef.current, GENERATION_TEXT) : false,
+    beginGeneration: (mode = 'generate') => {
+      const view = viewRef.current
+      if (!view || activeGenerationRef.current) return null
+      const session = beginGeneration(view, mode, latestGenerationRef.current)
+      if (!session) return null
+      activeGenerationRef.current = session
+      return { sceneText: session.preDocument, insertionPosition: session.insertionPosition }
+    },
+    appendGenerationChunk: (text) => {
+      const view = viewRef.current
+      const session = activeGenerationRef.current
+      return Boolean(view && session && appendGenerationChunk(view, session, text))
+    },
+    finishGeneration: (status) => {
+      const session = activeGenerationRef.current
+      activeGenerationRef.current = null
+      if (!session?.generatedText) return null
+      viewRef.current?.dispatch({ annotations: isolateHistory.of('before') })
+      const result: GenerationRecord = {
+        preDocument: session.preDocument,
+        sceneText: session.preDocument,
+        insertionPosition: session.insertionPosition,
+        resultDocument: session.resultDocument,
+        generatedText: session.generatedText,
+        status,
+      }
+      latestGenerationRef.current = result
+      return result
+    },
     insertSpeech: () => viewRef.current ? insertAtSelection(viewRef.current, SPEECH_TEXT) : false,
     undo: () => runHistoryCommand(viewRef.current, undo),
     redo: () => runHistoryCommand(viewRef.current, redo),
-    regenerate: () => viewRef.current ? regenerateLatest(viewRef.current) : false,
   }), [])
 
   useEffect(() => {
@@ -280,6 +384,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     viewRef.current = view
 
     return () => {
+      activeGenerationRef.current = null
       view.destroy()
       if (viewRef.current === view) viewRef.current = null
     }
