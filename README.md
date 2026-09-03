@@ -2,6 +2,8 @@
 
 This repository contains the first deployment prototype for a local-first novel-writing app. The current interface intentionally displays only **Hello world**.
 
+See [the product specification](docs/PRODUCT_SPEC.md) for the app's purpose, confirmed constraints, and undecided areas.
+
 ## How the pipeline works
 
 1. Source changes are reviewed and merged into `main`.
