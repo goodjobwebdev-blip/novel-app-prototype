@@ -19,15 +19,22 @@ type CodeMirrorModules = {
   markdown: any
 }
 
+const codeMirrorUrls = {
+  state: 'https://esm.sh/@codemirror/state@6.5.2',
+  view: 'https://esm.sh/@codemirror/view@6.38.1',
+  commands: 'https://esm.sh/@codemirror/commands@6.8.1',
+  markdown: 'https://esm.sh/@codemirror/lang-markdown@6.3.3',
+}
+
 let modulePromise: Promise<CodeMirrorModules> | null = null
 
 function loadCodeMirror() {
   if (!modulePromise) {
     modulePromise = Promise.all([
-      import(/* @vite-ignore */ 'https://esm.sh/@codemirror/state@6.5.2'),
-      import(/* @vite-ignore */ 'https://esm.sh/@codemirror/view@6.38.1'),
-      import(/* @vite-ignore */ 'https://esm.sh/@codemirror/commands@6.8.1'),
-      import(/* @vite-ignore */ 'https://esm.sh/@codemirror/lang-markdown@6.3.3'),
+      import(/* @vite-ignore */ codeMirrorUrls.state),
+      import(/* @vite-ignore */ codeMirrorUrls.view),
+      import(/* @vite-ignore */ codeMirrorUrls.commands),
+      import(/* @vite-ignore */ codeMirrorUrls.markdown),
     ]).then(([state, view, commands, markdownLanguage]) => ({
       EditorState: state.EditorState,
       EditorView: view.EditorView,
@@ -137,7 +144,7 @@ class RuleWidget {
   ignoreEvent() { return true }
 }
 
-function formattingKeymap(EditorView: any) {
+function formattingKeymap() {
   const wrapSelection = (marker: string) => (view: any) => {
     const selection = view.state.selection.main
     if (selection.empty) return false
@@ -184,7 +191,7 @@ export default function MarkdownEditor({ value, onChange, ariaLabel = 'Markdown 
         extensions: [
           markdown(),
           history(),
-          keymap.of([...formattingKeymap(EditorView), ...defaultKeymap, ...historyKeymap]),
+          keymap.of([...formattingKeymap(), ...defaultKeymap, ...historyKeymap]),
           livePreview,
           EditorView.lineWrapping,
           EditorView.contentAttributes.of({ 'aria-label': ariaLabel, spellcheck: 'true' }),
