@@ -422,13 +422,16 @@ function GenerateControl({ isGenerating, onGenerate, onStop, onMicro, onMicro2, 
         setExpanded(true)
       }, 450)
     }}
-    onPointerUp={() => {
-      cancelTimer()
-      if (!longPressRef.current) onGenerate()
-    }}
+    onPointerUp={cancelTimer}
     onPointerCancel={cancelTimer}
     onPointerLeave={cancelTimer}
-    onClick={(event) => { if (event.detail === 0) onGenerate() }}
+    onClick={() => {
+      if (longPressRef.current) {
+        longPressRef.current = false
+        return
+      }
+      onGenerate()
+    }}
   ><Play aria-hidden="true" fill="currentColor" /></button>
 }
 
