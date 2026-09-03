@@ -21,22 +21,37 @@ type MarkdownEditorProps = {
   className?: string
 }
 
+export type GenerationStart = {
+  id: number
+  document: string
+  position: number
+}
+
+export type GenerationResult = {
+  generatedText: string
+  document: string
+}
+
 export type MarkdownEditorHandle = {
-  generate: () => boolean
+  beginGeneration: (position?: number) => GenerationStart | null
+  appendGeneration: (id: number, text: string) => boolean
+  finishGeneration: (id: number) => GenerationResult | null
+  restoreDocument: (document: string, position: number) => boolean
   insertSpeech: () => boolean
   undo: () => boolean
   redo: () => boolean
-  regenerate: () => boolean
 }
 
-const GENERATION_TEXT = 'generation placeholder'
+type ActiveGeneration = GenerationStart & {
+  generatedText: string
+  contentTo: number
+}
+
 const SPEECH_TEXT = 'speech placeholder'
 
 class ListMarkerWidget extends WidgetType {
   constructor(readonly label: string) { super() }
-
   eq(other: ListMarkerWidget) { return other.label === this.label }
-
   toDOM() {
     const span = document.createElement('span')
     span.className = 'cm-live-list-marker'
@@ -47,7 +62,6 @@ class ListMarkerWidget extends WidgetType {
 
 class RuleWidget extends WidgetType {
   eq() { return true }
-
   toDOM() {
     const span = document.createElement('span')
     span.className = 'cm-live-rule'
@@ -58,50 +72,40 @@ class RuleWidget extends WidgetType {
 function buildLivePreviewDecorations(state: EditorState): DecorationSet {
   const activeLine = state.doc.lineAt(state.selection.main.head).number
   const ranges: any[] = []
-  const hide = (from: number, to: number) => {
-    if (to > from) ranges.push(Decoration.replace({}).range(from, to))
-  }
-  const mark = (from: number, to: number, className: string) => {
-    if (to > from) ranges.push(Decoration.mark({ class: className }).range(from, to))
-  }
+  const hide = (from: number, to: number) => { if (to > from) ranges.push(Decoration.replace({}).range(from, to)) }
+  const mark = (from: number, to: number, className: string) => { if (to > from) ranges.push(Decoration.mark({ class: className }).range(from, to)) }
 
   for (let lineNumber = 1; lineNumber <= state.doc.lines; lineNumber += 1) {
     if (lineNumber === activeLine) continue
     const line = state.doc.line(lineNumber)
     const text = line.text
-
     const heading = text.match(/^(#{1,6})\s+/)
     if (heading) {
       hide(line.from, line.from + heading[0].length)
       mark(line.from + heading[0].length, line.to, `cm-live-heading cm-live-heading-${heading[1].length}`)
     }
-
     const quote = text.match(/^>\s?/)
     if (quote) {
       hide(line.from, line.from + quote[0].length)
       mark(line.from + quote[0].length, line.to, 'cm-live-quote')
     }
-
     const unordered = text.match(/^(\s*)[-+*]\s+/)
     if (unordered) {
       const markerStart = line.from + unordered[1].length
       hide(markerStart, line.from + unordered[0].length)
       ranges.push(Decoration.widget({ widget: new ListMarkerWidget('•'), side: 1 }).range(markerStart))
     }
-
     const ordered = text.match(/^(\s*)(\d+)[.)]\s+/)
     if (ordered) {
       const markerStart = line.from + ordered[1].length
       hide(markerStart, line.from + ordered[0].length)
       ranges.push(Decoration.widget({ widget: new ListMarkerWidget(`${ordered[2]}.`), side: 1 }).range(markerStart))
     }
-
     if (/^\s*((\*\s*){3,}|(-\s*){3,}|(_\s*){3,})\s*$/.test(text)) {
       hide(line.from, line.to)
       ranges.push(Decoration.widget({ widget: new RuleWidget() }).range(line.from))
       continue
     }
-
     for (const matchResult of text.matchAll(/~~([^~\n]+)~~/g)) {
       const start = line.from + (matchResult.index ?? 0)
       const end = start + matchResult[0].length
@@ -115,17 +119,8 @@ function buildLivePreviewDecorations(state: EditorState): DecorationSet {
     enter(node) {
       const line = state.doc.lineAt(node.from)
       if (line.number === activeLine || node.to > line.to) return
-
-      if (node.name === 'StrongEmphasis') {
-        mark(node.from, node.to, 'cm-live-bold')
-        return
-      }
-
-      if (node.name === 'Emphasis') {
-        mark(node.from, node.to, 'cm-live-italic')
-        return
-      }
-
+      if (node.name === 'StrongEmphasis') { mark(node.from, node.to, 'cm-live-bold'); return }
+      if (node.name === 'Emphasis') { mark(node.from, node.to, 'cm-live-italic'); return }
       if (node.name === 'Link') {
         const raw = state.doc.sliceString(node.from, node.to)
         const matchResult = raw.match(/^\[([^\]\n]+)\]\(([^)\n]+)\)$/)
@@ -138,31 +133,19 @@ function buildLivePreviewDecorations(state: EditorState): DecorationSet {
           return false
         }
       }
-
-      if (node.name === 'EmphasisMark') {
-        hide(node.from, node.to)
-      }
+      if (node.name === 'EmphasisMark') hide(node.from, node.to)
     },
   })
-
   return Decoration.set(ranges, true)
 }
 
 const livePreview = ViewPlugin.fromClass(class {
   decorations: DecorationSet
-
-  constructor(view: EditorView) {
-    this.decorations = buildLivePreviewDecorations(view.state)
-  }
-
+  constructor(view: EditorView) { this.decorations = buildLivePreviewDecorations(view.state) }
   update(update: ViewUpdate) {
-    if (update.docChanged || update.selectionSet || update.viewportChanged) {
-      this.decorations = buildLivePreviewDecorations(update.state)
-    }
+    if (update.docChanged || update.selectionSet || update.viewportChanged) this.decorations = buildLivePreviewDecorations(update.state)
   }
-}, {
-  decorations: plugin => plugin.decorations,
-})
+}, { decorations: plugin => plugin.decorations })
 
 function formattingKeymap() {
   const wrapSelection = (marker: string) => (view: EditorView) => {
@@ -175,25 +158,7 @@ function formattingKeymap() {
     })
     return true
   }
-
-  return [
-    { key: 'Mod-b', run: wrapSelection('**') },
-    { key: 'Mod-i', run: wrapSelection('_') },
-  ]
-}
-
-function appendLine(view: EditorView, text: string) {
-  const current = view.state.doc.toString()
-  const prefix = current.length === 0 || current.endsWith('\n') ? '' : '\n'
-  const insert = `${prefix}${text}`
-  const from = current.length
-  view.dispatch({
-    changes: { from, insert },
-    selection: { anchor: from + insert.length },
-    scrollIntoView: true,
-  })
-  view.focus()
-  return true
+  return [{ key: 'Mod-b', run: wrapSelection('**') }, { key: 'Mod-i', run: wrapSelection('_') }]
 }
 
 function insertAtSelection(view: EditorView, text: string) {
@@ -207,23 +172,10 @@ function insertAtSelection(view: EditorView, text: string) {
   return true
 }
 
-function regenerateLatest(view: EditorView) {
-  const current = view.state.doc.toString()
-  const pattern = new RegExp(`(^|\\n)${GENERATION_TEXT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\n|$)`, 'g')
-  let latest: RegExpExecArray | null = null
-  for (const matchResult of current.matchAll(pattern)) latest = matchResult as RegExpExecArray
-  if (!latest || latest.index === undefined) return false
-
-  const prefixLength = latest[1]?.length ?? 0
-  const from = latest.index + prefixLength
-  const to = from + GENERATION_TEXT.length
-  view.dispatch({
-    changes: { from, to, insert: GENERATION_TEXT },
-    selection: { anchor: to },
-    scrollIntoView: true,
-  })
-  view.focus()
-  return true
+function paragraphBoundary(left: string, right: string) {
+  const before = !left ? '' : left.endsWith('\n\n') ? '' : left.endsWith('\n') ? '\n' : '\n\n'
+  const after = !right ? '' : right.startsWith('\n\n') ? '' : right.startsWith('\n') ? '\n' : '\n\n'
+  return { before, after }
 }
 
 function runHistoryCommand(view: EditorView | null, command: (target: EditorView) => boolean) {
@@ -239,20 +191,97 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
   const hostRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<EditorView | null>(null)
   const onChangeRef = useRef(onChange)
+  const activeGenerationRef = useRef<ActiveGeneration | null>(null)
+  const generationIdRef = useRef(0)
+  const suppressChangeRef = useRef(false)
 
   useEffect(() => { onChangeRef.current = onChange }, [onChange])
 
   useImperativeHandle(ref, () => ({
-    generate: () => viewRef.current ? appendLine(viewRef.current, GENERATION_TEXT) : false,
+    beginGeneration: (positionOverride) => {
+      const view = viewRef.current
+      if (!view || activeGenerationRef.current) return null
+      const document = view.state.doc.toString()
+      const selection = view.state.selection.main
+      const position = Math.max(0, Math.min(positionOverride ?? selection.head, document.length))
+      const { before, after } = paragraphBoundary(document.slice(0, position), document.slice(position))
+      const contentFrom = position + before.length
+      const id = ++generationIdRef.current
+      view.dispatch({
+        changes: { from: position, insert: `${before}${after}` },
+        selection: { anchor: contentFrom },
+        annotations: Transaction.addToHistory.of(false),
+      })
+      activeGenerationRef.current = { id, document, position, generatedText: '', contentTo: contentFrom }
+      return { id, document, position }
+    },
+    appendGeneration: (id, text) => {
+      const view = viewRef.current
+      const active = activeGenerationRef.current
+      if (!view || !active || active.id !== id || !text) return false
+      view.dispatch({
+        changes: { from: active.contentTo, insert: text },
+        selection: { anchor: active.contentTo + text.length },
+        annotations: Transaction.addToHistory.of(false),
+      })
+      active.contentTo += text.length
+      active.generatedText += text
+      return true
+    },
+    finishGeneration: (id) => {
+      const view = viewRef.current
+      const active = activeGenerationRef.current
+      if (!view || !active || active.id !== id) return null
+      const generatedText = active.generatedText
+      if (!generatedText) {
+        suppressChangeRef.current = true
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: active.document },
+          selection: { anchor: active.position },
+          annotations: Transaction.addToHistory.of(false),
+        })
+        suppressChangeRef.current = false
+        onChangeRef.current(active.document)
+        activeGenerationRef.current = null
+        return { generatedText: '', document: active.document }
+      }
+
+      const finalDocument = view.state.doc.toString()
+      const finalSelection = active.contentTo
+      suppressChangeRef.current = true
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: active.document },
+        annotations: Transaction.addToHistory.of(false),
+      })
+      suppressChangeRef.current = false
+      view.dispatch({
+        changes: { from: 0, to: active.document.length, insert: finalDocument },
+        selection: { anchor: finalSelection },
+        scrollIntoView: true,
+      })
+      activeGenerationRef.current = null
+      view.focus()
+      return { generatedText, document: finalDocument }
+    },
+    restoreDocument: (document, position) => {
+      const view = viewRef.current
+      if (!view || activeGenerationRef.current) return false
+      const anchor = Math.max(0, Math.min(position, document.length))
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: document },
+        selection: { anchor },
+        annotations: Transaction.addToHistory.of(false),
+      })
+      view.focus()
+      return true
+    },
     insertSpeech: () => viewRef.current ? insertAtSelection(viewRef.current, SPEECH_TEXT) : false,
     undo: () => runHistoryCommand(viewRef.current, undo),
     redo: () => runHistoryCommand(viewRef.current, redo),
-    regenerate: () => viewRef.current ? regenerateLatest(viewRef.current) : false,
   }), [])
 
   useEffect(() => {
     if (!hostRef.current) return
-
     const state = EditorState.create({
       doc: value,
       extensions: [
@@ -263,7 +292,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
         EditorView.lineWrapping,
         EditorView.contentAttributes.of({ 'aria-label': ariaLabel, spellcheck: 'true' }),
         EditorView.updateListener.of(update => {
-          if (update.docChanged) onChangeRef.current(update.state.doc.toString())
+          if (update.docChanged && !suppressChangeRef.current) onChangeRef.current(update.state.doc.toString())
         }),
         EditorView.theme({
           '&': { backgroundColor: 'transparent', width: '100%', maxWidth: '100%' },
@@ -275,10 +304,8 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
         }),
       ],
     })
-
     const view = new EditorView({ state, parent: hostRef.current })
     viewRef.current = view
-
     return () => {
       view.destroy()
       if (viewRef.current === view) viewRef.current = null
@@ -287,7 +314,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
 
   useEffect(() => {
     const view = viewRef.current
-    if (!view) return
+    if (!view || activeGenerationRef.current) return
     const current = view.state.doc.toString()
     if (current === value) return
     view.dispatch({
