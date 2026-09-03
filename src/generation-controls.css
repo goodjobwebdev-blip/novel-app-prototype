@@ -4,9 +4,77 @@
   user-select: none;
 }
 
+.play.generating {
+  background: rgba(173, 107, 96, 0.94) !important;
+  color: #fff5ef !important;
+}
+
+.play.generating svg {
+  width: 17px;
+  height: 17px;
+}
+
 .expandable-text-input {
   position: relative;
   min-width: 0;
+}
+
+.arc-prompt-field {
+  position: relative;
+  min-width: 0;
+  padding-bottom: 17px;
+}
+
+.arc-prompt-field > span {
+  position: absolute;
+  right: 4px;
+  bottom: 0;
+  color: var(--faint);
+  font-size: 9px;
+  letter-spacing: 0.03em;
+}
+
+.app-toast {
+  position: fixed;
+  z-index: 160;
+  top: max(16px, env(safe-area-inset-top));
+  left: 50%;
+  width: min(calc(100% - 28px), 560px);
+  min-height: 48px;
+  padding: 10px 10px 10px 14px;
+  border: 1px solid rgba(216, 122, 110, 0.38);
+  border-radius: 14px;
+  background: rgba(38, 23, 21, 0.95);
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.46);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  color: #f2ded9;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  transform: translateX(-50%);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.app-toast button {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.app-toast button svg {
+  width: 15px;
+  height: 15px;
 }
 
 .expandable-text-input textarea {

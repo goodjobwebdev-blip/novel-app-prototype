@@ -22,6 +22,7 @@ import {
   RefreshCw,
   Send,
   Settings2,
+  Square,
   Trash2,
   Undo2,
   Volume2,
@@ -29,9 +30,12 @@ import {
   X,
 } from 'lucide-react'
 import AiSettings from './App'
+import { AI_SETTINGS_STORAGE_KEY, loadAiSettings } from './ai-settings'
 import ExpandableTextInput from './ExpandableTextInput'
 import MarkdownEditor, { type MarkdownEditorHandle } from './MarkdownEditor'
+import { renderStoryPrompt, streamNanoGPTCompletion } from './nanogpt'
 import {
+  PROTOTYPE_BOOK_ID,
   PROTOTYPE_SCENE_ID,
   createSnapshot,
   ensurePrototypeSeed,
@@ -45,6 +49,13 @@ type Screen = 'home' | 'editor' | 'chat' | 'settings'
 type RightTab = 'outline' | 'notes' | 'codex' | 'chat'
 type ChatPanel = 'list' | 'settings'
 type SaveState = 'loading' | 'saving' | 'saved' | 'error'
+type ToastMessage = { id: number; message: string }
+type GenerationRequestSnapshot = {
+  baseUrl: string
+  model: string
+  systemPrompt: string
+  userMessage: string
+}
 
 const books = [
   { title: 'The City Beneath the Tide', series: 'Atlas of Lost Coasts · Book II', edited: 'Edited 12 minutes ago', cover: 'tide' },
@@ -85,22 +96,43 @@ export default function Workspace() {
   const [chatEdit, setChatEdit] = useState(false)
   const [aiReady, setAiReady] = useState(false)
   const [saveState, setSaveState] = useState<SaveState>('loading')
+  const [generationActive, setGenerationActive] = useState(false)
+  const [toast, setToast] = useState<ToastMessage | null>(null)
   const editorRef = useRef<MarkdownEditorHandle | null>(null)
   const promptRef = useRef<HTMLTextAreaElement | null>(null)
   const storyRef = useRef(initialStoryMarkdown)
+  const bookTitleRef = useRef('The City Beneath the Tide')
+  const scenePovRef = useRef('')
   const storageReadyRef = useRef(false)
   const changedSinceSnapshotRef = useRef(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const generationAbortRef = useRef<AbortController | null>(null)
+  const latestGenerationRequestRef = useRef<GenerationRequestSnapshot | null>(null)
 
-  useEffect(() => { setAiReady(Boolean(localStorage.getItem('arc-ai-defaults-v1'))) }, [])
+  useEffect(() => {
+    if (!localStorage.getItem(AI_SETTINGS_STORAGE_KEY)) return
+    const settings = loadAiSettings()
+    setAiReady(settings.provider === 'nanogpt' && Boolean(settings.apiKey.trim() && settings.mainModel.trim()))
+  }, [])
+
+  useEffect(() => () => {
+    generationAbortRef.current?.abort()
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       try {
         await ensurePrototypeSeed(initialStoryMarkdown)
-        const scene = await getEntity(PROTOTYPE_SCENE_ID)
+        const [book, scene] = await Promise.all([
+          getEntity(PROTOTYPE_BOOK_ID),
+          getEntity(PROTOTYPE_SCENE_ID),
+        ])
         if (cancelled) return
+        bookTitleRef.current = typeof book?.title === 'string' ? book.title : bookTitleRef.current
+        scenePovRef.current = typeof scene?.pov === 'string' ? scene.pov : ''
         const content = typeof scene?.content === 'string' ? scene.content : initialStoryMarkdown
         storyRef.current = content
         setStoryMarkdown(content)
@@ -185,13 +217,95 @@ export default function Workspace() {
     setRightOpen(false)
   }
 
-  function generate() {
-    if (editorRef.current?.generate()) void flushDocument('generation', true)
+  function showToast(message: string) {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+    setToast({ id: Date.now(), message })
+    toastTimerRef.current = setTimeout(() => setToast(null), 5200)
   }
 
-  function regenerate() {
-    if (editorRef.current?.regenerate()) void flushDocument('generation', true)
+  async function runGeneration(mode: 'generate' | 'regenerate') {
+    if (generationAbortRef.current) return
+
+    const settings = loadAiSettings()
+    if (settings.provider !== 'nanogpt') {
+      showToast('Story generation currently supports NanoGPT only. Choose it in AI settings.')
+      return
+    }
+    if (!settings.apiKey.trim()) {
+      showToast('Add your NanoGPT API key in AI settings before generating.')
+      return
+    }
+    if (!settings.mainModel.trim()) {
+      showToast('Choose a Main model in AI settings before generating.')
+      return
+    }
+
+    const previousRequest = latestGenerationRequestRef.current
+    if (mode === 'regenerate' && !previousRequest) {
+      showToast('Generate a passage before using Regenerate.')
+      return
+    }
+
+    const editor = editorRef.current
+    const context = editor?.beginGeneration(mode)
+    if (!editor || !context) {
+      showToast(mode === 'regenerate'
+        ? 'Regenerate is available only while the latest generated passage is unchanged.'
+        : 'The editor is not ready for generation yet.')
+      return
+    }
+
+    const requestSnapshot = mode === 'regenerate' && previousRequest
+      ? previousRequest
+      : {
+          baseUrl: settings.baseUrl,
+          model: settings.mainModel,
+          systemPrompt: renderStoryPrompt(settings.prompts.story, {
+            bookTitle: bookTitleRef.current,
+            sceneText: context.sceneText,
+            scenePov: scenePovRef.current || undefined,
+          }),
+          userMessage: arcPrompt,
+        }
+
+    const controller = new AbortController()
+    generationAbortRef.current = controller
+    setGenerationActive(true)
+    let status: 'complete' | 'cancelled' | 'error' = 'complete'
+
+    try {
+      await streamNanoGPTCompletion({
+        apiKey: settings.apiKey.trim(),
+        baseUrl: requestSnapshot.baseUrl,
+        model: requestSnapshot.model,
+        systemPrompt: requestSnapshot.systemPrompt,
+        userMessage: requestSnapshot.userMessage,
+      }, (chunk) => {
+        if (!editor.appendGenerationChunk(chunk)) throw new Error('The editor could not insert generated text.')
+      }, controller.signal)
+    } catch (error) {
+      if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+        status = 'cancelled'
+      } else {
+        status = 'error'
+        showToast(error instanceof Error ? error.message : 'Generation stopped unexpectedly.')
+      }
+    } finally {
+      const result = editor.finishGeneration(status)
+      generationAbortRef.current = null
+      setGenerationActive(false)
+      if (result) {
+        latestGenerationRequestRef.current = requestSnapshot
+        await flushDocument('generation', true)
+      }
+    }
   }
+
+  function generate() { void runGeneration('generate') }
+
+  function regenerate() { void runGeneration('regenerate') }
+
+  function stopGeneration() { generationAbortRef.current?.abort() }
 
   function insertEditorSpeech() {
     editorRef.current?.insertSpeech()
@@ -213,7 +327,10 @@ export default function Workspace() {
     })
   }
 
-  if (screen === 'settings') return <AiSettings onHome={() => setScreen('home')} onBack={() => setScreen(returnScreen)} onSaved={() => setAiReady(true)} />
+  if (screen === 'settings') return <AiSettings onHome={() => setScreen('home')} onBack={() => setScreen(returnScreen)} onSaved={() => {
+    const settings = loadAiSettings()
+    setAiReady(settings.provider === 'nanogpt' && Boolean(settings.apiKey.trim() && settings.mainModel.trim()))
+  }} />
 
   if (screen === 'home') return (
     <main className="library-screen">
@@ -234,6 +351,8 @@ export default function Workspace() {
         <button type="button" onClick={() => setRightOpen(true)} aria-label="Open book workspace"><ChevronsLeft aria-hidden="true" /></button>
       </header>
 
+      {toast && <div className="app-toast" role="alert" key={toast.id}><span>{toast.message}</span><button type="button" onClick={() => setToast(null)} aria-label="Dismiss notification"><X aria-hidden="true" /></button></div>}
+
       {screen === 'editor' ? <article className="story-editor">
         <small className="page-number">07</small><p className="document-path">Outline / Chapter 7 / Scene 2</p>
         <MarkdownEditor ref={editorRef} value={storyMarkdown} onChange={handleStoryChange} ariaLabel="Scene Markdown editor" />
@@ -247,8 +366,8 @@ export default function Workspace() {
         </div>
       </section>}
 
-      {screen === 'editor' && <div className="editor-bottom"><button type="button" onClick={() => setArcOpen(true)} aria-label="Open generation input"><PanelBottomOpen aria-hidden="true" /></button><GenerateControl onGenerate={generate} onMicro={insertEditorSpeech} onMicro2={insertPromptSpeech} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} /></div>}
-      {screen === 'editor' && arcOpen && <section className="arc-drawer"><div><small>ARC</small><span>Guide the next passage</span><button type="button" onClick={() => setArcOpen(false)} aria-label="Close Arc"><X aria-hidden="true" /></button></div><div className="arc-compose"><ExpandableTextInput ref={promptRef} value={arcPrompt} onChange={setArcPrompt} aria-label="generation prompt" dialogTitle="Edit generation prompt" /><button className="play" type="button" onClick={generate} aria-label="Generate"><Play aria-hidden="true" fill="currentColor" /></button></div></section>}
+      {screen === 'editor' && <div className="editor-bottom"><button type="button" onClick={() => setArcOpen(true)} aria-label="Open generation input"><PanelBottomOpen aria-hidden="true" /></button><GenerateControl isGenerating={generationActive} onGenerate={generate} onStop={stopGeneration} onMicro={insertEditorSpeech} onMicro2={insertPromptSpeech} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} /></div>}
+      {screen === 'editor' && arcOpen && <section className="arc-drawer"><div><small>ARC</small><span>Guide the next passage</span><button type="button" onClick={() => setArcOpen(false)} aria-label="Close Arc"><X aria-hidden="true" /></button></div><div className="arc-compose"><div className="arc-prompt-field"><ExpandableTextInput ref={promptRef} value={arcPrompt} onChange={setArcPrompt} aria-label="generation prompt" dialogTitle="Edit generation prompt" /><span aria-live="polite">{arcPrompt.length} characters</span></div><button className={`play ${generationActive ? 'generating' : ''}`} type="button" onClick={generationActive ? stopGeneration : generate} aria-label={generationActive ? 'Stop generation' : 'Generate'}>{generationActive ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" fill="currentColor" />}</button></div></section>}
       {screen === 'chat' && <section className="chat-composer"><small>Chapter 7 + Codex <ChevronDown aria-hidden="true" /></small><div><button type="button" aria-label="Dictate message"><Mic aria-hidden="true" /></button><textarea defaultValue="Compare Mara’s choice with what she promised Elias."/><button className="send" type="button" aria-label="Send message"><Send aria-hidden="true" fill="currentColor" /></button></div></section>}
 
       {rightOpen && <aside className="book-panel">
@@ -260,8 +379,10 @@ export default function Workspace() {
   )
 }
 
-function GenerateControl({ onGenerate, onMicro, onMicro2, onUndo, onRedo, onRegenerate }: {
+function GenerateControl({ isGenerating, onGenerate, onStop, onMicro, onMicro2, onUndo, onRedo, onRegenerate }: {
+  isGenerating: boolean
   onGenerate: () => void
+  onStop: () => void
   onMicro: () => void
   onMicro2: () => void
   onUndo: () => void
@@ -276,6 +397,8 @@ function GenerateControl({ onGenerate, onMicro, onMicro2, onUndo, onRedo, onRege
     if (timerRef.current) clearTimeout(timerRef.current)
     timerRef.current = null
   }
+
+  if (isGenerating) return <button className="play generate-trigger generating" type="button" onClick={onStop} aria-label="Stop generation" title="Stop generation"><Square aria-hidden="true" fill="currentColor" /></button>
 
   if (expanded) return <div className="generate-actions" role="toolbar" aria-label="Generate actions">
     <button type="button" onClick={onMicro} aria-label="Insert speech placeholder into editor" title="Micro"><Mic aria-hidden="true" /></button>
