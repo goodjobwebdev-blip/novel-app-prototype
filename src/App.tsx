@@ -1,239 +1,140 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
-const MODELS_ENDPOINT = 'https://nano-gpt.com/api/v1/models?detailed=true&sort=favorites'
-const CHAT_ENDPOINT = 'https://nano-gpt.com/api/v1/chat/completions'
+type Provider = 'openrouter' | 'nanogpt' | 'openai' | 'compatible'
+type Model = { id: string; name?: string; context_length?: number; pricing?: { prompt?: string; completion?: string }; architecture?: { modality?: string } }
+type Prompts = { story: string; summarize: string; titles: string }
+type Settings = { provider: Provider; apiKey: string; baseUrl: string; mainModel: string; supportModel: string; favorites: string[]; prompts: Prompts }
 
-type NanoModel = {
-  id: string
-  name?: string
-  owned_by?: string
+const STORAGE_KEY = 'arc-ai-defaults-v1'
+const defaultPrompts: Prompts = {
+  story: `You are the story writer for {{book.title}}.
+
+{% if scene.pov %}
+Stay close to {{scene.pov}} and preserve the established voice.
+{% endif %}
+
+Continue from {{scene.text}} without summarizing it.`,
+  summarize: `Summarize {{target.type}} for future story context.
+
+Keep names, decisions, promises, and unresolved questions.
+{% if target.previous_summary %}
+Update the existing summary instead of starting over.
+{% endif %}`,
+  titles: `Generate concise names or titles for {{target.type}}.
+
+Tone: {{book.style}}
+Return {{count}} distinct options without commentary.`,
+}
+const initialSettings: Settings = { provider: 'nanogpt', apiKey: '', baseUrl: 'https://nano-gpt.com/api/v1', mainModel: '', supportModel: '', favorites: [], prompts: defaultPrompts }
+const providerLabels: Record<Provider, string> = { openrouter: 'OpenRouter', nanogpt: 'nano-gpt.com', openai: 'OpenAI', compatible: 'OpenAI-compatible' }
+
+function endpointFor(settings: Settings) {
+  if (settings.provider === 'openrouter') return 'https://openrouter.ai/api/v1/models'
+  if (settings.provider === 'openai') return 'https://api.openai.com/v1/models'
+  if (settings.provider === 'nanogpt') return 'https://nano-gpt.com/api/v1/models?detailed=true&sort=favorites'
+  return `${settings.baseUrl.trim().replace(/\/$/, '')}/models`
+}
+function formatContext(value?: number) {
+  if (!value) return 'Context unknown'
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value % 1_000_000 ? 1 : 0)}m context`
+  return `${Math.round(value / 1000)}k context`
 }
 
-type ModelsResponse = {
-  data?: NanoModel[]
-  message?: string
+type AiSettingsProps = {
+  onHome?: () => void
+  onBack?: () => void
+  onSaved?: () => void
 }
 
-type ChatResponse = {
-  choices?: Array<{
-    message?: {
-      content?: string
+export default function App({ onHome, onBack, onSaved }: AiSettingsProps) {
+  const [settings, setSettings] = useState<Settings>(initialSettings)
+  const [models, setModels] = useState<Model[]>([])
+  const [promptTab, setPromptTab] = useState<keyof Prompts>('story')
+  const [modelSearch, setModelSearch] = useState('')
+  const [showKey, setShowKey] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [status, setStatus] = useState('Add an API key, then reload the model list.')
+  const [statusKind, setStatusKind] = useState<'quiet' | 'success' | 'error'>('quiet')
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    const stored = localStorage.getItem(STORAGE_KEY)
+    if (!stored) return
+    try {
+      const parsed = JSON.parse(stored) as Partial<Settings>
+      setSettings({ ...initialSettings, ...parsed, prompts: { ...defaultPrompts, ...parsed.prompts }, favorites: Array.isArray(parsed.favorites) ? parsed.favorites : [] })
+      setStatus('Saved AI defaults loaded from this device.')
+      setStatusKind('success')
+    } catch {
+      setStatus('Saved settings could not be read. Using defaults.')
+      setStatusKind('error')
     }
-  }>
-  error?: string | { message?: string }
-  message?: string
-}
+  }, [])
 
-export default function App() {
-  const [prompt, setPrompt] = useState('')
-  const [apiKey, setApiKey] = useState('')
-  const [models, setModels] = useState<NanoModel[]>([])
-  const [selectedModel, setSelectedModel] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [message, setMessage] = useState('Enter an API key, then refresh the model list.')
-  const [hasError, setHasError] = useState(false)
-  const [generationMessage, setGenerationMessage] = useState('')
-  const [generationError, setGenerationError] = useState(false)
+  const visibleModels = useMemo(() => {
+    const query = modelSearch.trim().toLowerCase()
+    return models.filter((model) => !query || `${model.id} ${model.name ?? ''}`.toLowerCase().includes(query)).sort((a, b) => Number(settings.favorites.includes(b.id)) - Number(settings.favorites.includes(a.id))).slice(0, 8)
+  }, [modelSearch, models, settings.favorites])
 
-  const modelOptions = useMemo(
-    () =>
-      models.map((model) => ({
-        id: model.id,
-        label: model.name && model.name !== model.id ? `${model.name} — ${model.id}` : model.id,
-      })),
-    [models],
-  )
-
+  function update<K extends keyof Settings>(key: K, value: Settings[K]) { setSettings((current) => ({ ...current, [key]: value })); setSaved(false) }
+  function selectProvider(provider: Provider) {
+    const baseUrl = provider === 'nanogpt' ? 'https://nano-gpt.com/api/v1' : provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : provider === 'openai' ? 'https://api.openai.com/v1' : settings.baseUrl
+    setSettings((current) => ({ ...current, provider, baseUrl, mainModel: '', supportModel: '' }))
+    setModels([]); setStatus('Provider changed. Reload its model list when ready.'); setStatusKind('quiet'); setSaved(false)
+  }
   async function refreshModels() {
-    setIsLoading(true)
-    setHasError(false)
-    setMessage('Loading models…')
-
+    if (!settings.apiKey.trim()) { setStatus('Enter an API key before loading models.'); setStatusKind('error'); return }
+    if (settings.provider === 'compatible' && !settings.baseUrl.trim()) { setStatus('Enter the compatible provider endpoint first.'); setStatusKind('error'); return }
+    setLoading(true); setStatus('Contacting the provider…'); setStatusKind('quiet')
     try {
-      const headers: HeadersInit = { Accept: 'application/json' }
-      const trimmedKey = apiKey.trim()
-
-      if (trimmedKey) {
-        headers.Authorization = `Bearer ${trimmedKey}`
-      }
-
-      const response = await fetch(MODELS_ENDPOINT, { headers })
-      const payload = (await response.json().catch(() => ({}))) as ModelsResponse
-
-      if (!response.ok) {
-        throw new Error(payload.message || `NanoGPT returned ${response.status}.`)
-      }
-
-      const availableModels = Array.isArray(payload.data)
-        ? payload.data.filter((model) => typeof model.id === 'string' && model.id.length > 0)
-        : []
-
-      setModels(availableModels)
-
-      if (!availableModels.some((model) => model.id === selectedModel)) {
-        setSelectedModel('')
-      }
-
-      setMessage(
-        availableModels.length > 0
-          ? `${availableModels.length} models available.`
-          : 'NanoGPT returned no available models.',
-      )
+      const response = await fetch(endpointFor(settings), { headers: { Accept: 'application/json', Authorization: `Bearer ${settings.apiKey.trim()}` } })
+      const payload = await response.json().catch(() => ({})) as { data?: Model[]; message?: string; error?: { message?: string } }
+      if (!response.ok) throw new Error(payload.error?.message || payload.message || `Provider returned ${response.status}.`)
+      const nextModels = Array.isArray(payload.data) ? payload.data.filter((model) => typeof model.id === 'string' && model.id.length > 0) : []
+      setModels(nextModels); setStatus(nextModels.length ? `${nextModels.length} models available.` : 'The provider returned no models.'); setStatusKind(nextModels.length ? 'success' : 'error')
     } catch (error) {
-      setModels([])
-      setSelectedModel('')
-      setHasError(true)
-      setMessage(error instanceof Error ? error.message : 'Could not load the model list.')
-    } finally {
-      setIsLoading(false)
-    }
+      setModels([]); setStatus(error instanceof Error ? error.message : 'Could not load the model list.'); setStatusKind('error')
+    } finally { setLoading(false) }
   }
-
-  async function generateContinuation() {
-    const trimmedKey = apiKey.trim()
-    const story = prompt.trim()
-
-    setGenerationError(false)
-
-    if (!trimmedKey) {
-      setGenerationError(true)
-      setGenerationMessage('Enter your NanoGPT API key before generating.')
-      return
-    }
-
-    if (!selectedModel) {
-      setGenerationError(true)
-      setGenerationMessage('Choose a model before generating.')
-      return
-    }
-
-    if (!story) {
-      setGenerationError(true)
-      setGenerationMessage('Add some story text before generating.')
-      return
-    }
-
-    setIsGenerating(true)
-    setGenerationMessage('Generating continuation…')
-
-    try {
-      const response = await fetch(CHAT_ENDPOINT, {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          Authorization: `Bearer ${trimmedKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: selectedModel,
-          messages: [
-            {
-              role: 'user',
-              content: `${story}\n\nContinue the story.`,
-            },
-          ],
-        }),
-      })
-
-      const payload = (await response.json().catch(() => ({}))) as ChatResponse
-
-      if (!response.ok) {
-        const apiMessage =
-          typeof payload.error === 'string' ? payload.error : payload.error?.message
-        throw new Error(apiMessage || payload.message || `NanoGPT returned ${response.status}.`)
-      }
-
-      const continuation = payload.choices?.[0]?.message?.content?.trim()
-
-      if (!continuation) {
-        throw new Error('NanoGPT returned an empty continuation.')
-      }
-
-      setPrompt(`${prompt.trimEnd()}\n\n${continuation}`)
-      setGenerationMessage('Continuation added to the text.')
-    } catch (error) {
-      setGenerationError(true)
-      setGenerationMessage(error instanceof Error ? error.message : 'Could not generate a continuation.')
-    } finally {
-      setIsGenerating(false)
-    }
-  }
+  function toggleFavorite(id: string) { update('favorites', settings.favorites.includes(id) ? settings.favorites.filter((favorite) => favorite !== id) : [...settings.favorites, id]) }
+  function saveDefaults() { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); setSaved(true); setStatus('AI defaults saved on this device. New books will copy them.'); setStatusKind('success'); onSaved?.() }
 
   return (
-    <main>
-      <section className="workspace" aria-labelledby="page-title">
-        <header>
-          <p className="eyebrow">NanoGPT</p>
-          <h1 id="page-title">Generation prototype</h1>
-        </header>
+    <main className="app-shell">
+      <aside className="settings-rail" aria-label="Default settings navigation">
+        <div className="rail-header"><button className="home-button" type="button" aria-label="Back to library" onClick={onHome}><span>⌂</span><b>Home</b></button><div><small>Defaults</small><strong>New books</strong></div></div>
+        <nav><button className="active" type="button"><span>✦</span>AI</button><button type="button" disabled><span>◫</span>Context</button><button type="button" disabled><span>Aa</span>UI</button><button type="button" disabled><span>◖</span>Speech</button><button type="button" disabled><span>◇</span>Images</button></nav>
+        <p>Defaults are copied into a new book. After that, each book keeps its own settings.</p>
+      </aside>
 
-        <div className="field">
-          <label htmlFor="prompt">Text</label>
-          <textarea
-            id="prompt"
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            placeholder="Write something to continue, rewrite, or explore…"
-            rows={10}
-          />
-        </div>
+      <section className="settings-page" aria-labelledby="page-title">
+        {onBack && <button className="settings-back" type="button" onClick={onBack}>← Back to book</button>}
+        <header className="page-heading"><div><p>Default AI</p><h1 id="page-title">Models & prompts</h1><span>Configure the writing and support models used when a book is created.</span></div><div className={`save-state ${saved ? 'saved' : ''}`}><i />{saved ? 'Saved' : 'Unsaved changes'}</div></header>
 
-        <div className="field">
-          <label htmlFor="api-key">NanoGPT API key</label>
-          <div className="key-row">
-            <input
-              id="api-key"
-              type="password"
-              value={apiKey}
-              onChange={(event) => setApiKey(event.target.value)}
-              placeholder="Enter API key"
-              autoComplete="off"
-              spellCheck={false}
-            />
-            <button type="button" onClick={refreshModels} disabled={isLoading}>
-              {isLoading ? 'Refreshing…' : 'Refresh model list'}
-            </button>
+        <section className="settings-card provider-card">
+          <div className="card-heading"><div><span>01</span><h2>Provider</h2></div><p>Connection details stay in this browser.</p></div>
+          <div className="provider-grid">{(Object.keys(providerLabels) as Provider[]).map((provider) => <button key={provider} className={settings.provider === provider ? 'selected' : ''} type="button" onClick={() => selectProvider(provider)}><i>{provider === 'nanogpt' ? 'N' : provider === 'openrouter' ? 'O' : provider === 'openai' ? 'AI' : '{ }'}</i><span><strong>{providerLabels[provider]}</strong><small>{provider === 'compatible' ? 'Custom endpoint' : 'Managed endpoint'}</small></span><b>{settings.provider === provider ? '✓' : ''}</b></button>)}</div>
+          <div className="connection-fields">
+            {settings.provider === 'compatible' && <label><span>Endpoint URL</span><input value={settings.baseUrl} onChange={(event) => update('baseUrl', event.target.value)} placeholder="https://provider.example/v1" /></label>}
+            <label><span>API key</span><div className="input-action"><input type={showKey ? 'text' : 'password'} value={settings.apiKey} onChange={(event) => update('apiKey', event.target.value)} placeholder="Enter API key" autoComplete="off" spellCheck={false} /><button type="button" onClick={() => setShowKey((value) => !value)}>{showKey ? 'Hide' : 'Show'}</button></div></label>
+            <button className="reload-button" type="button" onClick={refreshModels} disabled={loading}><span className={loading ? 'spinning' : ''}>↻</span>{loading ? 'Loading models…' : 'Reload model list'}</button>
           </div>
-          <p className="hint">The key stays in this browser tab and is not saved.</p>
-        </div>
+          <p className={`status ${statusKind}`} role="status"><i />{status}</p>
+        </section>
 
-        <div className="field">
-          <label htmlFor="model">Model</label>
-          <input
-            id="model"
-            list="available-models"
-            value={selectedModel}
-            onChange={(event) => setSelectedModel(event.target.value)}
-            placeholder={models.length > 0 ? 'Search models…' : 'Refresh the model list first'}
-            disabled={models.length === 0}
-            autoComplete="off"
-          />
-          <datalist id="available-models">
-            {modelOptions.map((model) => (
-              <option key={model.id} value={model.id} label={model.label} />
-            ))}
-          </datalist>
-          <p className={hasError ? 'status error' : 'status'} role="status">
-            {message}
-          </p>
-        </div>
+        <section className="settings-card models-card">
+          <div className="card-heading"><div><span>02</span><h2>Models</h2></div><p>Main writes; Support handles summaries and names.</p></div>
+          <div className="model-pickers"><label><span>Main model <em>Story generation</em></span><input list="model-options" value={settings.mainModel} onChange={(event) => update('mainModel', event.target.value)} placeholder={models.length ? 'Search models…' : 'Reload models first'} /></label><label><span>Support model <em>Fast utility tasks</em></span><input list="model-options" value={settings.supportModel} onChange={(event) => update('supportModel', event.target.value)} placeholder={models.length ? 'Search models…' : 'Reload models first'} /></label><datalist id="model-options">{models.map((model) => <option key={model.id} value={model.id}>{model.name ?? model.id}</option>)}</datalist></div>
+          <div className="model-browser"><div className="model-search"><span>⌕</span><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder="Search loaded models" /></div>{models.length ? <div className="model-list">{visibleModels.map((model) => <article key={model.id}><button className={`favorite ${settings.favorites.includes(model.id) ? 'active' : ''}`} type="button" onClick={() => toggleFavorite(model.id)} aria-label={`Favorite ${model.id}`}>★</button><div><strong>{model.name || model.id}</strong>{model.name && model.name !== model.id && <small>{model.id}</small>}<p><span>{formatContext(model.context_length)}</span><span>{model.architecture?.modality || 'Text'}</span>{model.pricing?.prompt && <span>Pricing supplied</span>}</p></div><button className="use-model" type="button" onClick={() => update('mainModel', model.id)}>Use</button></article>)}</div> : <div className="model-empty"><span>◎</span><strong>No models loaded</strong><p>Enter your key and reload the provider model list.</p></div>}</div>
+        </section>
 
-        <div className="generation-actions">
-          <button
-            className="generate-button"
-            type="button"
-            onClick={generateContinuation}
-            disabled={isGenerating || isLoading}
-          >
-            {isGenerating ? 'Generating…' : 'Generate'}
-          </button>
-          {generationMessage ? (
-            <p className={generationError ? 'status error' : 'status'} role="status">
-              {generationMessage}
-            </p>
-          ) : null}
-        </div>
+        <section className="settings-card prompts-card">
+          <div className="card-heading"><div><span>03</span><h2>System prompts</h2></div><button className="help-button" type="button" title="Use {{variable}} for values and {% if condition %}…{% endif %} for optional instructions.">? <b>Prompt syntax</b></button></div>
+          <div className="prompt-tabs" role="tablist">{([['story', 'Story'], ['summarize', 'Summarize'], ['titles', 'Titles & names']] as const).map(([key, label]) => <button key={key} className={promptTab === key ? 'active' : ''} type="button" onClick={() => setPromptTab(key)}>{label}</button>)}</div>
+          <textarea className="prompt-editor" value={settings.prompts[promptTab]} onChange={(event) => update('prompts', { ...settings.prompts, [promptTab]: event.target.value })} spellCheck={false} />
+          <div className="prompt-footer"><span>Variables: <code>{'{{book.title}}'}</code> <code>{'{{scene.pov}}'}</code> <code>{'{{target.type}}'}</code></span><button type="button" onClick={() => update('prompts', { ...settings.prompts, [promptTab]: defaultPrompts[promptTab] })}>Reset default</button></div>
+        </section>
+        <footer className="save-bar"><div><strong>AI defaults</strong><span>{settings.mainModel ? 'Ready to save for new books' : 'Choose models now or save them later'}</span></div><button type="button" onClick={saveDefaults}>Save defaults</button></footer>
       </section>
     </main>
   )
