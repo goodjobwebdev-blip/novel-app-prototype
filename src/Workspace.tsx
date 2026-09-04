@@ -31,8 +31,8 @@ import {
   WandSparkles,
   X,
 } from 'lucide-react'
-import AiSettings from './App'
-import { AI_SETTINGS_STORAGE_KEY, loadAiSettings } from './ai-settings'
+import AiSettingsScreen from './App'
+import { loadAiSettings, type AiSettings } from './ai-settings'
 import ExpandableTextInput from './ExpandableTextInput'
 import MarkdownEditor, { type MarkdownEditorHandle } from './MarkdownEditor'
 import { renderStoryPrompt, streamNanoGPTCompletion } from './nanogpt'
@@ -43,8 +43,10 @@ import {
   createSnapshot,
   createStructuralEntity,
   deleteEntityTree,
+  ensureBookAiSettings,
   ensurePrototypeSeed,
   getEntity,
+  getBookAiSettings,
   listBooks,
   listEntitiesByBook,
   moveStructuralEntity,
@@ -123,7 +125,6 @@ export default function Workspace() {
   const latestGenerationRequestRef = useRef<GenerationRequestSnapshot | null>(null)
 
   useEffect(() => {
-    if (!localStorage.getItem(AI_SETTINGS_STORAGE_KEY)) return
     const settings = loadAiSettings()
     setAiReady(settings.provider === 'nanogpt' && Boolean(settings.apiKey.trim() && settings.mainModel.trim()))
   }, [])
@@ -139,6 +140,8 @@ export default function Workspace() {
       try {
         await ensurePrototypeSeed(initialStoryMarkdown)
         const books = await listBooks()
+        const defaults = loadAiSettings()
+        await Promise.all(books.map((existingBook) => ensureBookAiSettings(existingBook.id, defaults)))
         const book = books.find((candidate) => candidate.id === PROTOTYPE_BOOK_ID) ?? books[0]
         const entities = book ? await listEntitiesByBook(book.id) as StructuralEntity[] : []
         const scene = entities.find((entity) => entity.id === PROTOTYPE_SCENE_ID && entity.type === 'scene')
@@ -284,7 +287,7 @@ export default function Workspace() {
 
   async function makeBook() {
     try {
-      const created = await createBook()
+      const created = await createBook(loadAiSettings())
       setBookList(await listBooks())
       await openBook(created.book.id, created.scene.id)
     } catch (error) {
@@ -384,17 +387,29 @@ export default function Workspace() {
   async function runGeneration(mode: 'generate' | 'regenerate') {
     if (generationAbortRef.current) return
 
-    const settings = loadAiSettings()
+    if (!currentBook) {
+      showToast('Open a book before generating.')
+      return
+    }
+
+    let settings: AiSettings
+    try {
+      const defaults = loadAiSettings()
+      settings = await getBookAiSettings(currentBook.id, defaults.favorites)
+    } catch {
+      showToast('This book’s AI settings could not be loaded. Open Book settings and try again.')
+      return
+    }
     if (settings.provider !== 'nanogpt') {
-      showToast('Story generation currently supports NanoGPT only. Choose it in AI settings.')
+      showToast('Story generation currently supports NanoGPT only. Choose it in Book settings.')
       return
     }
     if (!settings.apiKey.trim()) {
-      showToast('Add your NanoGPT API key in AI settings before generating.')
+      showToast('Add your NanoGPT API key in Book settings before generating.')
       return
     }
     if (!settings.mainModel.trim()) {
-      showToast('Choose a Main model in AI settings before generating.')
+      showToast('Choose a Main model in Book settings before generating.')
       return
     }
 
@@ -491,10 +506,14 @@ export default function Workspace() {
   const documentPath = ['Outline', activeAct?.title, activeChapter?.title, activeScene?.title].filter(Boolean).join(' / ')
   const chapterNumber = String((activeChapter?.order ?? 0) + 1).padStart(2, '0')
 
-  if (screen === 'settings') return <AiSettings onHome={() => setScreen('home')} onBack={() => setScreen(returnScreen)} onSaved={() => {
-    const settings = loadAiSettings()
-    setAiReady(settings.provider === 'nanogpt' && Boolean(settings.apiKey.trim() && settings.mainModel.trim()))
-  }} />
+  if (screen === 'settings') return <AiSettingsScreen
+    book={returnScreen === 'home' || !currentBook ? undefined : { id: currentBook.id, title: currentBook.title }}
+    onHome={() => setScreen('home')}
+    onBack={() => setScreen(returnScreen)}
+    onSaved={(settings) => {
+      if (returnScreen === 'home') setAiReady(settings.provider === 'nanogpt' && Boolean(settings.apiKey.trim() && settings.mainModel.trim()))
+    }}
+  />
 
   if (screen === 'home') return (
     <main className="library-screen">
@@ -513,7 +532,7 @@ export default function Workspace() {
   return (
     <main className={`workspace-screen ${screen === 'chat' ? 'chat-active' : ''}`}>
       <header className="floating-controls">
-        <button type="button" onClick={() => openSettings(screen)} aria-label="Open settings"><ChevronsRight aria-hidden="true" /></button>
+        <button type="button" onClick={() => openSettings(screen)} aria-label="Open current book settings"><ChevronsRight aria-hidden="true" /></button>
         <span className={`save-state ${saveState}`} title={saveState === 'error' ? 'Local save failed; your current editor text remains in memory.' : undefined}><i /> {saveState === 'loading' ? 'Loading' : saveState === 'saving' ? 'Saving' : saveState === 'error' ? 'Save failed' : 'Saved'}</span>
         <button type="button" onClick={() => setRightOpen(true)} aria-label="Open book workspace"><ChevronsLeft aria-hidden="true" /></button>
       </header>

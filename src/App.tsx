@@ -15,14 +15,21 @@ import {
   Volume2,
 } from 'lucide-react'
 import {
-  AI_SETTINGS_STORAGE_KEY,
   defaultAiPrompts,
   initialAiSettings,
   loadAiSettings,
+  saveAiSettings,
+  saveGlobalFavorites,
   type AiPrompts,
   type AiProvider,
   type AiSettings,
 } from './ai-settings'
+import {
+  copyDefaultAiSettingsToBook,
+  ensureBookAiSettings,
+  getBookAiSettings,
+  saveBookAiSettings,
+} from './persistence'
 
 type Model = { id: string; name?: string; context_length?: number; pricing?: { prompt?: string; completion?: string }; architecture?: { modality?: string } }
 type SettingsTab = 'ai' | 'context' | 'appearance' | 'speech' | 'images'
@@ -44,10 +51,11 @@ function formatContext(value?: number) {
 type AiSettingsProps = {
   onHome?: () => void
   onBack?: () => void
-  onSaved?: () => void
+  onSaved?: (settings: AiSettings) => void
+  book?: { id: string; title: string }
 }
 
-export default function App({ onHome, onBack, onSaved }: AiSettingsProps) {
+export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) {
   const [settings, setSettings] = useState<AiSettings>(initialAiSettings)
   const [models, setModels] = useState<Model[]>([])
   const [promptTab, setPromptTab] = useState<keyof AiPrompts>('story')
@@ -58,19 +66,40 @@ export default function App({ onHome, onBack, onSaved }: AiSettingsProps) {
   const [statusKind, setStatusKind] = useState<'quiet' | 'success' | 'error'>('quiet')
   const [saved, setSaved] = useState(false)
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('ai')
+  const [settingsLoading, setSettingsLoading] = useState(Boolean(book))
+  const isBookSettings = Boolean(book)
 
   useEffect(() => {
-    const stored = localStorage.getItem(AI_SETTINGS_STORAGE_KEY)
-    if (!stored) return
-    try {
-      setSettings(loadAiSettings())
+    let cancelled = false
+    const defaults = loadAiSettings()
+    if (!book) {
+      setSettings(defaults)
       setStatus('Saved AI defaults loaded from this device.')
       setStatusKind('success')
-    } catch {
-      setStatus('Saved settings could not be read. Using defaults.')
-      setStatusKind('error')
+      setSettingsLoading(false)
+      return () => { cancelled = true }
     }
-  }, [])
+
+    setSettingsLoading(true)
+    ;(async () => {
+      try {
+        await ensureBookAiSettings(book.id, defaults)
+        const bookSettings = await getBookAiSettings(book.id, defaults.favorites)
+        if (cancelled) return
+        setSettings(bookSettings)
+        setStatus(`AI settings loaded for “${book.title}”.`)
+        setStatusKind('success')
+      } catch {
+        if (cancelled) return
+        setSettings(defaults)
+        setStatus('Book settings could not be read. No changes have been saved.')
+        setStatusKind('error')
+      } finally {
+        if (!cancelled) setSettingsLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [book?.id, book?.title])
 
   const visibleModels = useMemo(() => {
     const query = modelSearch.trim().toLowerCase()
@@ -98,24 +127,56 @@ export default function App({ onHome, onBack, onSaved }: AiSettingsProps) {
     } finally { setLoading(false) }
   }
   function toggleFavorite(id: string) { update('favorites', settings.favorites.includes(id) ? settings.favorites.filter((favorite) => favorite !== id) : [...settings.favorites, id]) }
-  function saveDefaults() { localStorage.setItem(AI_SETTINGS_STORAGE_KEY, JSON.stringify(settings)); setSaved(true); setStatus('AI defaults saved on this device. New books will copy them.'); setStatusKind('success'); onSaved?.() }
+  async function saveSettings() {
+    try {
+      const savedSettings = book
+        ? await saveBookAiSettings(book.id, settings)
+        : saveAiSettings(settings)
+      if (book) saveGlobalFavorites(settings.favorites)
+      setSettings(savedSettings)
+      setSaved(true)
+      setStatus(book ? `AI settings saved for “${book.title}”.` : 'AI defaults saved on this device. New books will copy them.')
+      setStatusKind('success')
+      onSaved?.(savedSettings)
+    } catch {
+      setStatus('Settings could not be saved. Try again.')
+      setStatusKind('error')
+    }
+  }
+
+  async function resetFromDefaults() {
+    if (!book || !window.confirm(`Replace the AI settings for “${book.title}” with the current defaults?`)) return
+    try {
+      const defaults = loadAiSettings()
+      const copied = await copyDefaultAiSettingsToBook(book.id, defaults)
+      setSettings(copied)
+      setSaved(true)
+      setModels([])
+      setStatus(`Current defaults copied to “${book.title}”.`)
+      setStatusKind('success')
+      onSaved?.(copied)
+    } catch {
+      setStatus('Defaults could not be copied to this book. Try again.')
+      setStatusKind('error')
+    }
+  }
 
   return (
     <main className="app-shell">
-      <aside className="settings-rail" aria-label="Default settings navigation">
-        <div className="rail-header"><button className="home-button" type="button" aria-label="Back to library" onClick={onHome}><Home aria-hidden="true" /><b>Home</b></button><div><small>Defaults</small><strong>New books</strong></div></div>
+      <aside className="settings-rail" aria-label={`${isBookSettings ? 'Book' : 'Default'} settings navigation`}>
+        <div className="rail-header"><button className="home-button" type="button" aria-label="Back to library" onClick={onHome}><Home aria-hidden="true" /><b>Home</b></button><div><small>{isBookSettings ? 'Book settings' : 'Defaults'}</small><strong>{book?.title ?? 'New books'}</strong></div></div>
         <nav>
           {([['ai', Bot, 'AI'], ['context', SlidersHorizontal, 'Context'], ['appearance', Type, 'UI'], ['speech', Volume2, 'Speech'], ['images', ImageIcon, 'Images']] as const).map(([key, Icon, label]) => (
             <button className={settingsTab === key ? 'active' : ''} type="button" onClick={() => setSettingsTab(key)} key={key}><Icon aria-hidden="true" /><span>{label}</span></button>
           ))}
         </nav>
-        <p>Defaults are copied into a new book. After that, each book keeps its own settings.</p>
+        <p>{isBookSettings ? `Changes here affect only “${book?.title}”. Favorite models are shared across books.` : 'Defaults are copied into a new book. After that, each book keeps its own settings.'}</p>
       </aside>
 
       <section className="settings-page" aria-labelledby="page-title">
         {onBack && <button className="settings-back" type="button" onClick={onBack}><ArrowLeft aria-hidden="true" /> Back to book</button>}
         {settingsTab === 'ai' ? <>
-        <header className="page-heading"><div><p>Default AI</p><h1 id="page-title">Models & prompts</h1><span>Configure the writing and support models used when a book is created.</span></div><div className={`save-state ${saved ? 'saved' : ''}`}><i />{saved ? 'Saved' : 'Unsaved changes'}</div></header>
+        <header className="page-heading"><div><p>{isBookSettings ? 'Book AI' : 'Default AI'}</p><h1 id="page-title">Models & prompts</h1><span>{isBookSettings ? `Configure AI for “${book?.title}”. These settings are independent from the defaults.` : 'Configure the writing and support models used when a book is created.'}</span></div><div className={`save-state ${saved ? 'saved' : ''}`}><i />{settingsLoading ? 'Loading' : saved ? 'Saved' : 'Unsaved changes'}</div></header>
 
         <section className="settings-card provider-card">
           <div className="card-heading"><div><span>01</span><h2>Provider</h2></div><p>Connection details stay in this browser.</p></div>
@@ -129,7 +190,7 @@ export default function App({ onHome, onBack, onSaved }: AiSettingsProps) {
         </section>
 
         <section className="settings-card models-card">
-          <div className="card-heading"><div><span>02</span><h2>Models</h2></div><p>Main writes; Support handles summaries and names.</p></div>
+          <div className="card-heading"><div><span>02</span><h2>Models</h2></div><p>{isBookSettings ? 'Favorites are shared; model choices belong to this book.' : 'Main writes; Support handles summaries and names.'}</p></div>
           <div className="model-pickers"><label><span>Main model <em>Story generation</em></span><input list="model-options" value={settings.mainModel} onChange={(event) => update('mainModel', event.target.value)} placeholder={models.length ? 'Search models…' : 'Reload models first'} /></label><label><span>Support model <em>Fast utility tasks</em></span><input list="model-options" value={settings.supportModel} onChange={(event) => update('supportModel', event.target.value)} placeholder={models.length ? 'Search models…' : 'Reload models first'} /></label><datalist id="model-options">{models.map((model) => <option key={model.id} value={model.id}>{model.name ?? model.id}</option>)}</datalist></div>
           <div className="model-browser"><div className="model-search"><Search aria-hidden="true" /><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder="Search loaded models" /></div>{models.length ? <div className="model-list">{visibleModels.map((model) => <article key={model.id}><button className={`favorite ${settings.favorites.includes(model.id) ? 'active' : ''}`} type="button" onClick={() => toggleFavorite(model.id)} aria-label={`Favorite ${model.id}`}><Star fill={settings.favorites.includes(model.id) ? 'currentColor' : 'none'} aria-hidden="true" /></button><div><strong>{model.name || model.id}</strong>{model.name && model.name !== model.id && <small>{model.id}</small>}<p><span>{formatContext(model.context_length)}</span><span>{model.architecture?.modality || 'Text'}</span>{model.pricing?.prompt && <span>Pricing supplied</span>}</p></div><button className="use-model" type="button" onClick={() => update('mainModel', model.id)}>Use</button></article>)}</div> : <div className="model-empty"><Bot aria-hidden="true" /><strong>No models loaded</strong><p>Enter your key and reload the provider model list.</p></div>}</div>
         </section>
@@ -140,15 +201,15 @@ export default function App({ onHome, onBack, onSaved }: AiSettingsProps) {
           <textarea className="prompt-editor" value={settings.prompts[promptTab]} onChange={(event) => update('prompts', { ...settings.prompts, [promptTab]: event.target.value })} spellCheck={false} />
           <div className="prompt-footer"><span>Variables: <code>{'{{book.title}}'}</code> <code>{'{{scene.pov}}'}</code> <code>{'{{target.type}}'}</code></span><button type="button" onClick={() => update('prompts', { ...settings.prompts, [promptTab]: defaultAiPrompts[promptTab] })}>Reset default</button></div>
         </section>
-        <footer className="save-bar"><div><strong>AI defaults</strong><span>{settings.mainModel ? 'Ready to save for new books' : 'Choose models now or save them later'}</span></div><button type="button" onClick={saveDefaults}><Check aria-hidden="true" /> Save defaults</button></footer>
-        </> : <SettingsPlaceholder tab={settingsTab} />}
+        <footer className="save-bar"><div><strong>{isBookSettings ? book?.title : 'AI defaults'}</strong><span>{isBookSettings ? 'Independent book configuration' : settings.mainModel ? 'Ready to save for new books' : 'Choose models now or save them later'}</span></div><div className="save-actions">{book && <button className="reset-settings" type="button" onClick={() => { void resetFromDefaults() }} disabled={settingsLoading}><RefreshCw aria-hidden="true" /> Reset from defaults</button>}<button type="button" onClick={() => { void saveSettings() }} disabled={settingsLoading}><Check aria-hidden="true" /> {isBookSettings ? 'Save book settings' : 'Save defaults'}</button></div></footer>
+        </> : <SettingsPlaceholder tab={settingsTab} scope={isBookSettings ? 'book' : 'defaults'} />}
       </section>
     </main>
   )
 }
 
-function SettingsPlaceholder({ tab }: { tab: Exclude<SettingsTab, 'ai'> }) {
-  if (tab === 'appearance') return <AppearanceSettings />
+function SettingsPlaceholder({ tab, scope }: { tab: Exclude<SettingsTab, 'ai'>; scope: 'book' | 'defaults' }) {
+  if (tab === 'appearance') return <AppearanceSettings scope={scope} />
 
   const content = tab === 'context'
     ? { Icon: SlidersHorizontal, title: 'Context defaults' }
@@ -159,16 +220,16 @@ function SettingsPlaceholder({ tab }: { tab: Exclude<SettingsTab, 'ai'> }) {
   return <section className="compact-settings-empty" aria-labelledby="page-title">
     <Icon aria-hidden="true" />
     <h1 id="page-title">{content.title}</h1>
-    <p>Saved as the starting point for new books.</p>
+    <p>{scope === 'book' ? 'Book-level controls will live here.' : 'Saved as the starting point for new books.'}</p>
   </section>
 }
 
-function AppearanceSettings() {
+function AppearanceSettings({ scope }: { scope: 'book' | 'defaults' }) {
   const [textSize, setTextSize] = useState(21)
   const [theme, setTheme] = useState<'night' | 'paper'>('night')
 
   return <section className="appearance-settings">
-    <div className="page-heading"><div><p>Default UI</p><h1 id="page-title">Reading surface</h1><span>These values are copied when a new book is created.</span></div><Type aria-hidden="true" /></div>
+    <div className="page-heading"><div><p>{scope === 'book' ? 'Book UI' : 'Default UI'}</p><h1 id="page-title">Reading surface</h1><span>{scope === 'book' ? 'These values will apply only to this book.' : 'These values are copied when a new book is created.'}</span></div><Type aria-hidden="true" /></div>
     <div className="settings-card appearance-card">
       <label className="appearance-field"><span>Editor font</span><select defaultValue="Iowan Old Style"><option>Iowan Old Style</option><option>Literata</option><option>Source Serif</option></select></label>
       <label className="appearance-field"><span>Text size <b>{textSize} px</b></span><input type="range" min="16" max="30" value={textSize} onChange={(event) => setTextSize(Number(event.target.value))} /></label>

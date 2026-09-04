@@ -76,7 +76,7 @@ The application should feel like a quiet writing workspace, not a general-purpos
 ## Data and recovery
 
 - Manuscripts and structured book data should use IndexedDB; Dexie is the preferred wrapper when the data layer is implemented.
-- Small interface preferences and the current AI-defaults prototype use localStorage.
+- Small interface preferences and global AI defaults use localStorage. Each book's AI settings are stored with its other entities in IndexedDB.
 - Editing should autosave locally.
 - Local snapshots provide version history for accidental edits, but they are not backups because they live on the same device.
 - The app must provide manual export and import so work can be backed up and moved between devices.
@@ -87,10 +87,11 @@ The application should feel like a quiet writing workspace, not a general-purpos
 
 - Supported provider choices are OpenRouter, nano-gpt.com, OpenAI, and an OpenAI-compatible custom endpoint.
 - The user selects separate Main and Support models from the provider's model list. Main is intended for story writing; Support handles summaries, titles, and names.
-- Model controls support loading, search, favorites, capability/context metadata when supplied, and provider errors.
+- Model controls support loading, search, favorites, capability/context metadata when supplied, and provider errors. Favorites are a global model-picker preference rather than part of a book's generation configuration.
 - The user can edit separate Story, Summarize, and Titles & names system prompts.
 - Prompt examples support `{{variable}}` placeholders and `{% if condition %}...{% endif %}` blocks. The exact future template engine is not yet selected.
 - AI defaults, including the API key, are currently persisted in localStorage on that browser/device. The interface must state this clearly.
+- A new book copies provider, API key, base URL, Main/Support models, and all three prompts into an independent IndexedDB record. Later default changes do not affect that book unless the user explicitly resets it from defaults.
 - The API key must never be committed to the repository or embedded in the deployed build.
 - Local browser persistence is convenient but is not secure storage against scripts running in the same origin; this tradeoff is accepted for the personal prototype and should be revisited before adding third-party scripts or broader distribution.
 - Because the app is a static frontend, provider requests are sent from the browser. The provider must permit browser requests, and the key is visible to the browser runtime.
@@ -108,22 +109,23 @@ Implemented as working behavior:
 - provider model loading where browser permissions allow it;
 - model search, favorites, and Main/Support selection;
 - editable Story, Summarize, and Titles & names prompts;
-- saving and restoring global AI defaults.
+- saving and restoring global AI defaults;
+- independent per-book AI settings, explicit reset from defaults, and book-scoped generation;
+- persisted books, acts, chapters, scenes, navigation, autosave, and local document snapshots.
 
-Implemented as interactive UI prototypes without durable book data yet:
+Implemented as interactive UI prototypes or placeholders:
 
-- Home library and immediate untitled-book creation;
 - Markdown editor and active-line editing;
 - settings and book-workspace navigation;
-- Outline, summary states, Notes, and Codex views;
+- summary states, Notes, and Codex views;
 - Arc drawer and generation controls;
 - chat history, chat settings, messages, editing states, and composer.
 
-The prototype is not yet an MVP. Manuscripts, books, chats, notes, Codex entries, summaries, and generated text are not yet backed by the planned IndexedDB data model.
+The prototype is not yet an MVP. Chats, notes, Codex entries, and summaries are not yet backed by the planned IndexedDB data model.
 
 ## Not decided yet
 
-- Exact book, outline, summary, chat, and Codex data schemas
+- Exact summary, chat, and Codex data schemas
 - IndexedDB migrations and repository boundaries
 - Autosave and snapshot retention rules
 - Export and import file formats

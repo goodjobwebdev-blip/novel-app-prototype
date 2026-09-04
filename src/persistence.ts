@@ -1,3 +1,11 @@
+import {
+  copyAiSettings,
+  toBookAiSettings,
+  withGlobalFavorites,
+  type AiSettings,
+  type BookAiSettings,
+} from './ai-settings'
+
 type DexieModule = { default: new (name: string) => any }
 
 const dexieUrl = 'https://esm.sh/dexie@4.4.5'
@@ -30,6 +38,13 @@ export type DocumentSnapshot = {
 export type StructuralEntityType = 'act' | 'chapter' | 'scene'
 export type StructuralEntity = ArcEntity & { type: StructuralEntityType; bookId: string; parentId: string; order: number; title: string }
 export type BookEntity = ArcEntity & { type: 'book'; title: string }
+export type BookAiSettingsEntity = ArcEntity & {
+  type: 'settings'
+  bookId: string
+  parentId: string
+  settingsType: 'ai'
+  value: BookAiSettings
+}
 
 export const PROTOTYPE_BOOK_ID = 'book-city-beneath-tide'
 export const PROTOTYPE_SCENE_ID = 'scene-ch7-2'
@@ -53,6 +68,23 @@ async function database() {
 
 function makeId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
+
+function aiSettingsId(bookId: string) {
+  return `settings-ai-${bookId}`
+}
+
+function makeBookAiSettingsEntity(bookId: string, settings: AiSettings, now = Date.now()): BookAiSettingsEntity {
+  return {
+    id: aiSettingsId(bookId),
+    type: 'settings',
+    bookId,
+    parentId: bookId,
+    settingsType: 'ai',
+    value: toBookAiSettings(settings),
+    createdAt: now,
+    updatedAt: now,
+  }
 }
 
 export async function ensurePrototypeSeed(initialStoryMarkdown: string) {
@@ -106,7 +138,7 @@ export async function listBooks(): Promise<BookEntity[]> {
   return books.sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
-export async function createBook(title = 'Untitled Book'): Promise<{ book: BookEntity; chapter: StructuralEntity; scene: StructuralEntity }> {
+export async function createBook(defaultAiSettings: AiSettings, title = 'Untitled Book'): Promise<{ book: BookEntity; chapter: StructuralEntity; scene: StructuralEntity }> {
   const db = await database()
   const now = Date.now()
   const bookId = makeId('book')
@@ -114,8 +146,45 @@ export async function createBook(title = 'Untitled Book'): Promise<{ book: BookE
   const book: BookEntity = { id: bookId, type: 'book', title, series: 'Standalone', createdAt: now, updatedAt: now }
   const chapter: StructuralEntity = { id: chapterId, type: 'chapter', bookId, parentId: bookId, order: 0, title: 'Chapter 1', createdAt: now, updatedAt: now }
   const scene: StructuralEntity = { id: makeId('scene'), type: 'scene', bookId, parentId: chapterId, order: 0, title: 'Scene 1', content: '', createdAt: now, updatedAt: now }
-  await db.table('entities').bulkPut([book, chapter, scene])
+  const aiSettings = makeBookAiSettingsEntity(bookId, defaultAiSettings, now)
+  await db.table('entities').bulkPut([book, chapter, scene, aiSettings])
   return { book, chapter, scene }
+}
+
+export async function ensureBookAiSettings(bookId: string, defaults: AiSettings): Promise<BookAiSettingsEntity> {
+  const db = await database()
+  const existing = await db.table('entities').get(aiSettingsId(bookId)) as BookAiSettingsEntity | undefined
+  if (existing?.type === 'settings' && existing.settingsType === 'ai') return existing
+  const created = makeBookAiSettingsEntity(bookId, defaults)
+  await db.table('entities').put(created)
+  return created
+}
+
+export async function getBookAiSettings(bookId: string, globalFavorites: string[]): Promise<AiSettings> {
+  const db = await database()
+  const entity = await db.table('entities').get(aiSettingsId(bookId)) as BookAiSettingsEntity | undefined
+  if (!entity || entity.type !== 'settings' || entity.settingsType !== 'ai') {
+    throw new Error(`AI settings for book ${bookId} were not found`)
+  }
+  return withGlobalFavorites(entity.value, globalFavorites)
+}
+
+export async function saveBookAiSettings(bookId: string, settings: AiSettings): Promise<AiSettings> {
+  const db = await database()
+  const id = aiSettingsId(bookId)
+  const existing = await db.table('entities').get(id) as BookAiSettingsEntity | undefined
+  const now = Date.now()
+  const entity: BookAiSettingsEntity = {
+    ...makeBookAiSettingsEntity(bookId, settings, existing?.createdAt ?? now),
+    updatedAt: now,
+  }
+  await db.table('entities').put(entity)
+  return withGlobalFavorites(entity.value, settings.favorites)
+}
+
+export async function copyDefaultAiSettingsToBook(bookId: string, defaults: AiSettings): Promise<AiSettings> {
+  await saveBookAiSettings(bookId, copyAiSettings(defaults))
+  return copyAiSettings(defaults)
 }
 
 export async function createStructuralEntity(
