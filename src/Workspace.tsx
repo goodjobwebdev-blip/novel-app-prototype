@@ -5,6 +5,7 @@ import {
   ArrowUp,
   Bot,
   BookOpenText,
+  Check,
   ChevronDown,
   ChevronRight,
   ChevronsLeft,
@@ -52,7 +53,9 @@ import {
   moveStructuralEntity,
   renameEntity,
   saveDocumentContent,
+  updateBookMetadata,
   type BookEntity,
+  type BookMetadata,
   type SnapshotReason,
   type StructuralEntity,
   type StructuralEntityType,
@@ -60,7 +63,7 @@ import {
 import './generation-controls.css'
 
 type Screen = 'home' | 'editor' | 'chat' | 'settings'
-type RightTab = 'outline' | 'notes' | 'codex' | 'chat'
+type RightTab = 'book' | 'outline' | 'notes' | 'codex' | 'chat'
 type ChatPanel = 'list' | 'settings'
 type SaveState = 'loading' | 'saving' | 'saved' | 'error'
 type ToastMessage = { id: number; message: string }
@@ -319,6 +322,27 @@ export default function Workspace() {
     }
   }
 
+  async function saveBookMetadata(metadata: BookMetadata) {
+    if (!currentBook) return
+    const updated = await updateBookMetadata(currentBook.id, metadata)
+    setCurrentBook(updated)
+    setBookList((books) => books.map((book) => book.id === updated.id ? updated : book))
+    bookTitleRef.current = updated.title
+  }
+
+  async function removeCurrentBookFromSettings() {
+    if (!currentBook) return
+    await deleteEntityTree(currentBook.id)
+    const books = await listBooks()
+    setBookList(books)
+    setCurrentBook(null)
+    setOutlineEntities([])
+    activeSceneIdRef.current = null
+    setActiveSceneId(null)
+    setRightOpen(false)
+    setScreen('home')
+  }
+
   async function addOutlineEntity(type: StructuralEntityType, parentId: string) {
     if (!currentBook) return
     try {
@@ -522,7 +546,7 @@ export default function Workspace() {
         <div className="library-title"><div><small>Your library</small><h1>Books</h1></div><button type="button" disabled={saveState === 'loading'} onClick={() => { void makeBook() }}><Plus aria-hidden="true" /><span>New book</span></button></div>
         {!aiReady && <div className="setup-warning"><Bot aria-hidden="true" /><div><strong>Text AI is not set up</strong><p>Choose a provider and models before using generation or chat.</p></div><button type="button" onClick={() => openSettings('home')}>Set up AI <ChevronRight aria-hidden="true" /></button></div>}
         <div className="library-grid">{bookList.map((book, index) => <article className="library-book-card" key={book.id}>
-          <button type="button" className="library-book" onClick={() => { void openBook(book.id) }}><i className={`mock-cover ${['tide', 'orchard', 'fires'][index % 3]}`}>{book.title.slice(0,1)}</i><span><small>{typeof book.series === 'string' ? book.series : 'Standalone'}</small><strong>{book.title}</strong><em>{formatEdited(book.updatedAt)}</em></span></button>
+          <button type="button" className="library-book" onClick={() => { void openBook(book.id) }}><i className={`mock-cover ${['tide', 'orchard', 'fires'][index % 3]}`}>{book.title.slice(0,1)}</i><span><small>{formatSeries(book)}</small><strong>{book.title}</strong><em>{formatEdited(book.updatedAt)}</em></span></button>
           <div className="library-book-actions"><button type="button" onClick={() => { void editBookTitle(book) }} aria-label={`Rename ${book.title}`}><Pencil aria-hidden="true" /></button><button type="button" onClick={() => { void removeBook(book) }} aria-label={`Delete ${book.title}`}><Trash2 aria-hidden="true" /></button></div>
         </article>)}</div>
       </section>
@@ -557,9 +581,9 @@ export default function Workspace() {
       {screen === 'chat' && <section className="chat-composer"><small>Chapter 7 + Codex <ChevronDown aria-hidden="true" /></small><div><button type="button" aria-label="Dictate message"><Mic aria-hidden="true" /></button><textarea defaultValue="Compare Mara’s choice with what she promised Elias."/><button className="send" type="button" aria-label="Send message"><Send aria-hidden="true" fill="currentColor" /></button></div></section>}
 
       {rightOpen && <aside className="book-panel">
-        <header><div><small>{typeof currentBook?.series === 'string' ? currentBook.series : 'Standalone'}</small><strong>{currentBook?.title ?? 'Untitled Book'}</strong></div><button type="button" onClick={() => setRightOpen(false)} aria-label="Close book workspace"><X aria-hidden="true" /></button></header>
-        <nav>{([['outline', BookOpenText], ['notes', NotebookPen], ['codex', WandSparkles], ['chat', MessageCircle]] as const).map(([tab, Icon]) => <button type="button" className={rightTab === tab ? 'active' : ''} onClick={() => { setRightTab(tab); if (tab === 'chat') setChatPanel(screen === 'chat' ? 'settings' : 'list') }} key={tab}><Icon aria-hidden="true" /><span>{tab}</span></button>)}</nav>
-        <div className="panel-content">{rightTab === 'outline' ? <Outline book={currentBook} entities={outlineEntities} activeSceneId={activeSceneId} expandedIds={expandedIds} onToggle={(id) => setExpandedIds((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })} onOpenScene={(id) => { void loadScene(id) }} onCreate={(type, parentId) => { void addOutlineEntity(type, parentId) }} onRename={(entity) => { void editOutlineTitle(entity) }} onMove={(entity, direction) => { void moveOutlineEntity(entity, direction) }} onDelete={(entity) => { void removeOutlineEntity(entity) }} /> : rightTab === 'notes' ? <Notes /> : rightTab === 'codex' ? <Codex /> : chatPanel === 'list' ? <ChatList onOpen={openChat} activeChat={screen === 'chat' ? activeChat : ''} onSettings={() => setChatPanel('settings')} /> : <ChatSettings title={activeChat} onBack={() => setChatPanel('list')} />}</div>
+        <header><div><small>{formatSeries(currentBook)}</small><strong>{currentBook?.title ?? 'Untitled Book'}</strong></div><button type="button" onClick={() => setRightOpen(false)} aria-label="Close book workspace"><X aria-hidden="true" /></button></header>
+        <nav>{([['book', Settings2], ['outline', BookOpenText], ['notes', NotebookPen], ['codex', WandSparkles], ['chat', MessageCircle]] as const).map(([tab, Icon]) => <button type="button" className={rightTab === tab ? 'active' : ''} onClick={() => { setRightTab(tab); if (tab === 'chat') setChatPanel(screen === 'chat' ? 'settings' : 'list') }} key={tab}><Icon aria-hidden="true" /><span>{tab}</span></button>)}</nav>
+        <div className="panel-content">{rightTab === 'book' ? <BookSettings book={currentBook} seriesOptions={bookList.map((book) => bookMetadata(book).series).filter(Boolean)} onSave={saveBookMetadata} onDelete={removeCurrentBookFromSettings} /> : rightTab === 'outline' ? <Outline book={currentBook} entities={outlineEntities} activeSceneId={activeSceneId} expandedIds={expandedIds} onToggle={(id) => setExpandedIds((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })} onOpenScene={(id) => { void loadScene(id) }} onCreate={(type, parentId) => { void addOutlineEntity(type, parentId) }} onRename={(entity) => { void editOutlineTitle(entity) }} onMove={(entity, direction) => { void moveOutlineEntity(entity, direction) }} onDelete={(entity) => { void removeOutlineEntity(entity) }} /> : rightTab === 'notes' ? <Notes /> : rightTab === 'codex' ? <Codex /> : chatPanel === 'list' ? <ChatList onOpen={openChat} activeChat={screen === 'chat' ? activeChat : ''} onSettings={() => setChatPanel('settings')} /> : <ChatSettings title={activeChat} onBack={() => setChatPanel('list')} />}</div>
       </aside>}
     </main>
   )
@@ -630,6 +654,120 @@ function formatEdited(updatedAt: number) {
   const hours = Math.round(minutes / 60)
   if (hours < 24) return `Edited ${hours} hour${hours === 1 ? '' : 's'} ago`
   return `Edited ${new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(updatedAt)}`
+}
+
+function formatSeries(book: BookEntity | null) {
+  if (!book || !book.series || book.series === 'Standalone') return 'Standalone'
+  if (!book.seriesOrder || book.series.includes('· Book')) return book.series
+  return `${book.series} · Book ${book.seriesOrder}`
+}
+
+function bookMetadata(book: BookEntity): BookMetadata {
+  const rawSeries = typeof book.series === 'string' && book.series ? book.series : 'Standalone'
+  const legacySeries = rawSeries.match(/^(.*?)\s*·\s*Book\s+(.+)$/i)
+  const prototype = book.id === PROTOTYPE_BOOK_ID
+  return {
+    title: book.title,
+    series: legacySeries?.[1]?.trim() || rawSeries,
+    seriesOrder: typeof book.seriesOrder === 'string' && book.seriesOrder ? book.seriesOrder : legacySeries?.[2]?.trim() || '',
+    overview: typeof book.overview === 'string' && book.overview ? book.overview : prototype ? 'A cartographer discovers that the drowned parts of her city still exist behind doors that remember them.' : '',
+    genre: typeof book.genre === 'string' && book.genre ? book.genre : prototype ? 'Fantasy' : '',
+    writingStyle: typeof book.writingStyle === 'string' && book.writingStyle ? book.writingStyle : prototype ? 'Lyrical tension' : '',
+    pointOfView: typeof book.pointOfView === 'string' && book.pointOfView ? book.pointOfView : prototype ? 'Third person limited' : '',
+    tense: typeof book.tense === 'string' && book.tense ? book.tense : 'Past',
+    language: typeof book.language === 'string' && book.language ? book.language : 'English',
+  }
+}
+
+function BookSettings({ book, seriesOptions, onSave, onDelete }: {
+  book: BookEntity | null
+  seriesOptions: string[]
+  onSave: (metadata: BookMetadata) => Promise<void>
+  onDelete: () => Promise<void>
+}) {
+  const [draft, setDraft] = useState<BookMetadata | null>(book ? bookMetadata(book) : null)
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved')
+  const [addingSeries, setAddingSeries] = useState(false)
+  const [newSeries, setNewSeries] = useState('')
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const savedRef = useRef(book ? JSON.stringify(bookMetadata(book)) : '')
+  const latestDraftRef = useRef(draft)
+  const saveHandlerRef = useRef(onSave)
+  const saveSequenceRef = useRef(0)
+  latestDraftRef.current = draft
+  saveHandlerRef.current = onSave
+
+  useEffect(() => {
+    const next = book ? bookMetadata(book) : null
+    setDraft(next)
+    savedRef.current = next ? JSON.stringify(next) : ''
+    setSaveStatus('saved')
+    setAddingSeries(false)
+    setDeleteConfirm(false)
+  }, [book?.id])
+
+  useEffect(() => {
+    if (!draft || JSON.stringify(draft) === savedRef.current) return
+    setSaveStatus('saving')
+    const sequence = ++saveSequenceRef.current
+    const timer = window.setTimeout(async () => {
+      try {
+        await onSave(draft)
+        savedRef.current = JSON.stringify(draft)
+        if (sequence === saveSequenceRef.current) setSaveStatus('saved')
+      } catch (error) {
+        console.error('Failed to save book metadata', error)
+        if (sequence === saveSequenceRef.current) setSaveStatus('error')
+      }
+    }, 650)
+    return () => window.clearTimeout(timer)
+  }, [draft, onSave])
+
+  useEffect(() => {
+    if (!deleteConfirm) return
+    const timer = window.setTimeout(() => setDeleteConfirm(false), 6000)
+    return () => window.clearTimeout(timer)
+  }, [deleteConfirm])
+
+  useEffect(() => () => {
+    const latest = latestDraftRef.current
+    if (latest && JSON.stringify(latest) !== savedRef.current) void saveHandlerRef.current(latest)
+  }, [])
+
+  if (!book || !draft) return <section className="outline-empty"><Settings2 aria-hidden="true" /><p>Open a book to edit its details.</p></section>
+
+  const options = [...new Set(['Standalone', draft.series, ...seriesOptions])].filter(Boolean)
+  const update = <K extends keyof BookMetadata,>(key: K, value: BookMetadata[K]) => setDraft((current) => current ? { ...current, [key]: value } : current)
+  const acceptSeries = () => {
+    const value = newSeries.trim()
+    if (!value) return
+    update('series', value)
+    setNewSeries('')
+    setAddingSeries(false)
+  }
+
+  return <section className="book-settings">
+    <div className="panel-title book-settings-title"><div><small>Current book</small><h2>Identity & voice</h2></div><span className={`book-save-status ${saveStatus}`} aria-live="polite"><i />{saveStatus === 'saving' ? 'Saving' : saveStatus === 'error' ? 'Save failed' : 'Saved'}</span></div>
+    <section className="book-settings-group" aria-labelledby="book-identity-title">
+      <div className="book-settings-group-title"><span>01</span><h3 id="book-identity-title">Identity</h3></div>
+      <label className="book-field"><span>Book title</span><input value={draft.title} onChange={(event) => update('title', event.target.value)} onBlur={() => { if (!draft.title.trim()) update('title', book.title) }} placeholder="Untitled Book" /></label>
+      <div className="book-field"><span>Series</span><div className="series-control"><select value={draft.series} onChange={(event) => update('series', event.target.value)}>{options.map((series) => <option key={series}>{series}</option>)}</select><button type="button" onClick={() => setAddingSeries((value) => !value)} aria-label={addingSeries ? 'Cancel adding series' : 'Add series'}>{addingSeries ? <X aria-hidden="true" /> : <Plus aria-hidden="true" />}</button></div></div>
+      {addingSeries && <div className="new-series"><input autoFocus value={newSeries} onChange={(event) => setNewSeries(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') acceptSeries() }} placeholder="New series title" /><button type="button" disabled={!newSeries.trim()} onClick={acceptSeries}><Check aria-hidden="true" /> Accept</button></div>}
+      {draft.series !== 'Standalone' && <label className="book-field compact"><span>Book number in series</span><input inputMode="numeric" value={draft.seriesOrder} onChange={(event) => update('seriesOrder', event.target.value)} placeholder="1" /></label>}
+    </section>
+    <section className="book-settings-group" aria-labelledby="story-profile-title">
+      <div className="book-settings-group-title"><span>02</span><h3 id="story-profile-title">Story profile</h3></div>
+      <label className="book-field"><span>Book overview</span><textarea rows={5} value={draft.overview} onChange={(event) => update('overview', event.target.value)} placeholder="What is this book about?" /></label>
+      <label className="book-field"><span>Genre</span><input value={draft.genre} onChange={(event) => update('genre', event.target.value)} placeholder="Fantasy, mystery, romance…" /></label>
+      <label className="book-field"><span>Writing style</span><select value={draft.writingStyle} onChange={(event) => update('writingStyle', event.target.value)}><option value="">Choose a style</option><option>Lyrical tension</option><option>Clean & cinematic</option><option>Close interior</option><option>Custom</option></select></label>
+      <label className="book-field"><span>Point of view</span><select value={draft.pointOfView} onChange={(event) => update('pointOfView', event.target.value)}><option value="">Choose a point of view</option><option>First person</option><option>Second person</option><option>Third person limited</option><option>Third person omniscient</option><option>Multiple viewpoints</option></select></label>
+      <div className="book-field-pair"><label className="book-field"><span>Tense</span><select value={draft.tense} onChange={(event) => update('tense', event.target.value)}><option>Past</option><option>Present</option><option>Mixed</option></select></label><label className="book-field"><span>Primary language</span><select value={draft.language} onChange={(event) => update('language', event.target.value)}><option>English</option><option>Spanish</option><option>French</option><option>German</option><option>Ukrainian</option><option>Other</option></select></label></div>
+    </section>
+    <section className="book-danger" aria-labelledby="book-danger-title">
+      <div><span>Danger zone</span><h3 id="book-danger-title">Delete this book</h3><p>Removes the manuscript and all local book data from this device.</p></div>
+      <div className="book-danger-actions"><button className={deleteConfirm ? 'confirming' : ''} type="button" onClick={() => { if (!deleteConfirm) setDeleteConfirm(true); else { savedRef.current = JSON.stringify(draft); void onDelete() } }}><Trash2 aria-hidden="true" />{deleteConfirm ? 'Confirm delete' : 'Delete book'}</button>{deleteConfirm && <button className="cancel" type="button" onClick={() => setDeleteConfirm(false)}>Cancel</button>}</div>
+    </section>
+  </section>
 }
 
 type OutlineProps = {

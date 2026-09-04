@@ -37,7 +37,18 @@ export type DocumentSnapshot = {
 
 export type StructuralEntityType = 'act' | 'chapter' | 'scene'
 export type StructuralEntity = ArcEntity & { type: StructuralEntityType; bookId: string; parentId: string; order: number; title: string }
-export type BookEntity = ArcEntity & { type: 'book'; title: string }
+export type BookMetadata = {
+  title: string
+  series: string
+  seriesOrder: string
+  overview: string
+  genre: string
+  writingStyle: string
+  pointOfView: string
+  tense: string
+  language: string
+}
+export type BookEntity = ArcEntity & { type: 'book'; title: string } & Partial<Omit<BookMetadata, 'title'>>
 export type BookAiSettingsEntity = ArcEntity & {
   type: 'settings'
   bookId: string
@@ -94,7 +105,21 @@ export async function ensurePrototypeSeed(initialStoryMarkdown: string) {
 
   const now = Date.now()
   const entities: ArcEntity[] = [
-    { id: PROTOTYPE_BOOK_ID, type: 'book', title: 'The City Beneath the Tide', series: 'Atlas of Lost Coasts · Book II', createdAt: now, updatedAt: now },
+    {
+      id: PROTOTYPE_BOOK_ID,
+      type: 'book',
+      title: 'The City Beneath the Tide',
+      series: 'Atlas of Lost Coasts',
+      seriesOrder: '2',
+      overview: 'A cartographer discovers that the drowned parts of her city still exist behind doors that remember them.',
+      genre: 'Fantasy',
+      writingStyle: 'Lyrical tension',
+      pointOfView: 'Third person limited',
+      tense: 'Past',
+      language: 'English',
+      createdAt: now,
+      updatedAt: now,
+    },
     { id: 'act-1', type: 'act', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, order: 0, title: 'The doors remember', createdAt: now, updatedAt: now },
     { id: 'chapter-7', type: 'chapter', bookId: PROTOTYPE_BOOK_ID, parentId: 'act-1', order: 0, title: 'The Cartographer’s Door', createdAt: now, updatedAt: now },
     { id: PROTOTYPE_SCENE_ID, type: 'scene', bookId: PROTOTYPE_BOOK_ID, parentId: 'chapter-7', order: 0, title: 'The voice beyond', content: initialStoryMarkdown, createdAt: now, updatedAt: now },
@@ -143,7 +168,21 @@ export async function createBook(defaultAiSettings: AiSettings, title = 'Untitle
   const now = Date.now()
   const bookId = makeId('book')
   const chapterId = makeId('chapter')
-  const book: BookEntity = { id: bookId, type: 'book', title, series: 'Standalone', createdAt: now, updatedAt: now }
+  const book: BookEntity = {
+    id: bookId,
+    type: 'book',
+    title,
+    series: 'Standalone',
+    seriesOrder: '',
+    overview: '',
+    genre: '',
+    writingStyle: '',
+    pointOfView: '',
+    tense: 'Past',
+    language: 'English',
+    createdAt: now,
+    updatedAt: now,
+  }
   const chapter: StructuralEntity = { id: chapterId, type: 'chapter', bookId, parentId: bookId, order: 0, title: 'Chapter 1', createdAt: now, updatedAt: now }
   const scene: StructuralEntity = { id: makeId('scene'), type: 'scene', bookId, parentId: chapterId, order: 0, title: 'Scene 1', content: '', createdAt: now, updatedAt: now }
   const aiSettings = makeBookAiSettingsEntity(bookId, defaultAiSettings, now)
@@ -218,6 +257,22 @@ export async function renameEntity(id: string, title: string): Promise<ArcEntity
   const entity = await db.table('entities').get(id) as ArcEntity | undefined
   if (!entity) throw new Error(`Cannot rename missing entity ${id}`)
   const updated = { ...entity, title: title.trim() || entity.title || 'Untitled', updatedAt: Date.now() }
+  await db.table('entities').put(updated)
+  return updated
+}
+
+export async function updateBookMetadata(id: string, metadata: BookMetadata): Promise<BookEntity> {
+  const db = await database()
+  const entity = await db.table('entities').get(id) as BookEntity | undefined
+  if (!entity || entity.type !== 'book') throw new Error(`Cannot update missing book ${id}`)
+  const updated: BookEntity = {
+    ...entity,
+    ...metadata,
+    title: metadata.title.trim() || entity.title || 'Untitled Book',
+    series: metadata.series.trim() || 'Standalone',
+    seriesOrder: metadata.series.trim() === 'Standalone' ? '' : metadata.seriesOrder.trim(),
+    updatedAt: Date.now(),
+  }
   await db.table('entities').put(updated)
   return updated
 }

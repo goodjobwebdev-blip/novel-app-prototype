@@ -32,13 +32,13 @@ The application should feel like a quiet writing workspace, not a general-purpos
 
 ### Left settings
 
-- The left side is for global defaults or settings belonging to the open book.
-- Settings categories are Book, AI, Context, UI, Speech, and Images. Book settings also contain the destructive delete action.
+- The left side is for global defaults or AI, Context, UI, Speech, and Image settings belonging to the open book.
 - Only AI settings are functionally implemented in the current prototype; other categories establish the intended navigation and visual structure.
 
 ### Right book workspace
 
-- The right side contains persistent Outline, Notes, Codex, and Chat tabs.
+- The right side contains persistent Book, Outline, Notes, Codex, and Chat tabs.
+- Book contains current-book identity and story-profile metadata: title, series and order, overview, genre, writing style, point of view, tense, and language. It also contains the destructive delete action.
 - Outline supports optional acts, chapters, and scenes. Selecting a scene opens it in the editor.
 - Acts, chapters, and scenes expose distinct current, missing, and outdated summary states.
 - Notes open in the editor workspace.
@@ -111,6 +111,7 @@ Implemented as working behavior:
 - editable Story, Summarize, and Titles & names prompts;
 - saving and restoring global AI defaults;
 - independent per-book AI settings, explicit reset from defaults, and book-scoped generation;
+- persisted current-book metadata in the right-side Book tab;
 - persisted books, acts, chapters, scenes, navigation, autosave, and local document snapshots.
 
 Implemented as interactive UI prototypes or placeholders:
