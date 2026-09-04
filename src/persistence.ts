@@ -10,7 +10,7 @@ type DexieModule = { default: new (name: string) => any }
 
 const dexieUrl = 'https://esm.sh/dexie@4.4.5'
 
-export type EntityType = 'book' | 'act' | 'chapter' | 'scene' | 'note' | 'codexEntry' | 'chat' | 'chatMessage' | 'settings'
+export type EntityType = 'book' | 'act' | 'chapter' | 'scene' | 'note' | 'codexEntry' | 'summary' | 'chat' | 'chatMessage' | 'settings'
 export type SnapshotReason = 'autosave' | 'generation' | 'manual' | 'navigation' | 'lifecycle'
 
 export type ArcEntity = {
@@ -49,6 +49,19 @@ export type BookMetadata = {
   language: string
 }
 export type BookEntity = ArcEntity & { type: 'book'; title: string } & Partial<Omit<BookMetadata, 'title'>>
+export type NoteEntity = ArcEntity & { type: 'note'; bookId: string; parentId: string; title: string; content: string }
+export type CodexEntryEntity = ArcEntity & { type: 'codexEntry'; bookId: string; parentId: string; title: string; category: string; content: string }
+export type SummaryEntity = ArcEntity & {
+  type: 'summary'
+  bookId: string
+  parentId: string
+  sourceEntityId: string
+  sourceType: StructuralEntityType
+  title: string
+  content: string
+  summarizedSourceRevision?: number
+}
+export type EditableEntity = StructuralEntity | NoteEntity | CodexEntryEntity | SummaryEntity
 export type BookAiSettingsEntity = ArcEntity & {
   type: 'settings'
   bookId: string
@@ -85,6 +98,20 @@ function aiSettingsId(bookId: string) {
   return `settings-ai-${bookId}`
 }
 
+function summaryId(sourceEntityId: string) {
+  return `summary-${sourceEntityId}`
+}
+
+async function touchAncestors(db: any, parentId: string | undefined, now: number) {
+  let nextId = parentId
+  while (nextId) {
+    const parent = await db.table('entities').get(nextId) as ArcEntity | undefined
+    if (!parent) return
+    await db.table('entities').put({ ...parent, updatedAt: now })
+    nextId = parent.parentId
+  }
+}
+
 function makeBookAiSettingsEntity(bookId: string, settings: AiSettings, now = Date.now()): BookAiSettingsEntity {
   return {
     id: aiSettingsId(bookId),
@@ -101,37 +128,56 @@ function makeBookAiSettingsEntity(bookId: string, settings: AiSettings, now = Da
 export async function ensurePrototypeSeed(initialStoryMarkdown: string) {
   const db = await database()
   const seeded = await db.table('meta').get('prototype-seeded-v1')
-  if (seeded) return
+  if (!seeded) {
+    const now = Date.now()
+    const entities: ArcEntity[] = [
+      {
+        id: PROTOTYPE_BOOK_ID,
+        type: 'book',
+        title: 'The City Beneath the Tide',
+        series: 'Atlas of Lost Coasts',
+        seriesOrder: '2',
+        overview: 'A cartographer discovers that the drowned parts of her city still exist behind doors that remember them.',
+        genre: 'Fantasy',
+        writingStyle: 'Lyrical tension',
+        pointOfView: 'Third person limited',
+        tense: 'Past',
+        language: 'English',
+        createdAt: now,
+        updatedAt: now,
+      },
+      { id: 'act-1', type: 'act', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, order: 0, title: 'The doors remember', createdAt: now, updatedAt: now },
+      { id: 'chapter-7', type: 'chapter', bookId: PROTOTYPE_BOOK_ID, parentId: 'act-1', order: 0, title: 'The Cartographer’s Door', createdAt: now, updatedAt: now },
+      { id: PROTOTYPE_SCENE_ID, type: 'scene', bookId: PROTOTYPE_BOOK_ID, parentId: 'chapter-7', order: 0, title: 'The voice beyond', content: initialStoryMarkdown, createdAt: now, updatedAt: now },
+      { id: 'scene-ch7-3', type: 'scene', bookId: PROTOTYPE_BOOK_ID, parentId: 'chapter-7', order: 1, title: 'Crossing', content: '', createdAt: now, updatedAt: now },
+      { id: 'chapter-8', type: 'chapter', bookId: PROTOTYPE_BOOK_ID, parentId: 'act-1', order: 1, title: 'What the sea kept', createdAt: now, updatedAt: now },
+      { id: 'act-2', type: 'act', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, order: 1, title: 'The map without coastlines', createdAt: now, updatedAt: now },
+    ]
 
-  const now = Date.now()
-  const entities: ArcEntity[] = [
-    {
-      id: PROTOTYPE_BOOK_ID,
-      type: 'book',
-      title: 'The City Beneath the Tide',
-      series: 'Atlas of Lost Coasts',
-      seriesOrder: '2',
-      overview: 'A cartographer discovers that the drowned parts of her city still exist behind doors that remember them.',
-      genre: 'Fantasy',
-      writingStyle: 'Lyrical tension',
-      pointOfView: 'Third person limited',
-      tense: 'Past',
-      language: 'English',
-      createdAt: now,
-      updatedAt: now,
-    },
-    { id: 'act-1', type: 'act', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, order: 0, title: 'The doors remember', createdAt: now, updatedAt: now },
-    { id: 'chapter-7', type: 'chapter', bookId: PROTOTYPE_BOOK_ID, parentId: 'act-1', order: 0, title: 'The Cartographer’s Door', createdAt: now, updatedAt: now },
-    { id: PROTOTYPE_SCENE_ID, type: 'scene', bookId: PROTOTYPE_BOOK_ID, parentId: 'chapter-7', order: 0, title: 'The voice beyond', content: initialStoryMarkdown, createdAt: now, updatedAt: now },
-    { id: 'scene-ch7-3', type: 'scene', bookId: PROTOTYPE_BOOK_ID, parentId: 'chapter-7', order: 1, title: 'Crossing', content: '', createdAt: now, updatedAt: now },
-    { id: 'chapter-8', type: 'chapter', bookId: PROTOTYPE_BOOK_ID, parentId: 'act-1', order: 1, title: 'What the sea kept', createdAt: now, updatedAt: now },
-    { id: 'act-2', type: 'act', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, order: 1, title: 'The map without coastlines', createdAt: now, updatedAt: now },
-  ]
+    await db.transaction('rw', db.table('entities'), db.table('meta'), async () => {
+      await db.table('entities').bulkPut(entities)
+      await db.table('meta').put({ key: 'prototype-seeded-v1', value: true, createdAt: now })
+    })
+  }
 
-  await db.transaction('rw', db.table('entities'), db.table('meta'), async () => {
-    await db.table('entities').bulkPut(entities)
-    await db.table('meta').put({ key: 'prototype-seeded-v1', value: true, createdAt: now })
-  })
+  const contentSeeded = await db.table('meta').get('prototype-content-seeded-v1')
+  const prototypeBook = await db.table('entities').get(PROTOTYPE_BOOK_ID)
+  if (!contentSeeded && prototypeBook) {
+    const now = Date.now()
+    const contentEntities: ArcEntity[] = [
+      { id: 'note-remembered-doors', type: 'note', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, title: 'Rules of the remembered doors', content: '# Rules of the remembered doors\n\nA door that remembers a name should never be answered alone.', createdAt: now, updatedAt: now },
+      { id: 'note-act-two-questions', type: 'note', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, title: 'Questions for Act II', content: '- What does crossing cost Mara?\n- Why did her father hide the map?', createdAt: now, updatedAt: now },
+      { id: 'codex-mara-vale', type: 'codexEntry', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, title: 'Mara Vale', category: 'Character', content: 'A cartographer who inherited her father’s rules and his unfinished map.', createdAt: now, updatedAt: now },
+      { id: 'codex-drowned-quarter', type: 'codexEntry', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, title: 'The Drowned Quarter', category: 'Place', content: 'A district exposed only at low tide.', createdAt: now, updatedAt: now },
+      { id: 'codex-brass-compass', type: 'codexEntry', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, title: 'Brass Compass', category: 'Object', content: 'One of several compasses that point toward remembered doors.', createdAt: now, updatedAt: now },
+    ]
+    await db.transaction('rw', db.table('entities'), db.table('meta'), async () => {
+      for (const entity of contentEntities) {
+        if (!await db.table('entities').get(entity.id)) await db.table('entities').put(entity)
+      }
+      await db.table('meta').put({ key: 'prototype-content-seeded-v1', value: true, createdAt: now })
+    })
+  }
 }
 
 export async function getEntity<T extends ArcEntity = ArcEntity>(id: string): Promise<T | undefined> {
@@ -248,8 +294,79 @@ export async function createStructuralEntity(
     ...(type === 'scene' ? { content: '' } : {}),
     createdAt: now, updatedAt: now,
   }
-  await db.table('entities').put(entity)
+  await db.transaction('rw', db.table('entities'), async () => {
+    await db.table('entities').put(entity)
+    await touchAncestors(db, parentId, now)
+  })
   return entity
+}
+
+export async function createNote(bookId: string, title = 'Untitled Note'): Promise<NoteEntity> {
+  const db = await database()
+  const now = Date.now()
+  const note: NoteEntity = { id: makeId('note'), type: 'note', bookId, parentId: bookId, title, content: '', createdAt: now, updatedAt: now }
+  await db.transaction('rw', db.table('entities'), async () => {
+    await db.table('entities').put(note)
+    await touchAncestors(db, bookId, now)
+  })
+  return note
+}
+
+export async function createCodexEntry(bookId: string, title = 'Untitled Entry', category = 'Character'): Promise<CodexEntryEntity> {
+  const db = await database()
+  const now = Date.now()
+  const entry: CodexEntryEntity = { id: makeId('codex'), type: 'codexEntry', bookId, parentId: bookId, title, category, content: '', createdAt: now, updatedAt: now }
+  await db.transaction('rw', db.table('entities'), async () => {
+    await db.table('entities').put(entry)
+    await touchAncestors(db, bookId, now)
+  })
+  return entry
+}
+
+export async function getOrCreateSummary(source: StructuralEntity): Promise<SummaryEntity> {
+  const db = await database()
+  const id = summaryId(source.id)
+  const existing = await db.table('entities').get(id) as SummaryEntity | undefined
+  if (existing?.type === 'summary') return existing
+  const now = Date.now()
+  const summary: SummaryEntity = {
+    id,
+    type: 'summary',
+    bookId: source.bookId,
+    parentId: source.id,
+    sourceEntityId: source.id,
+    sourceType: source.type,
+    title: `${source.title} summary`,
+    content: '',
+    createdAt: now,
+    updatedAt: now,
+  }
+  await db.table('entities').put(summary)
+  return summary
+}
+
+export async function saveSummaryContent(summaryIdValue: string, content: string, sourceRevision: number): Promise<SummaryEntity> {
+  const db = await database()
+  const current = await db.table('entities').get(summaryIdValue) as SummaryEntity | undefined
+  if (!current || current.type !== 'summary') throw new Error(`Cannot save missing summary ${summaryIdValue}`)
+  const updated: SummaryEntity = { ...current, content, summarizedSourceRevision: sourceRevision, updatedAt: Date.now() }
+  await db.transaction('rw', db.table('entities'), async () => {
+    await db.table('entities').put(updated)
+    await touchAncestors(db, current.bookId, updated.updatedAt)
+  })
+  return updated
+}
+
+export async function updateCodexCategory(id: string, category: string): Promise<CodexEntryEntity> {
+  const db = await database()
+  const current = await db.table('entities').get(id) as CodexEntryEntity | undefined
+  if (!current || current.type !== 'codexEntry') throw new Error(`Cannot update missing Codex entry ${id}`)
+  const updated: CodexEntryEntity = { ...current, category: category.trim() || 'Other', updatedAt: Date.now() }
+  await db.transaction('rw', db.table('entities'), async () => {
+    await db.table('entities').put(updated)
+    await touchAncestors(db, current.bookId, updated.updatedAt)
+  })
+  return updated
 }
 
 export async function renameEntity(id: string, title: string): Promise<ArcEntity> {
@@ -257,7 +374,11 @@ export async function renameEntity(id: string, title: string): Promise<ArcEntity
   const entity = await db.table('entities').get(id) as ArcEntity | undefined
   if (!entity) throw new Error(`Cannot rename missing entity ${id}`)
   const updated = { ...entity, title: title.trim() || entity.title || 'Untitled', updatedAt: Date.now() }
-  await db.table('entities').put(updated)
+  await db.transaction('rw', db.table('entities'), async () => {
+    await db.table('entities').put(updated)
+    if (['act', 'chapter', 'scene'].includes(entity.type)) await touchAncestors(db, entity.parentId, updated.updatedAt)
+    else if (entity.bookId) await touchAncestors(db, entity.bookId, updated.updatedAt)
+  })
   return updated
 }
 
@@ -294,6 +415,7 @@ export async function moveStructuralEntity(id: string, direction: -1 | 1): Promi
       { ...entity, order: target.order, updatedAt: now },
       { ...target, order: entity.order, updatedAt: now },
     ])
+    await touchAncestors(db, entity.parentId, now)
   })
 }
 
@@ -318,6 +440,7 @@ export async function deleteEntityTree(id: string): Promise<string[]> {
     const snapshots: DocumentSnapshot[] = await db.table('snapshots').toArray()
     const snapshotIds = snapshots.filter((snapshot) => removedIds.has(snapshot.entityId)).map((snapshot) => snapshot.id)
     if (snapshotIds.length) await db.table('snapshots').bulkDelete(snapshotIds)
+    await touchAncestors(db, root?.parentId, Date.now())
   })
   return ids
 }
@@ -335,6 +458,7 @@ export async function saveDocumentContent(entityId: string, content: string) {
   const updated = { ...current, content, updatedAt: now }
   await db.transaction('rw', db.table('entities'), async () => {
     await db.table('entities').put(updated)
+    if (current.type === 'scene') await touchAncestors(db, current.parentId, now)
     if (current.bookId) {
       const book = await db.table('entities').get(current.bookId) as ArcEntity | undefined
       if (book) await db.table('entities').put({ ...book, updatedAt: now })
