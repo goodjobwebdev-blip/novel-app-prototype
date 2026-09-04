@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  ArrowLeft,
   Bot,
   Check,
   CircleHelp,
@@ -13,6 +12,7 @@ import {
   Star,
   Type,
   Volume2,
+  X,
 } from 'lucide-react'
 import {
   defaultAiPrompts,
@@ -164,7 +164,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   return (
     <main className="app-shell">
       <aside className="settings-rail" aria-label={`${isBookSettings ? 'Book' : 'Default'} settings navigation`}>
-        <div className="rail-header"><button className="home-button" type="button" aria-label="Back to library" onClick={onHome}><Home aria-hidden="true" /><b>Home</b></button><div><small>{isBookSettings ? 'Book settings' : 'Defaults'}</small><strong>{book?.title ?? 'New books'}</strong></div></div>
+        <div className="rail-header"><button className="home-button" type="button" aria-label="Back to library" onClick={onHome}><Home aria-hidden="true" /><b>Home</b></button>{onBack && <button className="settings-close" type="button" onClick={onBack} aria-label="Close settings"><X aria-hidden="true" /></button>}</div>
         <nav>
           {([['ai', Bot, 'AI'], ['context', SlidersHorizontal, 'Context'], ['appearance', Type, 'UI'], ['speech', Volume2, 'Speech'], ['images', ImageIcon, 'Images']] as const).map(([key, Icon, label]) => (
             <button className={settingsTab === key ? 'active' : ''} type="button" onClick={() => setSettingsTab(key)} key={key}><Icon aria-hidden="true" /><span>{label}</span></button>
@@ -174,7 +174,6 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
       </aside>
 
       <section className="settings-page" aria-labelledby="page-title">
-        {onBack && <button className="settings-back" type="button" onClick={onBack}><ArrowLeft aria-hidden="true" /> Back to book</button>}
         {settingsTab === 'ai' ? <>
         <header className="page-heading"><div><p>{isBookSettings ? 'Book AI' : 'Default AI'}</p><h1 id="page-title">Models & prompts</h1><span>{isBookSettings ? `Configure AI for “${book?.title}”. These settings are independent from the defaults.` : 'Configure the writing and support models used when a book is created.'}</span></div><div className={`save-state ${saved ? 'saved' : ''}`}><i />{settingsLoading ? 'Loading' : saved ? 'Saved' : 'Unsaved changes'}</div></header>
 
