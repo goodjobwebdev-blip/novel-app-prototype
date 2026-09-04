@@ -16,6 +16,8 @@ export type AiSettings = {
   prompts: AiPrompts
 }
 
+export type BookAiSettings = Omit<AiSettings, 'favorites'>
+
 export const AI_SETTINGS_STORAGE_KEY = 'arc-ai-defaults-v1'
 
 export const defaultAiPrompts: AiPrompts = {
@@ -48,19 +50,46 @@ export const initialAiSettings: AiSettings = {
   prompts: defaultAiPrompts,
 }
 
+export function normalizeAiSettings(value?: Partial<AiSettings>): AiSettings {
+  return {
+    ...initialAiSettings,
+    ...value,
+    prompts: { ...defaultAiPrompts, ...value?.prompts },
+    favorites: Array.isArray(value?.favorites) ? [...value.favorites] : [],
+  }
+}
+
+export function copyAiSettings(settings: AiSettings): AiSettings {
+  return normalizeAiSettings(settings)
+}
+
+export function toBookAiSettings(settings: AiSettings): BookAiSettings {
+  const { favorites: _globalFavorites, ...bookSettings } = copyAiSettings(settings)
+  return bookSettings
+}
+
+export function withGlobalFavorites(settings: BookAiSettings, favorites: string[]): AiSettings {
+  return normalizeAiSettings({ ...settings, favorites })
+}
+
 export function loadAiSettings(): AiSettings {
   const stored = localStorage.getItem(AI_SETTINGS_STORAGE_KEY)
-  if (!stored) return initialAiSettings
+  if (!stored) return copyAiSettings(initialAiSettings)
 
   try {
     const parsed = JSON.parse(stored) as Partial<AiSettings>
-    return {
-      ...initialAiSettings,
-      ...parsed,
-      prompts: { ...defaultAiPrompts, ...parsed.prompts },
-      favorites: Array.isArray(parsed.favorites) ? parsed.favorites : [],
-    }
+    return normalizeAiSettings(parsed)
   } catch {
-    return initialAiSettings
+    return copyAiSettings(initialAiSettings)
   }
+}
+
+export function saveAiSettings(settings: AiSettings) {
+  const normalized = copyAiSettings(settings)
+  localStorage.setItem(AI_SETTINGS_STORAGE_KEY, JSON.stringify(normalized))
+  return normalized
+}
+
+export function saveGlobalFavorites(favorites: string[]) {
+  return saveAiSettings({ ...loadAiSettings(), favorites: [...favorites] })
 }
