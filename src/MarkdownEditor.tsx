@@ -55,6 +55,7 @@ type ActiveGeneration = {
   generatedText: string
   generatedTo: number
   resultDocument: string
+  lastAutoScrollAt: number
 }
 
 const SPEECH_TEXT = 'speech placeholder'
@@ -244,6 +245,7 @@ function beginGeneration(
       generatedText: '',
       generatedTo: latest.insertionPosition,
       resultDocument: current,
+      lastAutoScrollAt: 0,
     }
   }
 
@@ -256,6 +258,7 @@ function beginGeneration(
     generatedText: '',
     generatedTo: position,
     resultDocument: current,
+    lastAutoScrollAt: 0,
   }
 }
 
@@ -281,22 +284,28 @@ function appendGenerationChunk(view: EditorView, session: ActiveGeneration, text
         ? { from: 0, to: current.length, insert: nextDocument }
         : { from: session.insertionPosition, insert: insertion },
       selection: { anchor: generatedTo },
-      scrollIntoView: true,
+      effects: EditorView.scrollIntoView(generatedTo, { y: 'center' }),
       annotations: [...annotations, isolateHistory.of('before')],
     })
-    view.focus()
+    session.lastAutoScrollAt = Date.now()
     session.generatedTo = generatedTo
     session.generatedText = text
     session.resultDocument = nextDocument
     return true
   }
 
+  const generatedTo = session.generatedTo + text.length
+  const now = Date.now()
+  const shouldAutoScroll = now - session.lastAutoScrollAt >= 100
   view.dispatch({
     changes: { from: session.generatedTo, insert: text },
+    selection: { anchor: generatedTo },
+    effects: shouldAutoScroll ? EditorView.scrollIntoView(generatedTo, { y: 'center' }) : [],
     annotations,
   })
   session.generatedText += text
-  session.generatedTo += text.length
+  session.generatedTo = generatedTo
+  if (shouldAutoScroll) session.lastAutoScrollAt = now
   session.resultDocument = view.state.doc.toString()
   return true
 }
@@ -337,7 +346,10 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       const session = activeGenerationRef.current
       activeGenerationRef.current = null
       if (!session?.generatedText) return null
-      viewRef.current?.dispatch({ annotations: isolateHistory.of('before') })
+      viewRef.current?.dispatch({
+        effects: EditorView.scrollIntoView(session.generatedTo, { y: 'center' }),
+        annotations: isolateHistory.of('before'),
+      })
       const result: GenerationRecord = {
         preDocument: session.preDocument,
         sceneText: session.preDocument,

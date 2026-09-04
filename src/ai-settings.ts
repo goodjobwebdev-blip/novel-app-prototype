@@ -11,7 +11,9 @@ export type AiSettings = {
   apiKey: string
   baseUrl: string
   mainModel: string
+  mainModelContextLength?: number
   supportModel: string
+  supportModelContextLength?: number
   favorites: string[]
   prompts: AiPrompts
 }
@@ -20,7 +22,7 @@ export type BookAiSettings = Omit<AiSettings, 'favorites'>
 
 export const AI_SETTINGS_STORAGE_KEY = 'arc-ai-defaults-v1'
 
-const previousDefaultAiPrompts: AiPrompts = {
+const previousDefaultAiPrompts: AiPrompts[] = [{
   story: `You are the story writer for {{book.title}}.
 
 {% if scene.pov %}
@@ -38,7 +40,25 @@ Update the existing summary instead of starting over.
 
 Tone: {{book.style}}
 Return {{count}} distinct options without commentary.`,
-}
+}, {
+  story: `You are the story writer for {{book.title}}.
+
+{% if scene.pov %}
+Stay close to {{scene.pov}} and preserve the established voice.
+{% endif %}
+
+Use the supplied structured story context. Continue the current scene without summarizing or repeating it.`,
+  summarize: `Summarize {{target.type}} for future story context.
+
+Keep names, decisions, promises, and unresolved questions.
+{% if target.previous_summary %}
+Update the existing summary instead of starting over.
+{% endif %}`,
+  titles: `Generate concise names or titles for {{target.type}}.
+
+Tone: {{book.style}}
+Return {{count}} distinct options without commentary.`,
+}]
 
 export const defaultAiPrompts: AiPrompts = {
   story: `You are the story writer for {{book.title}}.
@@ -71,7 +91,7 @@ Write in {{book.language}}.
 This scene uses {{scene.pov}}; prefer it over the book default.
 {% endif %}
 
-Continue from {{scene.text}} without summarizing it.`,
+Continue from the supplied Current scene section without summarizing it.`,
   summarize: `Summarize {{target.type}} from {{book.title}} for future story context.
 
 Keep names, decisions, promises, and unresolved questions.
@@ -103,14 +123,16 @@ export const initialAiSettings: AiSettings = {
 
 export function normalizeAiSettings(value?: Partial<AiSettings>): AiSettings {
   const prompts = { ...defaultAiPrompts, ...value?.prompts }
-  ;(Object.keys(previousDefaultAiPrompts) as Array<keyof AiPrompts>).forEach((key) => {
-    if (prompts[key] === previousDefaultAiPrompts[key]) prompts[key] = defaultAiPrompts[key]
+  ;(Object.keys(defaultAiPrompts) as Array<keyof AiPrompts>).forEach((key) => {
+    if (previousDefaultAiPrompts.some((defaults) => prompts[key] === defaults[key])) prompts[key] = defaultAiPrompts[key]
   })
   return {
     ...initialAiSettings,
     ...value,
     prompts,
     favorites: Array.isArray(value?.favorites) ? [...value.favorites] : [],
+    mainModelContextLength: Number.isFinite(value?.mainModelContextLength) ? value?.mainModelContextLength : undefined,
+    supportModelContextLength: Number.isFinite(value?.supportModelContextLength) ? value?.supportModelContextLength : undefined,
   }
 }
 

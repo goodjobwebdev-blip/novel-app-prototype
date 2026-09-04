@@ -27,8 +27,12 @@ import {
 import {
   copyDefaultAiSettingsToBook,
   ensureBookAiSettings,
+  getBookContextDefaults,
   getBookAiSettings,
+  saveBookContextDefaults,
   saveBookAiSettings,
+  defaultBookContextDefaults,
+  type BookContextDefaults,
 } from './persistence'
 import { promptVariables } from './prompt-template'
 
@@ -68,6 +72,8 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   const [saved, setSaved] = useState(false)
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('ai')
   const [settingsLoading, setSettingsLoading] = useState(Boolean(book))
+  const [contextDefaults, setContextDefaults] = useState<BookContextDefaults>(defaultBookContextDefaults)
+  const [contextSaved, setContextSaved] = useState(true)
   const isBookSettings = Boolean(book)
 
   useEffect(() => {
@@ -102,6 +108,22 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
     return () => { cancelled = true }
   }, [book?.id, book?.title])
 
+  useEffect(() => {
+    let cancelled = false
+    if (!book) {
+      setContextDefaults(defaultBookContextDefaults)
+      setContextSaved(true)
+      return () => { cancelled = true }
+    }
+    void getBookContextDefaults(book.id).then((value) => {
+      if (!cancelled) {
+        setContextDefaults(value)
+        setContextSaved(true)
+      }
+    })
+    return () => { cancelled = true }
+  }, [book?.id])
+
   const visibleModels = useMemo(() => {
     const query = modelSearch.trim().toLowerCase()
     return models.filter((model) => !query || `${model.id} ${model.name ?? ''}`.toLowerCase().includes(query)).sort((a, b) => Number(settings.favorites.includes(b.id)) - Number(settings.favorites.includes(a.id))).slice(0, 8)
@@ -110,8 +132,15 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   function update<K extends keyof AiSettings>(key: K, value: AiSettings[K]) { setSettings((current) => ({ ...current, [key]: value })); setSaved(false) }
   function selectProvider(provider: AiProvider) {
     const baseUrl = provider === 'nanogpt' ? 'https://nano-gpt.com/api/v1' : provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : provider === 'openai' ? 'https://api.openai.com/v1' : settings.baseUrl
-    setSettings((current) => ({ ...current, provider, baseUrl, mainModel: '', supportModel: '' }))
+    setSettings((current) => ({ ...current, provider, baseUrl, mainModel: '', mainModelContextLength: undefined, supportModel: '', supportModelContextLength: undefined }))
     setModels([]); setStatus('Provider changed. Reload its model list when ready.'); setStatusKind('quiet'); setSaved(false)
+  }
+  function selectModel(kind: 'main' | 'support', id: string) {
+    const contextLength = models.find((model) => model.id === id)?.context_length
+    setSettings((current) => kind === 'main'
+      ? { ...current, mainModel: id, mainModelContextLength: contextLength }
+      : { ...current, supportModel: id, supportModelContextLength: contextLength })
+    setSaved(false)
   }
   async function refreshModels() {
     if (!settings.apiKey.trim()) { setStatus('Enter an API key before loading models.'); setStatusKind('error'); return }
@@ -122,6 +151,12 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
       const payload = await response.json().catch(() => ({})) as { data?: Model[]; message?: string; error?: { message?: string } }
       if (!response.ok) throw new Error(payload.error?.message || payload.message || `Provider returned ${response.status}.`)
       const nextModels = Array.isArray(payload.data) ? payload.data.filter((model) => typeof model.id === 'string' && model.id.length > 0) : []
+      setSettings((current) => ({
+        ...current,
+        mainModelContextLength: nextModels.find((model) => model.id === current.mainModel)?.context_length ?? current.mainModelContextLength,
+        supportModelContextLength: nextModels.find((model) => model.id === current.supportModel)?.context_length ?? current.supportModelContextLength,
+      }))
+      if (nextModels.some((model) => model.id === settings.mainModel || model.id === settings.supportModel)) setSaved(false)
       setModels(nextModels); setStatus(nextModels.length ? `${nextModels.length} models available.` : 'The provider returned no models.'); setStatusKind(nextModels.length ? 'success' : 'error')
     } catch (error) {
       setModels([]); setStatus(error instanceof Error ? error.message : 'Could not load the model list.'); setStatusKind('error')
@@ -162,6 +197,17 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
     }
   }
 
+  async function saveContextDefaults() {
+    if (!book) return
+    try {
+      const savedDefaults = await saveBookContextDefaults(book.id, contextDefaults)
+      setContextDefaults(savedDefaults)
+      setContextSaved(true)
+    } catch {
+      setContextSaved(false)
+    }
+  }
+
   return (
     <main className="app-shell">
       <aside className="settings-rail" aria-label={`${isBookSettings ? 'Book' : 'Default'} settings navigation`}>
@@ -191,8 +237,8 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
 
         <section className="settings-card models-card">
           <div className="card-heading"><div><span>02</span><h2>Models</h2></div><p>{isBookSettings ? 'Favorites are shared; model choices belong to this book.' : 'Main writes; Support handles summaries and names.'}</p></div>
-          <div className="model-pickers"><label><span>Main model <em>Story generation</em></span><input list="model-options" value={settings.mainModel} onChange={(event) => update('mainModel', event.target.value)} placeholder={models.length ? 'Search models…' : 'Reload models first'} /></label><label><span>Support model <em>Fast utility tasks</em></span><input list="model-options" value={settings.supportModel} onChange={(event) => update('supportModel', event.target.value)} placeholder={models.length ? 'Search models…' : 'Reload models first'} /></label><datalist id="model-options">{models.map((model) => <option key={model.id} value={model.id}>{model.name ?? model.id}</option>)}</datalist></div>
-          <div className="model-browser"><div className="model-search"><Search aria-hidden="true" /><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder="Search loaded models" /></div>{models.length ? <div className="model-list">{visibleModels.map((model) => <article key={model.id}><button className={`favorite ${settings.favorites.includes(model.id) ? 'active' : ''}`} type="button" onClick={() => toggleFavorite(model.id)} aria-label={`Favorite ${model.id}`}><Star fill={settings.favorites.includes(model.id) ? 'currentColor' : 'none'} aria-hidden="true" /></button><div><strong>{model.name || model.id}</strong>{model.name && model.name !== model.id && <small>{model.id}</small>}<p><span>{formatContext(model.context_length)}</span><span>{model.architecture?.modality || 'Text'}</span>{model.pricing?.prompt && <span>Pricing supplied</span>}</p></div><button className="use-model" type="button" onClick={() => update('mainModel', model.id)}>Use</button></article>)}</div> : <div className="model-empty"><Bot aria-hidden="true" /><strong>No models loaded</strong><p>Enter your key and reload the provider model list.</p></div>}</div>
+          <div className="model-pickers"><label><span>Main model <em>Story generation</em></span><input list="model-options" value={settings.mainModel} onChange={(event) => selectModel('main', event.target.value)} placeholder={models.length ? 'Search models…' : 'Reload models first'} /></label><label><span>Support model <em>Fast utility tasks</em></span><input list="model-options" value={settings.supportModel} onChange={(event) => selectModel('support', event.target.value)} placeholder={models.length ? 'Search models…' : 'Reload models first'} /></label><datalist id="model-options">{models.map((model) => <option key={model.id} value={model.id}>{model.name ?? model.id}</option>)}</datalist></div>
+          <div className="model-browser"><div className="model-search"><Search aria-hidden="true" /><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder="Search loaded models" /></div>{models.length ? <div className="model-list">{visibleModels.map((model) => <article key={model.id}><button className={`favorite ${settings.favorites.includes(model.id) ? 'active' : ''}`} type="button" onClick={() => toggleFavorite(model.id)} aria-label={`Favorite ${model.id}`}><Star fill={settings.favorites.includes(model.id) ? 'currentColor' : 'none'} aria-hidden="true" /></button><div><strong>{model.name || model.id}</strong>{model.name && model.name !== model.id && <small>{model.id}</small>}<p><span>{formatContext(model.context_length)}</span><span>{model.architecture?.modality || 'Text'}</span>{model.pricing?.prompt && <span>Pricing supplied</span>}</p></div><button className="use-model" type="button" onClick={() => selectModel('main', model.id)}>Use</button></article>)}</div> : <div className="model-empty"><Bot aria-hidden="true" /><strong>No models loaded</strong><p>Enter your key and reload the provider model list.</p></div>}</div>
         </section>
 
         <section className="settings-card prompts-card">
@@ -207,10 +253,31 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
           <div className="prompt-footer"><button type="button" onClick={() => update('prompts', { ...settings.prompts, [promptTab]: defaultAiPrompts[promptTab] })}>Reset default</button></div>
         </section>
         <footer className="save-bar"><div><strong>{isBookSettings ? book?.title : 'AI defaults'}</strong><span>{isBookSettings ? 'Independent book configuration' : settings.mainModel ? 'Ready to save for new books' : 'Choose models now or save them later'}</span></div><div className="save-actions">{book && <button className="reset-settings" type="button" onClick={() => { void resetFromDefaults() }} disabled={settingsLoading}><RefreshCw aria-hidden="true" /> Reset from defaults</button>}<button type="button" onClick={() => { void saveSettings() }} disabled={settingsLoading}><Check aria-hidden="true" /> {isBookSettings ? 'Save book settings' : 'Save defaults'}</button></div></footer>
-        </> : <SettingsPlaceholder tab={settingsTab} scope={isBookSettings ? 'book' : 'defaults'} />}
+        </> : settingsTab === 'context' && book ? <ContextDefaultsSettings bookTitle={book.title} value={contextDefaults} saved={contextSaved} onChange={(value) => { setContextDefaults(value); setContextSaved(false) }} onSave={() => { void saveContextDefaults() }} /> : <SettingsPlaceholder tab={settingsTab} scope={isBookSettings ? 'book' : 'defaults'} />}
       </section>
     </main>
   )
+}
+
+function ContextDefaultsSettings({ bookTitle, value, saved, onChange, onSave }: {
+  bookTitle: string
+  value: BookContextDefaults
+  saved: boolean
+  onChange: (value: BookContextDefaults) => void
+  onSave: () => void
+}) {
+  return <section className="context-defaults-settings">
+    <header className="page-heading"><div><p>Book context</p><h1 id="page-title">Generation defaults</h1><span>Automatic sources for every scene in “{bookTitle}”. Notes and Codex selections stay scene-specific.</span></div><div className={`save-state ${saved ? 'saved' : ''}`}><i />{saved ? 'Saved' : 'Unsaved changes'}</div></header>
+    <section className="settings-card context-defaults-card">
+      <div className="card-heading"><div><span>01</span><h2>Automatic context</h2></div><p>Current scene is always included and cannot be disabled.</p></div>
+      <div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Whole current scene</strong><small>When empty, the full immediately previous scene is included instead.</small></span><b>Required</b></div>
+      <label><input type="checkbox" checked={value.includePreviousScene} onChange={(event) => onChange({ ...value, includePreviousScene: event.target.checked })} /><span><strong>Full previous scene</strong><small>Off by default; automatically included whenever the current scene is empty.</small></span></label>
+      <label><input type="checkbox" checked={value.includePreviousSummaries} onChange={(event) => onChange({ ...value, includePreviousSummaries: event.target.checked })} /><span><strong>All previous scene summaries</strong><small>A summary is skipped when that scene’s full text is already present.</small></span></label>
+      <label><input type="checkbox" checked={value.includeChapterSummary} onChange={(event) => onChange({ ...value, includeChapterSummary: event.target.checked })} /><span><strong>Current chapter summary</strong><small>Included only when a persisted summary exists.</small></span></label>
+      <label><input type="checkbox" checked={value.includeActSummary} onChange={(event) => onChange({ ...value, includeActSummary: event.target.checked })} /><span><strong>Current act summary</strong><small>Included only when the chapter belongs to an Act with a summary.</small></span></label>
+    </section>
+    <footer className="save-bar"><div><strong>{bookTitle}</strong><span>Context budget is derived from the selected Main model.</span></div><button type="button" onClick={onSave}><Check aria-hidden="true" /> Save context defaults</button></footer>
+  </section>
 }
 
 function SettingsPlaceholder({ tab, scope }: { tab: Exclude<SettingsTab, 'ai'>; scope: 'book' | 'defaults' }) {
