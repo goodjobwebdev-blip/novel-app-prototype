@@ -62,12 +62,53 @@ export type SummaryEntity = ArcEntity & {
   summarizedSourceRevision?: number
 }
 export type EditableEntity = StructuralEntity | NoteEntity | CodexEntryEntity | SummaryEntity
+export type BookContextDefaults = {
+  includePreviousScene: boolean
+  includePreviousSummaries: boolean
+  includeChapterSummary: boolean
+  includeActSummary: boolean
+}
+export type SceneContextSelection = {
+  noteIds: string[]
+  codexEntryIds: string[]
+}
+export type GenerationContextSelection = BookContextDefaults & SceneContextSelection
 export type BookAiSettingsEntity = ArcEntity & {
   type: 'settings'
   bookId: string
   parentId: string
   settingsType: 'ai'
   value: BookAiSettings
+}
+export type BookContextSettingsEntity = ArcEntity & {
+  type: 'settings'
+  bookId: string
+  parentId: string
+  settingsType: 'context-book'
+  value: BookContextDefaults
+}
+export type SceneContextSettingsEntity = ArcEntity & {
+  type: 'settings'
+  bookId: string
+  parentId: string
+  settingsType: 'context-scene'
+  value: SceneContextSelection
+}
+
+export const defaultBookContextDefaults: BookContextDefaults = {
+  includePreviousScene: false,
+  includePreviousSummaries: true,
+  includeChapterSummary: true,
+  includeActSummary: true,
+}
+
+function normalizeBookContextDefaults(value?: Partial<BookContextDefaults>): BookContextDefaults {
+  return {
+    includePreviousScene: value?.includePreviousScene ?? defaultBookContextDefaults.includePreviousScene,
+    includePreviousSummaries: value?.includePreviousSummaries ?? defaultBookContextDefaults.includePreviousSummaries,
+    includeChapterSummary: value?.includeChapterSummary ?? defaultBookContextDefaults.includeChapterSummary,
+    includeActSummary: value?.includeActSummary ?? defaultBookContextDefaults.includeActSummary,
+  }
 }
 
 export const PROTOTYPE_BOOK_ID = 'book-city-beneath-tide'
@@ -102,6 +143,18 @@ function summaryId(sourceEntityId: string) {
   return `summary-${sourceEntityId}`
 }
 
+function bookContextSettingsId(bookId: string) {
+  return `settings-context-book-${bookId}`
+}
+
+function sceneContextSettingsId(sceneId: string) {
+  return `settings-context-scene-${sceneId}`
+}
+
+function uniqueIds(ids: string[]) {
+  return [...new Set(ids.filter((id) => typeof id === 'string' && id.trim()))]
+}
+
 async function touchAncestors(db: any, parentId: string | undefined, now: number) {
   let nextId = parentId
   while (nextId) {
@@ -120,6 +173,19 @@ function makeBookAiSettingsEntity(bookId: string, settings: AiSettings, now = Da
     parentId: bookId,
     settingsType: 'ai',
     value: toBookAiSettings(settings),
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+function makeBookContextSettingsEntity(bookId: string, value: BookContextDefaults = defaultBookContextDefaults, now = Date.now()): BookContextSettingsEntity {
+  return {
+    id: bookContextSettingsId(bookId),
+    type: 'settings',
+    bookId,
+    parentId: bookId,
+    settingsType: 'context-book',
+    value: normalizeBookContextDefaults(value),
     createdAt: now,
     updatedAt: now,
   }
@@ -232,7 +298,8 @@ export async function createBook(defaultAiSettings: AiSettings, title = 'Untitle
   const chapter: StructuralEntity = { id: chapterId, type: 'chapter', bookId, parentId: bookId, order: 0, title: 'Chapter 1', createdAt: now, updatedAt: now }
   const scene: StructuralEntity = { id: makeId('scene'), type: 'scene', bookId, parentId: chapterId, order: 0, title: 'Scene 1', content: '', createdAt: now, updatedAt: now }
   const aiSettings = makeBookAiSettingsEntity(bookId, defaultAiSettings, now)
-  await db.table('entities').bulkPut([book, chapter, scene, aiSettings])
+  const contextSettings = makeBookContextSettingsEntity(bookId, defaultBookContextDefaults, now)
+  await db.table('entities').bulkPut([book, chapter, scene, aiSettings, contextSettings])
   return { book, chapter, scene }
 }
 
@@ -270,6 +337,76 @@ export async function saveBookAiSettings(bookId: string, settings: AiSettings): 
 export async function copyDefaultAiSettingsToBook(bookId: string, defaults: AiSettings): Promise<AiSettings> {
   await saveBookAiSettings(bookId, copyAiSettings(defaults))
   return copyAiSettings(defaults)
+}
+
+export async function getBookContextDefaults(bookId: string): Promise<BookContextDefaults> {
+  const db = await database()
+  const id = bookContextSettingsId(bookId)
+  const existing = await db.table('entities').get(id) as BookContextSettingsEntity | undefined
+  if (existing?.type === 'settings' && existing.settingsType === 'context-book') {
+    return normalizeBookContextDefaults(existing.value)
+  }
+  const created = makeBookContextSettingsEntity(bookId)
+  await db.table('entities').put(created)
+  return { ...created.value }
+}
+
+export async function saveBookContextDefaults(bookId: string, value: BookContextDefaults): Promise<BookContextDefaults> {
+  const db = await database()
+  const id = bookContextSettingsId(bookId)
+  const existing = await db.table('entities').get(id) as BookContextSettingsEntity | undefined
+  const now = Date.now()
+  const normalized = normalizeBookContextDefaults(value)
+  await db.table('entities').put({
+    ...makeBookContextSettingsEntity(bookId, normalized, existing?.createdAt ?? now),
+    updatedAt: now,
+  })
+  return normalized
+}
+
+export async function getSceneContextSelection(bookId: string, sceneId: string): Promise<SceneContextSelection> {
+  const db = await database()
+  const existing = await db.table('entities').get(sceneContextSettingsId(sceneId)) as SceneContextSettingsEntity | undefined
+  if (!existing || existing.type !== 'settings' || existing.settingsType !== 'context-scene' || existing.bookId !== bookId) {
+    return { noteIds: [], codexEntryIds: [] }
+  }
+  return { noteIds: uniqueIds(existing.value.noteIds ?? []), codexEntryIds: uniqueIds(existing.value.codexEntryIds ?? []) }
+}
+
+export async function saveSceneContextSelection(bookId: string, sceneId: string, value: SceneContextSelection): Promise<SceneContextSelection> {
+  const db = await database()
+  const id = sceneContextSettingsId(sceneId)
+  const existing = await db.table('entities').get(id) as SceneContextSettingsEntity | undefined
+  const now = Date.now()
+  const normalized = { noteIds: uniqueIds(value.noteIds), codexEntryIds: uniqueIds(value.codexEntryIds) }
+  const entity: SceneContextSettingsEntity = {
+    id,
+    type: 'settings',
+    bookId,
+    parentId: sceneId,
+    settingsType: 'context-scene',
+    value: normalized,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  }
+  await db.table('entities').put(entity)
+  return normalized
+}
+
+export async function getGenerationContextSelection(bookId: string, sceneId: string): Promise<GenerationContextSelection> {
+  const [defaults, selected] = await Promise.all([
+    getBookContextDefaults(bookId),
+    getSceneContextSelection(bookId, sceneId),
+  ])
+  return { ...defaults, ...selected }
+}
+
+export async function saveGenerationContextSelection(bookId: string, sceneId: string, value: GenerationContextSelection): Promise<GenerationContextSelection> {
+  const [defaults, selected] = await Promise.all([
+    saveBookContextDefaults(bookId, value),
+    saveSceneContextSelection(bookId, sceneId, value),
+  ])
+  return { ...defaults, ...selected }
 }
 
 export async function createStructuralEntity(

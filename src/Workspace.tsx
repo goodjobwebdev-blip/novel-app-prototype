@@ -36,7 +36,8 @@ import AiSettingsScreen from './App'
 import { loadAiSettings, type AiSettings } from './ai-settings'
 import ExpandableTextInput from './ExpandableTextInput'
 import MarkdownEditor, { type MarkdownEditorHandle } from './MarkdownEditor'
-import { renderStoryPrompt, streamNanoGPTCompletion } from './nanogpt'
+import { fetchNanoGPTModelContextLength, renderStoryPrompt, streamNanoGPTCompletion } from './nanogpt'
+import { buildGenerationContext, type ContextDiagnostics } from './context-service'
 import {
   PROTOTYPE_BOOK_ID,
   PROTOTYPE_SCENE_ID,
@@ -50,12 +51,15 @@ import {
   ensurePrototypeSeed,
   getEntity,
   getBookAiSettings,
+  getGenerationContextSelection,
   getOrCreateSummary,
   listBooks,
   listEntitiesByBook,
   moveStructuralEntity,
   renameEntity,
   saveDocumentContent,
+  saveBookAiSettings,
+  saveGenerationContextSelection,
   saveSummaryContent,
   updateBookMetadata,
   updateCodexCategory,
@@ -64,11 +68,13 @@ import {
   type BookMetadata,
   type CodexEntryEntity,
   type EditableEntity,
+  type GenerationContextSelection,
   type NoteEntity,
   type SnapshotReason,
   type StructuralEntity,
   type StructuralEntityType,
   type SummaryEntity,
+  defaultBookContextDefaults,
 } from './persistence'
 import { buildSummarySource, getSummaryStateMap, renderSummaryPrompt, type SummaryState } from './summary-service'
 import './generation-controls.css'
@@ -83,7 +89,14 @@ type GenerationRequestSnapshot = {
   baseUrl: string
   model: string
   systemPrompt: string
+  contextMessage: string
   userMessage: string
+}
+
+const initialContextSelection: GenerationContextSelection = {
+  ...defaultBookContextDefaults,
+  noteIds: [],
+  codexEntryIds: [],
 }
 
 const chats = [
@@ -133,6 +146,9 @@ export default function Workspace() {
   const [editorRevision, setEditorRevision] = useState(0)
   const [activeSceneId, setActiveSceneId] = useState<string | null>(null)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
+  const [contextSelection, setContextSelection] = useState<GenerationContextSelection>(initialContextSelection)
+  const [contextPickerOpen, setContextPickerOpen] = useState(false)
+  const [contextDiagnostics, setContextDiagnostics] = useState<ContextDiagnostics | null>(null)
   const editorRef = useRef<MarkdownEditorHandle | null>(null)
   const promptRef = useRef<HTMLTextAreaElement | null>(null)
   const storyRef = useRef(initialStoryMarkdown)
@@ -187,7 +203,11 @@ export default function Workspace() {
         setOutlineEntities(structural)
         setNotes(entities.filter((entity): entity is NoteEntity => entity.type === 'note'))
         setCodexEntries(entities.filter((entity): entity is CodexEntryEntity => entity.type === 'codexEntry'))
-        setSummaryStates(book ? await getSummaryStateMap(book.id) : {})
+        const [nextSummaryStates, nextContextSelection] = book && scene
+          ? await Promise.all([getSummaryStateMap(book.id), getGenerationContextSelection(book.id, scene.id)])
+          : [{}, initialContextSelection]
+        setSummaryStates(nextSummaryStates)
+        setContextSelection(nextContextSelection)
         bookTitleRef.current = book?.title ?? bookTitleRef.current
         activeDocumentIdRef.current = scene?.id ?? null
         activeSceneIdRef.current = scene?.id ?? null
@@ -307,6 +327,9 @@ export default function Workspace() {
       activeSceneIdRef.current = editableDocument.id
       setActiveSceneId(editableDocument.id)
       scenePovRef.current = typeof editableDocument.pov === 'string' ? editableDocument.pov : ''
+      setContextSelection(await getGenerationContextSelection(editableDocument.bookId, editableDocument.id))
+      setContextDiagnostics(null)
+      setContextPickerOpen(false)
     }
     const content = typeof editableDocument.content === 'string' ? editableDocument.content : ''
     storyRef.current = content
@@ -378,6 +401,8 @@ export default function Workspace() {
       setNotes([])
       setCodexEntries([])
       setSummaryStates({})
+      setContextSelection(initialContextSelection)
+      setContextDiagnostics(null)
       activeDocumentIdRef.current = null
       setActiveDocument(null)
       activeSceneIdRef.current = null
@@ -514,6 +539,29 @@ export default function Workspace() {
     await reloadBookContent(currentBook.id)
   }
 
+  async function updateContextSelection(next: GenerationContextSelection) {
+    if (!currentBook || !activeSceneIdRef.current) return
+    const previous = contextSelection
+    setContextSelection(next)
+    setContextDiagnostics(null)
+    try {
+      const saved = await saveGenerationContextSelection(currentBook.id, activeSceneIdRef.current, next)
+      setContextSelection(saved)
+    } catch {
+      setContextSelection(previous)
+      showToast('Context choices could not be saved.')
+    }
+  }
+
+  function toggleContextEntity(type: 'note' | 'codex', id: string) {
+    const key = type === 'note' ? 'noteIds' : 'codexEntryIds'
+    const ids = contextSelection[key]
+    void updateContextSelection({
+      ...contextSelection,
+      [key]: ids.includes(id) ? ids.filter((candidate) => candidate !== id) : [...ids, id],
+    })
+  }
+
   function openSettings(from: Screen) {
     if (from === 'editor' && changedSinceSnapshotRef.current) void flushDocument('navigation', true)
     setReturnScreen(from)
@@ -596,18 +644,45 @@ export default function Workspace() {
       return
     }
 
-    const requestSnapshot = mode === 'regenerate' && previousRequest
-      ? previousRequest
-      : {
+    let requestSnapshot: GenerationRequestSnapshot
+    if (mode === 'regenerate' && previousRequest) {
+      requestSnapshot = previousRequest
+    } else {
+      const systemPrompt = renderStoryPrompt(settings.prompts.story, {
+        bookTitle: bookTitleRef.current,
+        sceneText: 'the supplied Current scene section',
+        scenePov: scenePovRef.current || undefined,
+      })
+      try {
+        const modelContextLength = settings.mainModelContextLength
+          ?? await fetchNanoGPTModelContextLength(settings.apiKey.trim(), settings.baseUrl, settings.mainModel).catch(() => undefined)
+        if (modelContextLength && modelContextLength !== settings.mainModelContextLength) {
+          settings = await saveBookAiSettings(currentBook.id, { ...settings, mainModelContextLength: modelContextLength })
+        }
+        const prepared = await buildGenerationContext({
+          book: currentBook,
+          sceneId: activeDocument.id,
+          currentSceneText: context.sceneText,
+          modelId: settings.mainModel,
+          modelContextLength,
+          systemPrompt,
+          userInstruction: arcPrompt,
+          selection: contextSelection,
+        })
+        setContextDiagnostics(prepared.diagnostics)
+        requestSnapshot = {
           baseUrl: settings.baseUrl,
           model: settings.mainModel,
-          systemPrompt: renderStoryPrompt(settings.prompts.story, {
-            bookTitle: bookTitleRef.current,
-            sceneText: context.sceneText,
-            scenePov: scenePovRef.current || undefined,
-          }),
-          userMessage: arcPrompt,
+          systemPrompt,
+          contextMessage: prepared.message,
+          userMessage: '',
         }
+      } catch (error) {
+        editor.finishGeneration('error')
+        showToast(error instanceof Error ? error.message : 'Context could not be prepared.')
+        return
+      }
+    }
 
     const controller = new AbortController()
     generationAbortRef.current = controller
@@ -620,6 +695,7 @@ export default function Workspace() {
         baseUrl: requestSnapshot.baseUrl,
         model: requestSnapshot.model,
         systemPrompt: requestSnapshot.systemPrompt,
+        contextMessage: requestSnapshot.contextMessage,
         userMessage: requestSnapshot.userMessage,
       }, (chunk) => {
         if (!controller.signal.aborted) setGenerationPhase('writing')
@@ -769,11 +845,25 @@ export default function Workspace() {
         ? 'Σ'
         : String((activeChapter?.order ?? 0) + 1).padStart(2, '0')
   const openSummaryState = summarySource ? summaryStates[summarySource.id] ?? 'missing' : 'missing'
+  const selectedContextNotes = notes.filter((note) => contextSelection.noteIds.includes(note.id))
+  const selectedContextCodex = codexEntries.filter((entry) => contextSelection.codexEntryIds.includes(entry.id))
+  const selectedContextCount = 1
+    + Number(contextSelection.includePreviousScene)
+    + Number(contextSelection.includePreviousSummaries)
+    + Number(contextSelection.includeChapterSummary)
+    + Number(contextSelection.includeActSummary)
+    + selectedContextNotes.length
+    + selectedContextCodex.length
 
   if (screen === 'settings') return <AiSettingsScreen
     book={returnScreen === 'home' || !currentBook ? undefined : { id: currentBook.id, title: currentBook.title }}
     onHome={() => setScreen('home')}
-    onBack={() => setScreen(returnScreen)}
+    onBack={() => {
+      if (currentBook && activeSceneIdRef.current) {
+        void getGenerationContextSelection(currentBook.id, activeSceneIdRef.current).then(setContextSelection)
+      }
+      setScreen(returnScreen)
+    }}
     onSaved={(settings) => {
       if (returnScreen === 'home') setAiReady(settings.provider === 'nanogpt' && Boolean(settings.apiKey.trim() && settings.mainModel.trim()))
     }}
@@ -820,7 +910,7 @@ export default function Workspace() {
 
       {screen === 'editor' && activeDocument?.type === 'scene' && !arcOpen && <div className="editor-bottom"><button type="button" onClick={() => setArcOpen(true)} aria-label="Open generation input"><PanelBottomOpen aria-hidden="true" /></button><GenerateControl isGenerating={generationActive} phase={generationPhase} elapsedSeconds={generationElapsedSeconds} onGenerate={generate} onStop={stopGeneration} onMicro={insertEditorSpeech} onMicro2={insertPromptSpeech} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} /></div>}
       {screen === 'editor' && activeDocument?.type === 'summary' && <div className="summary-generate-wrap"><button className="summary-generate" type="button" onClick={generationActive ? stopGeneration : generate}>{generationActive ? <Square aria-hidden="true" fill="currentColor" /> : <RefreshCw aria-hidden="true" />} {generationActive ? 'Stop' : openSummaryState === 'missing' ? 'Summarize' : 'Re-summarize'}</button></div>}
-      {screen === 'editor' && activeDocument?.type === 'scene' && arcOpen && <section className="arc-drawer"><div><small>ARC</small>{generationActive && generationPhase ? <GenerationActivityStrip phase={generationPhase} elapsedSeconds={generationElapsedSeconds} placement="drawer" /> : <span>Guide the next passage</span>}<button type="button" onClick={() => setArcOpen(false)} aria-label="Close Arc"><X aria-hidden="true" /></button></div><div className="arc-compose"><div className="arc-prompt-field"><ExpandableTextInput ref={promptRef} value={arcPrompt} onChange={setArcPrompt} aria-label="generation prompt" dialogTitle="Edit generation prompt" /><span aria-live="polite">{arcPrompt.length} characters</span></div><button className={`play ${generationActive ? 'generating' : ''}`} type="button" onClick={generationActive ? stopGeneration : generate} aria-label={generationActive ? 'Stop generation' : 'Generate'}>{generationActive ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" fill="currentColor" />}</button></div></section>}
+      {screen === 'editor' && activeDocument?.type === 'scene' && arcOpen && <section className="arc-drawer"><div><small>ARC</small>{generationActive && generationPhase ? <GenerationActivityStrip phase={generationPhase} elapsedSeconds={generationElapsedSeconds} placement="drawer" /> : <span>Guide the next passage</span>}<button type="button" onClick={() => setArcOpen(false)} aria-label="Close Arc"><X aria-hidden="true" /></button></div><ContextPicker selection={contextSelection} notes={notes} codexEntries={codexEntries} selectedNotes={selectedContextNotes} selectedCodex={selectedContextCodex} open={contextPickerOpen} diagnostics={contextDiagnostics} sourceCount={selectedContextCount} onToggleOpen={() => setContextPickerOpen((value) => !value)} onUpdate={(next) => { void updateContextSelection(next) }} onToggleEntity={toggleContextEntity} /><div className="arc-compose"><div className="arc-prompt-field"><ExpandableTextInput ref={promptRef} value={arcPrompt} onChange={setArcPrompt} aria-label="generation prompt" dialogTitle="Edit generation prompt" /><span aria-live="polite">{arcPrompt.length} characters</span></div><button className={`play ${generationActive ? 'generating' : ''}`} type="button" onClick={generationActive ? stopGeneration : generate} aria-label={generationActive ? 'Stop generation' : 'Generate'}>{generationActive ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" fill="currentColor" />}</button></div></section>}
       {screen === 'chat' && <section className="chat-composer"><small>Chapter 7 + Codex <ChevronDown aria-hidden="true" /></small><div><button type="button" aria-label="Dictate message"><Mic aria-hidden="true" /></button><textarea defaultValue="Compare Mara’s choice with what she promised Elias."/><button className="send" type="button" aria-label="Send message"><Send aria-hidden="true" fill="currentColor" /></button></div></section>}
 
       {rightOpen && <aside className="book-panel">
@@ -857,6 +947,60 @@ function GenerationActivityStrip({ phase, elapsedSeconds, placement }: {
     <span className="generation-separator" aria-hidden="true">·</span>
     <span className="generation-time" aria-hidden="true">{formatGenerationTime(elapsedSeconds)}</span>
   </span>
+}
+
+function formatTokenCount(value: number) {
+  return value >= 1_000 ? `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1)}k` : String(value)
+}
+
+function ContextPicker({ selection, notes, codexEntries, selectedNotes, selectedCodex, open, diagnostics, sourceCount, onToggleOpen, onUpdate, onToggleEntity }: {
+  selection: GenerationContextSelection
+  notes: NoteEntity[]
+  codexEntries: CodexEntryEntity[]
+  selectedNotes: NoteEntity[]
+  selectedCodex: CodexEntryEntity[]
+  open: boolean
+  diagnostics: ContextDiagnostics | null
+  sourceCount: number
+  onToggleOpen: () => void
+  onUpdate: (next: GenerationContextSelection) => void
+  onToggleEntity: (type: 'note' | 'codex', id: string) => void
+}) {
+  const [query, setQuery] = useState('')
+  const normalizedQuery = query.trim().toLowerCase()
+  const visibleNotes = notes.filter((note) => !normalizedQuery || `${note.title} ${note.content}`.toLowerCase().includes(normalizedQuery))
+  const visibleCodex = codexEntries.filter((entry) => !normalizedQuery || `${entry.title} ${entry.category} ${entry.content}`.toLowerCase().includes(normalizedQuery))
+
+  return <div className="generation-context">
+    <div className="context-summary-row">
+      <button type="button" onClick={onToggleOpen} aria-expanded={open}><span>Context · {sourceCount} choices</span><small>{diagnostics ? `~${formatTokenCount(diagnostics.estimatedTokens)} / ${formatTokenCount(diagnostics.budgetTokens)} tokens` : 'Budget follows Main model'}</small><ChevronDown aria-hidden="true" /></button>
+    </div>
+    <div className="context-chips">
+      <span className="locked">Current scene <b>Required</b></span>
+      {selection.includePreviousScene && <button type="button" onClick={() => onUpdate({ ...selection, includePreviousScene: false })}>Previous scene <X aria-hidden="true" /></button>}
+      {selection.includePreviousSummaries && <button type="button" onClick={() => onUpdate({ ...selection, includePreviousSummaries: false })}>Previous summaries <X aria-hidden="true" /></button>}
+      {selection.includeChapterSummary && <button type="button" onClick={() => onUpdate({ ...selection, includeChapterSummary: false })}>Chapter summary <X aria-hidden="true" /></button>}
+      {selection.includeActSummary && <button type="button" onClick={() => onUpdate({ ...selection, includeActSummary: false })}>Act summary <X aria-hidden="true" /></button>}
+      {selectedNotes.map((note) => <button type="button" key={note.id} onClick={() => onToggleEntity('note', note.id)}>Note: {note.title} <X aria-hidden="true" /></button>)}
+      {selectedCodex.map((entry) => <button type="button" key={entry.id} onClick={() => onToggleEntity('codex', entry.id)}>Codex: {entry.title} <X aria-hidden="true" /></button>)}
+      <button type="button" className="add-context" onClick={onToggleOpen}><Plus aria-hidden="true" /> Add</button>
+    </div>
+    {diagnostics && (diagnostics.droppedTokens > 0 || diagnostics.mandatoryTextTruncated) && <p className="context-warning">Context was reduced for this model: {diagnostics.droppedTokens > 0 ? `~${formatTokenCount(diagnostics.droppedTokens)} lower-priority tokens omitted` : 'the primary scene text was shortened'}.</p>}
+    {open && <div className="context-picker-panel">
+      <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find Notes or Codex entries" aria-label="Search context sources" />
+      <div className="context-auto-options">
+        <label><input type="checkbox" checked={selection.includePreviousScene} onChange={(event) => onUpdate({ ...selection, includePreviousScene: event.target.checked })} /><span>Full previous scene<small>Always used automatically when the current scene is empty.</small></span></label>
+        <label><input type="checkbox" checked={selection.includePreviousSummaries} onChange={(event) => onUpdate({ ...selection, includePreviousSummaries: event.target.checked })} /><span>All previous scene summaries<small>Skips a summary whenever that scene’s full text is included.</small></span></label>
+        <label><input type="checkbox" checked={selection.includeChapterSummary} onChange={(event) => onUpdate({ ...selection, includeChapterSummary: event.target.checked })} /><span>Current chapter summary</span></label>
+        <label><input type="checkbox" checked={selection.includeActSummary} onChange={(event) => onUpdate({ ...selection, includeActSummary: event.target.checked })} /><span>Current act summary</span></label>
+      </div>
+      <div className="context-source-list">
+        {visibleNotes.length > 0 && <><h3>Notes</h3>{visibleNotes.map((note) => <label key={note.id}><input type="checkbox" checked={selection.noteIds.includes(note.id)} onChange={() => onToggleEntity('note', note.id)} /><span>{note.title}</span></label>)}</>}
+        {visibleCodex.length > 0 && <><h3>Codex</h3>{visibleCodex.map((entry) => <label key={entry.id}><input type="checkbox" checked={selection.codexEntryIds.includes(entry.id)} onChange={() => onToggleEntity('codex', entry.id)} /><span>{entry.title}<small>{entry.category}</small></span></label>)}</>}
+        {!visibleNotes.length && !visibleCodex.length && <p>No matching sources.</p>}
+      </div>
+    </div>}
+  </div>
 }
 
 function GenerateControl({ isGenerating, phase, elapsedSeconds, onGenerate, onStop, onMicro, onMicro2, onUndo, onRedo, onRegenerate }: {

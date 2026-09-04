@@ -9,6 +9,7 @@ export type NanoGPTGenerationRequest = {
   baseUrl: string
   model: string
   systemPrompt: string
+  contextMessage?: string
   userMessage?: string
 }
 
@@ -38,6 +39,18 @@ export function renderStoryPrompt(template: string, values: StoryPromptValues) {
 function completionEndpoint(baseUrl: string) {
   const normalized = baseUrl.trim().replace(/\/+$/, '') || 'https://nano-gpt.com/api/v1'
   return `${normalized}/chat/completions`
+}
+
+export async function fetchNanoGPTModelContextLength(apiKey: string, baseUrl: string, modelId: string) {
+  const normalized = baseUrl.trim().replace(/\/+$/, '') || 'https://nano-gpt.com/api/v1'
+  const response = await fetch(`${normalized}/models?detailed=true&sort=favorites`, {
+    headers: { Accept: 'application/json', Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(4_000),
+  })
+  if (!response.ok) return undefined
+  const payload = await response.json().catch(() => ({})) as { data?: Array<{ id?: string; context_length?: number }> }
+  const contextLength = payload.data?.find((model) => model.id === modelId)?.context_length
+  return Number.isFinite(contextLength) ? contextLength : undefined
 }
 
 function providerError(status: number, payload: unknown, apiKey: string) {
@@ -71,6 +84,7 @@ export async function streamNanoGPTCompletion(
   lifecycle: NanoGPTStreamLifecycle = {},
 ) {
   const messages = [{ role: 'system', content: request.systemPrompt }]
+  if (request.contextMessage?.trim()) messages.push({ role: 'user', content: request.contextMessage })
   if (request.userMessage?.trim()) messages.push({ role: 'user', content: request.userMessage })
 
   const response = await fetch(completionEndpoint(request.baseUrl), {
