@@ -11,7 +11,9 @@ export type AiSettings = {
   apiKey: string
   baseUrl: string
   mainModel: string
+  mainModelContextLength?: number
   supportModel: string
+  supportModelContextLength?: number
   favorites: string[]
   prompts: AiPrompts
 }
@@ -27,7 +29,7 @@ export const defaultAiPrompts: AiPrompts = {
 Stay close to {{scene.pov}} and preserve the established voice.
 {% endif %}
 
-Continue from {{scene.text}} without summarizing it.`,
+Use the supplied structured story context. Continue the current scene without summarizing or repeating it.`,
   summarize: `Summarize {{target.type}} for future story context.
 
 Keep names, decisions, promises, and unresolved questions.
@@ -56,6 +58,8 @@ export function normalizeAiSettings(value?: Partial<AiSettings>): AiSettings {
     ...value,
     prompts: { ...defaultAiPrompts, ...value?.prompts },
     favorites: Array.isArray(value?.favorites) ? [...value.favorites] : [],
+    mainModelContextLength: Number.isFinite(value?.mainModelContextLength) ? value?.mainModelContextLength : undefined,
+    supportModelContextLength: Number.isFinite(value?.supportModelContextLength) ? value?.supportModelContextLength : undefined,
   }
 }
 

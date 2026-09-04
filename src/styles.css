@@ -98,6 +98,15 @@ input::placeholder,textarea::placeholder { color:var(--faint); }
 .compact-settings-empty > svg { width:28px; height:28px; margin-bottom:20px; color:var(--accent); opacity:.75; }
 .compact-settings-empty h1 { margin:0; color:var(--ink); font:500 25px var(--serif); }
 .compact-settings-empty p { margin:9px 0 0; color:var(--faint); font-size:13px; }
+.context-defaults-card { display:grid; gap:10px; }
+.context-defaults-card > label,.context-default-locked { min-height:66px; padding:11px 12px; border:1px solid var(--line); border-radius:13px; background:rgba(255,255,255,.025); display:grid; grid-template-columns:22px minmax(0,1fr) auto; align-items:center; gap:10px; }
+.context-defaults-card input { width:17px; min-height:17px; accent-color:var(--accent); }
+.context-defaults-card > label > span { display:block; margin:0; }
+.context-defaults-card strong,.context-defaults-card small { display:block; }
+.context-defaults-card strong { color:var(--ink); font-size:12px; }
+.context-defaults-card small { margin-top:4px; color:var(--faint); font-size:10px; line-height:1.4; }
+.context-default-locked > svg { width:17px; color:#9db38d; }
+.context-default-locked > b { color:var(--accent); font-size:9px; letter-spacing:.08em; text-transform:uppercase; }
 button:focus-visible { outline:3px solid rgba(198,168,107,.3); outline-offset:2px; }
 
 @media (min-width: 760px) {
