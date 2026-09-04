@@ -30,6 +30,7 @@ import {
   getBookAiSettings,
   saveBookAiSettings,
 } from './persistence'
+import { promptVariables } from './prompt-template'
 
 type Model = { id: string; name?: string; context_length?: number; pricing?: { prompt?: string; completion?: string }; architecture?: { modality?: string } }
 type SettingsTab = 'ai' | 'context' | 'appearance' | 'speech' | 'images'
@@ -195,10 +196,15 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
         </section>
 
         <section className="settings-card prompts-card">
-          <div className="card-heading"><div><span>03</span><h2>System prompts</h2></div><button className="help-button" type="button" title="Use {{variable}} for values and {% if condition %}…{% endif %} for optional instructions."><CircleHelp aria-hidden="true" /><b>Prompt syntax</b></button></div>
+          <div className="card-heading"><div><span>03</span><h2>System prompts</h2></div></div>
           <div className="prompt-tabs" role="tablist">{([['story', 'Story'], ['summarize', 'Summarize'], ['titles', 'Titles & names']] as const).map(([key, label]) => <button key={key} className={promptTab === key ? 'active' : ''} type="button" onClick={() => setPromptTab(key)}>{label}</button>)}</div>
           <textarea className="prompt-editor" value={settings.prompts[promptTab]} onChange={(event) => update('prompts', { ...settings.prompts, [promptTab]: event.target.value })} spellCheck={false} />
-          <div className="prompt-footer"><span>Variables: <code>{'{{book.title}}'}</code> <code>{'{{scene.pov}}'}</code> <code>{'{{target.type}}'}</code></span><button type="button" onClick={() => update('prompts', { ...settings.prompts, [promptTab]: defaultAiPrompts[promptTab] })}>Reset default</button></div>
+          <details className="prompt-reference">
+            <summary><CircleHelp aria-hidden="true" /><span>Variables & syntax</span></summary>
+            <div className="prompt-syntax"><span>Insert a value</span><code>{'{{book.title}}'}</code><span>Include a block only when a value exists</span><code>{'{% if book.genre %}Genre: {{book.genre}}{% endif %}'}</code></div>
+            <div className="prompt-variable-list">{promptVariables.filter((variable) => variable.scopes.includes(promptTab)).map((variable) => <div key={variable.name}><code>{`{{${variable.name}}}`}</code><span>{variable.description}</span></div>)}</div>
+          </details>
+          <div className="prompt-footer"><button type="button" onClick={() => update('prompts', { ...settings.prompts, [promptTab]: defaultAiPrompts[promptTab] })}>Reset default</button></div>
         </section>
         <footer className="save-bar"><div><strong>{isBookSettings ? book?.title : 'AI defaults'}</strong><span>{isBookSettings ? 'Independent book configuration' : settings.mainModel ? 'Ready to save for new books' : 'Choose models now or save them later'}</span></div><div className="save-actions">{book && <button className="reset-settings" type="button" onClick={() => { void resetFromDefaults() }} disabled={settingsLoading}><RefreshCw aria-hidden="true" /> Reset from defaults</button>}<button type="button" onClick={() => { void saveSettings() }} disabled={settingsLoading}><Check aria-hidden="true" /> {isBookSettings ? 'Save book settings' : 'Save defaults'}</button></div></footer>
         </> : <SettingsPlaceholder tab={settingsTab} scope={isBookSettings ? 'book' : 'defaults'} />}

@@ -36,6 +36,7 @@ import { loadAiSettings, type AiSettings } from './ai-settings'
 import ExpandableTextInput from './ExpandableTextInput'
 import MarkdownEditor, { type MarkdownEditorHandle } from './MarkdownEditor'
 import { renderStoryPrompt, streamNanoGPTCompletion } from './nanogpt'
+import type { BookPromptValues } from './prompt-template'
 import {
   PROTOTYPE_BOOK_ID,
   PROTOTYPE_SCENE_ID,
@@ -134,7 +135,6 @@ export default function Workspace() {
   const storyRef = useRef(initialStoryMarkdown)
   const activeDocumentIdRef = useRef<string | null>(null)
   const activeSceneIdRef = useRef<string | null>(null)
-  const bookTitleRef = useRef('The City Beneath the Tide')
   const scenePovRef = useRef('')
   const storageReadyRef = useRef(false)
   const changedSinceSnapshotRef = useRef(false)
@@ -173,7 +173,6 @@ export default function Workspace() {
         setNotes(entities.filter((entity): entity is NoteEntity => entity.type === 'note'))
         setCodexEntries(entities.filter((entity): entity is CodexEntryEntity => entity.type === 'codexEntry'))
         setSummaryStates(book ? await getSummaryStateMap(book.id) : {})
-        bookTitleRef.current = book?.title ?? bookTitleRef.current
         activeDocumentIdRef.current = scene?.id ?? null
         activeSceneIdRef.current = scene?.id ?? null
         setActiveSceneId(scene?.id ?? null)
@@ -318,7 +317,6 @@ export default function Workspace() {
     const scene = entities.find((entity) => entity.id === preferredSceneId && entity.type === 'scene')
       ?? entities.find((entity) => entity.type === 'scene')
     setCurrentBook(book)
-    bookTitleRef.current = book.title
     setExpandedIds(new Set(entities.filter((entity) => entity.type !== 'scene').map((entity) => entity.id)))
     activeDocumentIdRef.current = null
     setActiveDocument(null)
@@ -348,7 +346,6 @@ export default function Workspace() {
     setBookList(await listBooks())
     if (currentBook?.id === book.id) {
       setCurrentBook(updated)
-      bookTitleRef.current = updated.title
     }
   }
 
@@ -375,7 +372,6 @@ export default function Workspace() {
     const updated = await updateBookMetadata(currentBook.id, metadata)
     setCurrentBook(updated)
     setBookList((books) => books.map((book) => book.id === updated.id ? updated : book))
-    bookTitleRef.current = updated.title
   }
 
   async function removeCurrentBookFromSettings() {
@@ -574,7 +570,7 @@ export default function Workspace() {
           baseUrl: settings.baseUrl,
           model: settings.mainModel,
           systemPrompt: renderStoryPrompt(settings.prompts.story, {
-            bookTitle: bookTitleRef.current,
+            book: toBookPromptValues(currentBook),
             sceneText: context.sceneText,
             scenePov: scenePovRef.current || undefined,
           }),
@@ -647,7 +643,7 @@ export default function Workspace() {
         apiKey: settings.apiKey.trim(),
         baseUrl: settings.baseUrl,
         model: settings.supportModel,
-        systemPrompt: renderSummaryPrompt(settings.prompts.summarize, summary.sourceType, summary.content),
+        systemPrompt: renderSummaryPrompt(settings.prompts.summarize, summary.sourceType, summary.content, toBookPromptValues(currentBook)),
         userMessage: `${summary.content.trim() ? `# Existing summary\n\n${summary.content.trim()}\n\n` : ''}# Source material\n\n${source.content}\n\nReturn only the updated summary as Markdown.`,
       }, (chunk) => { generated += chunk }, controller.signal)
       await createSnapshot(summary.id, 'generation', summary.content)
@@ -875,6 +871,22 @@ function bookMetadata(book: BookEntity): BookMetadata {
     pointOfView: typeof book.pointOfView === 'string' && book.pointOfView ? book.pointOfView : prototype ? 'Third person limited' : '',
     tense: typeof book.tense === 'string' && book.tense ? book.tense : 'Past',
     language: typeof book.language === 'string' && book.language ? book.language : 'English',
+  }
+}
+
+function toBookPromptValues(book: BookEntity): BookPromptValues {
+  const metadata = bookMetadata(book)
+  const series = metadata.series === 'Standalone' ? '' : metadata.series
+  return {
+    title: metadata.title,
+    series,
+    seriesOrder: series ? metadata.seriesOrder : '',
+    overview: metadata.overview,
+    genre: metadata.genre,
+    style: metadata.writingStyle,
+    pov: metadata.pointOfView,
+    tense: metadata.tense,
+    language: metadata.language,
   }
 }
 

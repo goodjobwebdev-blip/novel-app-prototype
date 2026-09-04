@@ -6,6 +6,7 @@ import {
   type StructuralEntityType,
   type SummaryEntity,
 } from './persistence'
+import { bookTemplateValues, renderPromptTemplate, type BookPromptValues } from './prompt-template'
 
 export type SummaryState = 'missing' | 'current' | 'outdated'
 
@@ -106,14 +107,11 @@ export async function buildSummarySource(sourceId: string): Promise<SummarySourc
   return { source, content, sourceRevision: sourceRevision(source, entities, summaries) }
 }
 
-export function renderSummaryPrompt(template: string, targetType: StructuralEntityType, previousSummary: string) {
+export function renderSummaryPrompt(template: string, targetType: StructuralEntityType, previousSummary: string, book: BookPromptValues) {
   const values: Record<string, string> = {
+    ...bookTemplateValues(book),
     'target.type': targetType,
     'target.previous_summary': previousSummary,
   }
-  return template
-    .replace(/{%\s*if\s+([\w.]+)\s*%}([\s\S]*?){%\s*endif\s*%}/g, (_match, key: string, body: string) => values[key]?.trim() ? body : '')
-    .replace(/{{\s*([\w.]+)\s*}}/g, (_match, key: string) => values[key] ?? '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
+  return renderPromptTemplate(template, values)
 }

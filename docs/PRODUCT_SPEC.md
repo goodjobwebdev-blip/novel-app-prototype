@@ -99,6 +99,29 @@ The application should feel like a quiet writing workspace, not a general-purpos
 - AI features must fail clearly without damaging or replacing manuscript text.
 - AI generation is optional. The non-AI writing experience must remain usable without a configured provider.
 
+### Prompt variables
+
+System prompts use `{{variable}}` for substitution and `{% if variable %}...{% endif %}` for optional blocks. The AI settings screen lists the variables available to the selected prompt type next to the prompt editor.
+
+| Variable | Prompt types | Value |
+|---|---|---|
+| `{{book.title}}` | All | Current book title |
+| `{{book.series}}` | All | Series title; empty for standalone books |
+| `{{book.series_order}}` | All | Book position within its series |
+| `{{book.overview}}` | All | Book overview from the Book tab |
+| `{{book.genre}}` | All | Genre or combination of genres |
+| `{{book.style}}` | All | Preferred writing style |
+| `{{book.pov}}` | All | Default book point of view |
+| `{{book.tense}}` | All | Default narrative tense |
+| `{{book.language}}` | All | Primary writing language |
+| `{{scene.text}}` | Story | Current scene text supplied for continuation |
+| `{{scene.pov}}` | Story | Scene-specific point of view, when set |
+| `{{target.type}}` | Summarize, Titles & names | Requested summary, title, or name target |
+| `{{target.previous_summary}}` | Summarize | Existing summary supplied during re-summarization |
+| `{{count}}` | Titles & names | Requested number of title or name options |
+
+Story and Summarize prompts are rendered by the current generation flows. Titles & names variables define the prompt contract for its planned generation flow.
+
 ## Current prototype scope
 
 The current prototype validates the complete interface direction and the working AI-settings flow.

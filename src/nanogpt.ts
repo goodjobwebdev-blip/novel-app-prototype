@@ -1,5 +1,7 @@
+import { bookTemplateValues, renderPromptTemplate, type BookPromptValues } from './prompt-template'
+
 export type StoryPromptValues = {
-  bookTitle: string
+  book: BookPromptValues
   sceneText: string
   scenePov?: string
 }
@@ -13,22 +15,13 @@ export type NanoGPTGenerationRequest = {
 }
 
 const templateValues = (values: StoryPromptValues): Record<string, string> => ({
-  'book.title': values.bookTitle,
+  ...bookTemplateValues(values.book),
   'scene.text': values.sceneText,
   'scene.pov': values.scenePov ?? '',
 })
 
 export function renderStoryPrompt(template: string, values: StoryPromptValues) {
-  const variables = templateValues(values)
-  const withConditionals = template.replace(
-    /{%\s*if\s+([\w.]+)\s*%}([\s\S]*?){%\s*endif\s*%}/g,
-    (_match, key: string, body: string) => variables[key]?.trim() ? body : '',
-  )
-
-  return withConditionals
-    .replace(/{{\s*([\w.]+)\s*}}/g, (_match, key: string) => variables[key] ?? '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
+  return renderPromptTemplate(template, templateValues(values))
 }
 
 function completionEndpoint(baseUrl: string) {
