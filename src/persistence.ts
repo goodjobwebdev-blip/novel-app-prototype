@@ -27,6 +27,10 @@ export type DocumentSnapshot = {
   reason: SnapshotReason
 }
 
+export type StructuralEntityType = 'act' | 'chapter' | 'scene'
+export type StructuralEntity = ArcEntity & { type: StructuralEntityType; bookId: string; parentId: string; order: number; title: string }
+export type BookEntity = ArcEntity & { type: 'book'; title: string }
+
 export const PROTOTYPE_BOOK_ID = 'book-city-beneath-tide'
 export const PROTOTYPE_SCENE_ID = 'scene-ch7-2'
 
@@ -96,6 +100,104 @@ export async function listEntitiesByBook(bookId: string, type?: EntityType): Pro
   return type ? entities.filter((entity) => entity.type === type) : entities
 }
 
+export async function listBooks(): Promise<BookEntity[]> {
+  const db = await database()
+  const books: BookEntity[] = await db.table('entities').where('type').equals('book').toArray()
+  return books.sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+export async function createBook(title = 'Untitled Book'): Promise<{ book: BookEntity; chapter: StructuralEntity; scene: StructuralEntity }> {
+  const db = await database()
+  const now = Date.now()
+  const bookId = makeId('book')
+  const chapterId = makeId('chapter')
+  const book: BookEntity = { id: bookId, type: 'book', title, series: 'Standalone', createdAt: now, updatedAt: now }
+  const chapter: StructuralEntity = { id: chapterId, type: 'chapter', bookId, parentId: bookId, order: 0, title: 'Chapter 1', createdAt: now, updatedAt: now }
+  const scene: StructuralEntity = { id: makeId('scene'), type: 'scene', bookId, parentId: chapterId, order: 0, title: 'Scene 1', content: '', createdAt: now, updatedAt: now }
+  await db.table('entities').bulkPut([book, chapter, scene])
+  return { book, chapter, scene }
+}
+
+export async function createStructuralEntity(
+  type: StructuralEntityType,
+  bookId: string,
+  parentId: string,
+  title = `Untitled ${type[0].toUpperCase()}${type.slice(1)}`,
+): Promise<StructuralEntity> {
+  const db = await database()
+  const parent = await db.table('entities').get(parentId) as ArcEntity | undefined
+  const validParent = type === 'act'
+    ? parent?.type === 'book'
+    : type === 'chapter'
+      ? parent?.type === 'book' || parent?.type === 'act'
+      : parent?.type === 'chapter'
+  if (!validParent) throw new Error(`Cannot create ${type} under ${parent?.type ?? 'missing parent'}`)
+  const siblings: ArcEntity[] = await db.table('entities').where('parentId').equals(parentId).toArray()
+  const order = siblings.filter((entity) => entity.type === type).reduce((maximum, entity) => Math.max(maximum, entity.order ?? -1), -1) + 1
+  const now = Date.now()
+  const entity: StructuralEntity = {
+    id: makeId(type), type, bookId, parentId, order, title,
+    ...(type === 'scene' ? { content: '' } : {}),
+    createdAt: now, updatedAt: now,
+  }
+  await db.table('entities').put(entity)
+  return entity
+}
+
+export async function renameEntity(id: string, title: string): Promise<ArcEntity> {
+  const db = await database()
+  const entity = await db.table('entities').get(id) as ArcEntity | undefined
+  if (!entity) throw new Error(`Cannot rename missing entity ${id}`)
+  const updated = { ...entity, title: title.trim() || entity.title || 'Untitled', updatedAt: Date.now() }
+  await db.table('entities').put(updated)
+  return updated
+}
+
+export async function moveStructuralEntity(id: string, direction: -1 | 1): Promise<void> {
+  const db = await database()
+  await db.transaction('rw', db.table('entities'), async () => {
+    const entity = await db.table('entities').get(id) as StructuralEntity | undefined
+    if (!entity?.parentId) throw new Error(`Cannot move missing entity ${id}`)
+    const siblings: StructuralEntity[] = (await db.table('entities').where('parentId').equals(entity.parentId).toArray())
+      .filter((candidate: ArcEntity) => candidate.type === entity.type)
+      .sort((a: ArcEntity, b: ArcEntity) => (a.order ?? 0) - (b.order ?? 0))
+    const index = siblings.findIndex((candidate) => candidate.id === id)
+    const targetIndex = index + direction
+    if (index < 0 || targetIndex < 0 || targetIndex >= siblings.length) return
+    const target = siblings[targetIndex]
+    const now = Date.now()
+    await db.table('entities').bulkPut([
+      { ...entity, order: target.order, updatedAt: now },
+      { ...target, order: entity.order, updatedAt: now },
+    ])
+  })
+}
+
+export async function deleteEntityTree(id: string): Promise<string[]> {
+  const db = await database()
+  const removedIds = new Set<string>()
+  async function collect(entityId: string) {
+    if (removedIds.has(entityId)) return
+    const children: ArcEntity[] = await db.table('entities').where('parentId').equals(entityId).toArray()
+    for (const child of children) await collect(child.id)
+    removedIds.add(entityId)
+  }
+  const root = await db.table('entities').get(id) as ArcEntity | undefined
+  await collect(id)
+  if (root?.type === 'book') {
+    const bookEntities: ArcEntity[] = await db.table('entities').where('bookId').equals(id).toArray()
+    for (const entity of bookEntities) await collect(entity.id)
+  }
+  const ids = [...removedIds]
+  await db.transaction('rw', db.table('entities'), db.table('snapshots'), async () => {
+    await db.table('entities').bulkDelete(ids)
+    const snapshots: DocumentSnapshot[] = await db.table('snapshots').toArray()
+    const snapshotIds = snapshots.filter((snapshot) => removedIds.has(snapshot.entityId)).map((snapshot) => snapshot.id)
+    if (snapshotIds.length) await db.table('snapshots').bulkDelete(snapshotIds)
+  })
+  return ids
+}
+
 export async function deleteEntity(id: string) {
   const db = await database()
   await db.table('entities').delete(id)
@@ -105,8 +207,15 @@ export async function saveDocumentContent(entityId: string, content: string) {
   const db = await database()
   const current = await db.table('entities').get(entityId) as ArcEntity | undefined
   if (!current) throw new Error(`Cannot save missing entity ${entityId}`)
-  const updated = { ...current, content, updatedAt: Date.now() }
-  await db.table('entities').put(updated)
+  const now = Date.now()
+  const updated = { ...current, content, updatedAt: now }
+  await db.transaction('rw', db.table('entities'), async () => {
+    await db.table('entities').put(updated)
+    if (current.bookId) {
+      const book = await db.table('entities').get(current.bookId) as ArcEntity | undefined
+      if (book) await db.table('entities').put({ ...book, updatedAt: now })
+    }
+  })
   return updated
 }
 
