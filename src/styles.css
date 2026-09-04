@@ -143,18 +143,11 @@ button:focus-visible { outline:3px solid rgba(198,168,107,.3); outline-offset:2p
 .book-settings-group-title h3 { margin:0; font:500 20px var(--serif); }
 .book-field { display:block; margin-bottom:15px; }
 .book-field > span { margin-bottom:7px; color:var(--soft); font-size:11px; }
-.book-field input,.book-field select,.book-field textarea,.new-series input { width:100%; border:1px solid var(--line); border-radius:11px; outline:none; background:rgba(255,255,255,.025); color:var(--ink); }
-.book-field input,.book-field select,.new-series input { min-height:44px; padding:0 11px; }
+.book-field input,.book-field textarea { width:100%; border:1px solid var(--line); border-radius:11px; outline:none; background:rgba(255,255,255,.025); color:var(--ink); }
+.book-field input { min-height:44px; padding:0 11px; }
 .book-field textarea { min-height:116px; padding:10px 11px; line-height:1.5; resize:vertical; }
-.book-field input:focus,.book-field select:focus,.book-field textarea:focus,.new-series input:focus { border-color:rgba(198,168,107,.45); box-shadow:0 0 0 3px rgba(198,168,107,.07); }
+.book-field input:focus,.book-field textarea:focus { border-color:rgba(198,168,107,.45); box-shadow:0 0 0 3px rgba(198,168,107,.07); }
 .book-field.compact { width:min(100%,190px); }
-.series-control { display:grid; grid-template-columns:minmax(0,1fr) 44px; gap:7px; }
-.series-control select { min-width:0; }
-.series-control button { width:44px; min-height:44px; padding:0; border:1px solid var(--line); border-radius:11px; background:rgba(255,255,255,.035); color:var(--accent); display:grid; place-items:center; cursor:pointer; }
-.series-control button svg { width:16px; height:16px; }
-.new-series { margin:-7px 0 15px; padding:10px; border:1px solid rgba(198,168,107,.22); border-radius:12px; background:rgba(198,168,107,.055); display:grid; grid-template-columns:minmax(0,1fr) auto; gap:7px; }
-.new-series button { min-height:44px; padding:0 11px; border:0; border-radius:10px; background:var(--accent); color:#191711; display:flex; align-items:center; gap:5px; font-size:10px; font-weight:700; cursor:pointer; }
-.new-series button:disabled { opacity:.45; cursor:default; }.new-series button svg { width:14px; height:14px; }
 .book-field-pair { display:grid; grid-template-columns:1fr 1fr; gap:9px; }
 .book-danger { padding:16px 14px; border:1px solid rgba(225,142,135,.25); border-radius:17px; background:rgba(225,142,135,.045); }
 .book-danger > div > span { color:var(--danger); font-size:9px; letter-spacing:.12em; text-transform:uppercase; }
