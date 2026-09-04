@@ -41,6 +41,7 @@ The application should feel like a quiet writing workspace, not a general-purpos
 - Book contains current-book identity and story-profile metadata: title, series and order, overview, genre, writing style, point of view, tense, and language. It also contains the destructive delete action.
 - Outline supports optional acts, chapters, and scenes. Selecting a scene opens it in the editor.
 - Acts, chapters, and scenes expose distinct current, missing, and outdated summary states.
+- Summary icons open persisted Markdown summaries in the shared editor. Manual edits are supported, and NanoGPT summary generation uses the book's Support model.
 - Notes open in the editor workspace.
 - Codex supports search, categories, compact/list/tile views, and new entries.
 - Chat shows conversation history. Selecting a chat replaces the editor with the conversation and changes the sidebar to that chat's settings.
@@ -112,27 +113,29 @@ Implemented as working behavior:
 - saving and restoring global AI defaults;
 - independent per-book AI settings, explicit reset from defaults, and book-scoped generation;
 - persisted current-book metadata in the right-side Book tab;
-- persisted books, acts, chapters, scenes, navigation, autosave, and local document snapshots.
+- persisted books, acts, chapters, scenes, navigation, autosave, and local document snapshots;
+- persisted Scene, Chapter, and Act summaries with freshness tracking and Support-model generation;
+- persisted, searchable Notes and categorized Codex entries using the shared Markdown editor.
 
 Implemented as interactive UI prototypes or placeholders:
 
 - Markdown editor and active-line editing;
 - settings and book-workspace navigation;
-- summary states, Notes, and Codex views;
+- alternate compact/card layouts for Notes and Codex;
 - Arc drawer and generation controls;
 - chat history, chat settings, messages, editing states, and composer.
 
-The prototype is not yet an MVP. Chats, notes, Codex entries, and summaries are not yet backed by the planned IndexedDB data model.
+The prototype is not yet an MVP. Chats are not yet backed by the planned IndexedDB data model, and the generation context builder is still pending.
 
 ## Not decided yet
 
-- Exact summary, chat, and Codex data schemas
+- Exact chat data schema
 - IndexedDB migrations and repository boundaries
 - Autosave and snapshot retention rules
 - Export and import file formats
 - Cloud synchronization or a backend
 - Exact prompt-template parser and escaping rules
-- Context assembly, token budgeting, and truncation behavior
+- Final context formatting and model-specific budgeting heuristics
 - Provider-specific capability normalization
 - Final light themes and custom-theme persistence
 

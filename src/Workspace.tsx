@@ -41,6 +41,8 @@ import {
   PROTOTYPE_BOOK_ID,
   PROTOTYPE_SCENE_ID,
   createBook,
+  createCodexEntry,
+  createNote,
   createSnapshot,
   createStructuralEntity,
   deleteEntityTree,
@@ -48,18 +50,27 @@ import {
   ensurePrototypeSeed,
   getEntity,
   getBookAiSettings,
+  getOrCreateSummary,
   listBooks,
   listEntitiesByBook,
   moveStructuralEntity,
   renameEntity,
   saveDocumentContent,
+  saveSummaryContent,
   updateBookMetadata,
+  updateCodexCategory,
+  type ArcEntity,
   type BookEntity,
   type BookMetadata,
+  type CodexEntryEntity,
+  type EditableEntity,
+  type NoteEntity,
   type SnapshotReason,
   type StructuralEntity,
   type StructuralEntityType,
+  type SummaryEntity,
 } from './persistence'
+import { buildSummarySource, getSummaryStateMap, renderSummaryPrompt, type SummaryState } from './summary-service'
 import './generation-controls.css'
 
 type Screen = 'home' | 'editor' | 'chat' | 'settings'
@@ -112,11 +123,17 @@ export default function Workspace() {
   const [bookList, setBookList] = useState<BookEntity[]>([])
   const [currentBook, setCurrentBook] = useState<BookEntity | null>(null)
   const [outlineEntities, setOutlineEntities] = useState<StructuralEntity[]>([])
+  const [notes, setNotes] = useState<NoteEntity[]>([])
+  const [codexEntries, setCodexEntries] = useState<CodexEntryEntity[]>([])
+  const [summaryStates, setSummaryStates] = useState<Record<string, SummaryState>>({})
+  const [activeDocument, setActiveDocument] = useState<EditableEntity | null>(null)
+  const [editorRevision, setEditorRevision] = useState(0)
   const [activeSceneId, setActiveSceneId] = useState<string | null>(null)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const editorRef = useRef<MarkdownEditorHandle | null>(null)
   const promptRef = useRef<HTMLTextAreaElement | null>(null)
   const storyRef = useRef(initialStoryMarkdown)
+  const activeDocumentIdRef = useRef<string | null>(null)
   const activeSceneIdRef = useRef<string | null>(null)
   const bookTitleRef = useRef('The City Beneath the Tide')
   const scenePovRef = useRef('')
@@ -146,21 +163,27 @@ export default function Workspace() {
         const defaults = loadAiSettings()
         await Promise.all(books.map((existingBook) => ensureBookAiSettings(existingBook.id, defaults)))
         const book = books.find((candidate) => candidate.id === PROTOTYPE_BOOK_ID) ?? books[0]
-        const entities = book ? await listEntitiesByBook(book.id) as StructuralEntity[] : []
+        const entities = book ? await listEntitiesByBook(book.id) : []
+        const structural = entities.filter((entity): entity is StructuralEntity => ['act', 'chapter', 'scene'].includes(entity.type))
         const scene = entities.find((entity) => entity.id === PROTOTYPE_SCENE_ID && entity.type === 'scene')
           ?? entities.find((entity) => entity.type === 'scene')
         if (cancelled) return
         setBookList(books)
         setCurrentBook(book ?? null)
-        setOutlineEntities(entities.filter((entity) => ['act', 'chapter', 'scene'].includes(entity.type)))
+        setOutlineEntities(structural)
+        setNotes(entities.filter((entity): entity is NoteEntity => entity.type === 'note'))
+        setCodexEntries(entities.filter((entity): entity is CodexEntryEntity => entity.type === 'codexEntry'))
+        setSummaryStates(book ? await getSummaryStateMap(book.id) : {})
         bookTitleRef.current = book?.title ?? bookTitleRef.current
+        activeDocumentIdRef.current = scene?.id ?? null
         activeSceneIdRef.current = scene?.id ?? null
         setActiveSceneId(scene?.id ?? null)
+        setActiveDocument((scene as StructuralEntity | undefined) ?? null)
         scenePovRef.current = typeof scene?.pov === 'string' ? scene.pov : ''
         const content = typeof scene?.content === 'string' ? scene.content : ''
         storyRef.current = content
         setStoryMarkdown(content)
-        setExpandedIds(new Set(entities.filter((entity) => entity.type !== 'scene').map((entity) => entity.id)))
+        setExpandedIds(new Set(structural.filter((entity) => entity.type !== 'scene').map((entity) => entity.id)))
         storageReadyRef.current = true
         setSaveState('saved')
       } catch (error) {
@@ -172,22 +195,30 @@ export default function Workspace() {
   }, [])
 
   async function flushDocument(reason: SnapshotReason = 'autosave', snapshot = false) {
-    const sceneId = activeSceneIdRef.current
-    if (!storageReadyRef.current || !sceneId) return
+    const documentId = activeDocumentIdRef.current
+    if (!storageReadyRef.current || !documentId) return
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
     }
     setSaveState('saving')
     try {
-      const savedScene = await saveDocumentContent(sceneId, storyRef.current)
+      const current = await getEntity<EditableEntity>(documentId)
+      if (!current) throw new Error(`Cannot save missing document ${documentId}`)
+      const savedDocument = current.type === 'summary'
+        ? await saveSummaryContent(current.id, storyRef.current, (await buildSummarySource(current.sourceEntityId)).sourceRevision)
+        : await saveDocumentContent(documentId, storyRef.current) as EditableEntity
       if (snapshot && changedSinceSnapshotRef.current) {
-        await createSnapshot(sceneId, reason, storyRef.current)
+        await createSnapshot(documentId, reason, storyRef.current)
         changedSinceSnapshotRef.current = false
       }
       const editedAt = Date.now()
-      setCurrentBook((book) => book && book.id === savedScene.bookId ? { ...book, updatedAt: editedAt } : book)
-      setBookList((books) => books.map((book) => book.id === savedScene.bookId ? { ...book, updatedAt: editedAt } : book))
+      setActiveDocument(savedDocument)
+      if (savedDocument.type === 'note') setNotes((items) => items.map((item) => item.id === savedDocument.id ? savedDocument : item))
+      if (savedDocument.type === 'codexEntry') setCodexEntries((items) => items.map((item) => item.id === savedDocument.id ? savedDocument : item))
+      setCurrentBook((book) => book && book.id === savedDocument.bookId ? { ...book, updatedAt: editedAt } : book)
+      setBookList((books) => books.map((book) => book.id === savedDocument.bookId ? { ...book, updatedAt: editedAt } : book))
+      if (savedDocument.bookId) setSummaryStates(await getSummaryStateMap(savedDocument.bookId))
       setSaveState('saved')
     } catch (error) {
       console.error('Failed to persist document', error)
@@ -196,7 +227,7 @@ export default function Workspace() {
   }
 
   useEffect(() => {
-    if (!storageReadyRef.current) return
+    if (!storageReadyRef.current || !changedSinceSnapshotRef.current) return
     saveTimerRef.current = setTimeout(() => { void flushDocument('autosave', false) }, 750)
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
@@ -213,7 +244,6 @@ export default function Workspace() {
     }
     const handlePageHide = () => {
       if (changedSinceSnapshotRef.current) void flushDocument('lifecycle', true)
-      else void flushDocument('lifecycle', false)
     }
     document.addEventListener('visibilitychange', handleVisibility)
     window.addEventListener('pagehide', handlePageHide)
@@ -231,32 +261,40 @@ export default function Workspace() {
     if (storageReadyRef.current) setSaveState('saving')
   }
 
-  async function reloadStructure(bookId: string) {
+  async function reloadBookContent(bookId: string) {
     const entities = await listEntitiesByBook(bookId)
     const structural = entities.filter((entity): entity is StructuralEntity => ['act', 'chapter', 'scene'].includes(entity.type))
     setOutlineEntities(structural)
+    setNotes(entities.filter((entity): entity is NoteEntity => entity.type === 'note').sort((a, b) => b.updatedAt - a.updatedAt))
+    setCodexEntries(entities.filter((entity): entity is CodexEntryEntity => entity.type === 'codexEntry').sort((a, b) => a.title.localeCompare(b.title)))
+    setSummaryStates(await getSummaryStateMap(bookId))
     return structural
   }
 
-  async function loadScene(sceneId: string, closePanel = true) {
-    if (sceneId === activeSceneIdRef.current) {
+  async function loadDocument(documentId: string, closePanel = true) {
+    if (documentId === activeDocumentIdRef.current) {
       if (closePanel) setRightOpen(false)
       return
     }
     if (generationAbortRef.current) {
-      showToast('Stop generation before switching scenes.')
+      showToast('Stop generation before switching documents.')
       return
     }
-    await flushDocument('navigation', changedSinceSnapshotRef.current)
-    const scene = await getEntity<StructuralEntity>(sceneId)
-    if (!scene || scene.type !== 'scene') {
-      showToast('That scene is no longer available.')
+    if (changedSinceSnapshotRef.current) await flushDocument('navigation', true)
+    const document = await getEntity<ArcEntity>(documentId)
+    if (!document || !['scene', 'note', 'codexEntry', 'summary'].includes(document.type)) {
+      showToast('That document is no longer available.')
       return
     }
-    activeSceneIdRef.current = scene.id
-    setActiveSceneId(scene.id)
-    scenePovRef.current = typeof scene.pov === 'string' ? scene.pov : ''
-    const content = typeof scene.content === 'string' ? scene.content : ''
+    const editableDocument = document as EditableEntity
+    activeDocumentIdRef.current = editableDocument.id
+    setActiveDocument(editableDocument)
+    if (editableDocument.type === 'scene') {
+      activeSceneIdRef.current = editableDocument.id
+      setActiveSceneId(editableDocument.id)
+      scenePovRef.current = typeof editableDocument.pov === 'string' ? editableDocument.pov : ''
+    }
+    const content = typeof editableDocument.content === 'string' ? editableDocument.content : ''
     storyRef.current = content
     changedSinceSnapshotRef.current = false
     latestGenerationRequestRef.current = null
@@ -266,19 +304,25 @@ export default function Workspace() {
     if (closePanel) setRightOpen(false)
   }
 
+  async function loadScene(sceneId: string, closePanel = true) {
+    await loadDocument(sceneId, closePanel)
+  }
+
   async function openBook(bookId: string, preferredSceneId?: string) {
-    if (activeSceneIdRef.current && changedSinceSnapshotRef.current) await flushDocument('navigation', true)
+    if (activeDocumentIdRef.current && changedSinceSnapshotRef.current) await flushDocument('navigation', true)
     const book = await getEntity<BookEntity>(bookId)
     if (!book || book.type !== 'book') {
       showToast('That book is no longer available.')
       return
     }
-    const entities = await reloadStructure(bookId)
+    const entities = await reloadBookContent(bookId)
     const scene = entities.find((entity) => entity.id === preferredSceneId && entity.type === 'scene')
       ?? entities.find((entity) => entity.type === 'scene')
     setCurrentBook(book)
     bookTitleRef.current = book.title
     setExpandedIds(new Set(entities.filter((entity) => entity.type !== 'scene').map((entity) => entity.id)))
+    activeDocumentIdRef.current = null
+    setActiveDocument(null)
     activeSceneIdRef.current = null
     setActiveSceneId(null)
     storyRef.current = ''
@@ -317,6 +361,11 @@ export default function Workspace() {
     if (currentBook?.id === book.id) {
       setCurrentBook(null)
       setOutlineEntities([])
+      setNotes([])
+      setCodexEntries([])
+      setSummaryStates({})
+      activeDocumentIdRef.current = null
+      setActiveDocument(null)
       activeSceneIdRef.current = null
       setActiveSceneId(null)
     }
@@ -348,7 +397,7 @@ export default function Workspace() {
     try {
       const entity = await createStructuralEntity(type, currentBook.id, parentId)
       setExpandedIds((current) => new Set(current).add(parentId))
-      await reloadStructure(currentBook.id)
+      await reloadBookContent(currentBook.id)
       if (entity.type === 'scene') await loadScene(entity.id)
     } catch (error) {
       showToast(error instanceof Error ? error.message : `Could not create ${type}.`)
@@ -359,13 +408,13 @@ export default function Workspace() {
     const title = window.prompt(`${entity.type[0].toUpperCase()}${entity.type.slice(1)} title`, entity.title)
     if (title === null || !title.trim() || !currentBook) return
     await renameEntity(entity.id, title)
-    await reloadStructure(currentBook.id)
+    await reloadBookContent(currentBook.id)
   }
 
   async function moveOutlineEntity(entity: StructuralEntity, direction: -1 | 1) {
     if (!currentBook) return
     await moveStructuralEntity(entity.id, direction)
-    await reloadStructure(currentBook.id)
+    await reloadBookContent(currentBook.id)
   }
 
   async function removeOutlineEntity(entity: StructuralEntity) {
@@ -374,9 +423,11 @@ export default function Workspace() {
     const warning = nested ? ' All nested content will also be deleted.' : ''
     if (!window.confirm(`Delete “${entity.title}”?${warning} This cannot be undone.`)) return
     const removedIds = await deleteEntityTree(entity.id)
-    const entities = await reloadStructure(currentBook.id)
-    if (activeSceneIdRef.current && removedIds.includes(activeSceneIdRef.current)) {
+    const entities = await reloadBookContent(currentBook.id)
+    if (activeDocumentIdRef.current && removedIds.includes(activeDocumentIdRef.current)) {
       const nextScene = entities.find((candidate) => candidate.type === 'scene')
+      activeDocumentIdRef.current = null
+      setActiveDocument(null)
       activeSceneIdRef.current = null
       setActiveSceneId(null)
       storyRef.current = ''
@@ -385,6 +436,68 @@ export default function Workspace() {
       latestGenerationRequestRef.current = null
       if (nextScene) await loadScene(nextScene.id, false)
     }
+  }
+
+  async function openSummary(source: StructuralEntity) {
+    try {
+      const summary = await getOrCreateSummary(source)
+      await loadDocument(summary.id)
+      if (currentBook) setSummaryStates(await getSummaryStateMap(currentBook.id))
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not open the summary.')
+    }
+  }
+
+  async function addNote() {
+    if (!currentBook) return
+    try {
+      const note = await createNote(currentBook.id)
+      await reloadBookContent(currentBook.id)
+      await loadDocument(note.id)
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not create the note.')
+    }
+  }
+
+  async function addCodexEntry() {
+    if (!currentBook) return
+    try {
+      const entry = await createCodexEntry(currentBook.id)
+      await reloadBookContent(currentBook.id)
+      await loadDocument(entry.id)
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not create the Codex entry.')
+    }
+  }
+
+  async function renameContentEntity(entity: NoteEntity | CodexEntryEntity) {
+    const label = entity.type === 'note' ? 'Note title' : 'Codex entry name'
+    const title = window.prompt(label, entity.title)
+    if (title === null || !title.trim() || !currentBook) return
+    const updated = await renameEntity(entity.id, title) as NoteEntity | CodexEntryEntity
+    if (activeDocumentIdRef.current === updated.id) setActiveDocument(updated)
+    await reloadBookContent(currentBook.id)
+  }
+
+  async function removeContentEntity(entity: NoteEntity | CodexEntryEntity) {
+    if (!currentBook || !window.confirm(`Delete “${entity.title}”? This cannot be undone.`)) return
+    await deleteEntityTree(entity.id)
+    await reloadBookContent(currentBook.id)
+    if (activeDocumentIdRef.current === entity.id) {
+      activeDocumentIdRef.current = null
+      setActiveDocument(null)
+      storyRef.current = ''
+      setStoryMarkdown('')
+      changedSinceSnapshotRef.current = false
+      if (activeSceneIdRef.current) await loadScene(activeSceneIdRef.current, false)
+    }
+  }
+
+  async function changeCodexCategory(category: string) {
+    if (activeDocument?.type !== 'codexEntry' || !currentBook) return
+    const updated = await updateCodexCategory(activeDocument.id, category)
+    setActiveDocument(updated)
+    await reloadBookContent(currentBook.id)
   }
 
   function openSettings(from: Screen) {
@@ -413,6 +526,10 @@ export default function Workspace() {
 
     if (!currentBook) {
       showToast('Open a book before generating.')
+      return
+    }
+    if (activeDocument?.type !== 'scene') {
+      showToast('Story generation is available while editing a Scene.')
       return
     }
 
@@ -498,9 +615,71 @@ export default function Workspace() {
     }
   }
 
-  function generate() { void runGeneration('generate') }
+  async function runSummaryGeneration() {
+    if (generationAbortRef.current || !currentBook || activeDocument?.type !== 'summary') return
+    if (changedSinceSnapshotRef.current) await flushDocument('manual', true)
 
-  function regenerate() { void runGeneration('regenerate') }
+    const summary = await getEntity<SummaryEntity>(activeDocument.id)
+    if (!summary || summary.type !== 'summary') {
+      showToast('This summary is no longer available.')
+      return
+    }
+
+    let settings: AiSettings
+    try {
+      const defaults = loadAiSettings()
+      settings = await getBookAiSettings(currentBook.id, defaults.favorites)
+    } catch {
+      showToast('This book’s AI settings could not be loaded.')
+      return
+    }
+    if (settings.provider !== 'nanogpt' || !settings.apiKey.trim() || !settings.supportModel.trim()) {
+      showToast('Choose NanoGPT and a Support model in Book settings before summarizing.')
+      return
+    }
+
+    const source = await buildSummarySource(summary.sourceEntityId)
+    const controller = new AbortController()
+    generationAbortRef.current = controller
+    setGenerationActive(true)
+    let generated = ''
+    try {
+      await streamNanoGPTCompletion({
+        apiKey: settings.apiKey.trim(),
+        baseUrl: settings.baseUrl,
+        model: settings.supportModel,
+        systemPrompt: renderSummaryPrompt(settings.prompts.summarize, summary.sourceType, summary.content),
+        userMessage: `${summary.content.trim() ? `# Existing summary\n\n${summary.content.trim()}\n\n` : ''}# Source material\n\n${source.content}\n\nReturn only the updated summary as Markdown.`,
+      }, (chunk) => { generated += chunk }, controller.signal)
+      await createSnapshot(summary.id, 'generation', summary.content)
+      const saved = await saveSummaryContent(summary.id, generated, source.sourceRevision)
+      activeDocumentIdRef.current = saved.id
+      setActiveDocument(saved)
+      storyRef.current = saved.content
+      setStoryMarkdown(saved.content)
+      changedSinceSnapshotRef.current = false
+      setEditorRevision((revision) => revision + 1)
+      setSummaryStates(await getSummaryStateMap(currentBook.id))
+      setSaveState('saved')
+    } catch (error) {
+      if (!controller.signal.aborted && !(error instanceof DOMException && error.name === 'AbortError')) {
+        showToast(error instanceof Error ? error.message : 'Summary generation stopped unexpectedly.')
+      }
+    } finally {
+      generationAbortRef.current = null
+      setGenerationActive(false)
+    }
+  }
+
+  function generate() {
+    if (activeDocument?.type === 'summary') void runSummaryGeneration()
+    else void runGeneration('generate')
+  }
+
+  function regenerate() {
+    if (activeDocument?.type === 'summary') void runSummaryGeneration()
+    else void runGeneration('regenerate')
+  }
 
   function stopGeneration() { generationAbortRef.current?.abort() }
 
@@ -524,11 +703,29 @@ export default function Workspace() {
     })
   }
 
-  const activeScene = outlineEntities.find((entity) => entity.id === activeSceneId && entity.type === 'scene')
+  const activeScene = activeDocument?.type === 'scene'
+    ? activeDocument
+    : outlineEntities.find((entity) => entity.id === activeSceneId && entity.type === 'scene')
   const activeChapter = activeScene ? outlineEntities.find((entity) => entity.id === activeScene.parentId && entity.type === 'chapter') : undefined
   const activeAct = activeChapter ? outlineEntities.find((entity) => entity.id === activeChapter.parentId && entity.type === 'act') : undefined
-  const documentPath = ['Outline', activeAct?.title, activeChapter?.title, activeScene?.title].filter(Boolean).join(' / ')
-  const chapterNumber = String((activeChapter?.order ?? 0) + 1).padStart(2, '0')
+  const summarySource = activeDocument?.type === 'summary'
+    ? outlineEntities.find((entity) => entity.id === activeDocument.sourceEntityId)
+    : undefined
+  const documentPath = activeDocument?.type === 'note'
+    ? `Notes / ${activeDocument.title}`
+    : activeDocument?.type === 'codexEntry'
+      ? `Codex / ${activeDocument.category} / ${activeDocument.title}`
+      : activeDocument?.type === 'summary'
+        ? `Outline / ${summarySource?.title ?? 'Missing source'} / Summary`
+        : ['Outline', activeAct?.title, activeChapter?.title, activeDocument?.title].filter(Boolean).join(' / ')
+  const pageLabel = activeDocument?.type === 'note'
+    ? 'N'
+    : activeDocument?.type === 'codexEntry'
+      ? 'C'
+      : activeDocument?.type === 'summary'
+        ? 'Σ'
+        : String((activeChapter?.order ?? 0) + 1).padStart(2, '0')
+  const openSummaryState = summarySource ? summaryStates[summarySource.id] ?? 'missing' : 'missing'
 
   if (screen === 'settings') return <AiSettingsScreen
     book={returnScreen === 'home' || !currentBook ? undefined : { id: currentBook.id, title: currentBook.title }}
@@ -564,8 +761,10 @@ export default function Workspace() {
       {toast && <div className="app-toast" role="alert" key={toast.id}><span>{toast.message}</span><button type="button" onClick={() => setToast(null)} aria-label="Dismiss notification"><X aria-hidden="true" /></button></div>}
 
       {screen === 'editor' ? <article className="story-editor">
-        <small className="page-number">{chapterNumber}</small><p className="document-path">{documentPath || 'Outline / No scene selected'}</p>
-        {activeScene ? <MarkdownEditor key={activeScene.id} ref={editorRef} value={storyMarkdown} onChange={handleStoryChange} ariaLabel={`${activeScene.title} Markdown editor`} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No scene selected</strong><p>Create a chapter and scene from the Outline to begin writing.</p><button type="button" onClick={() => setRightOpen(true)}>Open Outline</button></div>}
+        <small className="page-number">{pageLabel}</small><p className="document-path">{documentPath || 'No document selected'}</p>
+        {(activeDocument?.type === 'note' || activeDocument?.type === 'codexEntry') && <div className="document-titlebar"><div><small>{activeDocument.type === 'note' ? 'Note' : activeDocument.category}</small><h1>{activeDocument.title}</h1></div><button type="button" onClick={() => { void renameContentEntity(activeDocument) }}><Pencil aria-hidden="true" /> Rename</button></div>}
+        {activeDocument?.type === 'codexEntry' && <div className="document-metadata"><label><span>Category</span><select value={activeDocument.category} onChange={(event) => { void changeCodexCategory(event.target.value) }}><option>Character</option><option>Place</option><option>Object</option><option>Event</option><option>Group</option><option>Other</option></select></label></div>}
+        {activeDocument ? <MarkdownEditor key={`${activeDocument.id}-${editorRevision}`} ref={editorRef} value={storyMarkdown} onChange={handleStoryChange} ariaLabel={`${activeDocument.title} Markdown editor`} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No document selected</strong><p>Choose a Scene, Note, Codex entry, or Summary from the book workspace.</p><button type="button" onClick={() => setRightOpen(true)}>Open Book Workspace</button></div>}
       </article> : <section className="conversation">
         <header><small>Book chat</small><h1>{activeChat}</h1><p>Context: Chapter 7 · Codex</p></header>
         <div className="messages">
@@ -576,14 +775,15 @@ export default function Workspace() {
         </div>
       </section>}
 
-      {screen === 'editor' && <div className="editor-bottom"><button type="button" onClick={() => setArcOpen(true)} aria-label="Open generation input"><PanelBottomOpen aria-hidden="true" /></button><GenerateControl isGenerating={generationActive} onGenerate={generate} onStop={stopGeneration} onMicro={insertEditorSpeech} onMicro2={insertPromptSpeech} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} /></div>}
-      {screen === 'editor' && arcOpen && <section className="arc-drawer"><div><small>ARC</small><span>Guide the next passage</span><button type="button" onClick={() => setArcOpen(false)} aria-label="Close Arc"><X aria-hidden="true" /></button></div><div className="arc-compose"><div className="arc-prompt-field"><ExpandableTextInput ref={promptRef} value={arcPrompt} onChange={setArcPrompt} aria-label="generation prompt" dialogTitle="Edit generation prompt" /><span aria-live="polite">{arcPrompt.length} characters</span></div><button className={`play ${generationActive ? 'generating' : ''}`} type="button" onClick={generationActive ? stopGeneration : generate} aria-label={generationActive ? 'Stop generation' : 'Generate'}>{generationActive ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" fill="currentColor" />}</button></div></section>}
+      {screen === 'editor' && activeDocument?.type === 'scene' && <div className="editor-bottom"><button type="button" onClick={() => setArcOpen(true)} aria-label="Open generation input"><PanelBottomOpen aria-hidden="true" /></button><GenerateControl isGenerating={generationActive} onGenerate={generate} onStop={stopGeneration} onMicro={insertEditorSpeech} onMicro2={insertPromptSpeech} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} /></div>}
+      {screen === 'editor' && activeDocument?.type === 'summary' && <div className="summary-generate-wrap"><button className="summary-generate" type="button" onClick={generationActive ? stopGeneration : generate}>{generationActive ? <Square aria-hidden="true" fill="currentColor" /> : <RefreshCw aria-hidden="true" />} {generationActive ? 'Stop' : openSummaryState === 'missing' ? 'Summarize' : 'Re-summarize'}</button></div>}
+      {screen === 'editor' && activeDocument?.type === 'scene' && arcOpen && <section className="arc-drawer"><div><small>ARC</small><span>Guide the next passage</span><button type="button" onClick={() => setArcOpen(false)} aria-label="Close Arc"><X aria-hidden="true" /></button></div><div className="arc-compose"><div className="arc-prompt-field"><ExpandableTextInput ref={promptRef} value={arcPrompt} onChange={setArcPrompt} aria-label="generation prompt" dialogTitle="Edit generation prompt" /><span aria-live="polite">{arcPrompt.length} characters</span></div><button className={`play ${generationActive ? 'generating' : ''}`} type="button" onClick={generationActive ? stopGeneration : generate} aria-label={generationActive ? 'Stop generation' : 'Generate'}>{generationActive ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" fill="currentColor" />}</button></div></section>}
       {screen === 'chat' && <section className="chat-composer"><small>Chapter 7 + Codex <ChevronDown aria-hidden="true" /></small><div><button type="button" aria-label="Dictate message"><Mic aria-hidden="true" /></button><textarea defaultValue="Compare Mara’s choice with what she promised Elias."/><button className="send" type="button" aria-label="Send message"><Send aria-hidden="true" fill="currentColor" /></button></div></section>}
 
       {rightOpen && <aside className="book-panel">
         <header><div><small>{formatSeries(currentBook)}</small><strong>{currentBook?.title ?? 'Untitled Book'}</strong></div><button type="button" onClick={() => setRightOpen(false)} aria-label="Close book workspace"><X aria-hidden="true" /></button></header>
         <nav>{([['book', Settings2], ['outline', BookOpenText], ['notes', NotebookPen], ['codex', WandSparkles], ['chat', MessageCircle]] as const).map(([tab, Icon]) => <button type="button" className={rightTab === tab ? 'active' : ''} onClick={() => { setRightTab(tab); if (tab === 'chat') setChatPanel(screen === 'chat' ? 'settings' : 'list') }} key={tab}><Icon aria-hidden="true" /><span>{tab}</span></button>)}</nav>
-        <div className="panel-content">{rightTab === 'book' ? <BookSettings book={currentBook} seriesOptions={bookList.map((book) => bookMetadata(book).series).filter(Boolean)} onSave={saveBookMetadata} onDelete={removeCurrentBookFromSettings} /> : rightTab === 'outline' ? <Outline book={currentBook} entities={outlineEntities} activeSceneId={activeSceneId} expandedIds={expandedIds} onToggle={(id) => setExpandedIds((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })} onOpenScene={(id) => { void loadScene(id) }} onCreate={(type, parentId) => { void addOutlineEntity(type, parentId) }} onRename={(entity) => { void editOutlineTitle(entity) }} onMove={(entity, direction) => { void moveOutlineEntity(entity, direction) }} onDelete={(entity) => { void removeOutlineEntity(entity) }} /> : rightTab === 'notes' ? <Notes /> : rightTab === 'codex' ? <Codex /> : chatPanel === 'list' ? <ChatList onOpen={openChat} activeChat={screen === 'chat' ? activeChat : ''} onSettings={() => setChatPanel('settings')} /> : <ChatSettings title={activeChat} onBack={() => setChatPanel('list')} />}</div>
+        <div className="panel-content">{rightTab === 'book' ? <BookSettings book={currentBook} seriesOptions={bookList.map((book) => bookMetadata(book).series).filter(Boolean)} onSave={saveBookMetadata} onDelete={removeCurrentBookFromSettings} /> : rightTab === 'outline' ? <Outline book={currentBook} entities={outlineEntities} activeSceneId={activeSceneId} summaryStates={summaryStates} expandedIds={expandedIds} onToggle={(id) => setExpandedIds((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })} onOpenScene={(id) => { void loadScene(id) }} onOpenSummary={(entity) => { void openSummary(entity) }} onCreate={(type, parentId) => { void addOutlineEntity(type, parentId) }} onRename={(entity) => { void editOutlineTitle(entity) }} onMove={(entity, direction) => { void moveOutlineEntity(entity, direction) }} onDelete={(entity) => { void removeOutlineEntity(entity) }} /> : rightTab === 'notes' ? <Notes notes={notes} activeId={activeDocument?.type === 'note' ? activeDocument.id : null} onCreate={() => { void addNote() }} onOpen={(id) => { void loadDocument(id) }} onRename={(entity) => { void renameContentEntity(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> : rightTab === 'codex' ? <Codex entries={codexEntries} activeId={activeDocument?.type === 'codexEntry' ? activeDocument.id : null} onCreate={() => { void addCodexEntry() }} onOpen={(id) => { void loadDocument(id) }} onRename={(entity) => { void renameContentEntity(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> : chatPanel === 'list' ? <ChatList onOpen={openChat} activeChat={screen === 'chat' ? activeChat : ''} onSettings={() => setChatPanel('settings')} /> : <ChatSettings title={activeChat} onBack={() => setChatPanel('list')} />}</div>
       </aside>}
     </main>
   )
@@ -646,7 +846,7 @@ function GenerateControl({ isGenerating, onGenerate, onStop, onMicro, onMicro2, 
 }
 
 function MessageActions({ user = false }: { user?: boolean }) { return <div className="message-tools"><button type="button"><Pencil aria-hidden="true" /> Edit</button>{!user && <><button type="button"><GitFork aria-hidden="true" /> Fork</button><button type="button"><Volume2 aria-hidden="true" /> Read aloud</button><button type="button"><RefreshCw aria-hidden="true" /> Regenerate</button></>}<button type="button"><Trash2 aria-hidden="true" /> Delete</button></div> }
-function SummaryIcon({ state }: { state: 'complete' | 'outdated' | 'missing' }) { const Icon = state === 'complete' ? FileText : state === 'outdated' ? RefreshCw : FileQuestion; return <button className={`summary-status ${state}`} type="button" aria-label={`${state} summary`} title={`${state[0].toUpperCase()}${state.slice(1)} summary`}><Icon aria-hidden="true" /></button> }
+function SummaryIcon({ state, onOpen }: { state: SummaryState; onOpen: () => void }) { const Icon = state === 'current' ? FileText : state === 'outdated' ? RefreshCw : FileQuestion; return <button className={`summary-status ${state}`} type="button" onClick={onOpen} aria-label={`Open ${state} summary`} title={`${state[0].toUpperCase()}${state.slice(1)} summary`}><Icon aria-hidden="true" /></button> }
 function formatEdited(updatedAt: number) {
   const minutes = Math.max(0, Math.round((Date.now() - updatedAt) / 60_000))
   if (minutes < 1) return 'Edited just now'
@@ -774,16 +974,18 @@ type OutlineProps = {
   book: BookEntity | null
   entities: StructuralEntity[]
   activeSceneId: string | null
+  summaryStates: Record<string, SummaryState>
   expandedIds: Set<string>
   onToggle: (id: string) => void
   onOpenScene: (id: string) => void
+  onOpenSummary: (entity: StructuralEntity) => void
   onCreate: (type: StructuralEntityType, parentId: string) => void
   onRename: (entity: StructuralEntity) => void
   onMove: (entity: StructuralEntity, direction: -1 | 1) => void
   onDelete: (entity: StructuralEntity) => void
 }
 
-function Outline({ book, entities, activeSceneId, expandedIds, onToggle, onOpenScene, onCreate, onRename, onMove, onDelete }: OutlineProps) {
+function Outline({ book, entities, activeSceneId, summaryStates, expandedIds, onToggle, onOpenScene, onOpenSummary, onCreate, onRename, onMove, onDelete }: OutlineProps) {
   if (!book) return <section className="outline-empty"><BookOpenText aria-hidden="true" /><p>Create or open a book to see its outline.</p></section>
   const children = (parentId: string, type: StructuralEntityType) => entities
     .filter((entity) => entity.parentId === parentId && entity.type === type)
@@ -795,8 +997,8 @@ function Outline({ book, entities, activeSceneId, expandedIds, onToggle, onOpenS
     const scenes = children(chapter.id, 'scene')
     const open = expandedIds.has(chapter.id)
     return <div className="outline-branch" key={chapter.id}>
-      <OutlineRow entity={chapter} label={`Chapter ${index + 1}`} expanded={open} expandable onToggle={onToggle} onOpenScene={onOpenScene} onCreate={onCreate} onRename={onRename} onMove={onMove} onDelete={onDelete} first={index === 0} last={index === count - 1} />
-      {open && <div className="tree-children">{scenes.length ? scenes.map((scene, sceneIndex) => <OutlineRow key={scene.id} entity={scene} label={`Scene ${sceneIndex + 1}`} selected={activeSceneId === scene.id} onToggle={onToggle} onOpenScene={onOpenScene} onCreate={onCreate} onRename={onRename} onMove={onMove} onDelete={onDelete} first={sceneIndex === 0} last={sceneIndex === scenes.length - 1} />) : <p className="tree-empty">No scenes yet</p>}</div>}
+      <OutlineRow entity={chapter} label={`Chapter ${index + 1}`} summaryState={summaryStates[chapter.id] ?? 'missing'} expanded={open} expandable onToggle={onToggle} onOpenScene={onOpenScene} onOpenSummary={onOpenSummary} onCreate={onCreate} onRename={onRename} onMove={onMove} onDelete={onDelete} first={index === 0} last={index === count - 1} />
+      {open && <div className="tree-children">{scenes.length ? scenes.map((scene, sceneIndex) => <OutlineRow key={scene.id} entity={scene} label={`Scene ${sceneIndex + 1}`} summaryState={summaryStates[scene.id] ?? 'missing'} selected={activeSceneId === scene.id} onToggle={onToggle} onOpenScene={onOpenScene} onOpenSummary={onOpenSummary} onCreate={onCreate} onRename={onRename} onMove={onMove} onDelete={onDelete} first={sceneIndex === 0} last={sceneIndex === scenes.length - 1} />) : <p className="tree-empty">No scenes yet</p>}</div>}
     </div>
   }
 
@@ -808,7 +1010,7 @@ function Outline({ book, entities, activeSceneId, expandedIds, onToggle, onOpenS
         const chapters = children(act.id, 'chapter')
         const open = expandedIds.has(act.id)
         return <div className="outline-branch" key={act.id}>
-          <OutlineRow entity={act} label={`Act ${actIndex + 1}`} expanded={open} expandable onToggle={onToggle} onOpenScene={onOpenScene} onCreate={onCreate} onRename={onRename} onMove={onMove} onDelete={onDelete} first={actIndex === 0} last={actIndex === acts.length - 1} />
+          <OutlineRow entity={act} label={`Act ${actIndex + 1}`} summaryState={summaryStates[act.id] ?? 'missing'} expanded={open} expandable onToggle={onToggle} onOpenScene={onOpenScene} onOpenSummary={onOpenSummary} onCreate={onCreate} onRename={onRename} onMove={onMove} onDelete={onDelete} first={actIndex === 0} last={actIndex === acts.length - 1} />
           {open && <div className="tree-children">{chapters.length ? chapters.map((chapter, chapterIndex) => renderChapter(chapter, chapterIndex, chapters.length)) : <p className="tree-empty">No chapters yet</p>}</div>}
         </div>
       })}
@@ -818,9 +1020,10 @@ function Outline({ book, entities, activeSceneId, expandedIds, onToggle, onOpenS
   </section>
 }
 
-function OutlineRow({ entity, label, selected = false, expandable = false, expanded = false, first, last, onToggle, onOpenScene, onCreate, onRename, onMove, onDelete }: {
+function OutlineRow({ entity, label, summaryState, selected = false, expandable = false, expanded = false, first, last, onToggle, onOpenScene, onOpenSummary, onCreate, onRename, onMove, onDelete }: {
   entity: StructuralEntity
   label: string
+  summaryState: SummaryState
   selected?: boolean
   expandable?: boolean
   expanded?: boolean
@@ -828,6 +1031,7 @@ function OutlineRow({ entity, label, selected = false, expandable = false, expan
   last: boolean
   onToggle: (id: string) => void
   onOpenScene: (id: string) => void
+  onOpenSummary: (entity: StructuralEntity) => void
   onCreate: (type: StructuralEntityType, parentId: string) => void
   onRename: (entity: StructuralEntity) => void
   onMove: (entity: StructuralEntity, direction: -1 | 1) => void
@@ -836,7 +1040,7 @@ function OutlineRow({ entity, label, selected = false, expandable = false, expan
   return <div className={`outline-row ${selected ? 'selected' : ''}`}>
     {expandable ? <button className="tree-toggle" type="button" onClick={() => onToggle(entity.id)} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${entity.title}`}>{expanded ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}</button> : <span className="tree-spacer" />}
     <button className="tree-label" type="button" onClick={() => entity.type === 'scene' ? onOpenScene(entity.id) : onToggle(entity.id)}><small>{label}</small><span>{entity.title}</span></button>
-    <SummaryIcon state="missing" />
+    <SummaryIcon state={summaryState} onOpen={() => onOpenSummary(entity)} />
     <div className="outline-actions">
       {entity.type === 'act' && <button type="button" onClick={() => onCreate('chapter', entity.id)} aria-label={`Add chapter to ${entity.title}`} title="Add chapter"><Plus aria-hidden="true" /></button>}
       {entity.type === 'chapter' && <button type="button" onClick={() => onCreate('scene', entity.id)} aria-label={`Add scene to ${entity.title}`} title="Add scene"><Plus aria-hidden="true" /></button>}
@@ -847,7 +1051,34 @@ function OutlineRow({ entity, label, selected = false, expandable = false, expan
     </div>
   </div>
 }
-function Notes() { return <section><div className="panel-title"><div><small>Reference</small><h2>Notes</h2></div><button type="button" aria-label="Add note"><Plus aria-hidden="true" /></button></div><input className="panel-search" placeholder="Search notes"/>{['Rules of the remembered doors','Questions for Act II','Images of the drowned city','Father’s timeline'].map((note) => <button className="list-row" key={note}><NotebookPen aria-hidden="true" /><span>{note}<small>Edited recently</small></span><ChevronRight aria-hidden="true" /></button>)}</section> }
-function Codex() { return <section><div className="panel-title"><div><small>Book knowledge</small><h2>Codex</h2></div><button type="button"><Plus aria-hidden="true" /> New</button></div><input className="panel-search" placeholder="Search the Codex"/><div className="chips"><button>All</button><button>Characters</button><button>Places</button></div>{[['M','Mara Vale','Character'],['D','The Drowned Quarter','Place'],['B','Brass Compass','Object']].map(([letter,title,type]) => <button className="codex-row" key={title}><i>{letter}</i><span><small>{type}</small>{title}</span><ChevronRight aria-hidden="true" /></button>)}</section> }
+function Notes({ notes, activeId, onCreate, onOpen, onRename, onDelete }: {
+  notes: NoteEntity[]
+  activeId: string | null
+  onCreate: () => void
+  onOpen: (id: string) => void
+  onRename: (entity: NoteEntity) => void
+  onDelete: (entity: NoteEntity) => void
+}) {
+  const [query, setQuery] = useState('')
+  const normalizedQuery = query.trim().toLowerCase()
+  const visible = notes.filter((note) => !normalizedQuery || `${note.title} ${note.content}`.toLowerCase().includes(normalizedQuery))
+  return <section><div className="panel-title"><div><small>Reference</small><h2>Notes</h2></div><button type="button" onClick={onCreate} aria-label="Add note"><Plus aria-hidden="true" /> New</button></div><input className="panel-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search notes"/>{visible.length ? visible.map((note) => <article className={`content-row ${activeId === note.id ? 'selected' : ''}`} key={note.id}><button className="content-open" type="button" onClick={() => onOpen(note.id)}><NotebookPen aria-hidden="true" /><span><strong>{note.title}</strong><small>{formatEdited(note.updatedAt)}</small></span><ChevronRight aria-hidden="true" /></button><div className="content-actions"><button type="button" onClick={() => onRename(note)} aria-label={`Rename ${note.title}`}><Pencil aria-hidden="true" /></button><button type="button" onClick={() => onDelete(note)} aria-label={`Delete ${note.title}`}><Trash2 aria-hidden="true" /></button></div></article>) : <p className="content-empty">{query ? 'No matching notes.' : 'No notes yet.'}</p>}</section>
+}
+
+function Codex({ entries, activeId, onCreate, onOpen, onRename, onDelete }: {
+  entries: CodexEntryEntity[]
+  activeId: string | null
+  onCreate: () => void
+  onOpen: (id: string) => void
+  onRename: (entity: CodexEntryEntity) => void
+  onDelete: (entity: CodexEntryEntity) => void
+}) {
+  const [query, setQuery] = useState('')
+  const [category, setCategory] = useState('All')
+  const categories = ['All', ...new Set(entries.map((entry) => entry.category))]
+  const normalizedQuery = query.trim().toLowerCase()
+  const visible = entries.filter((entry) => (category === 'All' || entry.category === category) && (!normalizedQuery || `${entry.title} ${entry.content}`.toLowerCase().includes(normalizedQuery)))
+  return <section><div className="panel-title"><div><small>Book knowledge</small><h2>Codex</h2></div><button type="button" onClick={onCreate}><Plus aria-hidden="true" /> New</button></div><input className="panel-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search the Codex"/><div className="chips category-filter">{categories.map((item) => <button className={category === item ? 'active' : ''} type="button" onClick={() => setCategory(item)} key={item}>{item}</button>)}</div>{visible.length ? visible.map((entry) => <article className={`content-row codex-content-row ${activeId === entry.id ? 'selected' : ''}`} key={entry.id}><button className="content-open" type="button" onClick={() => onOpen(entry.id)}><i>{entry.title.slice(0, 1).toUpperCase()}</i><span><small>{entry.category}</small><strong>{entry.title}</strong></span><ChevronRight aria-hidden="true" /></button><div className="content-actions"><button type="button" onClick={() => onRename(entry)} aria-label={`Rename ${entry.title}`}><Pencil aria-hidden="true" /></button><button type="button" onClick={() => onDelete(entry)} aria-label={`Delete ${entry.title}`}><Trash2 aria-hidden="true" /></button></div></article>) : <p className="content-empty">{query || category !== 'All' ? 'No matching entries.' : 'No Codex entries yet.'}</p>}</section>
+}
 function ChatList({onOpen,activeChat,onSettings}:{onOpen:(title:string)=>void;activeChat:string;onSettings:()=>void}) { return <section><div className="panel-title"><div><small>Conversations</small><h2>Chats</h2></div><button type="button" aria-label="Start new chat"><Plus aria-hidden="true" /></button></div>{activeChat && <button className="current-chat" onClick={onSettings}><Settings2 aria-hidden="true" /><span><small>Current chat</small>{activeChat} settings</span><ChevronRight aria-hidden="true" /></button>}<input className="panel-search" placeholder="Search chats"/>{chats.map(([title,preview,time]) => <button className="chat-row" key={title} onClick={() => onOpen(title)}><i><MessageCircle aria-hidden="true" /></i><span><strong>{title}</strong><small>{preview}</small></span><em>{time}</em></button>)}</section> }
 function ChatSettings({title,onBack}:{title:string;onBack:()=>void}) { return <section><button className="back-list" onClick={onBack}><ArrowLeft aria-hidden="true" /> All chats</button><div className="panel-title"><div><small>Current chat</small><h2>{title}</h2></div></div><label className="panel-field"><span>System prompt</span><textarea defaultValue="You are a thoughtful story collaborator. Use only selected book context."/></label><label className="panel-field"><span>Model</span><select><option>Claude 3.7 Sonnet</option><option>GPT-4.1</option></select></label><label className="thinking"><span>Thinking<small>Allow longer internal reasoning</small></span><input type="checkbox" defaultChecked/></label><label className="panel-field"><span>Context</span><div className="chips"><button>Chapter 7 <X aria-hidden="true" /></button><button>Codex <X aria-hidden="true" /></button><button><Plus aria-hidden="true" /> Add</button></div></label></section> }
