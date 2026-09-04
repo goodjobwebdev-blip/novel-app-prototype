@@ -140,3 +140,44 @@ button:focus-visible { outline:3px solid rgba(198,168,107,.3); outline-offset:2p
   .library-grid { grid-template-columns:repeat(4,minmax(0,1fr)); gap:28px 20px; }.setup-warning { grid-template-columns:38px minmax(0,1fr) auto; }.setup-warning button { grid-column:auto; padding:0 13px; }.book-panel { left:auto; width:min(470px,44vw); box-shadow:-24px 0 60px rgba(0,0,0,.5); }.panel-content { padding:22px; }
 }
 @media (max-width:390px) { .library-title > button { width:46px; padding:0; }.library-title > button span { display:none; }.message-tools button { padding:0 5px; }.message.bot.no-thumb { margin-left:0; } }
+
+/* Persisted library and outline */
+.library-book-card { position:relative; min-width:0; }
+.library-book-card .library-book { width:100%; }
+.library-book-actions { position:absolute; top:7px; right:7px; display:flex; gap:5px; }
+.library-book-actions button { width:34px; height:34px; padding:0; border:1px solid rgba(255,255,255,.14); border-radius:50%; background:rgba(10,11,10,.72); backdrop-filter:blur(10px); display:grid; place-items:center; cursor:pointer; }
+.library-book-actions button svg { width:14px; height:14px; }
+.library-book-actions button:last-child { color:var(--danger); }
+
+.outline-create { margin:-7px 0 15px; display:flex; gap:7px; }
+.outline-create button { min-height:36px; padding:0 11px; border:1px solid var(--line); border-radius:18px; background:rgba(255,255,255,.035); color:var(--soft); display:inline-flex; align-items:center; gap:5px; font-size:11px; cursor:pointer; }
+.outline-create button svg { width:14px; height:14px; }
+.tree .outline-branch,.tree > .direct-chapters { margin:0; padding:0; border:0; }
+.tree .tree-children { margin-left:13px; padding-left:9px; border-left:1px solid var(--line); }
+.outline-row { min-height:52px; margin:3px 0; padding:5px 4px; border:1px solid transparent; border-radius:11px; display:grid; grid-template-columns:18px minmax(0,1fr) 28px; align-items:center; gap:4px; }
+.outline-row.selected { border-color:rgba(198,168,107,.24); background:rgba(198,168,107,.065); }
+.tree-toggle,.tree-label { padding:0; border:0; background:transparent; text-align:left; cursor:pointer; }
+.tree-toggle { width:18px; height:34px; display:grid; place-items:center; color:var(--soft); }
+.tree-toggle svg { width:14px; height:14px; }
+.tree-spacer { width:18px; }
+.tree-label { min-width:0; }
+.tree-label small,.tree-label span { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tree-label small { margin-bottom:2px; color:var(--faint); font:9px ui-sans-serif,system-ui; text-transform:uppercase; }
+.tree-label span { font:16px var(--serif); }
+.outline-row > .summary-status { justify-self:end; }
+.outline-actions { grid-column:2/4; min-width:0; padding-top:3px; display:flex; justify-content:flex-end; gap:2px; }
+.outline-actions button { width:29px; height:29px; padding:0; border:0; border-radius:8px; background:transparent; color:var(--faint); display:grid; place-items:center; cursor:pointer; }
+.outline-actions button:hover,.outline-actions button:focus-visible { background:rgba(255,255,255,.055); color:var(--soft); }
+.outline-actions button:disabled { opacity:.2; cursor:default; }
+.outline-actions button.delete { color:var(--danger); }
+.outline-actions button svg { width:13px; height:13px; }
+.tree-empty { margin:4px 0 8px; padding:9px; color:var(--faint); font-size:10px; font-style:italic; }
+.tree-group-label { display:block; margin:17px 4px 7px; color:var(--accent); font-size:9px; letter-spacing:.1em; text-transform:uppercase; }
+.outline-empty { min-height:190px; padding:30px 18px; display:grid; place-content:center; justify-items:center; text-align:center; color:var(--faint); }
+.outline-empty svg { width:24px; height:24px; margin-bottom:8px; color:var(--accent); }
+.outline-empty p { margin:0; font-size:11px; line-height:1.5; }
+.empty-editor { min-height:45vh; display:grid; place-content:center; justify-items:center; text-align:center; color:var(--faint); font-family:ui-sans-serif,system-ui; }
+.empty-editor > svg { width:26px; height:26px; margin-bottom:12px; color:var(--accent); }
+.empty-editor strong { color:var(--ink); font:500 22px var(--serif); }
+.empty-editor p { max-width:300px; margin:7px 0 15px; font-size:12px; line-height:1.5; }
+.empty-editor button { min-height:40px; padding:0 13px; border:1px solid var(--line); border-radius:20px; background:rgba(255,255,255,.04); cursor:pointer; }
