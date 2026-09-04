@@ -12,6 +12,10 @@ export type NanoGPTGenerationRequest = {
   userMessage?: string
 }
 
+export type NanoGPTStreamLifecycle = {
+  onResponse?: () => void
+}
+
 const templateValues = (values: StoryPromptValues): Record<string, string> => ({
   'book.title': values.bookTitle,
   'scene.text': values.sceneText,
@@ -64,6 +68,7 @@ export async function streamNanoGPTCompletion(
   request: NanoGPTGenerationRequest,
   onChunk: (text: string) => void,
   signal: AbortSignal,
+  lifecycle: NanoGPTStreamLifecycle = {},
 ) {
   const messages = [{ role: 'system', content: request.systemPrompt }]
   if (request.userMessage?.trim()) messages.push({ role: 'user', content: request.userMessage })
@@ -84,6 +89,7 @@ export async function streamNanoGPTCompletion(
     throw new Error(providerError(response.status, payload, request.apiKey))
   }
   if (!response.body) throw new Error('NanoGPT returned an empty streaming response.')
+  lifecycle.onResponse?.()
 
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
