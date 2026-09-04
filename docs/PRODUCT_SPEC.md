@@ -115,7 +115,8 @@ Implemented as working behavior:
 - persisted current-book metadata in the right-side Book tab;
 - persisted books, acts, chapters, scenes, navigation, autosave, and local document snapshots;
 - persisted Scene, Chapter, and Act summaries with freshness tracking and Support-model generation;
-- persisted, searchable Notes and categorized Codex entries using the shared Markdown editor.
+- persisted, searchable Notes and categorized Codex entries using the shared Markdown editor;
+- persisted book/scene context choices, structured generation context assembly, and Main-model-derived context budgets.
 
 Implemented as interactive UI prototypes or placeholders:
 
@@ -125,7 +126,7 @@ Implemented as interactive UI prototypes or placeholders:
 - Arc drawer and generation controls;
 - chat history, chat settings, messages, editing states, and composer.
 
-The prototype is not yet an MVP. Chats are not yet backed by the planned IndexedDB data model, and the generation context builder is still pending.
+The prototype is not yet an MVP. Chats are not yet backed by the planned IndexedDB data model.
 
 ## Not decided yet
 
@@ -135,7 +136,6 @@ The prototype is not yet an MVP. Chats are not yet backed by the planned Indexed
 - Export and import file formats
 - Cloud synchronization or a backend
 - Exact prompt-template parser and escaping rules
-- Final context formatting and model-specific budgeting heuristics
 - Provider-specific capability normalization
 - Final light themes and custom-theme persistence
 
