@@ -107,7 +107,7 @@ export const defaultBookContextSettings: BookContextSettings = {
     scene: { ...defaultGenerationContextProfile, includePreviousSceneWhenEmpty: true },
     codex: { ...defaultGenerationContextProfile, includeLastScene: true },
     note: { ...defaultGenerationContextProfile },
-    chat: { ...defaultGenerationContextProfile },
+    chat: { ...defaultGenerationContextProfile, includeLastScene: true },
   },
 }
 
@@ -130,7 +130,7 @@ function normalizeBookContextSettings(value?: Partial<BookContextSettings>): Boo
       scene: normalizeContextProfile(profiles.scene, { includePreviousSceneWhenEmpty: true }),
       codex: normalizeContextProfile(profiles.codex, { includeLastScene: true }),
       note: normalizeContextProfile(profiles.note),
-      chat: normalizeContextProfile(profiles.chat),
+      chat: normalizeContextProfile(profiles.chat, { includeLastScene: true }),
     },
   }
 }

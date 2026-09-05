@@ -90,7 +90,7 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
   const automaticFullIds = new Set<string>()
   if (options.type === 'scene' && options.currentSceneId) automaticFullIds.add(options.currentSceneId)
   if (previousSceneText && previousScene?.id) automaticFullIds.add(previousScene.id)
-  if (options.type === 'codex' && options.profile.includeLastScene && options.currentSceneId) automaticFullIds.add(options.currentSceneId)
+  if ((options.type === 'codex' || options.type === 'chat') && options.profile.includeLastScene && options.currentSceneId) automaticFullIds.add(options.currentSceneId)
 
   const selectedSceneIds = new Set<string>()
   outline.filter((item) => options.profile.structuralIds.includes(item.id)).forEach((item) => descendantScenes(item, outline).forEach((scene) => {
@@ -114,8 +114,8 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
     previousSceneText,
     previousSceneTitle: previousSceneText ? previousScene?.title ?? '' : '',
     summaryContext: automatic.text,
-    lastSceneText: options.type === 'codex' && options.profile.includeLastScene ? String(currentScene?.content ?? '') : '',
-    lastSceneTitle: options.type === 'codex' && options.profile.includeLastScene ? currentScene?.title ?? '' : '',
+    lastSceneText: (options.type === 'codex' || options.type === 'chat') && options.profile.includeLastScene ? String(currentScene?.content ?? '') : '',
+    lastSceneTitle: (options.type === 'codex' || options.type === 'chat') && options.profile.includeLastScene ? currentScene?.title ?? '' : '',
     additionalContext: [...fullSections, ...summarySections, ...notes, ...codex].join('\n\n'),
   }
 }
