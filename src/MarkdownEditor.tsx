@@ -22,7 +22,7 @@ type MarkdownEditorProps = {
 }
 
 export type MarkdownEditorHandle = {
-  beginGeneration: (mode?: 'generate' | 'regenerate') => GenerationContext | null
+  beginGeneration: (mode?: 'generate' | 'regenerate', placement?: 'append' | 'replace') => GenerationContext | null
   appendGenerationChunk: (text: string) => boolean
   finishGeneration: (status: GenerationStatus) => GenerationResult | null
   insertSpeech: () => boolean
@@ -56,6 +56,7 @@ type ActiveGeneration = {
   generatedFrom: number
   generatedTo: number
   resultDocument: string
+  placement: 'append' | 'replace'
 }
 
 const SPEECH_TEXT = 'speech placeholder'
@@ -267,19 +268,21 @@ function beginGeneration(
   view: EditorView,
   mode: 'generate' | 'regenerate',
   latest: GenerationRecord | null,
+  placement: 'append' | 'replace',
 ): ActiveGeneration | null {
   const current = view.state.doc.toString()
   if (mode === 'regenerate') {
     if (!latest || current !== latest.resultDocument) return null
     return {
       mode,
-      preDocument: latest.preDocument,
+      preDocument: placement === 'replace' ? current : latest.preDocument,
       insertionPosition: latest.insertionPosition,
       historyTime: Date.now(),
       generatedText: '',
       generatedFrom: latest.insertionPosition,
       generatedTo: latest.insertionPosition,
       resultDocument: current,
+      placement,
     }
   }
 
@@ -293,6 +296,7 @@ function beginGeneration(
     generatedFrom: position,
     generatedTo: position,
     resultDocument: current,
+    placement,
   }
 }
 
@@ -307,6 +311,18 @@ function appendGenerationChunk(view: EditorView, session: ActiveGeneration, text
   ]
 
   if (!session.generatedText) {
+    if (session.placement === 'replace') {
+      view.dispatch({
+        changes: { from: 0, to: current.length, insert: text },
+        effects: setGenerationHighlight.of({ from: 0, to: text.length, active: true }),
+        annotations: [Transaction.addToHistory.of(false)],
+      })
+      session.generatedFrom = 0
+      session.generatedTo = text.length
+      session.generatedText = text
+      session.resultDocument = text
+      return true
+    }
     const { beforeSeparator, afterSeparator } = generationSeparators(session.preDocument, session.insertionPosition)
     const insertion = `${beforeSeparator}${text}${afterSeparator}`
     const generatedFrom = session.insertionPosition + beforeSeparator.length
@@ -331,7 +347,7 @@ function appendGenerationChunk(view: EditorView, session: ActiveGeneration, text
   view.dispatch({
     changes: { from: session.generatedTo, insert: text },
     effects: setGenerationHighlight.of({ from: session.generatedFrom, to: generatedTo, active: true }),
-    annotations,
+    annotations: session.placement === 'replace' ? [Transaction.addToHistory.of(false)] : annotations,
   })
   session.generatedText += text
   session.generatedTo = generatedTo
@@ -358,10 +374,10 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
   useEffect(() => { onChangeRef.current = onChange }, [onChange])
 
   useImperativeHandle(ref, () => ({
-    beginGeneration: (mode = 'generate') => {
+    beginGeneration: (mode = 'generate', placement = 'append') => {
       const view = viewRef.current
       if (!view || activeGenerationRef.current) return null
-      const session = beginGeneration(view, mode, latestGenerationRef.current)
+      const session = beginGeneration(view, mode, latestGenerationRef.current, placement)
       if (!session) return null
       view.dispatch({ effects: setGenerationHighlight.of(null) })
       activeGenerationRef.current = session
@@ -376,10 +392,28 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       const session = activeGenerationRef.current
       activeGenerationRef.current = null
       if (!session?.generatedText) return null
-      viewRef.current?.dispatch({
-        effects: setGenerationHighlight.of({ from: session.generatedFrom, to: session.generatedTo, active: false }),
-        annotations: isolateHistory.of('before'),
-      })
+      if (session.placement === 'replace') {
+        const view = viewRef.current
+        if (!view) return null
+        const generated = session.resultDocument
+        const current = view.state.doc.toString()
+        view.dispatch({ changes: { from: 0, to: current.length, insert: session.preDocument }, annotations: Transaction.addToHistory.of(false) })
+        if (status === 'complete') {
+          view.dispatch({
+            changes: { from: 0, to: session.preDocument.length, insert: generated },
+            effects: setGenerationHighlight.of({ from: 0, to: generated.length, active: false }),
+            annotations: [Transaction.time.of(session.historyTime), Transaction.userEvent.of('input.type.generate'), isolateHistory.of('full')],
+          })
+          session.resultDocument = generated
+        } else {
+          view.dispatch({ effects: setGenerationHighlight.of(null), annotations: Transaction.addToHistory.of(false) })
+          session.resultDocument = session.preDocument
+        }
+      }
+      if (session.placement === 'append') viewRef.current?.dispatch({
+          effects: setGenerationHighlight.of({ from: session.generatedFrom, to: session.generatedTo, active: false }),
+          annotations: isolateHistory.of('before'),
+        })
       const result: GenerationRecord = {
         preDocument: session.preDocument,
         sceneText: session.preDocument,
@@ -388,7 +422,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
         generatedText: session.generatedText,
         status,
       }
-      latestGenerationRef.current = result
+      if (status === 'complete') latestGenerationRef.current = result
       return result
     },
     insertSpeech: () => viewRef.current ? insertAtSelection(viewRef.current, SPEECH_TEXT) : false,
