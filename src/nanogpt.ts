@@ -42,6 +42,9 @@ export type NanoGPTStreamMetadata = {
   totalTokens?: number
 }
 
+const STORY_BOOK_CONTEXT_SEPARATOR = '\n\n<<<ARC_STORY_BOOK_CONTEXT_V1>>>\n\n'
+const STORY_SCENE_CONTEXT_SEPARATOR = '\n\n<<<ARC_STORY_SCENE_CONTEXT_V1>>>\n\n'
+
 const templateValues = (values: StoryPromptValues): Record<string, string> => ({
   ...bookTemplateValues(values.book),
   'scene.text': values.sceneText,
@@ -51,8 +54,37 @@ const templateValues = (values: StoryPromptValues): Record<string, string> => ({
   'additional_context': values.additionalContext ?? '',
 })
 
+function storyTemplateEmbedsContext(template: string) {
+  return /{{\s*(?:book\.[\w.]+|scene\.[\w.]+|additional_context)\s*}}/.test(template)
+}
+
+function storyBookContext(values: StoryPromptValues) {
+  const lines = ['# Book context']
+  if (values.book.title.trim()) lines.push(`Title: ${values.book.title}`)
+  if (values.book.series.trim()) lines.push(`Series: ${values.book.series}`)
+  if (values.book.seriesOrder.trim()) lines.push(`Series position: Book ${values.book.seriesOrder}`)
+  if (values.book.overview.trim()) lines.push(`Overview: ${values.book.overview}`)
+  if (values.book.genre.trim()) lines.push(`Genre: ${values.book.genre}`)
+  if (values.book.style.trim()) lines.push(`Book-level style guidance: ${values.book.style}`)
+  if (values.book.pov.trim()) lines.push(`Default point of view: ${values.book.pov}`)
+  if (values.book.tense.trim()) lines.push(`Default narrative tense: ${values.book.tense}`)
+  if (values.book.language.trim()) lines.push(`Language: ${values.book.language}`)
+  return lines.join('\n')
+}
+
+function storySceneContext(values: StoryPromptValues) {
+  const sections: string[] = []
+  if (values.summaryContext?.trim()) sections.push(`# Earlier story context\n\n${values.summaryContext.trim()}`)
+  if (values.previousSceneText?.trim()) sections.push(`# Previous scene\n\n${values.previousSceneText}`)
+  if (values.scenePov?.trim()) sections.push(`# Scene settings\n\nPoint of view: ${values.scenePov}`)
+  sections.push(`# Current manuscript\n\n${values.sceneText}`)
+  return sections.join('\n\n')
+}
+
 export function renderStoryPrompt(template: string, values: StoryPromptValues) {
-  return renderPromptTemplate(template, templateValues(values))
+  const rendered = renderPromptTemplate(template, templateValues(values))
+  if (storyTemplateEmbedsContext(template)) return rendered
+  return `${rendered}${STORY_BOOK_CONTEXT_SEPARATOR}${storyBookContext(values)}${STORY_SCENE_CONTEXT_SEPARATOR}${storySceneContext(values)}`
 }
 
 export function renderLorePrompt(template: string, values: LorePromptValues) {
@@ -146,14 +178,29 @@ function hasMetadata(metadata: NanoGPTStreamMetadata) {
   return Object.values(metadata).some((value) => value !== undefined)
 }
 
+function splitStoryPrompt(systemPrompt: string) {
+  const bookIndex = systemPrompt.indexOf(STORY_BOOK_CONTEXT_SEPARATOR)
+  if (bookIndex < 0) return null
+  const sceneIndex = systemPrompt.indexOf(STORY_SCENE_CONTEXT_SEPARATOR, bookIndex + STORY_BOOK_CONTEXT_SEPARATOR.length)
+  if (sceneIndex < 0) return null
+  return {
+    systemPrompt: systemPrompt.slice(0, bookIndex),
+    bookContext: systemPrompt.slice(bookIndex + STORY_BOOK_CONTEXT_SEPARATOR.length, sceneIndex),
+    sceneContext: systemPrompt.slice(sceneIndex + STORY_SCENE_CONTEXT_SEPARATOR.length),
+  }
+}
+
 export async function streamNanoGPTCompletion(
   request: NanoGPTGenerationRequest,
   onChunk: (text: string) => void,
   signal: AbortSignal,
   lifecycle: NanoGPTStreamLifecycle = {},
 ) {
-  const messages = [{ role: 'system', content: request.systemPrompt }]
+  const storyPrompt = splitStoryPrompt(request.systemPrompt)
+  const messages = [{ role: 'system', content: storyPrompt?.systemPrompt ?? request.systemPrompt }]
+  if (storyPrompt?.bookContext.trim()) messages.push({ role: 'user', content: storyPrompt.bookContext })
   if (request.contextMessage?.trim()) messages.push({ role: 'user', content: request.contextMessage })
+  if (storyPrompt?.sceneContext.trim()) messages.push({ role: 'user', content: storyPrompt.sceneContext })
   if (request.userMessage?.trim()) messages.push({ role: 'user', content: request.userMessage })
 
   const response = await fetch(completionEndpoint(request.baseUrl), {
