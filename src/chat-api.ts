@@ -147,7 +147,7 @@ function stabilizeProposalHistory(content: string) {
     .replace(/\[Workspace edit proposals: ([^\]]*)\]/g, (_match, items: string) => `[Workspace edit proposals: ${stableProposalItems(items, ['proposed', 'applied', 'rejected', 'stale'])}]`)
     .replace(/\[Codex creation proposals: ([^\]]*)\]/g, (_match, items: string) => `[Codex creation proposals: ${stableProposalItems(items, ['proposed', 'created', 'rejected', 'duplicate'])}]`)
     .replace(/\[Outline proposals: ([^\]]*)\]/g, (_match, items: string) => `[Outline proposals: ${stableProposalItems(items, ['proposed', 'applied', 'rejected', 'stale'])}]`)
-    .replace(/\[Entity proposals: ([^\]]*)\]/g, (_match, items: string) => `[Entity proposals: ${stableProposalItems(items, ['proposed', 'applied', 'rejected', 'stale'])}]`)
+    .replace(/\[Note\/Codex proposals: ([^\]]*)\]/g, (_match, items: string) => `[Note/Codex proposals: ${stableProposalItems(items, ['proposed', 'applied', 'rejected', 'stale'])}]`)
 }
 
 function reorderSelectedBookContext(content: string) {
