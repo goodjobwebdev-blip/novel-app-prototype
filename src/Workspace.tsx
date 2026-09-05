@@ -333,6 +333,9 @@ export default function Workspace() {
 
   function handleStoryChange(value: string) {
     storyRef.current = value
+    if (activeDocument?.type === 'scene') {
+      setOutlineEntities((items) => items.map((item) => item.id === activeDocument.id ? { ...item, content: value } : item))
+    }
     if (generationAbortRef.current && activeDocument?.type === 'codexEntry') {
       setStoryMarkdown(value)
       return
@@ -1062,6 +1065,19 @@ function formatEdited(updatedAt: number) {
   return `Edited ${new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(updatedAt)}`
 }
 
+function countWords(markdown: string) {
+  const text = markdown
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+  return text.match(/[\p{L}\p{N}]+(?:[’'-][\p{L}\p{N}]+)*/gu)?.length ?? 0
+}
+
+function formatWordCount(count: number) {
+  return `${count.toLocaleString()} ${count === 1 ? 'word' : 'words'}`
+}
+
 function seriesForBook(book: BookEntity | null, series: SeriesEntity[]) {
   if (!book?.seriesId) return undefined
   return series.find((candidate) => candidate.id === book.seriesId)
@@ -1293,13 +1309,23 @@ function Outline({ book, entities, activeSceneId, summaryStates, expandedIds, on
     .sort((a, b) => a.order - b.order)
   const acts = children(book.id, 'act')
   const directChapters = children(book.id, 'chapter')
+  const wordCounts = new Map<string, number>()
+  const wordCountFor = (entity: StructuralEntity): number => {
+    const cached = wordCounts.get(entity.id)
+    if (cached !== undefined) return cached
+    const count = entity.type === 'scene'
+      ? countWords(typeof entity.content === 'string' ? entity.content : '')
+      : children(entity.id, entity.type === 'act' ? 'chapter' : 'scene').reduce((sum, child) => sum + wordCountFor(child), 0)
+    wordCounts.set(entity.id, count)
+    return count
+  }
 
   const renderChapter = (chapter: StructuralEntity, index: number, count: number) => {
     const scenes = children(chapter.id, 'scene')
     const open = expandedIds.has(chapter.id)
     return <div className="outline-branch" key={chapter.id}>
-      <OutlineRow entity={chapter} label={`Chapter ${index + 1}`} summaryState={summaryStates[chapter.id] ?? 'missing'} expanded={open} expandable onToggle={onToggle} onOpenScene={onOpenScene} onOpenSummary={onOpenSummary} onCreate={onCreate} onRename={onRename} onMove={onMove} onDelete={onDelete} first={index === 0} last={index === count - 1} />
-      {open && <div className="tree-children">{scenes.length ? scenes.map((scene, sceneIndex) => <OutlineRow key={scene.id} entity={scene} label={`Scene ${sceneIndex + 1}`} summaryState={summaryStates[scene.id] ?? 'missing'} selected={activeSceneId === scene.id} onToggle={onToggle} onOpenScene={onOpenScene} onOpenSummary={onOpenSummary} onCreate={onCreate} onRename={onRename} onMove={onMove} onDelete={onDelete} first={sceneIndex === 0} last={sceneIndex === scenes.length - 1} />) : <p className="tree-empty">No scenes yet</p>}</div>}
+      <OutlineRow entity={chapter} label={`Chapter ${index + 1}`} wordCount={wordCountFor(chapter)} summaryState={summaryStates[chapter.id] ?? 'missing'} expanded={open} expandable onToggle={onToggle} onOpenScene={onOpenScene} onOpenSummary={onOpenSummary} onCreate={onCreate} onRename={onRename} onMove={onMove} onDelete={onDelete} first={index === 0} last={index === count - 1} />
+      {open && <div className="tree-children">{scenes.length ? scenes.map((scene, sceneIndex) => <OutlineRow key={scene.id} entity={scene} label={`Scene ${sceneIndex + 1}`} wordCount={wordCountFor(scene)} summaryState={summaryStates[scene.id] ?? 'missing'} selected={activeSceneId === scene.id} onToggle={onToggle} onOpenScene={onOpenScene} onOpenSummary={onOpenSummary} onCreate={onCreate} onRename={onRename} onMove={onMove} onDelete={onDelete} first={sceneIndex === 0} last={sceneIndex === scenes.length - 1} />) : <p className="tree-empty">No scenes yet</p>}</div>}
     </div>
   }
 
@@ -1311,7 +1337,7 @@ function Outline({ book, entities, activeSceneId, summaryStates, expandedIds, on
         const chapters = children(act.id, 'chapter')
         const open = expandedIds.has(act.id)
         return <div className="outline-branch" key={act.id}>
-          <OutlineRow entity={act} label={`Act ${actIndex + 1}`} summaryState={summaryStates[act.id] ?? 'missing'} expanded={open} expandable onToggle={onToggle} onOpenScene={onOpenScene} onOpenSummary={onOpenSummary} onCreate={onCreate} onRename={onRename} onMove={onMove} onDelete={onDelete} first={actIndex === 0} last={actIndex === acts.length - 1} />
+          <OutlineRow entity={act} label={`Act ${actIndex + 1}`} wordCount={wordCountFor(act)} summaryState={summaryStates[act.id] ?? 'missing'} expanded={open} expandable onToggle={onToggle} onOpenScene={onOpenScene} onOpenSummary={onOpenSummary} onCreate={onCreate} onRename={onRename} onMove={onMove} onDelete={onDelete} first={actIndex === 0} last={actIndex === acts.length - 1} />
           {open && <div className="tree-children">{chapters.length ? chapters.map((chapter, chapterIndex) => renderChapter(chapter, chapterIndex, chapters.length)) : <p className="tree-empty">No chapters yet</p>}</div>}
         </div>
       })}
@@ -1321,9 +1347,10 @@ function Outline({ book, entities, activeSceneId, summaryStates, expandedIds, on
   </section>
 }
 
-function OutlineRow({ entity, label, summaryState, selected = false, expandable = false, expanded = false, first, last, onToggle, onOpenScene, onOpenSummary, onCreate, onRename, onMove, onDelete }: {
+function OutlineRow({ entity, label, wordCount, summaryState, selected = false, expandable = false, expanded = false, first, last, onToggle, onOpenScene, onOpenSummary, onCreate, onRename, onMove, onDelete }: {
   entity: StructuralEntity
   label: string
+  wordCount: number
   summaryState: SummaryState
   selected?: boolean
   expandable?: boolean
@@ -1340,7 +1367,7 @@ function OutlineRow({ entity, label, summaryState, selected = false, expandable 
 }) {
   return <div className={`outline-row ${selected ? 'selected' : ''}`}>
     {expandable ? <button className="tree-toggle" type="button" onClick={() => onToggle(entity.id)} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${entity.title}`}>{expanded ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}</button> : <span className="tree-spacer" />}
-    <button className="tree-label" type="button" onClick={() => entity.type === 'scene' ? onOpenScene(entity.id) : onToggle(entity.id)}><small>{label}</small><span>{entity.title}</span></button>
+    <button className="tree-label" type="button" onClick={() => entity.type === 'scene' ? onOpenScene(entity.id) : onToggle(entity.id)}><small>{label} · {formatWordCount(wordCount)}</small><span>{entity.title}</span></button>
     <SummaryIcon state={summaryState} onOpen={() => onOpenSummary(entity)} />
     <div className="outline-actions">
       {entity.type === 'act' && <button type="button" onClick={() => onCreate('chapter', entity.id)} aria-label={`Add chapter to ${entity.title}`} title="Add chapter"><Plus aria-hidden="true" /></button>}
