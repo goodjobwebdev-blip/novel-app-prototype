@@ -41,19 +41,12 @@ import { promptVariables } from './prompt-template'
 import type { BookPromptValues } from './prompt-template'
 import { buildContextValues, type PreparedContextValues } from './context-service'
 import { getChat, saveChatContextProfile } from './chat-service'
-
-type Model = { id: string; name?: string; context_length?: number; pricing?: { prompt?: string; completion?: string }; architecture?: { modality?: string } }
+import { clearModelCatalog, getCachedModelCatalog, providerModelEndpoint, saveModelCatalog, type ProviderModel } from './model-catalog'
 type SettingsTab = 'ai' | 'context' | 'appearance' | 'speech' | 'images'
 type SaveState = 'loading' | 'saved' | 'saving' | 'error'
 
 const providerLabels: Record<AiProvider, string> = { openrouter: 'OpenRouter', nanogpt: 'nano-gpt.com', openai: 'OpenAI', compatible: 'OpenAI-compatible' }
 
-function endpointFor(settings: AiSettings) {
-  if (settings.provider === 'openrouter') return 'https://openrouter.ai/api/v1/models'
-  if (settings.provider === 'openai') return 'https://api.openai.com/v1/models'
-  if (settings.provider === 'nanogpt') return 'https://nano-gpt.com/api/v1/models?detailed=true&sort=favorites'
-  return `${settings.baseUrl.trim().replace(/\/$/, '')}/models`
-}
 function formatContext(value?: number) {
   if (!value) return 'Context unknown'
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value % 1_000_000 ? 1 : 0)}m context`
@@ -69,7 +62,7 @@ type AiSettingsProps = {
 
 export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) {
   const [settings, setSettings] = useState<AiSettings>(initialAiSettings)
-  const [models, setModels] = useState<Model[]>([])
+  const [models, setModels] = useState<ProviderModel[]>([])
   const [promptTab, setPromptTab] = useState<keyof AiPrompts>('story')
   const [modelSearch, setModelSearch] = useState('')
   const [showKey, setShowKey] = useState(false)
@@ -108,8 +101,10 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
       aiSavedRef.current = JSON.stringify(defaults)
       aiLoadedScopeRef.current = scope
       setSettings(defaults)
-      setStatus('Saved AI defaults loaded from this device.')
-      setStatusKind('success')
+      const cachedModels = getCachedModelCatalog(defaults)
+      setModels(cachedModels?.models ?? [])
+      setStatus(cachedModels ? `${cachedModels.models.length} cached models available. Reload the model list to refresh it.` : 'No cached model list yet. Use Reload model list to fetch it from the provider.')
+      setStatusKind(cachedModels?.models.length ? 'success' : 'quiet')
       setSaveState('saved')
       setSettingsLoading(false)
       return () => { cancelled = true }
@@ -125,8 +120,10 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
         aiSavedRef.current = JSON.stringify(bookSettings)
         aiLoadedScopeRef.current = scope
         setSettings(bookSettings)
-        setStatus(`AI settings loaded for “${book.title}”.`)
-        setStatusKind('success')
+        const cachedModels = getCachedModelCatalog(bookSettings)
+        setModels(cachedModels?.models ?? [])
+        setStatus(cachedModels ? `${cachedModels.models.length} cached models available for “${book.title}”. Reload the model list to refresh it.` : 'No cached model list yet. Use Reload model list to fetch it from the provider.')
+        setStatusKind(cachedModels?.models.length ? 'success' : 'quiet')
         setSaveState('saved')
       } catch {
         if (cancelled) return
@@ -224,11 +221,24 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   }
 
   function update<K extends keyof AiSettings>(key: K, value: AiSettings[K]) { changeAiSettings((current) => ({ ...current, [key]: value })) }
+  function updateConnection<K extends 'apiKey' | 'baseUrl'>(key: K, value: AiSettings[K]) {
+    const current = latestAiSettingsRef.current
+    if (current[key] === value) return
+    const next = { ...current, [key]: value } as AiSettings
+    clearModelCatalog(current)
+    clearModelCatalog(next)
+    changeAiSettings(() => next)
+    setModels([])
+    setStatus('Connection changed. Reload the model list to refresh the cache.')
+    setStatusKind('quiet')
+  }
   function selectProvider(provider: AiProvider) {
-    changeAiSettings((current) => {
-      const baseUrl = provider === 'nanogpt' ? 'https://nano-gpt.com/api/v1' : provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : provider === 'openai' ? 'https://api.openai.com/v1' : current.baseUrl
-      return { ...current, provider, baseUrl, mainModel: '', mainModelContextLength: undefined, supportModel: '', supportModelContextLength: undefined, codexModel: '', codexModelContextLength: undefined }
-    })
+    const current = latestAiSettingsRef.current
+    const baseUrl = provider === 'nanogpt' ? 'https://nano-gpt.com/api/v1' : provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : provider === 'openai' ? 'https://api.openai.com/v1' : current.baseUrl
+    const next = { ...current, provider, baseUrl, mainModel: '', mainModelContextLength: undefined, supportModel: '', supportModelContextLength: undefined, codexModel: '', codexModelContextLength: undefined }
+    clearModelCatalog(current)
+    clearModelCatalog(next)
+    changeAiSettings(() => next)
     setModels([]); setStatus('Provider changed. Reload its model list when ready.'); setStatusKind('quiet')
   }
   function selectModel(kind: 'main' | 'support' | 'codex', id: string) {
@@ -242,8 +252,8 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
     if (settings.provider === 'compatible' && !settings.baseUrl.trim()) { setStatus('Enter the compatible provider endpoint first.'); setStatusKind('error'); return }
     setLoading(true); setStatus('Contacting the provider…'); setStatusKind('quiet')
     try {
-      const response = await fetch(endpointFor(settings), { headers: { Accept: 'application/json', Authorization: `Bearer ${settings.apiKey.trim()}` } })
-      const payload = await response.json().catch(() => ({})) as { data?: Model[]; message?: string; error?: { message?: string } }
+      const response = await fetch(providerModelEndpoint(settings), { headers: { Accept: 'application/json', Authorization: `Bearer ${settings.apiKey.trim()}` } })
+      const payload = await response.json().catch(() => ({})) as { data?: ProviderModel[]; message?: string; error?: { message?: string } }
       if (!response.ok) throw new Error(payload.error?.message || payload.message || `Provider returned ${response.status}.`)
       const nextModels = Array.isArray(payload.data) ? payload.data.filter((model) => typeof model.id === 'string' && model.id.length > 0) : []
       changeAiSettings((current) => ({
@@ -252,9 +262,21 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
         supportModelContextLength: nextModels.find((model) => model.id === current.supportModel)?.context_length ?? current.supportModelContextLength,
         codexModelContextLength: nextModels.find((model) => model.id === current.codexModel)?.context_length ?? current.codexModelContextLength,
       }))
-      setModels(nextModels); setStatus(nextModels.length ? `${nextModels.length} models available.` : 'The provider returned no models.'); setStatusKind(nextModels.length ? 'success' : 'error')
+      const cached = saveModelCatalog(settings, nextModels)
+      setModels(nextModels)
+      setStatus(nextModels.length ? (cached.persisted ? `${nextModels.length} models cached.` : `${nextModels.length} models loaded, but the browser could not persist the cache.`) : 'The provider returned no models.')
+      setStatusKind(nextModels.length && cached.persisted ? 'success' : 'error')
     } catch (error) {
-      setModels([]); setStatus(error instanceof Error ? error.message : 'Could not load the model list.'); setStatusKind('error')
+      const cached = getCachedModelCatalog(settings)
+      if (cached?.models.length) {
+        setModels(cached.models)
+        const reason = error instanceof Error ? error.message : 'Could not refresh the model list.'
+        setStatus(`Refresh failed; keeping ${cached.models.length} cached models. ${reason}`)
+      } else {
+        setModels([])
+        setStatus(error instanceof Error ? error.message : 'Could not load the model list.')
+      }
+      setStatusKind('error')
     } finally { setLoading(false) }
   }
   function toggleFavorite(id: string) { changeAiSettings((current) => ({ ...current, favorites: current.favorites.includes(id) ? current.favorites.filter((favorite) => favorite !== id) : [...current.favorites, id] })) }
@@ -271,7 +293,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
       aiSavedRef.current = JSON.stringify(copied)
       setSettings(copied)
       setSaveState('saved')
-      setModels([])
+      setModels(getCachedModelCatalog(copied)?.models ?? [])
       setStatus(`Current defaults copied to “${book.title}”.`)
       setStatusKind('success')
       onSaved?.(copied)
@@ -363,12 +385,12 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
           <div className="card-heading"><div><span>01</span><h2>Provider</h2></div><p>Connection details stay in this browser.</p></div>
           <div className="provider-grid">{(Object.keys(providerLabels) as AiProvider[]).map((provider) => <button key={provider} className={settings.provider === provider ? 'selected' : ''} type="button" onClick={() => selectProvider(provider)}><i>{provider === 'nanogpt' ? 'N' : provider === 'openrouter' ? 'O' : provider === 'openai' ? 'AI' : '{ }'}</i><span><strong>{providerLabels[provider]}</strong><small>{provider === 'compatible' ? 'Custom endpoint' : 'Managed endpoint'}</small></span><b>{settings.provider === provider ? '✓' : ''}</b></button>)}</div>
           <div className="connection-fields">
-            {settings.provider === 'compatible' && <label><span>Endpoint URL</span><input value={settings.baseUrl} onChange={(event) => update('baseUrl', event.target.value)} placeholder="https://provider.example/v1" /></label>}
+            {settings.provider === 'compatible' && <label><span>Endpoint URL</span><input value={settings.baseUrl} onChange={(event) => updateConnection('baseUrl', event.target.value)} placeholder="https://provider.example/v1" /></label>}
             <label><span>API key</span><div className="input-action"><input
               type={showKey ? 'text' : 'password'}
               name="arc-provider-token"
               value={settings.apiKey}
-              onChange={(event) => update('apiKey', event.target.value)}
+              onChange={(event) => updateConnection('apiKey', event.target.value)}
               placeholder="Enter API key"
               autoComplete="one-time-code"
               autoCapitalize="none"

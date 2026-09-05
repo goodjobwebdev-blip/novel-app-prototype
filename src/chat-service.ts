@@ -1,4 +1,5 @@
 import { loadAiSettings, type AiSettings } from './ai-settings'
+import { getCachedModelCatalog } from './model-catalog'
 import {
   deleteEntityTree,
   getBookAiSettings,
@@ -250,27 +251,15 @@ export async function forkChat(source: ChatEntity, throughOrder: number): Promis
   return (await getChat(fork.id)) ?? fork
 }
 
-function modelEndpoint(settings: AiSettings) {
-  const base = settings.baseUrl.trim().replace(/\/$/, '')
-  if (settings.provider === 'nanogpt') return `${base || 'https://nano-gpt.com/api/v1'}/models?detailed=true&sort=favorites`
-  return `${base}/models`
-}
-
 export async function fetchAvailableChatModels(settings: AiSettings): Promise<ChatModel[]> {
   if (!settings.apiKey.trim()) throw new Error('Add an API key in Book AI settings before loading chat models.')
-  const endpoint = modelEndpoint(settings)
-  if (!endpoint || endpoint === '/models') throw new Error('Configure the provider endpoint in Book AI settings first.')
-  const response = await fetch(endpoint, {
-    headers: { Accept: 'application/json', Authorization: `Bearer ${settings.apiKey.trim()}` },
-  })
-  const payload = await response.json().catch(() => ({})) as { data?: ChatModel[]; error?: { message?: string } | string; message?: string }
-  if (!response.ok) {
-    const reason = typeof payload.error === 'string' ? payload.error : payload.error?.message || payload.message
-    throw new Error(reason || `Model list request failed (${response.status}).`)
-  }
-  return (Array.isArray(payload.data) ? payload.data : [])
-    .filter((model) => typeof model.id === 'string' && model.id.length > 0)
-    .map((model) => ({ id: model.id, name: model.name, context_length: Number.isFinite(model.context_length) ? model.context_length : undefined }))
+  const cached = getCachedModelCatalog(settings)
+  if (!cached) throw new Error('No cached model list. Open Book AI settings and use Reload model list first.')
+  return cached.models.map((model) => ({
+    id: model.id,
+    name: model.name,
+    context_length: Number.isFinite(model.context_length) ? model.context_length : undefined,
+  }))
 }
 
 export async function getChatBookAiSettings(bookId: string) {
