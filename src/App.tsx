@@ -40,6 +40,7 @@ import {
 import { promptVariables } from './prompt-template'
 import type { BookPromptValues } from './prompt-template'
 import { buildContextValues, type PreparedContextValues } from './context-service'
+import { getChat, saveChatContextProfile } from './chat-service'
 
 type Model = { id: string; name?: string; context_length?: number; pricing?: { prompt?: string; completion?: string }; architecture?: { modality?: string } }
 type SettingsTab = 'ai' | 'context' | 'appearance' | 'speech' | 'images'
@@ -63,7 +64,7 @@ type AiSettingsProps = {
   onHome?: () => void
   onBack?: () => void
   onSaved?: (settings: AiSettings) => void
-  book?: { id: string; title: string; contextType?: GenerationContextType; currentDocumentId?: string; currentDocumentText?: string; promptValues?: BookPromptValues }
+  book?: { id: string; title: string; contextType?: GenerationContextType; currentDocumentId?: string; currentDocumentText?: string; promptValues?: BookPromptValues; chatId?: string }
 }
 
 export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) {
@@ -149,15 +150,18 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
       setContextSaved(true)
       return () => { cancelled = true }
     }
-    void Promise.all([getBookContextSettings(book.id), listEntitiesByBook(book.id)]).then(([value, entities]) => {
+    void Promise.all([getBookContextSettings(book.id), listEntitiesByBook(book.id), book.chatId ? getChat(book.chatId) : Promise.resolve(undefined)]).then(([value, entities, chat]) => {
       if (!cancelled) {
-        setContextSettings(value)
+        const scopedValue = book.contextType === 'chat' && chat
+          ? { ...value, profiles: { ...value.profiles, chat: chat.contextProfile } }
+          : value
+        setContextSettings(scopedValue)
         setContextSources(entities)
         setContextSaved(true)
       }
     })
     return () => { cancelled = true }
-  }, [book?.id])
+  }, [book?.id, book?.chatId, book?.contextType])
 
   const visibleModels = useMemo(() => {
     const query = modelSearch.trim().toLowerCase()
@@ -281,6 +285,15 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
     if (!book) return
     const version = ++contextSaveVersionRef.current
     const value = contextSettings
+    if (book.contextType === 'chat' && book.chatId) {
+      try {
+        await saveChatContextProfile(book.chatId, value.profiles.chat)
+        if (version === contextSaveVersionRef.current) setContextSaved(true)
+      } catch {
+        if (version === contextSaveVersionRef.current) setContextSaved(false)
+      }
+      return
+    }
     try {
       const pending = contextSaveQueueRef.current.catch(() => undefined).then(async () => {
         const savedDefaults = await saveBookContextSettings(book.id, value)
@@ -301,6 +314,15 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
     setContextSaved(false)
     if (!book) return
     const version = ++contextSaveVersionRef.current
+    if (book.contextType === 'chat' && book.chatId) {
+      contextSaveQueueRef.current = contextSaveQueueRef.current.catch(() => undefined).then(async () => {
+        await saveChatContextProfile(book.chatId!, value.profiles.chat)
+        if (version === contextSaveVersionRef.current) setContextSaved(true)
+      }).catch(() => {
+        if (version === contextSaveVersionRef.current) setContextSaved(false)
+      })
+      return
+    }
     contextSaveQueueRef.current = contextSaveQueueRef.current.catch(() => undefined).then(async () => {
       const savedDefaults = await saveBookContextSettings(book.id, value)
       if (version === contextSaveVersionRef.current) {
@@ -374,7 +396,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
 
         <section className="settings-card prompts-card">
           <div className="card-heading"><div><span>03</span><h2>System prompts</h2></div></div>
-          <div className="prompt-tabs" role="tablist">{([['story', 'Story'], ['summarize', 'Summarize'], ['titles', 'Titles & names'], ['lore', 'Lore entries']] as const).map(([key, label]) => <button key={key} className={promptTab === key ? 'active' : ''} type="button" onClick={() => setPromptTab(key)}>{label}</button>)}</div>
+          <div className="prompt-tabs" role="tablist">{([['story', 'Story'], ['summarize', 'Summarize'], ['titles', 'Titles & names'], ['lore', 'Lore entries'], ['assistant', 'Assistant']] as const).map(([key, label]) => <button key={key} className={promptTab === key ? 'active' : ''} type="button" onClick={() => setPromptTab(key)}>{label}</button>)}</div>
           <textarea className="prompt-editor" value={settings.prompts[promptTab]} onChange={(event) => update('prompts', { ...settings.prompts, [promptTab]: event.target.value })} spellCheck={false} />
           <details className="prompt-reference">
             <summary><CircleHelp aria-hidden="true" /><span>Variables & syntax</span></summary>
@@ -398,7 +420,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
   const updateProfile = (next: typeof profile) => onChange({ ...value, profiles: { ...value.profiles, [type]: next } })
   const toggle = (key: 'structuralIds' | 'noteIds' | 'codexEntryIds', id: string) => updateProfile({ ...profile, [key]: profile[key].includes(id) ? profile[key].filter((item) => item !== id) : [...profile[key], id] })
   const normalized = query.trim().toLowerCase()
-  const visible = sources.filter((item) => ['act', 'chapter', 'scene', 'note', 'codexEntry'].includes(item.type) && item.id !== currentDocumentId && (!normalized || `${item.title ?? ''} ${item.type} ${item.category ?? ''}`.toLowerCase().includes(normalized)))
+  const visible = sources.filter((item) => ['act', 'chapter', 'scene', 'note', 'codexEntry'].includes(item.type) && (type === 'chat' || item.id !== currentDocumentId) && (!normalized || `${item.title ?? ''} ${item.type} ${item.category ?? ''}`.toLowerCase().includes(normalized)))
   const groups = [
     ['Acts & chapters', visible.filter((item) => item.type === 'act' || item.type === 'chapter'), 'structuralIds'],
     ['Scenes', visible.filter((item) => item.type === 'scene'), 'structuralIds'],
@@ -428,6 +450,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
     ...(type === 'scene' && preview.summaryContext ? [{ title: 'Earlier summaries', detail: 'Automatic', content: preview.summaryContext }] : []),
     ...(type === 'codex' ? [{ title: `Current entry${currentDocument?.title ? ` — ${currentDocument.title}` : ''}`, detail: 'Required', content: currentDocumentText ?? String(currentDocument?.content ?? '') }] : []),
     ...(type === 'codex' && preview.lastSceneText ? [{ title: `Last-opened scene${preview.lastSceneTitle ? ` — ${preview.lastSceneTitle}` : ''}`, detail: 'Automatic', content: preview.lastSceneText }] : []),
+    ...(type === 'chat' && preview.lastSceneText ? [{ title: `Current scene${preview.lastSceneTitle ? ` — ${preview.lastSceneTitle}` : ''}`, detail: 'Automatic', content: preview.lastSceneText }] : []),
     ...(preview.additionalContext ? [{ title: 'Additional context', detail: 'Selected', content: preview.additionalContext }] : []),
     ...(type === 'scene' ? [{ title: `Current scene${preview.currentSceneTitle ? ` — ${preview.currentSceneTitle}` : ''}`, detail: 'Required', content: preview.currentSceneText }] : []),
   ] : []
@@ -436,7 +459,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
     <header className="page-heading"><div><p>{type} generation</p><h1 id="page-title">Context Management</h1><span>Saved independently for {type} generation in “{bookTitle}”.</span></div><div className={`save-state ${saved ? 'saved' : ''}`}><i />{saved ? 'Saved' : 'Saving…'}</div></header>
     <section className="settings-card context-defaults-card"><div className="card-heading"><div><span>01</span><h2>Automatic context</h2></div></div>
       <div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Book metadata</strong><small>Provided through the book prompt variables.</small></span><b>Required</b></div>
-      {type === 'scene' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current Scene</strong><small>The active editor content is always included.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} /><span><strong>Previous Scene when empty</strong><small>Use the immediately previous Scene only when the current Scene has no text.</small></span></label><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Earlier summaries</strong><small>Uses the highest completed Act or Chapter summary without exposing later material.</small></span><b>Automatic</b></div></> : type === 'codex' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current entry</strong><small>Title, category, and existing body are supplied through lore prompt variables.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includeLastScene} onChange={(event) => updateProfile({ ...profile, includeLastScene: event.target.checked })} /><span><strong>Last-opened Scene</strong><small>Included by default for Codex generation.</small></span></label></> : <div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Type-specific sources</strong><small>Automatic sources will be defined when {type} generation is implemented.</small></span><b>Planned</b></div>}
+      {type === 'scene' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current Scene</strong><small>The active editor content is always included.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} /><span><strong>Previous Scene when empty</strong><small>Use the immediately previous Scene only when the current Scene has no text.</small></span></label><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Earlier summaries</strong><small>Uses the highest completed Act or Chapter summary without exposing later material.</small></span><b>Automatic</b></div></> : type === 'codex' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current entry</strong><small>Title, category, and existing body are supplied through lore prompt variables.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includeLastScene} onChange={(event) => updateProfile({ ...profile, includeLastScene: event.target.checked })} /><span><strong>Last-opened Scene</strong><small>Included by default for Codex generation.</small></span></label></> : type === 'chat' ? <label><input type="checkbox" checked={profile.includeLastScene} onChange={(event) => updateProfile({ ...profile, includeLastScene: event.target.checked })} /><span><strong>Current Scene</strong><small>The book's last-opened Scene is included automatically for this chat.</small></span></label> : <div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Type-specific sources</strong><small>Automatic sources will be defined when {type} generation is implemented.</small></span><b>Planned</b></div>}
     </section>
     <section className="settings-card context-sources-card"><div className="card-heading"><div><span>02</span><h2>Additional context</h2></div><p>Inserted as <code>{'{{additional_context}}'}</code>.</p></div>
       <fieldset className="summary-range"><legend>Summaries</legend>{([['none','None'],['all','All summaries'],['before','Before current Scene'],['after','After current Scene']] as const).map(([range,label]) => <label key={range}><input type="radio" name="summary-range" checked={profile.summaryRange === range} onChange={() => updateProfile({ ...profile, summaryRange: range })}/><span>{label}</span></label>)}</fieldset>

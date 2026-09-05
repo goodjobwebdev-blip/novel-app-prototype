@@ -85,6 +85,7 @@ import {
   type SummaryEntity,
 } from './persistence'
 import { buildSummarySource, getSummaryStateMap, renderSummaryPrompt, type SummaryState } from './summary-service'
+import { ChatSidebar, ChatView } from './ChatFeature'
 import './generation-controls.css'
 
 type Screen = 'home' | 'editor' | 'chat' | 'settings'
@@ -127,7 +128,7 @@ export default function Workspace() {
   const [rightOpen, setRightOpen] = useState(false)
   const [rightTab, setRightTab] = useState<RightTab>('outline')
   const [chatPanel, setChatPanel] = useState<ChatPanel>('list')
-  const [activeChat, setActiveChat] = useState('Mara’s motivation')
+  const [activeChatId, setActiveChatId] = useState('')
   const [arcOpen, setArcOpen] = useState(false)
   const [storyMarkdown, setStoryMarkdown] = useState(initialStoryMarkdown)
   const [arcPrompt, setArcPrompt] = useState('')
@@ -558,10 +559,10 @@ export default function Workspace() {
     setRightOpen(false)
   }
 
-  function openChat(title: string) {
+  function openChat(chatId: string) {
     if (screen === 'editor' && changedSinceSnapshotRef.current) void flushDocument('navigation', true)
-    setActiveChat(title)
-    setChatPanel('settings')
+    setActiveChatId(chatId)
+    setChatPanel('list')
     setScreen('chat')
     setRightOpen(false)
   }
@@ -870,7 +871,7 @@ export default function Workspace() {
   const contextType: GenerationContextType = screen === 'chat' || (screen === 'settings' && returnScreen === 'chat') ? 'chat' : activeDocument?.type === 'codexEntry' ? 'codex' : activeDocument?.type === 'note' ? 'note' : 'scene'
 
   if (screen === 'settings') return <AiSettingsScreen
-    book={returnScreen === 'home' || !currentBook ? undefined : { id: currentBook.id, title: currentBook.title, contextType, currentDocumentId: activeDocument?.id, currentDocumentText: storyMarkdown, promptValues: toBookPromptValues(currentBook, seriesList) }}
+    book={returnScreen === 'home' || !currentBook ? undefined : { id: currentBook.id, title: currentBook.title, contextType, currentDocumentId: activeDocument?.id, currentDocumentText: storyMarkdown, promptValues: toBookPromptValues(currentBook, seriesList), chatId: contextType === 'chat' ? activeChatId || undefined : undefined }}
     onHome={() => setScreen('home')}
     onBack={() => setScreen(returnScreen)}
     onSaved={(settings) => {
@@ -907,25 +908,16 @@ export default function Workspace() {
         {(activeDocument?.type === 'note' || activeDocument?.type === 'codexEntry') && <div className="document-titlebar"><div><small>{activeDocument.type === 'note' ? 'Note' : activeDocument.category}</small><h1>{activeDocument.title}</h1></div><button type="button" onClick={() => { void renameContentEntity(activeDocument) }}><Pencil aria-hidden="true" /> Rename</button></div>}
         {activeDocument?.type === 'codexEntry' && <div className="document-metadata"><label><span>Category</span><select value={activeDocument.category} onChange={(event) => { void changeCodexCategory(event.target.value) }}><option>Character</option><option>Place</option><option>Object</option><option>Event</option><option>Group</option><option>Other</option></select></label></div>}
         {activeDocument ? <MarkdownEditor key={`${activeDocument.id}-${editorRevision}`} ref={editorRef} value={storyMarkdown} onChange={handleStoryChange} ariaLabel={`${activeDocument.title} Markdown editor`} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No document selected</strong><p>Choose a Scene, Note, Codex entry, or Summary from the book workspace.</p><button type="button" onClick={() => setRightOpen(true)}>Open Book Workspace</button></div>}
-      </article> : <section className="conversation">
-        <header><small>Book chat</small><h1>{activeChat}</h1><p>Context: Chapter 7 · Codex</p></header>
-        <div className="messages">
-          <article className="message user"><div className="bubble">Why does Mara open the door even though she knows her father’s warning?</div><MessageActions user /></article>
-          <article className="message bot"><i className="bot-thumb"><Feather aria-hidden="true" /></i><div><div className="bubble"><p>Mara opens it because the warning has become evidence. Her father taught her the rule but never explained how he knew it, so hearing her own name confirms that the door is tied to the life he concealed.</p><p>Every compass also turns toward the threshold. For a cartographer, that transforms fear into a navigational fact.</p></div><MessageActions /></div></article>
-          <article className="message user">{chatEdit ? <div className="inline-edit"><textarea defaultValue="Does that choice contradict her promise to Elias in Chapter Four?"/><div><button type="button" onClick={() => setChatEdit(false)}>Cancel</button><button type="button" onClick={() => setChatEdit(false)}>Save</button><button type="button" onClick={() => setChatEdit(false)}>Save & regenerate</button></div></div> : <><div className="bubble">Does that choice contradict her promise to Elias in Chapter Four?</div><div className="message-tools"><button type="button" onClick={() => setChatEdit(true)}><Pencil aria-hidden="true" /> Edit</button><button type="button"><Trash2 aria-hidden="true" /> Delete</button></div></>}</article>
-          <article className="message bot no-thumb"><div><div className="bubble">Not necessarily. She promised Elias she would not cross alone. Opening the door tests the boundary of that promise without yet breaking it.</div><MessageActions /></div></article>
-        </div>
-      </section>}
+      </article> : currentBook ? <ChatView bookId={currentBook.id} chatId={activeChatId} bookPromptValues={toBookPromptValues(currentBook, seriesList)} currentSceneId={activeSceneId} onChatChange={openChat} onToast={showToast} /> : <section className="conversation chat-empty"><MessageCircle aria-hidden="true" /><p>Open a book before starting a chat.</p></section>}
 
       {screen === 'editor' && (activeDocument?.type === 'scene' || activeDocument?.type === 'codexEntry') && !arcOpen && <div className="editor-bottom"><button type="button" onClick={() => setArcOpen(true)} aria-label="Open generation input"><PanelBottomOpen aria-hidden="true" /></button><GenerateControl isGenerating={generationActive} phase={generationPhase} elapsedSeconds={generationElapsedSeconds} onGenerate={generate} onStop={stopGeneration} onMicro={insertEditorSpeech} onMicro2={insertPromptSpeech} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} /></div>}
       {screen === 'editor' && activeDocument?.type === 'summary' && <div className="summary-generate-wrap"><button className="summary-generate" type="button" onClick={generationActive ? stopGeneration : generate}>{generationActive ? <Square aria-hidden="true" fill="currentColor" /> : <RefreshCw aria-hidden="true" />} {generationActive ? 'Stop' : openSummaryState === 'missing' ? 'Summarize' : 'Re-summarize'}</button></div>}
       {screen === 'editor' && (activeDocument?.type === 'scene' || activeDocument?.type === 'codexEntry') && arcOpen && <section className="arc-drawer"><div><small>{activeDocument.type === 'codexEntry' ? 'LORE' : 'ARC'}</small>{generationActive && generationPhase ? <GenerationActivityStrip phase={generationPhase} elapsedSeconds={generationElapsedSeconds} placement="drawer" /> : <span>{activeDocument.type === 'codexEntry' ? 'Create or revise this entry' : 'Guide the next passage'}</span>}<button type="button" onClick={() => setArcOpen(false)} aria-label="Close generation input"><X aria-hidden="true" /></button></div><div className="arc-compose"><div className="arc-prompt-field"><ExpandableTextInput ref={promptRef} value={activeDocument.type === 'codexEntry' ? lorePrompt : arcPrompt} onChange={activeDocument.type === 'codexEntry' ? setLorePrompt : setArcPrompt} aria-label="generation prompt" dialogTitle="Edit generation prompt" /><span aria-live="polite">{(activeDocument.type === 'codexEntry' ? lorePrompt : arcPrompt).length} characters</span></div><button className={`play ${generationActive ? 'generating' : ''}`} type="button" onClick={generationActive ? stopGeneration : generate} aria-label={generationActive ? 'Stop generation' : 'Generate'}>{generationActive ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" fill="currentColor" />}</button></div></section>}
-      {screen === 'chat' && <section className="chat-composer"><small>Chapter 7 + Codex <ChevronDown aria-hidden="true" /></small><div><button type="button" aria-label="Dictate message"><Mic aria-hidden="true" /></button><textarea defaultValue="Compare Mara’s choice with what she promised Elias."/><button className="send" type="button" aria-label="Send message"><Send aria-hidden="true" fill="currentColor" /></button></div></section>}
 
       {rightOpen && <aside className="book-panel">
         <header><div><small>{formatSeries(currentBook, seriesList)}</small><strong>{currentBook?.title ?? 'Untitled Book'}</strong></div><button type="button" onClick={() => setRightOpen(false)} aria-label="Close book workspace"><X aria-hidden="true" /></button></header>
         <nav>{([['book', Settings2], ['outline', BookOpenText], ['notes', NotebookPen], ['codex', WandSparkles], ['chat', MessageCircle]] as const).map(([tab, Icon]) => <button type="button" className={rightTab === tab ? 'active' : ''} onClick={() => { setRightTab(tab); if (tab === 'chat') setChatPanel(screen === 'chat' ? 'settings' : 'list') }} key={tab}><Icon aria-hidden="true" /><span>{tab}</span></button>)}</nav>
-        <div className="panel-content">{rightTab === 'book' ? <BookSettings book={currentBook} books={bookList} series={seriesList} onSave={saveBookMetadata} onCreateSeries={addSeries} onRenameSeries={renameSeries} onDelete={removeCurrentBookFromSettings} /> : rightTab === 'outline' ? <Outline book={currentBook} entities={outlineEntities} activeSceneId={activeSceneId} summaryStates={summaryStates} expandedIds={expandedIds} onToggle={(id) => setExpandedIds((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })} onOpenScene={(id) => { void loadScene(id) }} onOpenSummary={(entity) => { void openSummary(entity) }} onCreate={(type, parentId) => { void addOutlineEntity(type, parentId) }} onRename={(entity) => { void editOutlineTitle(entity) }} onMove={(entity, direction) => { void moveOutlineEntity(entity, direction) }} onDelete={(entity) => { void removeOutlineEntity(entity) }} /> : rightTab === 'notes' ? <Notes notes={notes} activeId={activeDocument?.type === 'note' ? activeDocument.id : null} onCreate={() => { void addNote() }} onOpen={(id) => { void loadDocument(id) }} onRename={(entity) => { void renameContentEntity(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> : rightTab === 'codex' ? <Codex entries={codexEntries} activeId={activeDocument?.type === 'codexEntry' ? activeDocument.id : null} onCreate={() => { void addCodexEntry() }} onOpen={(id) => { void loadDocument(id) }} onRename={(entity) => { void renameContentEntity(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> : chatPanel === 'list' ? <ChatList onOpen={openChat} activeChat={screen === 'chat' ? activeChat : ''} onSettings={() => setChatPanel('settings')} /> : <ChatSettings title={activeChat} onBack={() => setChatPanel('list')} />}</div>
+        <div className="panel-content">{rightTab === 'book' ? <BookSettings book={currentBook} books={bookList} series={seriesList} onSave={saveBookMetadata} onCreateSeries={addSeries} onRenameSeries={renameSeries} onDelete={removeCurrentBookFromSettings} /> : rightTab === 'outline' ? <Outline book={currentBook} entities={outlineEntities} activeSceneId={activeSceneId} summaryStates={summaryStates} expandedIds={expandedIds} onToggle={(id) => setExpandedIds((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })} onOpenScene={(id) => { void loadScene(id) }} onOpenSummary={(entity) => { void openSummary(entity) }} onCreate={(type, parentId) => { void addOutlineEntity(type, parentId) }} onRename={(entity) => { void editOutlineTitle(entity) }} onMove={(entity, direction) => { void moveOutlineEntity(entity, direction) }} onDelete={(entity) => { void removeOutlineEntity(entity) }} /> : rightTab === 'notes' ? <Notes notes={notes} activeId={activeDocument?.type === 'note' ? activeDocument.id : null} onCreate={() => { void addNote() }} onOpen={(id) => { void loadDocument(id) }} onRename={(entity) => { void renameContentEntity(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> : rightTab === 'codex' ? <Codex entries={codexEntries} activeId={activeDocument?.type === 'codexEntry' ? activeDocument.id : null} onCreate={() => { void addCodexEntry() }} onOpen={(id) => { void loadDocument(id) }} onRename={(entity) => { void renameContentEntity(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> : <ChatSidebar bookId={currentBook?.id ?? ''} activeChatId={screen === 'chat' ? activeChatId : ''} onOpen={openChat} />}</div>
       </aside>}
     </main>
   )

@@ -5,6 +5,7 @@ export type AiPrompts = {
   summarize: string
   titles: string
   lore: string
+  assistant: string
 }
 
 export type AiSettings = {
@@ -67,6 +68,19 @@ Return {{count}} distinct options without commentary.`,
 }]
 
 export const defaultAiPrompts: AiPrompts = {
+  assistant: `You are a thoughtful writing assistant for {{book.title}}.
+
+Use the supplied book context as the source of truth. Distinguish established facts from suggestions, point out uncertainty when the manuscript is ambiguous, and help with continuity, character motivation, structure, brainstorming, and revision without pretending invented ideas are already canon.
+
+{% if book.genre %}
+Genre: {{book.genre}}
+{% endif %}
+{% if book.style %}
+Writing style: {{book.style}}
+{% endif %}
+{% if book.language %}
+Answer in {{book.language}} unless the user asks otherwise.
+{% endif %}`,
   story: `You are the story writer for {{book.title}}.
 
 {% if book.series %}

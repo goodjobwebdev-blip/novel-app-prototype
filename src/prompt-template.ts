@@ -1,4 +1,4 @@
-export type PromptScope = 'story' | 'summarize' | 'titles' | 'lore'
+export type PromptScope = 'story' | 'summarize' | 'titles' | 'lore' | 'assistant'
 
 export type BookPromptValues = {
   title: string
@@ -18,7 +18,7 @@ export type PromptVariable = {
   scopes: PromptScope[]
 }
 
-const everyPrompt: PromptScope[] = ['story', 'summarize', 'titles', 'lore']
+const everyPrompt: PromptScope[] = ['story', 'summarize', 'titles', 'lore', 'assistant']
 
 export const promptVariables: PromptVariable[] = [
   { name: 'book.title', description: 'Current book title', scopes: everyPrompt },
