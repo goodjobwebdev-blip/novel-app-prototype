@@ -130,7 +130,7 @@ export default function Workspace() {
   const [activeChat, setActiveChat] = useState('Mara’s motivation')
   const [arcOpen, setArcOpen] = useState(false)
   const [storyMarkdown, setStoryMarkdown] = useState(initialStoryMarkdown)
-  const [arcPrompt, setArcPrompt] = useState('Let Mara step through. Keep the reveal quiet and unsettling.')
+  const [arcPrompt, setArcPrompt] = useState('')
   const [lorePrompt, setLorePrompt] = useState('')
   const [chatEdit, setChatEdit] = useState(false)
   const [aiReady, setAiReady] = useState(false)
@@ -163,6 +163,11 @@ export default function Workspace() {
   const generationAbortRef = useRef<AbortController | null>(null)
   const generationStartedAtRef = useRef(0)
   const latestGenerationRequestRef = useRef<GenerationRequestSnapshot | null>(null)
+
+  useEffect(() => {
+    setArcPrompt('')
+    setLorePrompt('')
+  }, [activeDocument?.id])
 
   useEffect(() => {
     const settings = loadAiSettings()
@@ -659,7 +664,11 @@ export default function Workspace() {
           ? renderLorePrompt(settings.prompts.lore, { book: toBookPromptValues(currentBook, seriesList), entryTitle: activeDocument.title, entryCategory: activeDocument.category, entryContent: context.sceneText, sceneText: prepared.lastSceneText, additionalContext: prepared.additionalContext })
           : renderStoryPrompt(settings.prompts.story, { book: toBookPromptValues(currentBook, seriesList), sceneText: context.sceneText, scenePov: scenePovRef.current || undefined, previousSceneText: prepared.previousSceneText, summaryContext: prepared.summaryContext, additionalContext: prepared.additionalContext })
         const userMessage = `# Instruction\n\n${instruction.trim() || (isCodex ? 'Create a complete Codex entry.' : 'Continue the story.')}`
-        const diagnostics = generationContextDiagnostics(selectedModel, modelContextLength, systemPrompt, userMessage)
+        const selectedContextIsTemplated = /{{\s*additional_context\s*}}/.test(isCodex ? settings.prompts.lore : settings.prompts.story)
+        const contextMessage = !selectedContextIsTemplated && prepared.additionalContext.trim()
+          ? `# Additional context\n\n${prepared.additionalContext}`
+          : ''
+        const diagnostics = generationContextDiagnostics(selectedModel, modelContextLength, systemPrompt, `${contextMessage}\n\n${userMessage}`)
         if (!diagnostics.fits) {
           editor.finishGeneration('error')
           showToast(`Context is too large: ~${diagnostics.requestTokens.toLocaleString()} tokens plus response space for a ${diagnostics.modelContextTokens.toLocaleString()}-token model. Reduce context or choose a larger model.`)
@@ -669,7 +678,7 @@ export default function Workspace() {
           baseUrl: settings.baseUrl,
           model: selectedModel,
           systemPrompt,
-          contextMessage: '',
+          contextMessage,
           userMessage,
         }
       } catch (error) {
@@ -861,7 +870,7 @@ export default function Workspace() {
   const contextType: GenerationContextType = screen === 'chat' || (screen === 'settings' && returnScreen === 'chat') ? 'chat' : activeDocument?.type === 'codexEntry' ? 'codex' : activeDocument?.type === 'note' ? 'note' : 'scene'
 
   if (screen === 'settings') return <AiSettingsScreen
-    book={returnScreen === 'home' || !currentBook ? undefined : { id: currentBook.id, title: currentBook.title, contextType, currentDocumentId: activeDocument?.id }}
+    book={returnScreen === 'home' || !currentBook ? undefined : { id: currentBook.id, title: currentBook.title, contextType, currentDocumentId: activeDocument?.id, currentDocumentText: storyMarkdown, promptValues: toBookPromptValues(currentBook, seriesList) }}
     onHome={() => setScreen('home')}
     onBack={() => setScreen(returnScreen)}
     onSaved={(settings) => {
