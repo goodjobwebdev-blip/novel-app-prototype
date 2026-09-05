@@ -107,7 +107,11 @@ export function createBufferedWordRenderer({
   }
 
   function handleAbort() {
-    flushNow()
+    sourceEnded = true
+    if (timer) clearTimeout(timer)
+    timer = null
+    buffer = ''
+    complete()
   }
 
   signal.addEventListener('abort', handleAbort, { once: true })
