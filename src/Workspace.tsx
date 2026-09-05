@@ -337,6 +337,7 @@ export default function Workspace() {
 
   async function loadDocument(documentId: string, closePanel = true) {
     if (documentId === activeDocumentIdRef.current) {
+      setScreen('editor')
       if (closePanel) setRightOpen(false)
       return
     }
