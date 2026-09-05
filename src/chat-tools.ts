@@ -1,11 +1,13 @@
 import type { ChatToolCall, ChatToolDefinition } from './chat-api'
 import {
   updateChatMessage,
+  type ChatCodexCreationProposal,
   type ChatDocumentEditProposal,
   type ChatMessageEntity,
   type ChatTextReplacement,
 } from './chat-service'
 import {
+  createCodexEntry,
   createSnapshot,
   getEntity,
   listEntitiesByBook,
@@ -17,6 +19,7 @@ const editableTypes = ['scene', 'note', 'codexEntry'] as const
 const editableTypeSet = new Set<string>(editableTypes)
 const MAX_SEARCH_RESULTS = 12
 const MAX_REPLACEMENTS = 12
+const CODEX_CATEGORIES = ['Character', 'Place', 'Object', 'Event', 'Group', 'Other'] as const
 
 export const chatWorkspaceTools: ChatToolDefinition[] = [
   {
@@ -50,6 +53,24 @@ export const chatWorkspaceTools: ChatToolDefinition[] = [
           entity_id: { type: 'string' },
         },
         required: ['entity_id'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'propose_codex_entry',
+      description: 'Propose creating a new Codex/lore entry in the current book. Search existing Codex entries first when the name may already exist. This only creates a proposal; the entry is not created until the user presses Create.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Concise canonical name for the lore entry.' },
+          category: { type: 'string', enum: CODEX_CATEGORIES, description: 'Codex category.' },
+          content: { type: 'string', description: 'Markdown body for the new Codex entry.' },
+          summary: { type: 'string', description: 'Short explanation of why this lore entry should be created.' },
+        },
+        required: ['title', 'category', 'content'],
         additionalProperties: false,
       },
     },
@@ -105,8 +126,12 @@ export const chatWorkspaceTools: ChatToolDefinition[] = [
   },
 ]
 
-function makeProposalId() {
-  return `chat-edit-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+function makeProposalId(prefix = 'chat-edit') {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
+
+function normalizedTitle(title: string) {
+  return title.trim().replace(/\s+/g, ' ').toLocaleLowerCase()
 }
 
 function toolResult(value: unknown) {
@@ -171,7 +196,7 @@ function normalizeReplacements(value: unknown): ChatTextReplacement[] {
   })
 }
 
-export async function executeChatWorkspaceTool(bookId: string, call: ChatToolCall): Promise<{ content: string; proposal?: ChatDocumentEditProposal }> {
+export async function executeChatWorkspaceTool(bookId: string, call: ChatToolCall): Promise<{ content: string; proposal?: ChatDocumentEditProposal; codexCreation?: ChatCodexCreationProposal }> {
   try {
     const args = parseArguments(call)
     if (call.function.name === 'search_entities') {
@@ -209,6 +234,28 @@ export async function executeChatWorkspaceTool(bookId: string, call: ChatToolCal
           content: String(entity.content ?? ''),
         },
       }) }
+    }
+
+    if (call.function.name === 'propose_codex_entry') {
+      const title = typeof args.title === 'string' ? args.title.trim().replace(/\s+/g, ' ') : ''
+      const category = typeof args.category === 'string' && CODEX_CATEGORIES.includes(args.category as typeof CODEX_CATEGORIES[number]) ? args.category : 'Other'
+      const content = typeof args.content === 'string' ? args.content : ''
+      if (!title) return { content: toolResult({ ok: false, error: 'Codex title cannot be empty.' }) }
+      const existing = (await listEntitiesByBook(bookId, 'codexEntry'))
+        .filter((entity) => normalizedTitle(String(entity.title ?? '')) === normalizedTitle(title))
+      if (existing.length) {
+        return { content: toolResult({ ok: false, error: 'A Codex entry with this title already exists. Read or edit the existing entry instead of creating a duplicate.', existing: existing.map((entity) => ({ id: entity.id, title: titleFor(entity), category: String(entity.category ?? 'Other') })) }) }
+      }
+      const proposal: ChatCodexCreationProposal = {
+        id: makeProposalId('chat-codex-create'),
+        title,
+        category,
+        content,
+        summary: typeof args.summary === 'string' ? args.summary.trim() : '',
+        status: 'proposed',
+        createdAt: Date.now(),
+      }
+      return { content: toolResult({ ok: true, proposalId: proposal.id, message: 'Codex creation proposal created. The entry has not been created; the user must press Create.' }), codexCreation: proposal }
     }
 
     if (call.function.name === 'propose_document_edit') {
@@ -312,4 +359,43 @@ export async function rejectChatDocumentEdit(messageId: string, proposalId: stri
   const { message, proposal } = await messageWithProposal(messageId, proposalId)
   if (proposal.status !== 'proposed') return
   await setProposalStatus(message, proposal.id, 'rejected')
+}
+
+async function messageWithCodexCreation(messageId: string, proposalId: string) {
+  const entity = await getEntity<ArcEntity>(messageId)
+  if (!entity || entity.type !== 'chatMessage') throw new Error('The chat message is no longer available.')
+  const message = entity as ChatMessageEntity
+  const proposal = message.codexCreations?.find((item) => item.id === proposalId)
+  if (!proposal) throw new Error('That Codex creation proposal is no longer available.')
+  return { message, proposal }
+}
+
+async function setCodexCreationStatus(message: ChatMessageEntity, proposalId: string, patch: Partial<ChatCodexCreationProposal>) {
+  const codexCreations = (message.codexCreations ?? []).map((proposal) => proposal.id === proposalId ? { ...proposal, ...patch } : proposal)
+  return updateChatMessage(message.id, { codexCreations })
+}
+
+export async function createChatCodexEntry(messageId: string, proposalId: string) {
+  const { message, proposal } = await messageWithCodexCreation(messageId, proposalId)
+  if (proposal.status !== 'proposed') throw new Error(`This Codex proposal is already ${proposal.status}.`)
+
+  const duplicates = (await listEntitiesByBook(message.bookId, 'codexEntry'))
+    .filter((entity) => normalizedTitle(String(entity.title ?? '')) === normalizedTitle(proposal.title))
+  if (duplicates.length) {
+    await setCodexCreationStatus(message, proposal.id, { status: 'duplicate', entityId: duplicates[0].id })
+    throw new Error('A Codex entry with this title now exists. The proposal was not created again.')
+  }
+
+  const created = await createCodexEntry(message.bookId, proposal.title, proposal.category)
+  if (proposal.content) await saveDocumentContent(created.id, proposal.content)
+  const appliedAt = Date.now()
+  await setCodexCreationStatus(message, proposal.id, { status: 'created', entityId: created.id, appliedAt })
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('arc-entity-changed', { detail: { bookId: message.bookId, entityId: created.id } }))
+  return { entityId: created.id, appliedAt }
+}
+
+export async function rejectChatCodexEntry(messageId: string, proposalId: string) {
+  const { message, proposal } = await messageWithCodexCreation(messageId, proposalId)
+  if (proposal.status !== 'proposed') return
+  await setCodexCreationStatus(message, proposal.id, { status: 'rejected' })
 }
