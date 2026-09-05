@@ -29,6 +29,17 @@ export type NanoGPTGenerationRequest = {
 
 export type NanoGPTStreamLifecycle = {
   onResponse?: () => void
+  onThoughts?: (text: string) => void
+  onMetadata?: (metadata: NanoGPTStreamMetadata) => void
+}
+
+export type NanoGPTStreamMetadata = {
+  responseId?: string
+  responseModel?: string
+  finishReason?: string
+  promptTokens?: number
+  completionTokens?: number
+  totalTokens?: number
 }
 
 const templateValues = (values: StoryPromptValues): Record<string, string> => ({
@@ -96,6 +107,45 @@ function chunkText(payload: unknown) {
   return typeof choice?.delta?.content === 'string' ? choice.delta.content : ''
 }
 
+function reasoningText(delta: Record<string, unknown>) {
+  if (typeof delta.reasoning_content === 'string') return delta.reasoning_content
+  if (typeof delta.reasoning === 'string') return delta.reasoning
+  if (typeof delta.thinking === 'string') return delta.thinking
+  const details = delta.reasoning_details
+  if (!Array.isArray(details)) return ''
+  return details.map((item) => {
+    if (!item || typeof item !== 'object') return ''
+    const value = item as Record<string, unknown>
+    if (typeof value.text === 'string') return value.text
+    if (typeof value.content === 'string') return value.content
+    if (typeof value.reasoning === 'string') return value.reasoning
+    return ''
+  }).join('')
+}
+
+function finiteNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function streamMetadata(payload: unknown): NanoGPTStreamMetadata {
+  if (!payload || typeof payload !== 'object') return {}
+  const value = payload as Record<string, unknown>
+  const choice = (value.choices as Array<{ finish_reason?: unknown }> | undefined)?.[0]
+  const usage = value.usage && typeof value.usage === 'object' ? value.usage as Record<string, unknown> : undefined
+  return {
+    responseId: typeof value.id === 'string' ? value.id : undefined,
+    responseModel: typeof value.model === 'string' ? value.model : undefined,
+    finishReason: typeof choice?.finish_reason === 'string' ? choice.finish_reason : undefined,
+    promptTokens: finiteNumber(usage?.prompt_tokens),
+    completionTokens: finiteNumber(usage?.completion_tokens),
+    totalTokens: finiteNumber(usage?.total_tokens),
+  }
+}
+
+function hasMetadata(metadata: NanoGPTStreamMetadata) {
+  return Object.values(metadata).some((value) => value !== undefined)
+}
+
 export async function streamNanoGPTCompletion(
   request: NanoGPTGenerationRequest,
   onChunk: (text: string) => void,
@@ -113,7 +163,13 @@ export async function streamNanoGPTCompletion(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${request.apiKey}`,
     },
-    body: JSON.stringify({ model: request.model, messages, stream: true }),
+    body: JSON.stringify({
+      model: request.model,
+      messages,
+      stream: true,
+      reasoning: { enabled: true, delta_field: 'reasoning_content' },
+      stream_options: { include_usage: true },
+    }),
     signal,
   })
 
@@ -134,7 +190,13 @@ export async function streamNanoGPTCompletion(
     if (!trimmed.startsWith('data:')) return false
     const data = trimmed.slice(5).trim()
     if (!data || data === '[DONE]') return data === '[DONE]'
-    const text = chunkText(JSON.parse(data))
+    const payload = JSON.parse(data) as unknown
+    const metadata = streamMetadata(payload)
+    if (hasMetadata(metadata)) lifecycle.onMetadata?.(metadata)
+    const delta = (payload as { choices?: Array<{ delta?: Record<string, unknown> }> }).choices?.[0]?.delta
+    const thoughts = delta ? reasoningText(delta) : ''
+    if (thoughts) lifecycle.onThoughts?.(thoughts)
+    const text = chunkText(payload)
     if (text) {
       receivedText = true
       onChunk(text)
