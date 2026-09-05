@@ -30,6 +30,7 @@ import {
   listChats,
   updateChat,
   updateChatMessage,
+  type ChatCodexCreationProposal,
   type ChatDocumentEditProposal,
   type ChatEntity,
   type ChatMessageEntity,
@@ -37,7 +38,7 @@ import {
 } from './chat-service'
 import { buildContextValues, generationContextDiagnostics } from './context-service'
 import { bookTemplateValues, renderPromptTemplate, type BookPromptValues } from './prompt-template'
-import { applyChatDocumentEdit, chatWorkspaceTools, executeChatWorkspaceTool, rejectChatDocumentEdit } from './chat-tools'
+import { applyChatDocumentEdit, chatWorkspaceTools, createChatCodexEntry, executeChatWorkspaceTool, rejectChatCodexEntry, rejectChatDocumentEdit } from './chat-tools'
 import './chat.css'
 
 type GenerationPhase = 'sending' | 'thinking' | 'writing' | 'stopping'
@@ -238,18 +239,21 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     ].filter(Boolean)
     const workspaceInstructions = `# Workspace tools
 
-You can inspect and propose edits to Scenes, Notes, and Codex entries in this book. Use search_entities and read_entity when the target document is not already known. For localized changes, prefer propose_document_edit with exact old_text copied from read_entity. Use propose_document_replacement only when the user asks for a whole-document rewrite. Tool edit calls create proposals only: never claim a document has already changed. The user must press Apply in the chat before a proposal is written.`
+You can inspect and propose edits to Scenes, Notes, and Codex entries in this book. You can also propose creating a new Codex/lore entry with propose_codex_entry. Search existing entries first when the requested lore may already exist. Use search_entities and read_entity when the target document is not already known. For localized changes, prefer propose_document_edit with exact old_text copied from read_entity. Use propose_document_replacement only when the user asks for a whole-document rewrite. Tool edit and creation calls create proposals only: never claim a document has already changed or been created. The user must press Apply or Create in the chat first.`
     const providerMessages: ChatCompletionMessage[] = [
       { role: 'system', content: systemPrompt },
       { role: 'system', content: workspaceInstructions },
       ...(contextSections.length ? [{ role: 'system' as const, content: `# Selected book context\n\n${contextSections.join('\n\n')}` }] : []),
       ...history.map((message): ChatCompletionMessage => {
         const editState = message.role === 'assistant' && message.documentEdits?.length
-          ? `\n\n[Workspace proposals: ${message.documentEdits.map((proposal) => `${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
+          ? `\n\n[Workspace edit proposals: ${message.documentEdits.map((proposal) => `${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
+          : ''
+        const creationState = message.role === 'assistant' && message.codexCreations?.length
+          ? `\n\n[Codex creation proposals: ${message.codexCreations.map((proposal) => `${proposal.title}: ${proposal.status}`).join('; ')}]`
           : ''
         return {
           role: message.role,
-          content: `${message.content}${editState}`,
+          content: `${message.content}${editState}${creationState}`,
           ...(message.role === 'assistant' && message.thoughts ? { reasoning_content: message.thoughts } : {}),
         }
       }),
@@ -273,6 +277,7 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
     let thoughts = ''
     let completed = false
     const proposals: ChatDocumentEditProposal[] = []
+    const codexCreations: ChatCodexCreationProposal[] = []
 
     try {
       const workingMessages = [...providerMessages]
@@ -314,6 +319,7 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
           for (const call of result.toolCalls) {
             const execution = await executeChatWorkspaceTool(bookId, call)
             if (execution.proposal) proposals.push(execution.proposal)
+            if (execution.codexCreation) codexCreations.push(execution.codexCreation)
             workingMessages.push({ role: 'tool', tool_call_id: call.id, content: execution.content })
           }
           setStreamedContent('')
@@ -340,11 +346,12 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
       setElapsed(0)
       setStreamedContent('')
       setStreamedThoughts('')
-      if ((content || thoughts || proposals.length) && (completed || stopped)) {
+      if ((content || thoughts || proposals.length || codexCreations.length) && (completed || stopped)) {
         await createChatMessage(activeChat, 'assistant', content, {
           thoughts: thoughts || undefined,
           status: stopped ? 'stopped' : 'complete',
           documentEdits: proposals.length ? proposals : undefined,
+          codexCreations: codexCreations.length ? codexCreations : undefined,
         })
         await reloadMessages()
       }
@@ -450,6 +457,26 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
     }
   }
 
+  async function createCodexProposal(message: ChatMessageEntity, proposal: ChatCodexCreationProposal) {
+    try {
+      await createChatCodexEntry(message.id, proposal.id)
+      await reloadMessages()
+      onToast(`Created Codex entry “${proposal.title}”.`)
+    } catch (error) {
+      await reloadMessages().catch(() => undefined)
+      onToast(error instanceof Error ? error.message : 'Could not create the proposed Codex entry.')
+    }
+  }
+
+  async function rejectCodexProposal(message: ChatMessageEntity, proposal: ChatCodexCreationProposal) {
+    try {
+      await rejectChatCodexEntry(message.id, proposal.id)
+      await reloadMessages()
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : 'Could not reject the Codex proposal.')
+    }
+  }
+
   function readAloud(message: ChatMessageEntity) {
     if (!('speechSynthesis' in window) || !message.content.trim()) return
     window.speechSynthesis.cancel()
@@ -468,8 +495,9 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
           {message.role === 'assistant' ? <div className="chat-message-stack">
             {editingId === message.id ? <InlineMessageEdit value={editingValue} onChange={setEditingValue} onCancel={() => setEditingId('')} onSave={() => { void saveEdit(message, false) }} /> : <>
               {message.thoughts && <details className="chat-thoughts"><summary>Thoughts</summary><div>{message.thoughts}</div></details>}
-              <div className="bubble">{message.content || (message.documentEdits?.length ? <em>Workspace edit proposal</em> : <em>No final answer returned.</em>)}</div>
+              <div className="bubble">{message.content || (message.documentEdits?.length || message.codexCreations?.length ? <em>Workspace proposal</em> : <em>No final answer returned.</em>)}</div>
               {message.documentEdits?.length ? <div className="chat-document-edits">{message.documentEdits.map((proposal) => <DocumentEditCard key={proposal.id} proposal={proposal} onApply={() => { void applyProposal(message, proposal) }} onReject={() => { void rejectProposal(message, proposal) }} />)}</div> : null}
+              {message.codexCreations?.length ? <div className="chat-document-edits">{message.codexCreations.map((proposal) => <CodexCreationCard key={proposal.id} proposal={proposal} onCreate={() => { void createCodexProposal(message, proposal) }} onReject={() => { void rejectCodexProposal(message, proposal) }} />)}</div> : null}
               {message.status === 'stopped' && <small className="chat-message-status">Stopped</small>}
               <div className="message-tools"><button type="button" onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" onClick={() => { void fork(message) }}><GitFork aria-hidden="true" /> Fork</button><button type="button" onClick={() => readAloud(message)}><Volume2 aria-hidden="true" /> Read aloud</button><button type="button" onClick={() => { void regenerate(message) }}><RefreshCw aria-hidden="true" /> Regenerate</button><button type="button" onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
             </>}
@@ -563,6 +591,16 @@ function ChatModelPicker({ value, models, onChange }: { value: string; models: C
       </div>
     </section>}
   </div>
+}
+
+function CodexCreationCard({ proposal, onCreate, onReject }: { proposal: ChatCodexCreationProposal; onCreate: () => void; onReject: () => void }) {
+  const statusLabel = proposal.status === 'proposed' ? 'Ready to create' : proposal.status === 'created' ? 'Created' : proposal.status === 'duplicate' ? 'Already exists' : 'Rejected'
+  return <section className={`chat-document-edit chat-codex-creation ${proposal.status}`}>
+    <header><div><small>New Codex · {proposal.category}</small><strong>{proposal.title}</strong></div><span>{statusLabel}</span></header>
+    {proposal.summary && <p>{proposal.summary}</p>}
+    <details><summary>View entry</summary><div className="chat-document-diff"><pre className="new">{proposal.content || '[empty entry]'}</pre></div></details>
+    {proposal.status === 'proposed' && <footer><button type="button" onClick={onReject}>Reject</button><button className="primary" type="button" onClick={onCreate}>Create</button></footer>}
+  </section>
 }
 
 function DocumentEditCard({ proposal, onApply, onReject }: { proposal: ChatDocumentEditProposal; onApply: () => void; onReject: () => void }) {
