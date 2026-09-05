@@ -88,12 +88,12 @@ The application should feel like a quiet writing workspace, not a general-purpos
 ## AI constraints and decisions
 
 - Supported provider choices are OpenRouter, nano-gpt.com, OpenAI, and an OpenAI-compatible custom endpoint.
-- The user selects separate Main and Support models from the provider's model list. Main is intended for story writing; Support handles summaries, titles, and names.
+- The user selects Main and Support models from the provider's model list, plus an optional Codex model. Main is intended for story writing; Support handles summaries, titles, and names; Codex generation falls back to Main when its dedicated model is empty.
 - Model controls support loading, search, favorites, capability/context metadata when supplied, and provider errors. Favorites are a global model-picker preference rather than part of a book's generation configuration.
-- The user can edit separate Story, Summarize, and Titles & names system prompts.
+- The user can edit separate Story, Summarize, Titles & names, and Lore entries system prompts.
 - Prompt examples support `{{variable}}` placeholders and `{% if condition %}...{% endif %}` blocks. The exact future template engine is not yet selected.
 - AI defaults, including the API key, are currently persisted in localStorage on that browser/device. The interface must state this clearly.
-- A new book copies provider, API key, base URL, Main/Support models, and all three prompts into an independent IndexedDB record. Later default changes do not affect that book unless the user explicitly resets it from defaults.
+- A new book copies provider, API key, base URL, Main/Support/Codex model choices, and all four prompts into an independent IndexedDB record. Later default changes do not affect that book unless the user explicitly resets it from defaults.
 - The API key must never be committed to the repository or embedded in the deployed build.
 - Local browser persistence is convenient but is not secure storage against scripts running in the same origin; this tradeoff is accepted for the personal prototype and should be revisited before adding third-party scripts or broader distribution.
 - Because the app is a static frontend, provider requests are sent from the browser. The provider must permit browser requests, and the key is visible to the browser runtime.
@@ -115,13 +115,19 @@ System prompts use `{{variable}}` for substitution and `{% if variable %}...{% e
 | `{{book.pov}}` | All | Default book point of view |
 | `{{book.tense}}` | All | Default narrative tense |
 | `{{book.language}}` | All | Primary writing language |
-| `{{scene.text}}` | Story | Current scene text; available to custom prompts while the default prompt relies on the structured context message |
+| `{{scene.text}}` | Story, Lore entries | Current Scene for Story; last-opened Scene for Lore entries |
+| `{{scene.previous_text}}` | Story | Immediately previous Scene text when the current Scene is empty |
+| `{{scene.summary_context}}` | Story | Automatically selected summaries of earlier material |
 | `{{scene.pov}}` | Story | Scene-specific point of view, when set |
+| `{{entry.title}}` | Lore entries | Current Codex entry title |
+| `{{entry.category}}` | Lore entries | Current Codex entry category |
+| `{{entry.content}}` | Lore entries | Existing Codex entry Markdown body |
+| `{{additional_context}}` | Story, Lore entries | Deterministically ordered sources selected in Context Management |
 | `{{target.type}}` | Summarize, Titles & names | Requested summary, title, or name target |
 | `{{target.previous_summary}}` | Summarize | Existing summary supplied during re-summarization |
 | `{{count}}` | Titles & names | Requested number of title or name options |
 
-Story and Summarize prompts are rendered by the current generation flows. Titles & names variables define the prompt contract for its planned generation flow.
+Story, Summarize, and Lore entries prompts are rendered by the current generation flows. Titles & names variables define the prompt contract for its planned generation flow.
 
 ## Current prototype scope
 
@@ -132,8 +138,8 @@ Implemented as working behavior:
 - provider selection and compatible endpoint entry;
 - API-key entry and device-local persistence;
 - provider model loading where browser permissions allow it;
-- model search, favorites, and Main/Support selection;
-- editable Story, Summarize, and Titles & names prompts;
+- model search, favorites, Main/Support selection, and an optional Codex-model override;
+- editable Story, Summarize, Titles & names, and Lore entries prompts;
 - saving and restoring global AI defaults;
 - independent per-book AI settings, explicit reset from defaults, and book-scoped generation;
 - persisted current-book metadata in the right-side Book tab;
@@ -141,7 +147,8 @@ Implemented as working behavior:
 - persisted books, acts, chapters, scenes, navigation, autosave, and local document snapshots;
 - persisted Scene, Chapter, and Act summaries with freshness tracking and Support-model generation;
 - persisted, searchable Notes and categorized Codex entries using the shared Markdown editor;
-- persisted book/scene context choices, structured generation context assembly, and Main-model-derived context budgets.
+- persisted per-book Scene/Codex/Note/Chat context profiles, deterministic automatic/additional context assembly, and selected-model context budgets;
+- streamed whole-body Codex generation with Main-model fallback and editor undo/redo recovery.
 
 Implemented as interactive UI prototypes or placeholders:
 
