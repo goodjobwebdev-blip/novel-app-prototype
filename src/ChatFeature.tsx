@@ -21,6 +21,7 @@ import {
   X,
 } from 'lucide-react'
 import { streamChatCompletion, type ChatCompletionMessage } from './chat-api'
+import ExpandableTextInput from './ExpandableTextInput'
 import {
   createChat,
   createChatMessage,
@@ -687,12 +688,12 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
         {modelStatus && <small className="chat-model-status">{modelStatus}</small>}
       </div>
       <div className="chat-compose-row">
-        <textarea ref={inputRef} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => {
+        <ExpandableTextInput ref={inputRef} value={draft} onChange={setDraft} onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault()
             void send()
           }
-        }} placeholder="Ask about the book…" aria-label="Chat message" />
+        }} placeholder="Ask about the book…" aria-label="Chat message" dialogTitle="Write chat message" />
         <ChatGenerateButton generating={generating} phase={phase} elapsed={elapsed} thinking={chat.thinking} onGenerate={() => { void send() }} onStop={stop} onMicro={insertMicroPlaceholder} onThinking={setThinking} />
       </div>
     </section>
@@ -808,7 +809,7 @@ function InlineMessageEdit({ value, onChange, onCancel, onSave, onSaveAndRegener
   onSave: () => void
   onSaveAndRegenerate?: () => void
 }) {
-  return <div className="inline-edit"><textarea value={value} onChange={(event) => onChange(event.target.value)} autoFocus/><div><button type="button" onClick={onCancel}>Cancel</button><button type="button" onClick={onSave}>Save</button>{onSaveAndRegenerate && <button type="button" onClick={onSaveAndRegenerate}>Save & regenerate</button>}</div></div>
+  return <div className="inline-edit chat-inline-edit"><ExpandableTextInput value={value} onChange={onChange} autoFocus aria-label="Edit chat message" dialogTitle="Edit chat message" /><div><button type="button" onClick={onCancel}>Cancel</button><button type="button" onClick={onSave}>Save</button>{onSaveAndRegenerate && <button type="button" onClick={onSaveAndRegenerate}>Save & regenerate</button>}</div></div>
 }
 
 function ChatGenerateButton({ generating, phase, elapsed, thinking, onGenerate, onStop, onMicro, onThinking }: {
