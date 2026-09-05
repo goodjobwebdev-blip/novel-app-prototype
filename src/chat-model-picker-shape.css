@@ -1,0 +1,21 @@
+/* Keep the searchable model trigger consistent with the rest of the mobile composer.
+   The legacy selector uses a 999px radius, which becomes a stretched ellipse at full width. */
+.functional-chat-composer .chat-model-picker > .chat-model-selector {
+  height: 44px;
+  min-height: 44px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .025);
+}
+
+.functional-chat-composer .chat-model-picker > .chat-model-selector:hover,
+.functional-chat-composer .chat-model-picker.open > .chat-model-selector {
+  border-color: rgba(198, 168, 107, .32);
+  background: rgba(198, 168, 107, .045);
+}
+
+@media (max-width: 720px) {
+  .functional-chat-composer .chat-model-picker > .chat-model-selector {
+    width: 100%;
+    border-radius: 14px;
+  }
+}
