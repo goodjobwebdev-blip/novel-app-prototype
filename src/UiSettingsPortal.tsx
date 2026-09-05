@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Copy, Palette, Plus, Search, Trash2, Type } from 'lucide-react'
+import { Check, Copy, Palette, Plus, Search, Trash2 } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import {
   UI_SETTINGS_EVENT,
@@ -183,20 +183,39 @@ export default function UiSettingsPortalBridge() {
 
   useEffect(() => {
     let current: HTMLElement | null = null
+    let railFooter: HTMLParagraphElement | null = null
+    let originalRailText = ''
+
+    function restoreRailFooter() {
+      if (railFooter) railFooter.textContent = originalRailText
+      railFooter = null
+      originalRailText = ''
+    }
+
     function findTarget() {
       const next = document.querySelector<HTMLElement>('.appearance-settings')
       if (next === current) return
       if (current) current.classList.remove('ui-settings-enhanced')
+      restoreRailFooter()
       current = next
-      if (current) current.classList.add('ui-settings-enhanced')
+      if (current) {
+        current.classList.add('ui-settings-enhanced')
+        railFooter = current.closest('.app-shell')?.querySelector<HTMLParagraphElement>('.settings-rail > p') ?? null
+        if (railFooter) {
+          originalRailText = railFooter.textContent ?? ''
+          railFooter.textContent = 'UI settings are global on this device and apply to every book. Books cannot override them.'
+        }
+      }
       setTarget(current)
     }
+
     findTarget()
     const observer = new MutationObserver(findTarget)
     observer.observe(document.body, { childList: true, subtree: true })
     return () => {
       observer.disconnect()
       if (current) current.classList.remove('ui-settings-enhanced')
+      restoreRailFooter()
     }
   }, [])
 
