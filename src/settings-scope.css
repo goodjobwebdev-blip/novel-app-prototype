@@ -1,0 +1,3 @@
+[aria-label="Default settings navigation"] nav button:nth-child(2) {
+  display: none;
+}
