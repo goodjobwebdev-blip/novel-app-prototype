@@ -1,4 +1,4 @@
-import { loadAiSettings, type AiSettings } from './ai-settings'
+import { defaultAiPrompts, loadAiSettings, previousDefaultAssistantPrompt, type AiSettings } from './ai-settings'
 import { getCachedModelCatalog } from './model-catalog'
 import {
   deleteEntityTree,
@@ -150,7 +150,12 @@ export async function listChats(bookId: string): Promise<ChatEntity[]> {
 
 export async function getChat(chatId: string): Promise<ChatEntity | undefined> {
   const entity = await getEntity<ArcEntity>(chatId)
-  return entity?.type === 'chat' ? entity as ChatEntity : undefined
+  if (entity?.type !== 'chat') return undefined
+  const chat = entity as ChatEntity
+  if (chat.systemPrompt !== previousDefaultAssistantPrompt) return chat
+  const migrated: ChatEntity = { ...chat, systemPrompt: defaultAiPrompts.assistant }
+  await putEntity(migrated)
+  return migrated
 }
 
 export async function createChat(bookId: string, title = 'New chat'): Promise<ChatEntity> {

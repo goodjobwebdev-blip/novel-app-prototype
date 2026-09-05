@@ -38,9 +38,19 @@ export type ChatCompletionChunk = {
   thoughts?: string
 }
 
+export type ChatCompletionUsage = {
+  promptTokens?: number
+  completionTokens?: number
+  totalTokens?: number
+  cachedTokens?: number
+  cacheReadInputTokens?: number
+  cacheCreationInputTokens?: number
+}
+
 export type ChatCompletionResult = {
   toolCalls: ChatToolCall[]
   finishReason?: string
+  usage?: ChatCompletionUsage
 }
 
 type ToolCallFragment = {
@@ -101,6 +111,67 @@ function parseChunk(payload: unknown): { chunk: ChatCompletionChunk; toolFragmen
   }
 }
 
+function finiteNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function parseUsage(payload: unknown): ChatCompletionUsage {
+  if (!payload || typeof payload !== 'object') return {}
+  const value = payload as Record<string, unknown>
+  const usage = value.usage && typeof value.usage === 'object' ? value.usage as Record<string, unknown> : undefined
+  const details = usage?.prompt_tokens_details && typeof usage.prompt_tokens_details === 'object'
+    ? usage.prompt_tokens_details as Record<string, unknown>
+    : undefined
+  if (!usage) return {}
+  return {
+    promptTokens: finiteNumber(usage.prompt_tokens),
+    completionTokens: finiteNumber(usage.completion_tokens),
+    totalTokens: finiteNumber(usage.total_tokens),
+    cachedTokens: finiteNumber(details?.cached_tokens),
+    cacheReadInputTokens: finiteNumber(usage.cache_read_input_tokens) ?? finiteNumber(details?.cache_read_input_tokens),
+    cacheCreationInputTokens: finiteNumber(usage.cache_creation_input_tokens) ?? finiteNumber(details?.cache_creation_input_tokens),
+  }
+}
+
+function hasUsage(usage: ChatCompletionUsage) {
+  return Object.values(usage).some((value) => value !== undefined)
+}
+
+function stableProposalItems(items: string, statuses: string[]) {
+  const statusPattern = new RegExp(`: (?:${statuses.join('|')})$`)
+  return items.split('; ').map((item) => item.replace(statusPattern, '')).join('; ')
+}
+
+function stabilizeProposalHistory(content: string) {
+  return content
+    .replace(/\[Workspace edit proposals: ([^\]]*)\]/g, (_match, items: string) => `[Workspace edit proposals: ${stableProposalItems(items, ['proposed', 'applied', 'rejected', 'stale'])}]`)
+    .replace(/\[Codex creation proposals: ([^\]]*)\]/g, (_match, items: string) => `[Codex creation proposals: ${stableProposalItems(items, ['proposed', 'created', 'rejected', 'duplicate'])}]`)
+    .replace(/\[Outline proposals: ([^\]]*)\]/g, (_match, items: string) => `[Outline proposals: ${stableProposalItems(items, ['proposed', 'applied', 'rejected', 'stale'])}]`)
+    .replace(/\[Note\/Codex proposals: ([^\]]*)\]/g, (_match, items: string) => `[Note/Codex proposals: ${stableProposalItems(items, ['proposed', 'applied', 'rejected', 'stale'])}]`)
+}
+
+function reorderSelectedBookContext(content: string) {
+  const header = '# Selected book context\n\n'
+  if (!content.startsWith(header)) return content
+  const additionalMarker = '\n\n# Additional context\n\n'
+  const additionalIndex = content.lastIndexOf(additionalMarker)
+  if (additionalIndex < header.length) return content
+  const firstSection = content.slice(header.length, additionalIndex)
+  if (!firstSection.startsWith('# Current scene')) return content
+  const additionalSection = content.slice(additionalIndex + 2)
+  return `${header}${additionalSection}\n\n${firstSection}`
+}
+
+function cacheFriendlyMessages(messages: ChatCompletionMessage[]) {
+  return messages.map((message) => {
+    if (!message.content) return message
+    let content = message.content
+    if (message.role === 'system') content = reorderSelectedBookContext(content)
+    if (message.role === 'assistant') content = stabilizeProposalHistory(content)
+    return content === message.content ? message : { ...message, content }
+  })
+}
+
 export async function streamChatCompletion(
   request: ChatCompletionRequest,
   onChunk: (chunk: ChatCompletionChunk) => void,
@@ -109,9 +180,10 @@ export async function streamChatCompletion(
 ): Promise<ChatCompletionResult> {
   const body: Record<string, unknown> = {
     model: request.model,
-    messages: request.messages,
+    messages: cacheFriendlyMessages(request.messages),
     stream: true,
   }
+  if (request.provider !== 'compatible') body.stream_options = { include_usage: true }
   if (request.tools?.length) {
     body.tools = request.tools
     body.tool_choice = 'auto'
@@ -148,6 +220,7 @@ export async function streamChatCompletion(
   let buffer = ''
   let received = false
   let finishReason: string | undefined
+  let usage: ChatCompletionUsage = {}
   const accumulated = new Map<number, ChatToolCall>()
 
   const appendToolFragment = (fragment: ToolCallFragment, fallbackIndex: number) => {
@@ -169,7 +242,13 @@ export async function streamChatCompletion(
     if (!trimmed.startsWith('data:')) return false
     const data = trimmed.slice(5).trim()
     if (!data || data === '[DONE]') return data === '[DONE]'
-    const parsed = parseChunk(JSON.parse(data))
+    const payload = JSON.parse(data) as unknown
+    const nextUsage = parseUsage(payload)
+    if (hasUsage(nextUsage)) {
+      const definedUsage = Object.fromEntries(Object.entries(nextUsage).filter(([, value]) => value !== undefined)) as Partial<ChatCompletionUsage>
+      usage = { ...usage, ...definedUsage }
+    }
+    const parsed = parseChunk(payload)
     if (parsed.finishReason) finishReason = parsed.finishReason
     parsed.toolFragments.forEach((fragment, index) => appendToolFragment(fragment, index))
     if (parsed.chunk.content || parsed.chunk.thoughts) {
@@ -205,5 +284,8 @@ export async function streamChatCompletion(
       id: call.id || `tool-call-${index}`,
     }))
     .filter((call) => call.function.name)
-  return { toolCalls, finishReason }
+  if (hasUsage(usage) && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('arc-chat-cache-usage', { detail: usage }))
+  }
+  return { toolCalls, finishReason, ...(hasUsage(usage) ? { usage } : {}) }
 }
