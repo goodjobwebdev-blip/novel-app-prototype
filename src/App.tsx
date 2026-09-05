@@ -40,6 +40,7 @@ import {
 import { promptVariables } from './prompt-template'
 import type { BookPromptValues } from './prompt-template'
 import { buildContextValues, type PreparedContextValues } from './context-service'
+import { buildComprehensiveContextPreview } from './context-preview'
 import { getChat, saveChatContextProfile } from './chat-service'
 import { clearModelCatalog, getCachedModelCatalog, providerModelEndpoint, saveModelCatalog, type ProviderModel } from './model-catalog'
 type SettingsTab = 'ai' | 'context' | 'appearance' | 'speech' | 'images'
@@ -428,13 +429,13 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
           <div className="prompt-footer"><button type="button" onClick={() => update('prompts', { ...settings.prompts, [promptTab]: defaultAiPrompts[promptTab] })}>Reset default</button></div>
         </section>
         {book && <footer className="save-bar"><div><strong>{book.title}</strong><span>Changes save automatically</span></div><div className="save-actions"><button className="reset-settings" type="button" onClick={() => { void resetFromDefaults() }} disabled={settingsLoading}><RefreshCw aria-hidden="true" /> Reset from defaults</button></div></footer>}
-        </> : settingsTab === 'context' && book ? <ContextSettings bookId={book.id} bookTitle={book.title} bookPromptValues={book.promptValues} type={book.contextType ?? 'scene'} currentDocumentId={book.currentDocumentId} currentDocumentText={book.currentDocumentText} value={contextSettings} sources={contextSources} saved={contextSaved} onChange={updateContextDefaults} /> : <SettingsPlaceholder tab={settingsTab} scope={isBookSettings ? 'book' : 'defaults'} />}
+        </> : settingsTab === 'context' && book ? <ContextSettings bookId={book.id} bookTitle={book.title} bookPromptValues={book.promptValues} type={book.contextType ?? 'scene'} currentDocumentId={book.currentDocumentId} currentDocumentText={book.currentDocumentText} chatId={book.chatId} aiSettings={settings} value={contextSettings} sources={contextSources} saved={contextSaved} onChange={updateContextDefaults} /> : <SettingsPlaceholder tab={settingsTab} scope={isBookSettings ? 'book' : 'defaults'} />}
       </section>
     </main>
   )
 }
 
-function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDocumentId, currentDocumentText, value, sources, saved, onChange }: { bookId: string; bookTitle: string; bookPromptValues?: BookPromptValues; type: GenerationContextType; currentDocumentId?: string; currentDocumentText?: string; value: BookContextSettings; sources: ArcEntity[]; saved: boolean; onChange: (value: BookContextSettings) => void }) {
+function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDocumentId, currentDocumentText, chatId, aiSettings, value, sources, saved, onChange }: { bookId: string; bookTitle: string; bookPromptValues?: BookPromptValues; type: GenerationContextType; currentDocumentId?: string; currentDocumentText?: string; chatId?: string; aiSettings: AiSettings; value: BookContextSettings; sources: ArcEntity[]; saved: boolean; onChange: (value: BookContextSettings) => void }) {
   const [query, setQuery] = useState('')
   const [preview, setPreview] = useState<PreparedContextValues | null>(null)
   const [previewError, setPreviewError] = useState('')
@@ -460,38 +461,38 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
     return () => { cancelled = true }
   }, [bookId, currentDocumentId, currentDocumentText, profile, sources, type, value.lastOpenedSceneId])
 
-  const currentDocument = sources.find((item) => item.id === currentDocumentId)
   const metadata = bookPromptValues ?? { title: bookTitle, series: '', seriesOrder: '', overview: '', genre: '', style: '', pov: '', tense: '', language: '' }
-  const metadataText = [
-    ['Title', metadata.title], ['Series', metadata.series], ['Series order', metadata.seriesOrder], ['Overview', metadata.overview],
-    ['Genre', metadata.genre], ['Style', metadata.style], ['Point of view', metadata.pov], ['Tense', metadata.tense], ['Language', metadata.language],
-  ].filter((item) => item[1]).map(([label, content]) => `${label}: ${content}`).join('\n')
-  const previewSections = preview ? [
-    { title: 'Book metadata', detail: 'Prompt variables', content: metadataText },
-    ...(type === 'scene' && preview.previousSceneText ? [{ title: `Previous scene${preview.previousSceneTitle ? ` — ${preview.previousSceneTitle}` : ''}`, detail: 'Empty-scene fallback', content: preview.previousSceneText }] : []),
-    ...(type === 'scene' && preview.summaryContext ? [{ title: 'Earlier summaries', detail: 'Automatic', content: preview.summaryContext }] : []),
-    ...(type === 'codex' ? [{ title: `Current entry${currentDocument?.title ? ` — ${currentDocument.title}` : ''}`, detail: 'Required', content: currentDocumentText ?? String(currentDocument?.content ?? '') }] : []),
-    ...(type === 'codex' && preview.lastSceneText ? [{ title: `Last-opened scene${preview.lastSceneTitle ? ` — ${preview.lastSceneTitle}` : ''}`, detail: 'Automatic', content: preview.lastSceneText }] : []),
-    ...(type === 'chat' && preview.lastSceneText ? [{ title: `Current scene${preview.lastSceneTitle ? ` — ${preview.lastSceneTitle}` : ''}`, detail: 'Automatic', content: preview.lastSceneText }] : []),
-    ...(preview.additionalContext ? [{ title: 'Additional context', detail: 'Selected', content: preview.additionalContext }] : []),
-    ...(type === 'scene' ? [{ title: `Current scene${preview.currentSceneTitle ? ` — ${preview.currentSceneTitle}` : ''}`, detail: 'Required', content: preview.currentSceneText }] : []),
-  ] : []
-  const exactPreview = previewSections.map((item) => `# ${item.title}\n\n${item.content || '[empty]'}`).join('\n\n')
+  const previewResult = preview ? buildComprehensiveContextPreview({
+    type,
+    aiSettings,
+    metadata,
+    prepared: preview,
+    sources,
+    currentDocumentId,
+    currentDocumentText,
+    chatId,
+  }) : null
+  const previewSections = previewResult?.sections ?? []
+  const scopeLabel = previewResult?.scopeLabel ?? (type === 'scene' ? 'Story' : type === 'codex' ? 'Codex' : type === 'note' ? 'Note' : 'Chat')
+  const helperText = previewResult?.helperText ?? 'Preparing the model input preview.'
+  const exactPreview = previewResult?.combinedText ?? ''
+
   return <section className="context-defaults-settings">
-    <header className="page-heading"><div><p>{type} generation</p><h1 id="page-title">Context Management</h1><span>Saved independently for {type} generation in “{bookTitle}”.</span></div><div className={`save-state ${saved ? 'saved' : ''}`}><i />{saved ? 'Saved' : 'Saving…'}</div></header>
+    <header className="page-heading"><div><p>{scopeLabel} generation</p><h1 id="page-title">Context Management</h1><span>Saved independently for {scopeLabel.toLowerCase()} generation in “{bookTitle}”.</span></div><div className={`save-state ${saved ? 'saved' : ''}`}><i />{saved ? 'Saved' : 'Saving…'}</div></header>
     <section className="settings-card context-defaults-card"><div className="card-heading"><div><span>01</span><h2>Automatic context</h2></div></div>
       <div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Book metadata</strong><small>Provided through the book prompt variables.</small></span><b>Required</b></div>
-      {type === 'scene' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current Scene</strong><small>The active editor content is always included.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} /><span><strong>Previous Scene when empty</strong><small>Use the immediately previous Scene only when the current Scene has no text.</small></span></label><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Earlier summaries</strong><small>Uses the highest completed Act or Chapter summary without exposing later material.</small></span><b>Automatic</b></div></> : type === 'codex' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current entry</strong><small>Title, category, and existing body are supplied through lore prompt variables.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includeLastScene} onChange={(event) => updateProfile({ ...profile, includeLastScene: event.target.checked })} /><span><strong>Last-opened Scene</strong><small>Included by default for Codex generation.</small></span></label></> : type === 'chat' ? <label><input type="checkbox" checked={profile.includeLastScene} onChange={(event) => updateProfile({ ...profile, includeLastScene: event.target.checked })} /><span><strong>Current Scene</strong><small>The book's last-opened Scene is included automatically for this chat.</small></span></label> : <div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Type-specific sources</strong><small>Automatic sources will be defined when {type} generation is implemented.</small></span><b>Planned</b></div>}
+      {type === 'scene' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current Scene</strong><small>The active editor content is always available to the Story system prompt.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} /><span><strong>Previous Scene when empty</strong><small>Use the immediately previous Scene only when the current Scene has no text.</small></span></label><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Earlier summaries</strong><small>Uses the highest completed Act or Chapter summary without exposing later material.</small></span><b>Automatic</b></div></> : type === 'codex' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current entry</strong><small>Title, category, and existing body are supplied through Lore prompt variables.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includeLastScene} onChange={(event) => updateProfile({ ...profile, includeLastScene: event.target.checked })} /><span><strong>Last-opened Scene</strong><small>Included by default for Codex generation.</small></span></label></> : type === 'chat' ? <label><input type="checkbox" checked={profile.includeLastScene} onChange={(event) => updateProfile({ ...profile, includeLastScene: event.target.checked })} /><span><strong>Current Scene</strong><small>The book's last-opened Scene is included automatically for this chat.</small></span></label> : <div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current Note</strong><small>The active Note body is shown with the Assistant prompt and selected Note context.</small></span><b>Required</b></div>}
     </section>
-    <section className="settings-card context-sources-card"><div className="card-heading"><div><span>02</span><h2>Additional context</h2></div><p>Inserted as <code>{'{{additional_context}}'}</code>.</p></div>
+    <section className="settings-card context-sources-card"><div className="card-heading"><div><span>02</span><h2>Additional context</h2></div><p>Selected independently for this generation type.</p></div>
       <fieldset className="summary-range"><legend>Summaries</legend>{([['none','None'],['all','All summaries'],['before','Before current Scene'],['after','After current Scene']] as const).map(([range,label]) => <label key={range}><input type="radio" name="summary-range" checked={profile.summaryRange === range} onChange={() => updateProfile({ ...profile, summaryRange: range })}/><span>{label}</span></label>)}</fieldset>
       <div className="context-source-search"><Search aria-hidden="true" /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find Acts, Chapters, Scenes, Notes, or Codex" /></div>
       <div className="context-managed-list">{groups.map(([label, items, key]) => items.length > 0 && <section key={label}><h3>{label}</h3>{items.map((item) => <label key={item.id}><input type="checkbox" checked={profile[key].includes(item.id)} onChange={() => toggle(key, item.id)} /><span><strong>{item.title || 'Untitled'}</strong><small>{item.type}</small></span></label>)}</section>)}{!visible.length && <p>No matching sources.</p>}</div>
     </section>
-    <section className="settings-card context-preview-card"><div className="card-heading"><div><span>03</span><h2>Context to be sent</h2></div><p>Live preview of the material available to the generation prompt.</p></div>
-      {previewError ? <p className="context-preview-error" role="alert">{previewError}</p> : preview ? <>
-        <div className="context-preview-rendered">{previewSections.map((item) => <section key={`${item.title}-${item.detail}`}><header><h3>{item.title}</h3><span>{item.detail}</span></header>{item.content ? <div className="context-preview-copy">{item.content}</div> : <p className="context-preview-empty">No content will be sent for this section.</p>}</section>)}</div>
-        <details className="context-preview-raw"><summary>View exact context text</summary><pre>{exactPreview}</pre></details>
+    <section className="settings-card context-preview-card"><div className="card-heading"><div><span>03</span><h2>{scopeLabel} prompt & context</h2></div><p>Live preview of the model input assembled for this entity type.</p></div>
+      <p className="context-preview-empty">{helperText}</p>
+      {previewError ? <p className="context-preview-error" role="alert">{previewError}</p> : previewResult ? <>
+        <div className="context-preview-rendered">{previewSections.map((item, index) => <section key={`${item.title}-${item.detail}-${index}`}><header><h3>{item.title}</h3><span>{item.detail}</span></header>{item.content ? <div className="context-preview-copy">{item.content}</div> : <p className="context-preview-empty">This section is currently empty.</p>}</section>)}</div>
+        <details className="context-preview-raw"><summary>View combined prompt text</summary><pre>{exactPreview}</pre></details>
       </> : <p className="context-preview-empty">Preparing preview…</p>}
     </section>
   </section>
