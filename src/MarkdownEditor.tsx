@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import { defaultKeymap, history, historyKeymap, isolateHistory, redo, undo } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
 import { syntaxTree } from '@codemirror/language'
-import { EditorState, Transaction } from '@codemirror/state'
+import { EditorState, StateEffect, StateField, Transaction } from '@codemirror/state'
 import {
   Decoration,
   EditorView,
@@ -53,9 +53,9 @@ type ActiveGeneration = {
   insertionPosition: number
   historyTime: number
   generatedText: string
+  generatedFrom: number
   generatedTo: number
   resultDocument: string
-  lastAutoScrollAt: number
 }
 
 const SPEECH_TEXT = 'speech placeholder'
@@ -82,6 +82,40 @@ class RuleWidget extends WidgetType {
     return span
   }
 }
+
+class GenerationCaretWidget extends WidgetType {
+  eq() { return true }
+
+  toDOM() {
+    const span = document.createElement('span')
+    span.className = 'cm-generation-caret'
+    span.setAttribute('aria-hidden', 'true')
+    return span
+  }
+}
+
+type GenerationHighlight = { from: number; to: number; active: boolean } | null
+const setGenerationHighlight = StateEffect.define<GenerationHighlight>()
+
+const generationHighlightField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(highlights, transaction) {
+    let next = highlights.map(transaction.changes)
+    for (const effect of transaction.effects) {
+      if (!effect.is(setGenerationHighlight)) continue
+      if (!effect.value) return Decoration.none
+      const { from, to, active } = effect.value
+      const ranges: any[] = []
+      if (to > from) {
+        ranges.push(Decoration.mark({ class: active ? 'cm-generation-active' : 'cm-generation-complete' }).range(from, to))
+      }
+      if (active) ranges.push(Decoration.widget({ widget: new GenerationCaretWidget(), side: 1 }).range(to))
+      next = Decoration.set(ranges, true)
+    }
+    return next
+  },
+  provide: field => EditorView.decorations.from(field),
+})
 
 function buildLivePreviewDecorations(state: EditorState): DecorationSet {
   const activeLine = state.doc.lineAt(state.selection.main.head).number
@@ -243,9 +277,9 @@ function beginGeneration(
       insertionPosition: latest.insertionPosition,
       historyTime: Date.now(),
       generatedText: '',
+      generatedFrom: latest.insertionPosition,
       generatedTo: latest.insertionPosition,
       resultDocument: current,
-      lastAutoScrollAt: 0,
     }
   }
 
@@ -256,9 +290,9 @@ function beginGeneration(
     insertionPosition: position,
     historyTime: Date.now(),
     generatedText: '',
+    generatedFrom: position,
     generatedTo: position,
     resultDocument: current,
-    lastAutoScrollAt: 0,
   }
 }
 
@@ -283,11 +317,10 @@ function appendGenerationChunk(view: EditorView, session: ActiveGeneration, text
       changes: session.mode === 'regenerate'
         ? { from: 0, to: current.length, insert: nextDocument }
         : { from: session.insertionPosition, insert: insertion },
-      selection: { anchor: generatedTo },
-      effects: EditorView.scrollIntoView(generatedTo, { y: 'center' }),
+      effects: setGenerationHighlight.of({ from: generatedFrom, to: generatedTo, active: true }),
       annotations: [...annotations, isolateHistory.of('before')],
     })
-    session.lastAutoScrollAt = Date.now()
+    session.generatedFrom = generatedFrom
     session.generatedTo = generatedTo
     session.generatedText = text
     session.resultDocument = nextDocument
@@ -295,17 +328,13 @@ function appendGenerationChunk(view: EditorView, session: ActiveGeneration, text
   }
 
   const generatedTo = session.generatedTo + text.length
-  const now = Date.now()
-  const shouldAutoScroll = now - session.lastAutoScrollAt >= 100
   view.dispatch({
     changes: { from: session.generatedTo, insert: text },
-    selection: { anchor: generatedTo },
-    effects: shouldAutoScroll ? EditorView.scrollIntoView(generatedTo, { y: 'center' }) : [],
+    effects: setGenerationHighlight.of({ from: session.generatedFrom, to: generatedTo, active: true }),
     annotations,
   })
   session.generatedText += text
   session.generatedTo = generatedTo
-  if (shouldAutoScroll) session.lastAutoScrollAt = now
   session.resultDocument = view.state.doc.toString()
   return true
 }
@@ -334,6 +363,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       if (!view || activeGenerationRef.current) return null
       const session = beginGeneration(view, mode, latestGenerationRef.current)
       if (!session) return null
+      view.dispatch({ effects: setGenerationHighlight.of(null) })
       activeGenerationRef.current = session
       return { sceneText: session.preDocument, insertionPosition: session.insertionPosition }
     },
@@ -347,7 +377,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       activeGenerationRef.current = null
       if (!session?.generatedText) return null
       viewRef.current?.dispatch({
-        effects: EditorView.scrollIntoView(session.generatedTo, { y: 'center' }),
+        effects: setGenerationHighlight.of({ from: session.generatedFrom, to: session.generatedTo, active: false }),
         annotations: isolateHistory.of('before'),
       })
       const result: GenerationRecord = {
@@ -376,6 +406,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
         history(),
         keymap.of([...formattingKeymap(), ...defaultKeymap, ...historyKeymap]),
         livePreview,
+        generationHighlightField,
         EditorView.lineWrapping,
         EditorView.contentAttributes.of({ 'aria-label': ariaLabel, spellcheck: 'true' }),
         EditorView.updateListener.of(update => {

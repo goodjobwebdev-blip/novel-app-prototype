@@ -34,7 +34,8 @@ import {
   X,
 } from 'lucide-react'
 import AiSettingsScreen from './App'
-import { loadAiSettings, type AiSettings } from './ai-settings'
+import { generationWordDelayMs, loadAiSettings, type AiSettings } from './ai-settings'
+import { createBufferedWordRenderer } from './buffered-word-renderer'
 import ExpandableTextInput from './ExpandableTextInput'
 import MarkdownEditor, { type MarkdownEditorHandle } from './MarkdownEditor'
 import { fetchNanoGPTModelContextLength, renderStoryPrompt, streamNanoGPTCompletion } from './nanogpt'
@@ -705,6 +706,14 @@ export default function Workspace() {
     generationAbortRef.current = controller
     startGenerationActivity()
     let status: 'complete' | 'cancelled' | 'error' = 'complete'
+    const renderer = createBufferedWordRenderer({
+      delayMs: generationWordDelayMs(settings),
+      signal: controller.signal,
+      onInsert: (text) => {
+        if (!editor.appendGenerationChunk(text)) throw new Error('The editor could not insert generated text.')
+      },
+      onError: () => controller.abort(),
+    })
 
     try {
       await streamNanoGPTCompletion({
@@ -716,14 +725,21 @@ export default function Workspace() {
         userMessage: requestSnapshot.userMessage,
       }, (chunk) => {
         if (!controller.signal.aborted) setGenerationPhase('writing')
-        if (!editor.appendGenerationChunk(chunk)) throw new Error('The editor could not insert generated text.')
+        renderer.push(chunk)
       }, controller.signal, {
         onResponse: () => {
           if (!controller.signal.aborted) setGenerationPhase('thinking')
         },
       })
+      await renderer.finish()
+      if (controller.signal.aborted) status = 'cancelled'
     } catch (error) {
-      if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+      await renderer.flush().catch(() => undefined)
+      const renderingError = renderer.error()
+      if (renderingError) {
+        status = 'error'
+        showToast(renderingError instanceof Error ? renderingError.message : 'Generation stopped unexpectedly.')
+      } else if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
         status = 'cancelled'
       } else {
         status = 'error'
