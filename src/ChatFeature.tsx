@@ -41,7 +41,7 @@ import { bookTemplateValues, renderPromptTemplate, type BookPromptValues } from 
 import { applyChatDocumentEdit, chatWorkspaceTools, createChatCodexEntry, executeChatWorkspaceTool, rejectChatCodexEntry, rejectChatDocumentEdit } from './chat-tools'
 import './chat.css'
 
-type GenerationPhase = 'sending' | 'thinking' | 'writing' | 'stopping'
+type GenerationPhase = 'sending' | 'thinking' | 'using-tools' | 'writing' | 'stopping'
 
 type ChatViewProps = {
   bookId: string
@@ -55,6 +55,14 @@ type ChatViewProps = {
 function formatElapsed(seconds: number) {
   if (seconds < 60) return `${seconds}s`
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+function generationPhaseLabel(phase: GenerationPhase | null) {
+  if (phase === 'sending') return 'Sending'
+  if (phase === 'using-tools') return 'Using tools'
+  if (phase === 'writing') return 'Writing'
+  if (phase === 'stopping') return 'Stopping'
+  return 'Thinking'
 }
 
 function section(title: string, content: string) {
@@ -76,10 +84,13 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   const [elapsed, setElapsed] = useState(0)
   const [streamedContent, setStreamedContent] = useState('')
   const [streamedThoughts, setStreamedThoughts] = useState('')
+  const [liveThoughtsOpen, setLiveThoughtsOpen] = useState(true)
+  const [followOutput, setFollowOutput] = useState(true)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const startedAtRef = useRef(0)
   const bottomRef = useRef<HTMLDivElement | null>(null)
+  const followOutputRef = useRef(true)
 
   const sortedModels = useMemo(() => [...models].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)), [models])
 
@@ -90,6 +101,9 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     setPhase(null)
     setStreamedContent('')
     setStreamedThoughts('')
+    setLiveThoughtsOpen(true)
+    followOutputRef.current = true
+    setFollowOutput(true)
     setEditingId('')
     if (!bookId || !chatId) {
       setChat(null)
@@ -138,8 +152,25 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   }, [generating])
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: 'end' })
-  }, [messages, streamedContent, streamedThoughts])
+    if (!generating) return
+    const updateFollowState = () => {
+      const root = document.documentElement
+      const distanceFromBottom = root.scrollHeight - (window.scrollY + window.innerHeight)
+      const nearBottom = distanceFromBottom <= 120
+      if (nearBottom === followOutputRef.current) return
+      followOutputRef.current = nearBottom
+      setFollowOutput(nearBottom)
+    }
+    window.addEventListener('scroll', updateFollowState, { passive: true })
+    updateFollowState()
+    return () => window.removeEventListener('scroll', updateFollowState)
+  }, [generating])
+
+  useEffect(() => {
+    if (!followOutputRef.current) return
+    const frame = window.requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ block: 'end' }))
+    return () => window.cancelAnimationFrame(frame)
+  }, [messages.length, streamedContent, streamedThoughts, phase])
 
   useEffect(() => () => abortRef.current?.abort(), [])
 
@@ -273,6 +304,9 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
     setPhase('sending')
     setStreamedContent('')
     setStreamedThoughts('')
+    setLiveThoughtsOpen(true)
+    followOutputRef.current = true
+    setFollowOutput(true)
     let content = ''
     let thoughts = ''
     let completed = false
@@ -284,8 +318,6 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
       for (let round = 0; round < 8 && !controller.signal.aborted; round += 1) {
         let roundContent = ''
         let roundThoughts = ''
-        setStreamedContent('')
-        setStreamedThoughts('')
         const result = await streamChatCompletion({
           apiKey: settings.apiKey.trim(),
           baseUrl: settings.baseUrl,
@@ -297,7 +329,8 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
         }, (chunk) => {
           if (chunk.thoughts) {
             roundThoughts += chunk.thoughts
-            setStreamedThoughts(roundThoughts)
+            thoughts += chunk.thoughts
+            setStreamedThoughts(thoughts)
             if (!roundContent) setPhase('thinking')
           }
           if (chunk.content) {
@@ -310,6 +343,7 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
         })
 
         if (result.toolCalls.length) {
+          setPhase('using-tools')
           workingMessages.push({
             role: 'assistant',
             content: roundContent || null,
@@ -323,13 +357,11 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
             workingMessages.push({ role: 'tool', tool_call_id: call.id, content: execution.content })
           }
           setStreamedContent('')
-          setStreamedThoughts('')
           setPhase('thinking')
           continue
         }
 
         content = roundContent
-        thoughts = roundThoughts
         completed = true
         break
       }
@@ -340,20 +372,23 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
       }
     } finally {
       const stopped = controller.signal.aborted
-      abortRef.current = null
-      setGenerating(false)
-      setPhase(null)
-      setElapsed(0)
-      setStreamedContent('')
-      setStreamedThoughts('')
-      if ((content || thoughts || proposals.length || codexCreations.length) && (completed || stopped)) {
-        await createChatMessage(activeChat, 'assistant', content, {
-          thoughts: thoughts || undefined,
-          status: stopped ? 'stopped' : 'complete',
-          documentEdits: proposals.length ? proposals : undefined,
-          codexCreations: codexCreations.length ? codexCreations : undefined,
-        })
-        await reloadMessages()
+      try {
+        if ((content || thoughts || proposals.length || codexCreations.length) && (completed || stopped)) {
+          await createChatMessage(activeChat, 'assistant', content, {
+            thoughts: thoughts || undefined,
+            status: stopped ? 'stopped' : 'complete',
+            documentEdits: proposals.length ? proposals : undefined,
+            codexCreations: codexCreations.length ? codexCreations : undefined,
+          })
+          await reloadMessages()
+        }
+      } finally {
+        abortRef.current = null
+        setGenerating(false)
+        setPhase(null)
+        setElapsed(0)
+        setStreamedContent('')
+        setStreamedThoughts('')
       }
     }
   }
@@ -477,6 +512,12 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
     }
   }
 
+  function jumpToLatest() {
+    followOutputRef.current = true
+    setFollowOutput(true)
+    bottomRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' })
+  }
+
   function readAloud(message: ChatMessageEntity) {
     if (!('speechSynthesis' in window) || !message.content.trim()) return
     window.speechSynthesis.cancel()
@@ -506,14 +547,16 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
             <div className="message-tools"><button type="button" onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
           </>}
         </article>)}
-        {generating && <article className="message bot no-thumb streaming"><div className="chat-message-stack">
-          {streamedThoughts && <details className="chat-thoughts" open={!streamedContent}><summary>Thoughts</summary><div>{streamedThoughts}</div></details>}
+        {generating && <article className="message bot no-thumb streaming"><div className="chat-message-stack chat-live-generation">
+          <div className="chat-live-status"><i /><span>{generationPhaseLabel(phase)} · {formatElapsed(elapsed)}</span></div>
+          {streamedThoughts && <details className="chat-thoughts" open={liveThoughtsOpen} onToggle={(event) => setLiveThoughtsOpen(event.currentTarget.open)}><summary>Thoughts</summary><div>{streamedThoughts}</div></details>}
           {streamedContent && <div className="bubble">{streamedContent}</div>}
-          {!streamedContent && !streamedThoughts && <div className="chat-thinking-indicator"><i /><span>{phase === 'sending' ? 'Sending' : 'Thinking'} · {formatElapsed(elapsed)}</span></div>}
         </div></article>}
         <div ref={bottomRef} />
       </div>
     </section>
+
+    {generating && !followOutput && <button className="chat-follow-output" type="button" onClick={jumpToLatest}>↓ New content</button>}
 
     <section className="chat-composer functional-chat-composer">
       <div className="chat-config-row">
@@ -643,7 +686,7 @@ function ChatGenerateButton({ generating, phase, elapsed, thinking, onGenerate, 
     timerRef.current = null
   }
 
-  if (generating) return <div className="chat-generation-running"><span><i />{phase === 'stopping' ? 'Stopping' : phase === 'writing' ? 'Writing' : phase === 'sending' ? 'Sending' : 'Thinking'} · {formatElapsed(elapsed)}</span><button className="play generating" type="button" onClick={onStop} aria-label="Stop chat generation"><Square aria-hidden="true" fill="currentColor" /></button></div>
+  if (generating) return <div className="chat-generation-running"><span><i />{generationPhaseLabel(phase)} · {formatElapsed(elapsed)}</span><button className="play generating" type="button" onClick={onStop} aria-label="Stop chat generation"><Square aria-hidden="true" fill="currentColor" /></button></div>
 
   if (expanded) return <div className="chat-generate-actions" role="toolbar" aria-label="Chat generation actions">
     <button type="button" onClick={onMicro} title="Micro"><Mic aria-hidden="true" /><span>Micro</span></button>

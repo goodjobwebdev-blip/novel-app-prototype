@@ -90,3 +90,13 @@
 .chat-document-edit > footer { display: flex; justify-content: flex-end; gap: .45rem; padding: .65rem .8rem; border-top: 1px solid var(--border); }
 .chat-document-edit > footer button { border: 1px solid var(--border); border-radius: .65rem; background: transparent; color: inherit; padding: .45rem .7rem; }
 .chat-document-edit > footer button.primary { background: var(--accent); border-color: transparent; color: var(--canvas); }
+
+
+/* Stable live chat generation: keep status/thoughts mounted and stop forced scroll jumps. */
+.chat-live-generation { min-height: 2.75rem; }
+.chat-live-status { min-height: 2rem; margin-bottom: .45rem; display: flex; align-items: center; gap: .45rem; color: var(--faint); font-size: .72rem; font-variant-numeric: tabular-nums; }
+.chat-live-status i { width: .45rem; height: .45rem; flex: none; border-radius: 999px; background: currentColor; animation: chatPulse 1s ease-in-out infinite alternate; }
+.chat-live-generation .chat-thoughts { margin-bottom: .55rem; }
+.chat-follow-output { position: fixed; z-index: 48; left: 50%; bottom: calc(10.75rem + max(8px, env(safe-area-inset-bottom))); transform: translateX(-50%); min-height: 36px; padding: 0 .8rem; border: 1px solid var(--line); border-radius: 12px; background: rgba(20,21,19,.94); color: var(--soft); box-shadow: 0 8px 24px rgba(0,0,0,.36); backdrop-filter: blur(16px); cursor: pointer; font-size: .72rem; }
+.chat-follow-output:hover,.chat-follow-output:focus-visible { border-color: rgba(198,168,107,.38); color: var(--ink); }
+@media (max-width: 720px) { .chat-follow-output { bottom: calc(11.5rem + max(8px, env(safe-area-inset-bottom))); } }
