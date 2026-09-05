@@ -137,7 +137,8 @@ function UiSettingsPanel() {
   }, [])
 
   function commit(transform: (current: UiSettings) => UiSettings) {
-    setSettings((current) => saveUiSettings(transform(current)))
+    const next = saveUiSettings(transform(settings))
+    setSettings(next)
   }
 
   function updateCustomTheme(nextTheme: CustomUiTheme) {
@@ -145,7 +146,7 @@ function UiSettingsPanel() {
   }
 
   function duplicate(themeId: string) {
-    setSettings((current) => createCustomTheme(current, themeId))
+    commit((current) => createCustomTheme(current, themeId))
   }
 
   function removeCustomTheme(theme: CustomUiTheme) {
