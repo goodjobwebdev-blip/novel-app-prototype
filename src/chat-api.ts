@@ -1,9 +1,26 @@
 import type { AiProvider } from './ai-settings'
 
+export type ChatToolCall = {
+  id: string
+  type: 'function'
+  function: { name: string; arguments: string }
+}
+
+export type ChatToolDefinition = {
+  type: 'function'
+  function: {
+    name: string
+    description: string
+    parameters: Record<string, unknown>
+  }
+}
+
 export type ChatCompletionMessage = {
-  role: 'system' | 'user' | 'assistant'
-  content: string
+  role: 'system' | 'user' | 'assistant' | 'tool'
+  content: string | null
   reasoning_content?: string
+  tool_calls?: ChatToolCall[]
+  tool_call_id?: string
 }
 
 export type ChatCompletionRequest = {
@@ -13,11 +30,24 @@ export type ChatCompletionRequest = {
   model: string
   messages: ChatCompletionMessage[]
   thinking: boolean
+  tools?: ChatToolDefinition[]
 }
 
 export type ChatCompletionChunk = {
   content?: string
   thoughts?: string
+}
+
+export type ChatCompletionResult = {
+  toolCalls: ChatToolCall[]
+  finishReason?: string
+}
+
+type ToolCallFragment = {
+  index?: number
+  id?: string
+  type?: string
+  function?: { name?: string; arguments?: string }
 }
 
 function completionEndpoint(baseUrl: string) {
@@ -56,14 +86,18 @@ function reasoningText(delta: Record<string, unknown>) {
   }).join('')
 }
 
-function parseChunk(payload: unknown): ChatCompletionChunk {
-  if (!payload || typeof payload !== 'object') return {}
-  const choice = (payload as { choices?: Array<{ delta?: Record<string, unknown> }> }).choices?.[0]
+function parseChunk(payload: unknown): { chunk: ChatCompletionChunk; toolFragments: ToolCallFragment[]; finishReason?: string } {
+  if (!payload || typeof payload !== 'object') return { chunk: {}, toolFragments: [] }
+  const choice = (payload as { choices?: Array<{ delta?: Record<string, unknown>; finish_reason?: unknown }> }).choices?.[0]
   const delta = choice?.delta
-  if (!delta) return {}
+  if (!delta) return { chunk: {}, toolFragments: [], finishReason: typeof choice?.finish_reason === 'string' ? choice.finish_reason : undefined }
   return {
-    content: typeof delta.content === 'string' ? delta.content : undefined,
-    thoughts: reasoningText(delta) || undefined,
+    chunk: {
+      content: typeof delta.content === 'string' ? delta.content : undefined,
+      thoughts: reasoningText(delta) || undefined,
+    },
+    toolFragments: Array.isArray(delta.tool_calls) ? delta.tool_calls as ToolCallFragment[] : [],
+    finishReason: typeof choice?.finish_reason === 'string' ? choice.finish_reason : undefined,
   }
 }
 
@@ -72,11 +106,15 @@ export async function streamChatCompletion(
   onChunk: (chunk: ChatCompletionChunk) => void,
   signal: AbortSignal,
   onResponse?: () => void,
-) {
+): Promise<ChatCompletionResult> {
   const body: Record<string, unknown> = {
     model: request.model,
     messages: request.messages,
     stream: true,
+  }
+  if (request.tools?.length) {
+    body.tools = request.tools
+    body.tool_choice = 'auto'
   }
   if (request.thinking && request.provider === 'nanogpt') {
     body.reasoning = { enabled: true, delta_field: 'reasoning_content' }
@@ -109,16 +147,34 @@ export async function streamChatCompletion(
   const decoder = new TextDecoder()
   let buffer = ''
   let received = false
+  let finishReason: string | undefined
+  const accumulated = new Map<number, ChatToolCall>()
+
+  const appendToolFragment = (fragment: ToolCallFragment, fallbackIndex: number) => {
+    const index = Number.isInteger(fragment.index) ? Number(fragment.index) : fallbackIndex
+    const current = accumulated.get(index) ?? {
+      id: '',
+      type: 'function' as const,
+      function: { name: '', arguments: '' },
+    }
+    if (fragment.id) current.id = fragment.id
+    if (fragment.function?.name) current.function.name += fragment.function.name
+    if (fragment.function?.arguments) current.function.arguments += fragment.function.arguments
+    accumulated.set(index, current)
+    received = true
+  }
 
   const consumeLine = (line: string) => {
     const trimmed = line.trim()
     if (!trimmed.startsWith('data:')) return false
     const data = trimmed.slice(5).trim()
     if (!data || data === '[DONE]') return data === '[DONE]'
-    const chunk = parseChunk(JSON.parse(data))
-    if (chunk.content || chunk.thoughts) {
+    const parsed = parseChunk(JSON.parse(data))
+    if (parsed.finishReason) finishReason = parsed.finishReason
+    parsed.toolFragments.forEach((fragment, index) => appendToolFragment(fragment, index))
+    if (parsed.chunk.content || parsed.chunk.thoughts) {
       received = true
-      onChunk(chunk)
+      onChunk(parsed.chunk)
     }
     return false
   }
@@ -142,4 +198,12 @@ export async function streamChatCompletion(
   }
 
   if (!received) throw new Error('The provider completed without returning a response.')
+  const toolCalls = [...accumulated.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([, call], index) => ({
+      ...call,
+      id: call.id || `tool-call-${index}`,
+    }))
+    .filter((call) => call.function.name)
+  return { toolCalls, finishReason }
 }
