@@ -1,0 +1,35 @@
+button,
+[role='button'] {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:not(:disabled),
+[role='button'] {
+  transition:
+    opacity 120ms ease,
+    filter 120ms ease;
+}
+
+button:not(:disabled):active,
+[role='button']:active {
+  opacity: 0.72;
+  filter: brightness(0.92);
+}
+
+button:focus,
+[role='button']:focus {
+  outline: none;
+}
+
+button:focus-visible,
+[role='button']:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button:not(:disabled),
+  [role='button'] {
+    transition: none;
+  }
+}
