@@ -11,6 +11,7 @@ import {
   listEntitiesByBook,
   placeStructuralEntity,
   renameEntity,
+  saveDocumentContent,
   type ArcEntity,
   type StructuralEntity,
   type StructuralEntityType,
@@ -40,13 +41,14 @@ export const chatOutlineTools: ChatToolDefinition[] = [
     type: 'function',
     function: {
       name: 'propose_outline_create',
-      description: 'Propose creating an empty Act, Chapter, or Scene. This does not create anything until the user approves the proposal in Chat.',
+      description: 'Propose creating an Act, Chapter, or Scene. A Scene may include initial Markdown content. This does not create anything until the user approves the proposal in Chat.',
       parameters: {
         type: 'object',
         properties: {
           type: { type: 'string', enum: structuralTypes },
           parent_id: { type: 'string', description: 'Book ID for an Act; Book or Act ID for a Chapter; Chapter ID for a Scene.' },
           title: { type: 'string' },
+          content: { type: 'string', description: 'Optional initial Markdown body. Supported only when type is scene.' },
           summary: { type: 'string', description: 'Short explanation of why this outline item should be created.' },
         },
         required: ['type', 'parent_id', 'title'],
@@ -210,6 +212,8 @@ export async function executeChatOutlineTool(bookId: string, call: ChatToolCall)
       const parentId = typeof args.parent_id === 'string' ? args.parent_id : ''
       const title = cleanTitle(args.title)
       if (!title) return { content: result({ ok: false, error: 'The new outline item needs a title.' }) }
+      const initialContent = typeof args.content === 'string' ? args.content : ''
+      if (type !== 'scene' && initialContent.trim()) return { content: result({ ok: false, error: 'Initial content is supported only for Scene creation.' }) }
       const parent = await outlineParent(bookId, type, parentId)
       const proposal: ChatOutlineActionProposal = {
         id: makeProposalId(),
@@ -219,6 +223,7 @@ export async function executeChatOutlineTool(bookId: string, call: ChatToolCall)
         targetParentId: parent.id,
         targetParentTitle: entityTitle(parent),
         newTitle: title,
+        initialContent: type === 'scene' ? initialContent : undefined,
         summary: cleanTitle(args.summary),
         status: 'proposed',
         createdAt: Date.now(),
@@ -323,6 +328,7 @@ export async function applyChatOutlineAction(messageId: string, proposalId: stri
       const parentId = proposal.targetParentId ?? ''
       await outlineParent(message.bookId, proposal.entityType, parentId)
       const created = await createStructuralEntity(proposal.entityType, message.bookId, parentId, proposal.newTitle || proposal.entityTitle)
+      if (proposal.entityType === 'scene' && proposal.initialContent) await saveDocumentContent(created.id, proposal.initialContent)
       const appliedAt = Date.now()
       await setOutlineActionStatus(message, proposal.id, { status: 'applied', appliedAt, entityId: created.id })
       if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('arc-entity-changed', { detail: { bookId: message.bookId, entityId: created.id } }))
