@@ -181,6 +181,28 @@ export default function Workspace() {
   }, [])
 
   useEffect(() => {
+    const handleEntityChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ bookId?: string; entityId?: string }>).detail
+      if (!detail?.bookId || !detail.entityId || detail.bookId !== currentBook?.id) return
+      void (async () => {
+        await reloadBookContent(detail.bookId!)
+        if (activeDocumentIdRef.current !== detail.entityId) return
+        const refreshed = await getEntity<EditableEntity>(detail.entityId!)
+        if (!refreshed || !['scene', 'note', 'codexEntry', 'summary'].includes(refreshed.type)) return
+        setActiveDocument(refreshed)
+        const content = String(refreshed.content ?? '')
+        storyRef.current = content
+        changedSinceSnapshotRef.current = false
+        setStoryMarkdown(content)
+        setEditorRevision((revision) => revision + 1)
+        setSaveState('saved')
+      })().catch(() => showToast('The edited document was saved, but the workspace could not refresh it.'))
+    }
+    window.addEventListener('arc-entity-changed', handleEntityChanged)
+    return () => window.removeEventListener('arc-entity-changed', handleEntityChanged)
+  }, [currentBook?.id])
+
+  useEffect(() => {
     if (!generationActive) return
     const updateElapsed = () => {
       setGenerationElapsedSeconds(Math.max(0, Math.floor((Date.now() - generationStartedAtRef.current) / 1000)))

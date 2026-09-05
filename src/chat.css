@@ -68,3 +68,25 @@
   .chat-generate-actions span { display: none; }
   .chat-row-actions { opacity: 1; }
 }
+
+.chat-document-edits { display: grid; gap: .65rem; margin-top: .65rem; }
+.chat-document-edit { border: 1px solid var(--border); border-radius: .9rem; background: color-mix(in srgb, var(--glass) 82%, transparent); overflow: hidden; }
+.chat-document-edit > header { display: flex; align-items: center; justify-content: space-between; gap: .8rem; padding: .7rem .8rem; border-bottom: 1px solid var(--border); }
+.chat-document-edit > header > div { display: grid; gap: .12rem; min-width: 0; }
+.chat-document-edit > header small { color: var(--muted); text-transform: uppercase; letter-spacing: .08em; font-size: .65rem; }
+.chat-document-edit > header strong { overflow-wrap: anywhere; }
+.chat-document-edit > header > span { color: var(--muted); font-size: .72rem; white-space: nowrap; }
+.chat-document-edit.applied > header > span { color: var(--accent); }
+.chat-document-edit.stale > header > span { color: #d7a36b; }
+.chat-document-edit > p { margin: .7rem .8rem 0; color: var(--muted); font-size: .85rem; line-height: 1.45; }
+.chat-document-edit > details { margin: .65rem .8rem; }
+.chat-document-edit > details > summary { cursor: pointer; color: var(--muted); font-size: .78rem; }
+.chat-document-diff { display: grid; gap: .65rem; margin-top: .55rem; max-height: 24rem; overflow: auto; }
+.chat-document-diff section { display: grid; gap: .35rem; }
+.chat-document-diff small { color: var(--muted); }
+.chat-document-diff pre { margin: 0; padding: .65rem .7rem; border-radius: .65rem; white-space: pre-wrap; overflow-wrap: anywhere; font: .78rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.chat-document-diff pre.old { background: color-mix(in srgb, #a44 12%, var(--glass)); text-decoration-color: #b66; }
+.chat-document-diff pre.new { background: color-mix(in srgb, var(--accent) 10%, var(--glass)); }
+.chat-document-edit > footer { display: flex; justify-content: flex-end; gap: .45rem; padding: .65rem .8rem; border-top: 1px solid var(--border); }
+.chat-document-edit > footer button { border: 1px solid var(--border); border-radius: .65rem; background: transparent; color: inherit; padding: .45rem .7rem; }
+.chat-document-edit > footer button.primary { background: var(--accent); border-color: transparent; color: var(--canvas); }

@@ -24,6 +24,21 @@ export type ChatEntity = ArcEntity & {
 }
 
 export type ChatMessageStatus = 'complete' | 'stopped'
+export type ChatTextReplacement = { oldText: string; newText: string }
+export type ChatDocumentEditProposal = {
+  id: string
+  entityId: string
+  entityType: 'scene' | 'note' | 'codexEntry'
+  entityTitle: string
+  expectedUpdatedAt: number
+  mode: 'text_replacements' | 'replace_document'
+  edits?: ChatTextReplacement[]
+  newContent?: string
+  summary?: string
+  status: 'proposed' | 'applied' | 'rejected' | 'stale'
+  createdAt: number
+  appliedAt?: number
+}
 export type ChatMessageEntity = ArcEntity & {
   type: 'chatMessage'
   bookId: string
@@ -33,6 +48,7 @@ export type ChatMessageEntity = ArcEntity & {
   content: string
   thoughts?: string
   status?: ChatMessageStatus
+  documentEdits?: ChatDocumentEditProposal[]
 }
 
 export type ChatModel = {
@@ -152,7 +168,7 @@ async function touchFromMessages(bookId: string, chatId: string) {
   notifyChatChange(bookId)
 }
 
-export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntity['role'], content: string, extra: Pick<ChatMessageEntity, 'thoughts' | 'status'> = {}): Promise<ChatMessageEntity> {
+export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntity['role'], content: string, extra: Pick<ChatMessageEntity, 'thoughts' | 'status' | 'documentEdits'> = {}): Promise<ChatMessageEntity> {
   const messages = await listChatMessages(chat.bookId, chat.id)
   const now = Date.now()
   const message: ChatMessageEntity = {
@@ -165,6 +181,7 @@ export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntit
     content,
     thoughts: extra.thoughts,
     status: extra.status ?? 'complete',
+    documentEdits: extra.documentEdits?.map((proposal) => ({ ...proposal, edits: proposal.edits?.map((edit) => ({ ...edit })) })),
     createdAt: now,
     updatedAt: now,
   }
@@ -178,7 +195,7 @@ export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntit
   return message
 }
 
-export async function updateChatMessage(messageId: string, patch: Partial<Pick<ChatMessageEntity, 'content' | 'thoughts' | 'status'>>): Promise<ChatMessageEntity> {
+export async function updateChatMessage(messageId: string, patch: Partial<Pick<ChatMessageEntity, 'content' | 'thoughts' | 'status' | 'documentEdits'>>): Promise<ChatMessageEntity> {
   const current = await getEntity<ArcEntity>(messageId)
   if (!current || current.type !== 'chatMessage') throw new Error('Message is no longer available.')
   const next = { ...current, ...patch, updatedAt: Date.now() } as ChatMessageEntity

@@ -30,12 +30,14 @@ import {
   listChats,
   updateChat,
   updateChatMessage,
+  type ChatDocumentEditProposal,
   type ChatEntity,
   type ChatMessageEntity,
   type ChatModel,
 } from './chat-service'
 import { buildContextValues, generationContextDiagnostics } from './context-service'
 import { bookTemplateValues, renderPromptTemplate, type BookPromptValues } from './prompt-template'
+import { applyChatDocumentEdit, chatWorkspaceTools, executeChatWorkspaceTool, rejectChatDocumentEdit } from './chat-tools'
 import './chat.css'
 
 type GenerationPhase = 'sending' | 'thinking' | 'writing' | 'stopping'
@@ -234,16 +236,25 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       prepared.lastSceneText ? section(`Current scene${prepared.lastSceneTitle ? ` — ${prepared.lastSceneTitle}` : ''}`, prepared.lastSceneText) : '',
       prepared.additionalContext ? section('Additional context', prepared.additionalContext) : '',
     ].filter(Boolean)
+    const workspaceInstructions = `# Workspace tools
+
+You can inspect and propose edits to Scenes, Notes, and Codex entries in this book. Use search_entities and read_entity when the target document is not already known. For localized changes, prefer propose_document_edit with exact old_text copied from read_entity. Use propose_document_replacement only when the user asks for a whole-document rewrite. Tool edit calls create proposals only: never claim a document has already changed. The user must press Apply in the chat before a proposal is written.`
     const providerMessages: ChatCompletionMessage[] = [
       { role: 'system', content: systemPrompt },
+      { role: 'system', content: workspaceInstructions },
       ...(contextSections.length ? [{ role: 'system' as const, content: `# Selected book context\n\n${contextSections.join('\n\n')}` }] : []),
-      ...history.map((message): ChatCompletionMessage => ({
-        role: message.role,
-        content: message.content,
-        ...(message.role === 'assistant' && message.thoughts ? { reasoning_content: message.thoughts } : {}),
-      })),
+      ...history.map((message): ChatCompletionMessage => {
+        const editState = message.role === 'assistant' && message.documentEdits?.length
+          ? `\n\n[Workspace proposals: ${message.documentEdits.map((proposal) => `${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
+          : ''
+        return {
+          role: message.role,
+          content: `${message.content}${editState}`,
+          ...(message.role === 'assistant' && message.thoughts ? { reasoning_content: message.thoughts } : {}),
+        }
+      }),
     ]
-    const requestText = providerMessages.map((message) => `${message.role}: ${message.content}${message.reasoning_content ? `\nreasoning: ${message.reasoning_content}` : ''}`).join('\n\n')
+    const requestText = providerMessages.map((message) => `${message.role}: ${message.content ?? ''}${message.reasoning_content ? `\nreasoning: ${message.reasoning_content}` : ''}`).join('\n\n')
     const diagnostics = generationContextDiagnostics(activeChat.model, activeChat.modelContextLength, systemPrompt, requestText)
     if (!diagnostics.fits) {
       onToast(`Context is too large for this model (~${diagnostics.requestTokens.toLocaleString()} request tokens plus response space). Reduce Chat context in Context Management or choose a larger model.`)
@@ -261,30 +272,62 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     let content = ''
     let thoughts = ''
     let completed = false
+    const proposals: ChatDocumentEditProposal[] = []
 
     try {
-      await streamChatCompletion({
-        apiKey: settings.apiKey.trim(),
-        baseUrl: settings.baseUrl,
-        provider: settings.provider,
-        model: activeChat.model,
-        messages: providerMessages,
-        thinking: activeChat.thinking,
-      }, (chunk) => {
-        if (chunk.thoughts) {
-          thoughts += chunk.thoughts
-          setStreamedThoughts(thoughts)
-          if (!content) setPhase('thinking')
+      const workingMessages = [...providerMessages]
+      for (let round = 0; round < 8 && !controller.signal.aborted; round += 1) {
+        let roundContent = ''
+        let roundThoughts = ''
+        setStreamedContent('')
+        setStreamedThoughts('')
+        const result = await streamChatCompletion({
+          apiKey: settings.apiKey.trim(),
+          baseUrl: settings.baseUrl,
+          provider: settings.provider,
+          model: activeChat.model,
+          messages: workingMessages,
+          thinking: activeChat.thinking,
+          tools: chatWorkspaceTools,
+        }, (chunk) => {
+          if (chunk.thoughts) {
+            roundThoughts += chunk.thoughts
+            setStreamedThoughts(roundThoughts)
+            if (!roundContent) setPhase('thinking')
+          }
+          if (chunk.content) {
+            roundContent += chunk.content
+            setStreamedContent(roundContent)
+            setPhase('writing')
+          }
+        }, controller.signal, () => {
+          if (!controller.signal.aborted) setPhase('thinking')
+        })
+
+        if (result.toolCalls.length) {
+          workingMessages.push({
+            role: 'assistant',
+            content: roundContent || null,
+            ...(roundThoughts ? { reasoning_content: roundThoughts } : {}),
+            tool_calls: result.toolCalls,
+          })
+          for (const call of result.toolCalls) {
+            const execution = await executeChatWorkspaceTool(bookId, call)
+            if (execution.proposal) proposals.push(execution.proposal)
+            workingMessages.push({ role: 'tool', tool_call_id: call.id, content: execution.content })
+          }
+          setStreamedContent('')
+          setStreamedThoughts('')
+          setPhase('thinking')
+          continue
         }
-        if (chunk.content) {
-          content += chunk.content
-          setStreamedContent(content)
-          setPhase('writing')
-        }
-      }, controller.signal, () => {
-        if (!controller.signal.aborted) setPhase('thinking')
-      })
-      completed = true
+
+        content = roundContent
+        thoughts = roundThoughts
+        completed = true
+        break
+      }
+      if (!completed && !controller.signal.aborted) throw new Error('The assistant used too many workspace tool steps. Ask it to make a smaller edit.')
     } catch (error) {
       if (!controller.signal.aborted && !(error instanceof DOMException && error.name === 'AbortError')) {
         onToast(error instanceof Error ? error.message : 'Chat generation stopped unexpectedly.')
@@ -297,8 +340,12 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       setElapsed(0)
       setStreamedContent('')
       setStreamedThoughts('')
-      if ((content || thoughts) && (completed || stopped)) {
-        await createChatMessage(activeChat, 'assistant', content, { thoughts: thoughts || undefined, status: stopped ? 'stopped' : 'complete' })
+      if ((content || thoughts || proposals.length) && (completed || stopped)) {
+        await createChatMessage(activeChat, 'assistant', content, {
+          thoughts: thoughts || undefined,
+          status: stopped ? 'stopped' : 'complete',
+          documentEdits: proposals.length ? proposals : undefined,
+        })
         await reloadMessages()
       }
     }
@@ -383,6 +430,26 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     }
   }
 
+  async function applyProposal(message: ChatMessageEntity, proposal: ChatDocumentEditProposal) {
+    try {
+      await applyChatDocumentEdit(message.id, proposal.id)
+      await reloadMessages()
+      onToast(`Applied changes to “${proposal.entityTitle}”.`)
+    } catch (error) {
+      await reloadMessages().catch(() => undefined)
+      onToast(error instanceof Error ? error.message : 'Could not apply the proposed edit.')
+    }
+  }
+
+  async function rejectProposal(message: ChatMessageEntity, proposal: ChatDocumentEditProposal) {
+    try {
+      await rejectChatDocumentEdit(message.id, proposal.id)
+      await reloadMessages()
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : 'Could not reject the proposed edit.')
+    }
+  }
+
   function readAloud(message: ChatMessageEntity) {
     if (!('speechSynthesis' in window) || !message.content.trim()) return
     window.speechSynthesis.cancel()
@@ -401,7 +468,8 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           {message.role === 'assistant' ? <div className="chat-message-stack">
             {editingId === message.id ? <InlineMessageEdit value={editingValue} onChange={setEditingValue} onCancel={() => setEditingId('')} onSave={() => { void saveEdit(message, false) }} /> : <>
               {message.thoughts && <details className="chat-thoughts"><summary>Thoughts</summary><div>{message.thoughts}</div></details>}
-              <div className="bubble">{message.content || <em>No final answer returned.</em>}</div>
+              <div className="bubble">{message.content || (message.documentEdits?.length ? <em>Workspace edit proposal</em> : <em>No final answer returned.</em>)}</div>
+              {message.documentEdits?.length ? <div className="chat-document-edits">{message.documentEdits.map((proposal) => <DocumentEditCard key={proposal.id} proposal={proposal} onApply={() => { void applyProposal(message, proposal) }} onReject={() => { void rejectProposal(message, proposal) }} />)}</div> : null}
               {message.status === 'stopped' && <small className="chat-message-status">Stopped</small>}
               <div className="message-tools"><button type="button" onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" onClick={() => { void fork(message) }}><GitFork aria-hidden="true" /> Fork</button><button type="button" onClick={() => readAloud(message)}><Volume2 aria-hidden="true" /> Read aloud</button><button type="button" onClick={() => { void regenerate(message) }}><RefreshCw aria-hidden="true" /> Regenerate</button><button type="button" onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
             </>}
@@ -447,6 +515,18 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       </section>
     </div>}
   </>
+}
+
+function DocumentEditCard({ proposal, onApply, onReject }: { proposal: ChatDocumentEditProposal; onApply: () => void; onReject: () => void }) {
+  const statusLabel = proposal.status === 'proposed' ? 'Ready to apply' : proposal.status === 'applied' ? 'Applied' : proposal.status === 'stale' ? 'Document changed' : 'Rejected'
+  return <section className={`chat-document-edit ${proposal.status}`}>
+    <header><div><small>${proposal.entityType === 'codexEntry' ? 'Codex' : proposal.entityType === 'scene' ? 'Scene' : 'Note'}</small><strong>{proposal.entityTitle}</strong></div><span>{statusLabel}</span></header>
+    {proposal.summary && <p>{proposal.summary}</p>}
+    <details><summary>View changes</summary><div className="chat-document-diff">
+      {proposal.mode === 'replace_document' ? <><small>Whole document replacement</small><pre className="new">{proposal.newContent}</pre></> : proposal.edits?.map((edit, index) => <section key={index}><small>Change {index + 1}</small><pre className="old">{edit.oldText}</pre><pre className="new">{edit.newText || '[delete]'}</pre></section>)}
+    </div></details>
+    {proposal.status === 'proposed' && <footer><button type="button" onClick={onReject}>Reject</button><button className="primary" type="button" onClick={onApply}>Apply</button></footer>}
+  </section>
 }
 
 function InlineMessageEdit({ value, onChange, onCancel, onSave, onSaveAndRegenerate }: {
