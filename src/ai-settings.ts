@@ -14,6 +14,7 @@ export type AiSettings = {
   mainModelContextLength?: number
   supportModel: string
   supportModelContextLength?: number
+  generationWordDelayMs: string
   favorites: string[]
   prompts: AiPrompts
 }
@@ -21,6 +22,8 @@ export type AiSettings = {
 export type BookAiSettings = Omit<AiSettings, 'favorites'>
 
 export const AI_SETTINGS_STORAGE_KEY = 'arc-ai-defaults-v1'
+export const DEFAULT_GENERATION_WORD_DELAY_MS = 40
+export const MAX_GENERATION_WORD_DELAY_MS = 2000
 
 const previousDefaultAiPrompts: AiPrompts[] = [{
   story: `You are the story writer for {{book.title}}.
@@ -117,8 +120,23 @@ export const initialAiSettings: AiSettings = {
   baseUrl: 'https://nano-gpt.com/api/v1',
   mainModel: '',
   supportModel: '',
+  generationWordDelayMs: String(DEFAULT_GENERATION_WORD_DELAY_MS),
   favorites: [],
   prompts: defaultAiPrompts,
+}
+
+function normalizeGenerationWordDelay(value: unknown) {
+  const text = typeof value === 'number' || typeof value === 'string' ? String(value).trim() : ''
+  if (!/^\d+$/.test(text)) return String(DEFAULT_GENERATION_WORD_DELAY_MS)
+  const delay = Number(text)
+  if (!Number.isSafeInteger(delay) || delay < 1 || delay > MAX_GENERATION_WORD_DELAY_MS) {
+    return String(DEFAULT_GENERATION_WORD_DELAY_MS)
+  }
+  return String(delay)
+}
+
+export function generationWordDelayMs(settings: Pick<AiSettings, 'generationWordDelayMs'>) {
+  return Number(normalizeGenerationWordDelay(settings.generationWordDelayMs))
 }
 
 export function normalizeAiSettings(value?: Partial<AiSettings>): AiSettings {
@@ -131,6 +149,7 @@ export function normalizeAiSettings(value?: Partial<AiSettings>): AiSettings {
     ...value,
     prompts,
     favorites: Array.isArray(value?.favorites) ? [...value.favorites] : [],
+    generationWordDelayMs: normalizeGenerationWordDelay(value?.generationWordDelayMs),
     mainModelContextLength: Number.isFinite(value?.mainModelContextLength) ? value?.mainModelContextLength : undefined,
     supportModelContextLength: Number.isFinite(value?.supportModelContextLength) ? value?.supportModelContextLength : undefined,
   }
