@@ -4,6 +4,7 @@ import Workspace from './Workspace'
 import './editor-history-bridge'
 import './styles.css'
 import './button-interactions.css'
+import './chat-composer-fix.css'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

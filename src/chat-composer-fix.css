@@ -1,0 +1,154 @@
+/* Isolate the functional chat composer from the legacy prototype .chat-composer rules. */
+.functional-chat-composer {
+  display: grid;
+  gap: .65rem;
+}
+
+.functional-chat-composer > .chat-config-row,
+.functional-chat-composer > .chat-compose-row {
+  width: min(100%, 760px);
+  margin: 0 auto;
+}
+
+.functional-chat-composer > .chat-config-row {
+  display: flex;
+  grid-template-columns: none;
+  align-items: center;
+  gap: .5rem;
+  min-width: 0;
+}
+
+.functional-chat-composer > .chat-compose-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: .65rem;
+}
+
+.functional-chat-composer .chat-model-selector {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 32rem;
+}
+
+.functional-chat-composer .chat-model-selector > span {
+  display: block;
+  flex: none;
+  justify-content: initial;
+  margin: 0;
+}
+
+.functional-chat-composer .chat-model-selector select {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.functional-chat-composer .chat-system-prompt-button {
+  width: auto;
+  height: 38px;
+  min-height: 38px;
+  margin: 0;
+  padding: 0 .75rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  flex: none;
+}
+
+.functional-chat-composer > .chat-compose-row > textarea {
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 56px;
+  max-height: 11rem;
+  margin: 0;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+.functional-chat-composer .chat-generate-trigger,
+.functional-chat-composer .chat-generation-running .play {
+  margin: 0 !important;
+}
+
+.functional-chat-composer .chat-generation-running,
+.functional-chat-composer .chat-generate-actions {
+  align-self: end;
+  margin: 0;
+}
+
+.functional-chat-composer .chat-generate-actions button {
+  width: auto;
+  height: auto;
+  min-width: 0;
+  margin: 0;
+  border-radius: 999px;
+  display: inline-flex;
+}
+
+@media (max-width: 720px) {
+  .functional-chat-composer {
+    gap: .55rem;
+    padding-left: max(14px, env(safe-area-inset-left));
+    padding-right: max(14px, env(safe-area-inset-right));
+  }
+
+  .functional-chat-composer > .chat-config-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 42px;
+    gap: .5rem;
+  }
+
+  .functional-chat-composer .chat-model-selector {
+    width: 100%;
+    max-width: none;
+  }
+
+  .functional-chat-composer .chat-model-selector select {
+    width: 100%;
+    max-width: none;
+  }
+
+  .functional-chat-composer .chat-system-prompt-button {
+    width: 42px;
+    height: 42px;
+    min-height: 42px;
+    padding: 0;
+    border-radius: 50%;
+  }
+
+  .functional-chat-composer .chat-system-prompt-button span {
+    display: none;
+  }
+
+  .functional-chat-composer .chat-model-status {
+    grid-column: 1 / -1;
+    width: 100%;
+    max-width: none;
+  }
+
+  .functional-chat-composer > .chat-compose-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: .55rem;
+  }
+
+  .functional-chat-composer > .chat-compose-row > textarea {
+    min-height: 54px;
+    max-height: 8.5rem;
+  }
+}
+
+@media (max-width: 390px) {
+  .functional-chat-composer .chat-model-selector > span {
+    display: none;
+  }
+
+  .functional-chat-composer .chat-generate-actions {
+    gap: .15rem;
+  }
+}
