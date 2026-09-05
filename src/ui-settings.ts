@@ -52,28 +52,28 @@ export const UI_SETTINGS_STORAGE_KEY = 'arc.ui.settings.v1'
 export const UI_SETTINGS_EVENT = 'arc-ui-settings-changed'
 
 export const fontOptions: FontOption[] = [
-  { family: 'Literata', label: 'Literata', stack: '"Literata", Georgia, serif', kind: 'serif', bundled: true },
-  { family: 'Newsreader', label: 'Newsreader', stack: '"Newsreader", Georgia, serif', kind: 'serif', bundled: true },
-  { family: 'Lora', label: 'Lora', stack: '"Lora", Georgia, serif', kind: 'serif', bundled: true },
-  { family: 'Source Serif 4', label: 'Source Serif 4', stack: '"Source Serif 4", Georgia, serif', kind: 'serif', bundled: true },
-  { family: 'Crimson Pro', label: 'Crimson Pro', stack: '"Crimson Pro", Georgia, serif', kind: 'serif', bundled: true },
-  { family: 'EB Garamond', label: 'EB Garamond', stack: '"EB Garamond", Garamond, Georgia, serif', kind: 'serif', bundled: true },
-  { family: 'Noto Serif', label: 'Noto Serif', stack: '"Noto Serif", Georgia, serif', kind: 'serif', bundled: true },
+  { family: 'Literata', label: 'Literata', stack: '"Literata Variable", Georgia, serif', kind: 'serif', bundled: true },
+  { family: 'Newsreader', label: 'Newsreader', stack: '"Newsreader Variable", Georgia, serif', kind: 'serif', bundled: true },
+  { family: 'Lora', label: 'Lora', stack: '"Lora Variable", Georgia, serif', kind: 'serif', bundled: true },
+  { family: 'Source Serif 4', label: 'Source Serif 4', stack: '"Source Serif 4 Variable", Georgia, serif', kind: 'serif', bundled: true },
+  { family: 'Crimson Pro', label: 'Crimson Pro', stack: '"Crimson Pro Variable", Georgia, serif', kind: 'serif', bundled: true },
+  { family: 'EB Garamond', label: 'EB Garamond', stack: '"EB Garamond Variable", Garamond, Georgia, serif', kind: 'serif', bundled: true },
+  { family: 'Noto Serif', label: 'Noto Serif', stack: '"Noto Serif Variable", Georgia, serif', kind: 'serif', bundled: true },
   { family: 'Iowan Old Style', label: 'Iowan Old Style', stack: '"Iowan Old Style", Baskerville, Georgia, serif', kind: 'system', bundled: false },
   { family: 'Baskerville', label: 'Baskerville', stack: 'Baskerville, Georgia, serif', kind: 'system', bundled: false },
   { family: 'Georgia', label: 'Georgia', stack: 'Georgia, serif', kind: 'system', bundled: false },
   { family: 'Times New Roman', label: 'Times New Roman', stack: '"Times New Roman", serif', kind: 'system', bundled: false },
-  { family: 'Inter', label: 'Inter', stack: 'Inter, ui-sans-serif, system-ui, sans-serif', kind: 'sans', bundled: true },
-  { family: 'Roboto', label: 'Roboto', stack: 'Roboto, ui-sans-serif, system-ui, sans-serif', kind: 'sans', bundled: true },
-  { family: 'Open Sans', label: 'Open Sans', stack: '"Open Sans", ui-sans-serif, system-ui, sans-serif', kind: 'sans', bundled: true },
-  { family: 'DM Sans', label: 'DM Sans', stack: '"DM Sans", ui-sans-serif, system-ui, sans-serif', kind: 'sans', bundled: true },
-  { family: 'Manrope', label: 'Manrope', stack: 'Manrope, ui-sans-serif, system-ui, sans-serif', kind: 'sans', bundled: true },
+  { family: 'Inter', label: 'Inter', stack: '"Inter Variable", ui-sans-serif, system-ui, sans-serif', kind: 'sans', bundled: true },
+  { family: 'Roboto', label: 'Roboto', stack: '"Roboto Variable", ui-sans-serif, system-ui, sans-serif', kind: 'sans', bundled: true },
+  { family: 'Open Sans', label: 'Open Sans', stack: '"Open Sans Variable", ui-sans-serif, system-ui, sans-serif', kind: 'sans', bundled: true },
+  { family: 'DM Sans', label: 'DM Sans', stack: '"DM Sans Variable", ui-sans-serif, system-ui, sans-serif', kind: 'sans', bundled: true },
+  { family: 'Manrope', label: 'Manrope', stack: '"Manrope Variable", ui-sans-serif, system-ui, sans-serif', kind: 'sans', bundled: true },
   { family: 'System UI', label: 'System UI', stack: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', kind: 'system', bundled: false },
   { family: 'Arial', label: 'Arial', stack: 'Arial, Helvetica, sans-serif', kind: 'system', bundled: false },
   { family: 'Helvetica', label: 'Helvetica', stack: 'Helvetica, Arial, sans-serif', kind: 'system', bundled: false },
-  { family: 'JetBrains Mono', label: 'JetBrains Mono', stack: '"JetBrains Mono", ui-monospace, monospace', kind: 'mono', bundled: true },
-  { family: 'Roboto Mono', label: 'Roboto Mono', stack: '"Roboto Mono", ui-monospace, monospace', kind: 'mono', bundled: true },
-  { family: 'Source Code Pro', label: 'Source Code Pro', stack: '"Source Code Pro", ui-monospace, monospace', kind: 'mono', bundled: true },
+  { family: 'JetBrains Mono', label: 'JetBrains Mono', stack: '"JetBrains Mono Variable", ui-monospace, monospace', kind: 'mono', bundled: true },
+  { family: 'Roboto Mono', label: 'Roboto Mono', stack: '"Roboto Mono Variable", ui-monospace, monospace', kind: 'mono', bundled: true },
+  { family: 'Source Code Pro', label: 'Source Code Pro', stack: '"Source Code Pro Variable", ui-monospace, monospace', kind: 'mono', bundled: true },
   { family: 'Courier New', label: 'Courier New', stack: '"Courier New", monospace', kind: 'system', bundled: false },
 ]
 
@@ -194,7 +194,7 @@ function getPaletteTone(palette: ThemePalette): 'dark' | 'light' {
 }
 
 export function fontStack(family: string) {
-  return fontOptions.find((font) => font.family === family)?.stack ?? defaultUiSettings.editor.fontFamily
+  return fontOptions.find((font) => font.family === family)?.stack ?? fontOptions[0].stack
 }
 
 export function loadUiSettings(): UiSettings {
