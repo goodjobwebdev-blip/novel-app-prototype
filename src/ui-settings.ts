@@ -280,5 +280,5 @@ export function createCustomTheme(settings: UiSettings, sourceThemeId = settings
   const source = resolveTheme({ ...settings, activeThemeId: sourceThemeId })
   const id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? `custom-${crypto.randomUUID()}` : `custom-${Date.now()}`
   const theme: CustomUiTheme = { id, name: `Custom ${source.name}`, palette: { ...source.palette } }
-  return saveUiSettings({ ...settings, activeThemeId: id, customThemes: [...settings.customThemes, theme] })
+  return { ...settings, activeThemeId: id, customThemes: [...settings.customThemes, theme] }
 }
