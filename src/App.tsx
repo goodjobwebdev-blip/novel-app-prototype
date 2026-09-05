@@ -43,6 +43,7 @@ import { buildContextValues, type PreparedContextValues } from './context-servic
 
 type Model = { id: string; name?: string; context_length?: number; pricing?: { prompt?: string; completion?: string }; architecture?: { modality?: string } }
 type SettingsTab = 'ai' | 'context' | 'appearance' | 'speech' | 'images'
+type SaveState = 'loading' | 'saved' | 'saving' | 'error'
 
 const providerLabels: Record<AiProvider, string> = { openrouter: 'OpenRouter', nanogpt: 'nano-gpt.com', openai: 'OpenAI', compatible: 'OpenAI-compatible' }
 
@@ -74,23 +75,41 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState('Add an API key, then reload the model list.')
   const [statusKind, setStatusKind] = useState<'quiet' | 'success' | 'error'>('quiet')
-  const [saved, setSaved] = useState(false)
+  const [saveState, setSaveState] = useState<SaveState>(book ? 'loading' : 'saved')
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('ai')
   const [settingsLoading, setSettingsLoading] = useState(Boolean(book))
   const [contextSettings, setContextSettings] = useState<BookContextSettings>(defaultBookContextSettings)
   const [contextSources, setContextSources] = useState<ArcEntity[]>([])
   const [contextSaved, setContextSaved] = useState(true)
+  const aiLoadedScopeRef = useRef<string | null>(null)
+  const aiSavedRef = useRef('')
+  const latestAiSettingsRef = useRef(settings)
+  const aiSaveTimerRef = useRef<number | null>(null)
+  const aiSaveVersionRef = useRef(0)
+  const aiSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const onSavedRef = useRef(onSaved)
   const contextSaveVersionRef = useRef(0)
   const contextSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const isBookSettings = Boolean(book)
+  onSavedRef.current = onSaved
 
   useEffect(() => {
     let cancelled = false
+    const scope = book?.id ?? 'defaults'
+    aiLoadedScopeRef.current = null
+    aiSaveVersionRef.current += 1
+    if (aiSaveTimerRef.current !== null) window.clearTimeout(aiSaveTimerRef.current)
+    aiSaveTimerRef.current = null
+    setSaveState('loading')
     const defaults = loadAiSettings()
     if (!book) {
+      latestAiSettingsRef.current = defaults
+      aiSavedRef.current = JSON.stringify(defaults)
+      aiLoadedScopeRef.current = scope
       setSettings(defaults)
       setStatus('Saved AI defaults loaded from this device.')
       setStatusKind('success')
+      setSaveState('saved')
       setSettingsLoading(false)
       return () => { cancelled = true }
     }
@@ -101,20 +120,26 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
         await ensureBookAiSettings(book.id, defaults)
         const bookSettings = await getBookAiSettings(book.id, defaults.favorites)
         if (cancelled) return
+        latestAiSettingsRef.current = bookSettings
+        aiSavedRef.current = JSON.stringify(bookSettings)
+        aiLoadedScopeRef.current = scope
         setSettings(bookSettings)
         setStatus(`AI settings loaded for “${book.title}”.`)
         setStatusKind('success')
+        setSaveState('saved')
       } catch {
         if (cancelled) return
+        latestAiSettingsRef.current = defaults
         setSettings(defaults)
         setStatus('Book settings could not be read. No changes have been saved.')
         setStatusKind('error')
+        setSaveState('error')
       } finally {
         if (!cancelled) setSettingsLoading(false)
       }
     })()
     return () => { cancelled = true }
-  }, [book?.id, book?.title])
+  }, [book?.id])
 
   useEffect(() => {
     let cancelled = false
@@ -139,18 +164,74 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
     return models.filter((model) => !query || `${model.id} ${model.name ?? ''}`.toLowerCase().includes(query)).sort((a, b) => Number(settings.favorites.includes(b.id)) - Number(settings.favorites.includes(a.id))).slice(0, 8)
   }, [modelSearch, models, settings.favorites])
 
-  function update<K extends keyof AiSettings>(key: K, value: AiSettings[K]) { setSettings((current) => ({ ...current, [key]: value })); setSaved(false) }
+  function persistAiSettings(snapshot: AiSettings, scope: string, version: number) {
+    const pending = aiSaveQueueRef.current.catch(() => undefined).then(async () => {
+      const savedSettings = scope === 'defaults'
+        ? saveAiSettings(snapshot)
+        : await saveBookAiSettings(scope, snapshot)
+      if (scope !== 'defaults') saveGlobalFavorites(snapshot.favorites)
+      if (version !== aiSaveVersionRef.current || scope !== aiLoadedScopeRef.current) return
+      aiSavedRef.current = JSON.stringify(snapshot)
+      setSaveState('saved')
+      setStatus(scope === 'defaults' ? 'AI defaults saved automatically on this device.' : `AI settings saved automatically for “${book?.title ?? 'this book'}”.`)
+      setStatusKind('success')
+      onSavedRef.current?.(savedSettings)
+    })
+    aiSaveQueueRef.current = pending
+    return pending.catch(() => {
+      if (version !== aiSaveVersionRef.current || scope !== aiLoadedScopeRef.current) return
+      setSaveState('error')
+      setStatus('Settings could not be saved. Your changes are still shown; edit a setting to try again.')
+      setStatusKind('error')
+    })
+  }
+
+  function scheduleAiSettingsSave(next: AiSettings) {
+    const scope = aiLoadedScopeRef.current
+    latestAiSettingsRef.current = next
+    if (!scope || JSON.stringify(next) === aiSavedRef.current) return
+    setSaveState('saving')
+    const version = ++aiSaveVersionRef.current
+    if (aiSaveTimerRef.current !== null) window.clearTimeout(aiSaveTimerRef.current)
+    aiSaveTimerRef.current = window.setTimeout(() => {
+      aiSaveTimerRef.current = null
+      void persistAiSettings(next, scope, version)
+    }, 500)
+  }
+
+  function changeAiSettings(transform: (current: AiSettings) => AiSettings) {
+    const current = latestAiSettingsRef.current
+    const next = transform(current)
+    if (JSON.stringify(next) === JSON.stringify(current)) return
+    latestAiSettingsRef.current = next
+    setSettings(next)
+    scheduleAiSettingsSave(next)
+  }
+
+  async function flushAiSettings() {
+    const scope = aiLoadedScopeRef.current
+    const snapshot = latestAiSettingsRef.current
+    if (!scope || JSON.stringify(snapshot) === aiSavedRef.current) return
+    if (aiSaveTimerRef.current !== null) window.clearTimeout(aiSaveTimerRef.current)
+    aiSaveTimerRef.current = null
+    setSaveState('saving')
+    const version = ++aiSaveVersionRef.current
+    await persistAiSettings(snapshot, scope, version)
+  }
+
+  function update<K extends keyof AiSettings>(key: K, value: AiSettings[K]) { changeAiSettings((current) => ({ ...current, [key]: value })) }
   function selectProvider(provider: AiProvider) {
-    const baseUrl = provider === 'nanogpt' ? 'https://nano-gpt.com/api/v1' : provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : provider === 'openai' ? 'https://api.openai.com/v1' : settings.baseUrl
-    setSettings((current) => ({ ...current, provider, baseUrl, mainModel: '', mainModelContextLength: undefined, supportModel: '', supportModelContextLength: undefined, codexModel: '', codexModelContextLength: undefined }))
-    setModels([]); setStatus('Provider changed. Reload its model list when ready.'); setStatusKind('quiet'); setSaved(false)
+    changeAiSettings((current) => {
+      const baseUrl = provider === 'nanogpt' ? 'https://nano-gpt.com/api/v1' : provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : provider === 'openai' ? 'https://api.openai.com/v1' : current.baseUrl
+      return { ...current, provider, baseUrl, mainModel: '', mainModelContextLength: undefined, supportModel: '', supportModelContextLength: undefined, codexModel: '', codexModelContextLength: undefined }
+    })
+    setModels([]); setStatus('Provider changed. Reload its model list when ready.'); setStatusKind('quiet')
   }
   function selectModel(kind: 'main' | 'support' | 'codex', id: string) {
     const contextLength = models.find((model) => model.id === id)?.context_length
-    setSettings((current) => kind === 'main'
+    changeAiSettings((current) => kind === 'main'
       ? { ...current, mainModel: id, mainModelContextLength: contextLength }
       : kind === 'support' ? { ...current, supportModel: id, supportModelContextLength: contextLength } : { ...current, codexModel: id, codexModelContextLength: contextLength })
-    setSaved(false)
   }
   async function refreshModels() {
     if (!settings.apiKey.trim()) { setStatus('Enter an API key before loading models.'); setStatusKind('error'); return }
@@ -161,43 +242,31 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
       const payload = await response.json().catch(() => ({})) as { data?: Model[]; message?: string; error?: { message?: string } }
       if (!response.ok) throw new Error(payload.error?.message || payload.message || `Provider returned ${response.status}.`)
       const nextModels = Array.isArray(payload.data) ? payload.data.filter((model) => typeof model.id === 'string' && model.id.length > 0) : []
-      setSettings((current) => ({
+      changeAiSettings((current) => ({
         ...current,
         mainModelContextLength: nextModels.find((model) => model.id === current.mainModel)?.context_length ?? current.mainModelContextLength,
         supportModelContextLength: nextModels.find((model) => model.id === current.supportModel)?.context_length ?? current.supportModelContextLength,
         codexModelContextLength: nextModels.find((model) => model.id === current.codexModel)?.context_length ?? current.codexModelContextLength,
       }))
-      if (nextModels.some((model) => model.id === settings.mainModel || model.id === settings.supportModel || model.id === settings.codexModel)) setSaved(false)
       setModels(nextModels); setStatus(nextModels.length ? `${nextModels.length} models available.` : 'The provider returned no models.'); setStatusKind(nextModels.length ? 'success' : 'error')
     } catch (error) {
       setModels([]); setStatus(error instanceof Error ? error.message : 'Could not load the model list.'); setStatusKind('error')
     } finally { setLoading(false) }
   }
-  function toggleFavorite(id: string) { update('favorites', settings.favorites.includes(id) ? settings.favorites.filter((favorite) => favorite !== id) : [...settings.favorites, id]) }
-  async function saveSettings() {
-    try {
-      const savedSettings = book
-        ? await saveBookAiSettings(book.id, settings)
-        : saveAiSettings(settings)
-      if (book) saveGlobalFavorites(settings.favorites)
-      setSettings(savedSettings)
-      setSaved(true)
-      setStatus(book ? `AI settings saved for “${book.title}”.` : 'AI defaults saved on this device. New books will copy them.')
-      setStatusKind('success')
-      onSaved?.(savedSettings)
-    } catch {
-      setStatus('Settings could not be saved. Try again.')
-      setStatusKind('error')
-    }
-  }
+  function toggleFavorite(id: string) { changeAiSettings((current) => ({ ...current, favorites: current.favorites.includes(id) ? current.favorites.filter((favorite) => favorite !== id) : [...current.favorites, id] })) }
 
   async function resetFromDefaults() {
     if (!book || !window.confirm(`Replace the AI settings for “${book.title}” with the current defaults?`)) return
     try {
       const defaults = loadAiSettings()
       const copied = await copyDefaultAiSettingsToBook(book.id, defaults)
+      if (aiSaveTimerRef.current !== null) window.clearTimeout(aiSaveTimerRef.current)
+      aiSaveTimerRef.current = null
+      aiSaveVersionRef.current += 1
+      latestAiSettingsRef.current = copied
+      aiSavedRef.current = JSON.stringify(copied)
       setSettings(copied)
-      setSaved(true)
+      setSaveState('saved')
       setModels([])
       setStatus(`Current defaults copied to “${book.title}”.`)
       setStatusKind('success')
@@ -210,12 +279,20 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
 
   async function saveContextDefaults() {
     if (!book) return
+    const version = ++contextSaveVersionRef.current
+    const value = contextSettings
     try {
-      const savedDefaults = await saveBookContextSettings(book.id, contextSettings)
-      setContextSettings(savedDefaults)
-      setContextSaved(true)
+      const pending = contextSaveQueueRef.current.catch(() => undefined).then(async () => {
+        const savedDefaults = await saveBookContextSettings(book.id, value)
+        if (version === contextSaveVersionRef.current) {
+          setContextSettings(savedDefaults)
+          setContextSaved(true)
+        }
+      })
+      contextSaveQueueRef.current = pending
+      await pending
     } catch {
-      setContextSaved(false)
+      if (version === contextSaveVersionRef.current) setContextSaved(false)
     }
   }
 
@@ -235,19 +312,19 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
     })
   }
 
-  function leaveSettings(destination?: () => void) {
+  async function leaveSettings(destination?: () => void) {
     if (!destination) return
-    if (book && settingsTab === 'context' && !contextSaved) {
-      void saveContextDefaults().finally(destination)
-      return
-    }
+    await Promise.allSettled([
+      flushAiSettings(),
+      book && !contextSaved ? saveContextDefaults() : Promise.resolve(),
+    ])
     destination()
   }
 
   return (
     <main className="app-shell">
       <aside className="settings-rail" aria-label={`${isBookSettings ? 'Book' : 'Default'} settings navigation`}>
-        <div className="rail-header"><button className="home-button" type="button" aria-label="Back to library" onClick={() => leaveSettings(onHome)}><Home aria-hidden="true" /><b>Home</b></button>{onBack && <button className="settings-close" type="button" onClick={() => leaveSettings(onBack)} aria-label="Close settings"><X aria-hidden="true" /></button>}</div>
+        <div className="rail-header"><button className="home-button" type="button" aria-label="Back to library" onClick={() => { void leaveSettings(onHome) }}><Home aria-hidden="true" /><b>Home</b></button>{onBack && <button className="settings-close" type="button" onClick={() => { void leaveSettings(onBack) }} aria-label="Close settings"><X aria-hidden="true" /></button>}</div>
         <nav>
           {([['ai', Bot, 'AI'], ['context', SlidersHorizontal, 'Context'], ['appearance', Type, 'UI'], ['speech', Volume2, 'Speech'], ['images', ImageIcon, 'Images']] as const).map(([key, Icon, label]) => (
             <button className={settingsTab === key ? 'active' : ''} type="button" onClick={() => setSettingsTab(key)} key={key}><Icon aria-hidden="true" /><span>{label}</span></button>
@@ -258,14 +335,27 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
 
       <section className="settings-page" aria-labelledby="page-title">
         {settingsTab === 'ai' ? <>
-        <header className="page-heading"><div><p>{isBookSettings ? 'Book AI' : 'Default AI'}</p><h1 id="page-title">Models & prompts</h1><span>{isBookSettings ? `Configure AI for “${book?.title}”. These settings are independent from the defaults.` : 'Configure the writing and support models used when a book is created.'}</span></div><div className={`save-state ${saved ? 'saved' : ''}`}><i />{settingsLoading ? 'Loading' : saved ? 'Saved' : 'Unsaved changes'}</div></header>
+        <header className="page-heading"><div><p>{isBookSettings ? 'Book AI' : 'Default AI'}</p><h1 id="page-title">Models & prompts</h1><span>{isBookSettings ? `Configure AI for “${book?.title}”. These settings are independent from the defaults.` : 'Configure the writing and support models used when a book is created.'}</span></div><div className={`save-state ${saveState}`} aria-live="polite"><i />{saveState === 'loading' || settingsLoading ? 'Loading' : saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Save failed' : 'Saved'}</div></header>
 
         <section className="settings-card provider-card">
           <div className="card-heading"><div><span>01</span><h2>Provider</h2></div><p>Connection details stay in this browser.</p></div>
           <div className="provider-grid">{(Object.keys(providerLabels) as AiProvider[]).map((provider) => <button key={provider} className={settings.provider === provider ? 'selected' : ''} type="button" onClick={() => selectProvider(provider)}><i>{provider === 'nanogpt' ? 'N' : provider === 'openrouter' ? 'O' : provider === 'openai' ? 'AI' : '{ }'}</i><span><strong>{providerLabels[provider]}</strong><small>{provider === 'compatible' ? 'Custom endpoint' : 'Managed endpoint'}</small></span><b>{settings.provider === provider ? '✓' : ''}</b></button>)}</div>
           <div className="connection-fields">
             {settings.provider === 'compatible' && <label><span>Endpoint URL</span><input value={settings.baseUrl} onChange={(event) => update('baseUrl', event.target.value)} placeholder="https://provider.example/v1" /></label>}
-            <label><span>API key</span><div className="input-action"><input type={showKey ? 'text' : 'password'} value={settings.apiKey} onChange={(event) => update('apiKey', event.target.value)} placeholder="Enter API key" autoComplete="off" spellCheck={false} /><button type="button" onClick={() => setShowKey((value) => !value)}>{showKey ? 'Hide' : 'Show'}</button></div></label>
+            <label><span>API key</span><div className="input-action"><input
+              type={showKey ? 'text' : 'password'}
+              name="arc-provider-token"
+              value={settings.apiKey}
+              onChange={(event) => update('apiKey', event.target.value)}
+              placeholder="Enter API key"
+              autoComplete="one-time-code"
+              autoCapitalize="none"
+              data-1p-ignore
+              data-bwignore="true"
+              data-form-type="other"
+              data-lpignore="true"
+              spellCheck={false}
+            /><button type="button" onClick={() => setShowKey((value) => !value)}>{showKey ? 'Hide' : 'Show'}</button></div></label>
             <button className="reload-button" type="button" onClick={refreshModels} disabled={loading}><RefreshCw className={loading ? 'spinning' : ''} aria-hidden="true" />{loading ? 'Loading models…' : 'Reload model list'}</button>
           </div>
           <p className={`status ${statusKind}`} role="status"><i />{status}</p>
@@ -293,14 +383,14 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
           </details>
           <div className="prompt-footer"><button type="button" onClick={() => update('prompts', { ...settings.prompts, [promptTab]: defaultAiPrompts[promptTab] })}>Reset default</button></div>
         </section>
-        <footer className="save-bar"><div><strong>{isBookSettings ? book?.title : 'AI defaults'}</strong><span>{isBookSettings ? 'Independent book configuration' : settings.mainModel ? 'Ready to save for new books' : 'Choose models now or save them later'}</span></div><div className="save-actions">{book && <button className="reset-settings" type="button" onClick={() => { void resetFromDefaults() }} disabled={settingsLoading}><RefreshCw aria-hidden="true" /> Reset from defaults</button>}<button type="button" onClick={() => { void saveSettings() }} disabled={settingsLoading}><Check aria-hidden="true" /> {isBookSettings ? 'Save book settings' : 'Save defaults'}</button></div></footer>
-        </> : settingsTab === 'context' && book ? <ContextSettings bookId={book.id} bookTitle={book.title} bookPromptValues={book.promptValues} type={book.contextType ?? 'scene'} currentDocumentId={book.currentDocumentId} currentDocumentText={book.currentDocumentText} value={contextSettings} sources={contextSources} saved={contextSaved} onChange={updateContextDefaults} onSave={() => { void saveContextDefaults() }} /> : <SettingsPlaceholder tab={settingsTab} scope={isBookSettings ? 'book' : 'defaults'} />}
+        {book && <footer className="save-bar"><div><strong>{book.title}</strong><span>Changes save automatically</span></div><div className="save-actions"><button className="reset-settings" type="button" onClick={() => { void resetFromDefaults() }} disabled={settingsLoading}><RefreshCw aria-hidden="true" /> Reset from defaults</button></div></footer>}
+        </> : settingsTab === 'context' && book ? <ContextSettings bookId={book.id} bookTitle={book.title} bookPromptValues={book.promptValues} type={book.contextType ?? 'scene'} currentDocumentId={book.currentDocumentId} currentDocumentText={book.currentDocumentText} value={contextSettings} sources={contextSources} saved={contextSaved} onChange={updateContextDefaults} /> : <SettingsPlaceholder tab={settingsTab} scope={isBookSettings ? 'book' : 'defaults'} />}
       </section>
     </main>
   )
 }
 
-function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDocumentId, currentDocumentText, value, sources, saved, onChange, onSave }: { bookId: string; bookTitle: string; bookPromptValues?: BookPromptValues; type: GenerationContextType; currentDocumentId?: string; currentDocumentText?: string; value: BookContextSettings; sources: ArcEntity[]; saved: boolean; onChange: (value: BookContextSettings) => void; onSave: () => void }) {
+function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDocumentId, currentDocumentText, value, sources, saved, onChange }: { bookId: string; bookTitle: string; bookPromptValues?: BookPromptValues; type: GenerationContextType; currentDocumentId?: string; currentDocumentText?: string; value: BookContextSettings; sources: ArcEntity[]; saved: boolean; onChange: (value: BookContextSettings) => void }) {
   const [query, setQuery] = useState('')
   const [preview, setPreview] = useState<PreparedContextValues | null>(null)
   const [previewError, setPreviewError] = useState('')
@@ -359,7 +449,6 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
         <details className="context-preview-raw"><summary>View exact context text</summary><pre>{exactPreview}</pre></details>
       </> : <p className="context-preview-empty">Preparing preview…</p>}
     </section>
-    <footer className="save-bar"><div><strong>{bookTitle}</strong><span>Context changes save automatically</span></div><button type="button" onClick={onSave} disabled={saved}><Check aria-hidden="true" /> {saved ? 'Saved' : 'Save now'}</button></footer>
   </section>
 }
 

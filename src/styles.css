@@ -42,6 +42,7 @@ button { color: inherit; }
 .page-heading > div > span { display: block; max-width: 540px; margin-top: 10px; color: var(--faint); font-size: 13px; line-height: 1.5; }
 .save-state { flex: none; margin-top: 4px; color: var(--faint); display: flex; align-items: center; gap: 7px; font-size: 11px; }
 .save-state i { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }.save-state.saved { color: #a9c497; }.save-state.saved i { background:#8fac7b; }
+.save-state.error { color:var(--danger); }.save-state.error i { background:var(--danger); }
 
 .settings-card { margin-bottom: 14px; padding: 18px 14px; border: 1px solid var(--line); border-radius: 18px; background: rgba(21,22,19,.72); box-shadow: 0 18px 50px rgba(0,0,0,.18); }
 .card-heading { margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
