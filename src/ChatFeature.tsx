@@ -39,10 +39,12 @@ import {
   type ChatEntity,
   type ChatMessageEntity,
   type ChatModel,
+  type ChatOutlineActionProposal,
 } from './chat-service'
 import { buildContextValues, generationContextDiagnostics } from './context-service'
 import { bookTemplateValues, renderPromptTemplate, type BookPromptValues } from './prompt-template'
 import { applyChatDocumentEdit, chatWorkspaceTools, createChatCodexEntry, executeChatWorkspaceTool, rejectChatCodexEntry, rejectChatDocumentEdit } from './chat-tools'
+import { applyChatOutlineAction, chatOutlineToolNames, chatOutlineTools, executeChatOutlineTool, rejectChatOutlineAction } from './chat-outline-tools'
 import './chat.css'
 
 type GenerationPhase = 'sending' | 'thinking' | 'writing' | 'stopping'
@@ -248,7 +250,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     ].filter(Boolean)
     const workspaceInstructions = `# Workspace tools
 
-You can inspect and propose edits to Scenes, Notes, and Codex entries in this book. You can also propose creating a new Codex/lore entry with propose_codex_entry. Search existing entries first when the requested lore may already exist. Use search_entities and read_entity when the target document is not already known. For localized changes, prefer propose_document_edit with exact old_text copied from read_entity. Use propose_document_replacement only when the user asks for a whole-document rewrite. Tool edit and creation calls create proposals only: never claim a document has already changed or been created. The user must press Apply or Create in the chat first.`
+You can inspect and propose edits to Scenes, Notes, and Codex entries in this book. You can also propose creating a new Codex/lore entry. For the outline, use read_outline before structural changes; you may propose creating, renaming, moving/reordering, or deleting Acts, Chapters, and Scenes. Mutating tools only create approval proposals: never claim an edit, creation, rename, move, reorder, or deletion happened until the user approves the card in Chat. Outline deletion is allowed only when the target and every descendant Scene have empty content. Search/read tools are read-only and can run automatically. Use search_entities and read_entity when a document target is not already known. For localized document changes, prefer propose_document_edit with exact old_text copied from read_entity. Use propose_document_replacement only for whole-document rewrites.`
     const providerMessages: ChatCompletionMessage[] = [
       { role: 'system', content: systemPrompt },
       { role: 'system', content: workspaceInstructions },
@@ -260,9 +262,12 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
         const creationState = message.role === 'assistant' && message.codexCreations?.length
           ? `\n\n[Codex creation proposals: ${message.codexCreations.map((proposal) => `${proposal.title}: ${proposal.status}`).join('; ')}]`
           : ''
+        const outlineState = message.role === 'assistant' && message.outlineActions?.length
+          ? `\n\n[Outline proposals: ${message.outlineActions.map((proposal) => `${proposal.action} ${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
+          : ''
         return {
           role: message.role,
-          content: `${message.content}${editState}${creationState}`,
+          content: `${message.content}${editState}${creationState}${outlineState}`,
           ...(message.role === 'assistant' && message.thoughts ? { reasoning_content: message.thoughts } : {}),
         }
       }),
@@ -287,6 +292,7 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
     let completed = false
     const proposals: ChatDocumentEditProposal[] = []
     const codexCreations: ChatCodexCreationProposal[] = []
+    const outlineActions: ChatOutlineActionProposal[] = []
 
     try {
       const workingMessages = [...providerMessages]
@@ -302,7 +308,7 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
           model: activeChat.model,
           messages: workingMessages,
           thinking: activeChat.thinking,
-          tools: chatWorkspaceTools,
+          tools: [...chatWorkspaceTools, ...chatOutlineTools],
         }, (chunk) => {
           if (chunk.thoughts) {
             roundThoughts += chunk.thoughts
@@ -326,10 +332,16 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
             tool_calls: result.toolCalls,
           })
           for (const call of result.toolCalls) {
-            const execution = await executeChatWorkspaceTool(bookId, call)
-            if (execution.proposal) proposals.push(execution.proposal)
-            if (execution.codexCreation) codexCreations.push(execution.codexCreation)
-            workingMessages.push({ role: 'tool', tool_call_id: call.id, content: execution.content })
+            if (chatOutlineToolNames.has(call.function.name)) {
+              const execution = await executeChatOutlineTool(bookId, call)
+              if (execution.outlineAction) outlineActions.push(execution.outlineAction)
+              workingMessages.push({ role: 'tool', tool_call_id: call.id, content: execution.content })
+            } else {
+              const execution = await executeChatWorkspaceTool(bookId, call)
+              if (execution.proposal) proposals.push(execution.proposal)
+              if (execution.codexCreation) codexCreations.push(execution.codexCreation)
+              workingMessages.push({ role: 'tool', tool_call_id: call.id, content: execution.content })
+            }
           }
           setStreamedContent('')
           setStreamedThoughts('')
@@ -355,12 +367,13 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
       setElapsed(0)
       setStreamedContent('')
       setStreamedThoughts('')
-      if ((content || thoughts || proposals.length || codexCreations.length) && (completed || stopped)) {
+      if ((content || thoughts || proposals.length || codexCreations.length || outlineActions.length) && (completed || stopped)) {
         await createChatMessage(activeChat, 'assistant', content, {
           thoughts: thoughts || undefined,
           status: stopped ? 'stopped' : 'complete',
           documentEdits: proposals.length ? proposals : undefined,
           codexCreations: codexCreations.length ? codexCreations : undefined,
+          outlineActions: outlineActions.length ? outlineActions : undefined,
         })
         await reloadMessages()
       }
@@ -514,6 +527,26 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
     }
   }
 
+  async function applyOutlineProposal(message: ChatMessageEntity, proposal: ChatOutlineActionProposal) {
+    try {
+      await applyChatOutlineAction(message.id, proposal.id)
+      await reloadMessages()
+      onToast(`Approved ${proposal.action} for “${proposal.entityTitle}”.`)
+    } catch (error) {
+      await reloadMessages().catch(() => undefined)
+      onToast(error instanceof Error ? error.message : 'Could not apply the outline proposal.')
+    }
+  }
+
+  async function rejectOutlineProposal(message: ChatMessageEntity, proposal: ChatOutlineActionProposal) {
+    try {
+      await rejectChatOutlineAction(message.id, proposal.id)
+      await reloadMessages()
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : 'Could not reject the outline proposal.')
+    }
+  }
+
   function readAloud(message: ChatMessageEntity) {
     if (!('speechSynthesis' in window) || !message.content.trim()) return
     window.speechSynthesis.cancel()
@@ -532,9 +565,10 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
           {message.role === 'assistant' ? <div className="chat-message-stack">
             {editingId === message.id ? <InlineMessageEdit value={editingValue} onChange={setEditingValue} onCancel={() => setEditingId('')} onSave={() => { void saveEdit(message, false) }} /> : <>
               {message.thoughts && <details className="chat-thoughts"><summary>Thoughts</summary><div>{message.thoughts}</div></details>}
-              <div className="bubble chat-markdown-bubble">{message.content ? <MarkdownMessage content={message.content} /> : (message.documentEdits?.length || message.codexCreations?.length ? <em>Workspace proposal</em> : <em>No final answer returned.</em>)}</div>
+              <div className="bubble chat-markdown-bubble">{message.content ? <MarkdownMessage content={message.content} /> : (message.documentEdits?.length || message.codexCreations?.length || message.outlineActions?.length ? <em>Workspace proposal</em> : <em>No final answer returned.</em>)}</div>
               {message.documentEdits?.length ? <div className="chat-document-edits">{message.documentEdits.map((proposal) => <DocumentEditCard key={proposal.id} proposal={proposal} onApply={() => { void applyProposal(message, proposal) }} onReject={() => { void rejectProposal(message, proposal) }} />)}</div> : null}
               {message.codexCreations?.length ? <div className="chat-document-edits">{message.codexCreations.map((proposal) => <CodexCreationCard key={proposal.id} proposal={proposal} onCreate={() => { void createCodexProposal(message, proposal) }} onReject={() => { void rejectCodexProposal(message, proposal) }} />)}</div> : null}
+              {message.outlineActions?.length ? <div className="chat-document-edits">{message.outlineActions.map((proposal) => <OutlineActionCard key={proposal.id} proposal={proposal} onApply={() => { void applyOutlineProposal(message, proposal) }} onReject={() => { void rejectOutlineProposal(message, proposal) }} />)}</div> : null}
               {message.status === 'stopped' && <small className="chat-message-status">Stopped</small>}
               <div className="message-tools"><button type="button" onClick={() => { void copyMessage(message) }}>{copiedMessageId === message.id ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />} {copiedMessageId === message.id ? 'Copied' : 'Copy'}</button><button type="button" onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" onClick={() => { void fork(message) }}><GitFork aria-hidden="true" /> Fork</button><button type="button" onClick={() => readAloud(message)}><Volume2 aria-hidden="true" /> Read aloud</button><button type="button" onClick={() => { void regenerate(message) }}><RefreshCw aria-hidden="true" /> Regenerate</button><button type="button" onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
             </>}
@@ -632,6 +666,23 @@ function ChatModelPicker({ value, models, onChange }: { value: string; models: C
       </div>
     </section>}
   </div>
+}
+
+function OutlineActionCard({ proposal, onApply, onReject }: { proposal: ChatOutlineActionProposal; onApply: () => void; onReject: () => void }) {
+  const actionLabel = proposal.action === 'create' ? 'Create' : proposal.action === 'rename' ? 'Rename' : proposal.action === 'move' ? 'Move' : 'Delete'
+  const statusLabel = proposal.status === 'proposed' ? 'Needs approval' : proposal.status === 'applied' ? 'Applied' : proposal.status === 'stale' ? 'Outline changed' : 'Rejected'
+  const typeLabel = proposal.entityType[0].toUpperCase() + proposal.entityType.slice(1)
+  return <section className={`chat-document-edit chat-outline-action ${proposal.action} ${proposal.status}`}>
+    <header><div><small>{actionLabel} {typeLabel}</small><strong>{proposal.entityTitle}</strong></div><span>{statusLabel}</span></header>
+    {proposal.summary && <p>{proposal.summary}</p>}
+    <div className="chat-outline-action-body">
+      {proposal.action === 'create' && <p>Create under <strong>{proposal.targetParentTitle || 'target parent'}</strong>.</p>}
+      {proposal.action === 'rename' && <p><span>{proposal.entityTitle}</span><b>→</b><strong>{proposal.newTitle}</strong></p>}
+      {proposal.action === 'move' && <p>Move to <strong>{proposal.targetParentTitle || 'target parent'}</strong>{proposal.beforeTitle ? <> before <strong>{proposal.beforeTitle}</strong></> : <> at the end</>}.</p>}
+      {proposal.action === 'delete' && <p>Delete this item and its empty descendants. Non-empty Scene content blocks deletion.</p>}
+    </div>
+    {proposal.status === 'proposed' && <footer><button type="button" onClick={onReject}>Reject</button><button className={proposal.action === 'delete' ? 'danger' : 'primary'} type="button" onClick={onApply}>{actionLabel}</button></footer>}
+  </section>
 }
 
 function CodexCreationCard({ proposal, onCreate, onReject }: { proposal: ChatCodexCreationProposal; onCreate: () => void; onReject: () => void }) {
