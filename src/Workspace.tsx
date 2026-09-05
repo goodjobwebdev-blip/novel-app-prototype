@@ -5,6 +5,7 @@ import {
   ArrowUp,
   Bot,
   BookOpenText,
+  Check,
   ChevronDown,
   ChevronRight,
   ChevronsLeft,
@@ -22,6 +23,7 @@ import {
   Plus,
   Redo2,
   RefreshCw,
+  Search,
   Send,
   Settings2,
   Square,
@@ -45,19 +47,23 @@ import {
   createBook,
   createCodexEntry,
   createNote,
+  createSeries as createSeriesEntity,
   createSnapshot,
   createStructuralEntity,
   deleteEntityTree,
   ensureBookAiSettings,
   ensurePrototypeSeed,
+  ensureSeriesLibrary,
   getEntity,
   getBookAiSettings,
   getGenerationContextSelection,
   getOrCreateSummary,
   listBooks,
   listEntitiesByBook,
+  listSeries,
   moveStructuralEntity,
   renameEntity,
+  renameSeries as renameSeriesEntity,
   saveDocumentContent,
   saveBookAiSettings,
   saveGenerationContextSelection,
@@ -72,6 +78,7 @@ import {
   type GenerationContextSelection,
   type NoteEntity,
   type SnapshotReason,
+  type SeriesEntity,
   type StructuralEntity,
   type StructuralEntityType,
   type SummaryEntity,
@@ -138,6 +145,7 @@ export default function Workspace() {
   const [generationElapsedSeconds, setGenerationElapsedSeconds] = useState(0)
   const [toast, setToast] = useState<ToastMessage | null>(null)
   const [bookList, setBookList] = useState<BookEntity[]>([])
+  const [seriesList, setSeriesList] = useState<SeriesEntity[]>([])
   const [currentBook, setCurrentBook] = useState<BookEntity | null>(null)
   const [outlineEntities, setOutlineEntities] = useState<StructuralEntity[]>([])
   const [notes, setNotes] = useState<NoteEntity[]>([])
@@ -189,6 +197,7 @@ export default function Workspace() {
     ;(async () => {
       try {
         await ensurePrototypeSeed(initialStoryMarkdown)
+        const availableSeries = await ensureSeriesLibrary()
         const books = await listBooks()
         const defaults = loadAiSettings()
         await Promise.all(books.map((existingBook) => ensureBookAiSettings(existingBook.id, defaults)))
@@ -199,6 +208,7 @@ export default function Workspace() {
           ?? entities.find((entity) => entity.type === 'scene')
         if (cancelled) return
         setBookList(books)
+        setSeriesList(availableSeries)
         setCurrentBook(book ?? null)
         setOutlineEntities(structural)
         setNotes(entities.filter((entity): entity is NoteEntity => entity.type === 'note'))
@@ -412,6 +422,18 @@ export default function Workspace() {
     const updated = await updateBookMetadata(currentBook.id, metadata)
     setCurrentBook(updated)
     setBookList((books) => books.map((book) => book.id === updated.id ? updated : book))
+  }
+
+  async function addSeries(title: string) {
+    const created = await createSeriesEntity(title)
+    setSeriesList(await listSeries())
+    return created
+  }
+
+  async function renameSeries(id: string, title: string) {
+    const updated = await renameSeriesEntity(id, title)
+    setSeriesList(await listSeries())
+    return updated
   }
 
   async function removeCurrentBookFromSettings() {
@@ -645,7 +667,7 @@ export default function Workspace() {
       requestSnapshot = previousRequest
     } else {
       const systemPrompt = renderStoryPrompt(settings.prompts.story, {
-        book: toBookPromptValues(currentBook),
+        book: toBookPromptValues(currentBook, seriesList),
         sceneText: context.sceneText,
         scenePov: scenePovRef.current || undefined,
       })
@@ -767,7 +789,7 @@ export default function Workspace() {
         apiKey: settings.apiKey.trim(),
         baseUrl: settings.baseUrl,
         model: settings.supportModel,
-        systemPrompt: renderSummaryPrompt(settings.prompts.summarize, summary.sourceType, summary.content, toBookPromptValues(currentBook)),
+        systemPrompt: renderSummaryPrompt(settings.prompts.summarize, summary.sourceType, summary.content, toBookPromptValues(currentBook, seriesList)),
         userMessage: `${summary.content.trim() ? `# Existing summary\n\n${summary.content.trim()}\n\n` : ''}# Source material\n\n${source.content}\n\nReturn only the updated summary as Markdown.`,
       }, (chunk) => {
         if (!controller.signal.aborted) setGenerationPhase('writing')
@@ -887,7 +909,7 @@ export default function Workspace() {
         <div className="library-title"><div><small>Your library</small><h1>Books</h1></div><button type="button" disabled={saveState === 'loading'} onClick={() => { void makeBook() }}><Plus aria-hidden="true" /><span>New book</span></button></div>
         {!aiReady && <div className="setup-warning"><Bot aria-hidden="true" /><div><strong>Text AI is not set up</strong><p>Choose a provider and models before using generation or chat.</p></div><button type="button" onClick={() => openSettings('home')}>Set up AI <ChevronRight aria-hidden="true" /></button></div>}
         <div className="library-grid">{bookList.map((book, index) => <article className="library-book-card" key={book.id}>
-          <button type="button" className="library-book" onClick={() => { void openBook(book.id) }}><i className={`mock-cover ${['tide', 'orchard', 'fires'][index % 3]}`}>{book.title.slice(0,1)}</i><span><small>{formatSeries(book)}</small><strong>{book.title}</strong><em>{formatEdited(book.updatedAt)}</em></span></button>
+          <button type="button" className="library-book" onClick={() => { void openBook(book.id) }}><i className={`mock-cover ${['tide', 'orchard', 'fires'][index % 3]}`}>{book.title.slice(0,1)}</i><span><small>{formatSeries(book, seriesList)}</small><strong>{book.title}</strong><em>{formatEdited(book.updatedAt)}</em></span></button>
           <div className="library-book-actions"><button type="button" onClick={() => { void editBookTitle(book) }} aria-label={`Rename ${book.title}`}><Pencil aria-hidden="true" /></button><button type="button" onClick={() => { void removeBook(book) }} aria-label={`Delete ${book.title}`}><Trash2 aria-hidden="true" /></button></div>
         </article>)}</div>
       </section>
@@ -925,9 +947,9 @@ export default function Workspace() {
       {screen === 'chat' && <section className="chat-composer"><small>Chapter 7 + Codex <ChevronDown aria-hidden="true" /></small><div><button type="button" aria-label="Dictate message"><Mic aria-hidden="true" /></button><textarea defaultValue="Compare Mara’s choice with what she promised Elias."/><button className="send" type="button" aria-label="Send message"><Send aria-hidden="true" fill="currentColor" /></button></div></section>}
 
       {rightOpen && <aside className="book-panel">
-        <header><div><small>{formatSeries(currentBook)}</small><strong>{currentBook?.title ?? 'Untitled Book'}</strong></div><button type="button" onClick={() => setRightOpen(false)} aria-label="Close book workspace"><X aria-hidden="true" /></button></header>
+        <header><div><small>{formatSeries(currentBook, seriesList)}</small><strong>{currentBook?.title ?? 'Untitled Book'}</strong></div><button type="button" onClick={() => setRightOpen(false)} aria-label="Close book workspace"><X aria-hidden="true" /></button></header>
         <nav>{([['book', Settings2], ['outline', BookOpenText], ['notes', NotebookPen], ['codex', WandSparkles], ['chat', MessageCircle]] as const).map(([tab, Icon]) => <button type="button" className={rightTab === tab ? 'active' : ''} onClick={() => { setRightTab(tab); if (tab === 'chat') setChatPanel(screen === 'chat' ? 'settings' : 'list') }} key={tab}><Icon aria-hidden="true" /><span>{tab}</span></button>)}</nav>
-        <div className="panel-content">{rightTab === 'book' ? <BookSettings book={currentBook} onSave={saveBookMetadata} onDelete={removeCurrentBookFromSettings} /> : rightTab === 'outline' ? <Outline book={currentBook} entities={outlineEntities} activeSceneId={activeSceneId} summaryStates={summaryStates} expandedIds={expandedIds} onToggle={(id) => setExpandedIds((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })} onOpenScene={(id) => { void loadScene(id) }} onOpenSummary={(entity) => { void openSummary(entity) }} onCreate={(type, parentId) => { void addOutlineEntity(type, parentId) }} onRename={(entity) => { void editOutlineTitle(entity) }} onMove={(entity, direction) => { void moveOutlineEntity(entity, direction) }} onDelete={(entity) => { void removeOutlineEntity(entity) }} /> : rightTab === 'notes' ? <Notes notes={notes} activeId={activeDocument?.type === 'note' ? activeDocument.id : null} onCreate={() => { void addNote() }} onOpen={(id) => { void loadDocument(id) }} onRename={(entity) => { void renameContentEntity(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> : rightTab === 'codex' ? <Codex entries={codexEntries} activeId={activeDocument?.type === 'codexEntry' ? activeDocument.id : null} onCreate={() => { void addCodexEntry() }} onOpen={(id) => { void loadDocument(id) }} onRename={(entity) => { void renameContentEntity(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> : chatPanel === 'list' ? <ChatList onOpen={openChat} activeChat={screen === 'chat' ? activeChat : ''} onSettings={() => setChatPanel('settings')} /> : <ChatSettings title={activeChat} onBack={() => setChatPanel('list')} />}</div>
+        <div className="panel-content">{rightTab === 'book' ? <BookSettings book={currentBook} books={bookList} series={seriesList} onSave={saveBookMetadata} onCreateSeries={addSeries} onRenameSeries={renameSeries} onDelete={removeCurrentBookFromSettings} /> : rightTab === 'outline' ? <Outline book={currentBook} entities={outlineEntities} activeSceneId={activeSceneId} summaryStates={summaryStates} expandedIds={expandedIds} onToggle={(id) => setExpandedIds((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })} onOpenScene={(id) => { void loadScene(id) }} onOpenSummary={(entity) => { void openSummary(entity) }} onCreate={(type, parentId) => { void addOutlineEntity(type, parentId) }} onRename={(entity) => { void editOutlineTitle(entity) }} onMove={(entity, direction) => { void moveOutlineEntity(entity, direction) }} onDelete={(entity) => { void removeOutlineEntity(entity) }} /> : rightTab === 'notes' ? <Notes notes={notes} activeId={activeDocument?.type === 'note' ? activeDocument.id : null} onCreate={() => { void addNote() }} onOpen={(id) => { void loadDocument(id) }} onRename={(entity) => { void renameContentEntity(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> : rightTab === 'codex' ? <Codex entries={codexEntries} activeId={activeDocument?.type === 'codexEntry' ? activeDocument.id : null} onCreate={() => { void addCodexEntry() }} onOpen={(id) => { void loadDocument(id) }} onRename={(entity) => { void renameContentEntity(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> : chatPanel === 'list' ? <ChatList onOpen={openChat} activeChat={screen === 'chat' ? activeChat : ''} onSettings={() => setChatPanel('settings')} /> : <ChatSettings title={activeChat} onBack={() => setChatPanel('list')} />}</div>
       </aside>}
     </main>
   )
@@ -1086,20 +1108,24 @@ function formatEdited(updatedAt: number) {
   return `Edited ${new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(updatedAt)}`
 }
 
-function formatSeries(book: BookEntity | null) {
-  if (!book || !book.series || book.series === 'Standalone') return 'Standalone'
-  if (!book.seriesOrder || book.series.includes('· Book')) return book.series
-  return `${book.series} · Book ${book.seriesOrder}`
+function seriesForBook(book: BookEntity | null, series: SeriesEntity[]) {
+  if (!book?.seriesId) return undefined
+  return series.find((candidate) => candidate.id === book.seriesId)
+}
+
+function formatSeries(book: BookEntity | null, series: SeriesEntity[]) {
+  if (!book) return 'Standalone'
+  const selected = seriesForBook(book, series)
+  if (!selected) return 'Standalone'
+  return book.seriesOrder ? `${selected.title} · Book ${book.seriesOrder}` : selected.title
 }
 
 function bookMetadata(book: BookEntity): BookMetadata {
-  const rawSeries = typeof book.series === 'string' && book.series ? book.series : 'Standalone'
-  const legacySeries = rawSeries.match(/^(.*?)\s*·\s*Book\s+(.+)$/i)
   const prototype = book.id === PROTOTYPE_BOOK_ID
   return {
     title: book.title,
-    series: legacySeries?.[1]?.trim() || rawSeries,
-    seriesOrder: typeof book.seriesOrder === 'string' && book.seriesOrder ? book.seriesOrder : legacySeries?.[2]?.trim() || '',
+    seriesId: typeof book.seriesId === 'string' ? book.seriesId : '',
+    seriesOrder: typeof book.seriesOrder === 'string' ? book.seriesOrder : '',
     overview: typeof book.overview === 'string' && book.overview ? book.overview : prototype ? 'A cartographer discovers that the drowned parts of her city still exist behind doors that remember them.' : '',
     genre: typeof book.genre === 'string' && book.genre ? book.genre : prototype ? 'Fantasy' : '',
     writingStyle: typeof book.writingStyle === 'string' && book.writingStyle ? book.writingStyle : prototype ? 'Lyrical tension' : '',
@@ -1109,13 +1135,13 @@ function bookMetadata(book: BookEntity): BookMetadata {
   }
 }
 
-function toBookPromptValues(book: BookEntity): BookPromptValues {
+function toBookPromptValues(book: BookEntity, series: SeriesEntity[]): BookPromptValues {
   const metadata = bookMetadata(book)
-  const series = metadata.series === 'Standalone' ? '' : metadata.series
+  const seriesTitle = series.find((candidate) => candidate.id === metadata.seriesId)?.title ?? ''
   return {
     title: metadata.title,
-    series,
-    seriesOrder: series ? metadata.seriesOrder : '',
+    series: seriesTitle,
+    seriesOrder: seriesTitle ? metadata.seriesOrder : '',
     overview: metadata.overview,
     genre: metadata.genre,
     style: metadata.writingStyle,
@@ -1125,18 +1151,28 @@ function toBookPromptValues(book: BookEntity): BookPromptValues {
   }
 }
 
-function BookSettings({ book, onSave, onDelete }: {
+function BookSettings({ book, books, series, onSave, onCreateSeries, onRenameSeries, onDelete }: {
   book: BookEntity | null
+  books: BookEntity[]
+  series: SeriesEntity[]
   onSave: (metadata: BookMetadata) => Promise<void>
+  onCreateSeries: (title: string) => Promise<SeriesEntity>
+  onRenameSeries: (id: string, title: string) => Promise<SeriesEntity>
   onDelete: () => Promise<void>
 }) {
   const [draft, setDraft] = useState<BookMetadata | null>(book ? bookMetadata(book) : null)
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved')
   const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [seriesPickerMode, setSeriesPickerMode] = useState<'choose' | 'rename' | null>(null)
+  const [seriesQuery, setSeriesQuery] = useState('')
+  const [seriesError, setSeriesError] = useState('')
+  const [seriesWorking, setSeriesWorking] = useState(false)
   const savedRef = useRef(book ? JSON.stringify(bookMetadata(book)) : '')
   const latestDraftRef = useRef(draft)
   const saveHandlerRef = useRef(onSave)
   const saveSequenceRef = useRef(0)
+  const seriesPickerRef = useRef<HTMLElement | null>(null)
+  const seriesTriggerRef = useRef<HTMLButtonElement | null>(null)
   latestDraftRef.current = draft
   saveHandlerRef.current = onSave
 
@@ -1146,7 +1182,27 @@ function BookSettings({ book, onSave, onDelete }: {
     savedRef.current = next ? JSON.stringify(next) : ''
     setSaveStatus('saved')
     setDeleteConfirm(false)
+    setSeriesPickerMode(null)
+    setSeriesQuery('')
+    setSeriesError('')
   }, [book?.id])
+
+  useEffect(() => {
+    if (!seriesPickerMode) return
+    const closeOutside = (event: PointerEvent) => {
+      const target = event.target as Node
+      if (!seriesPickerRef.current?.contains(target) && !seriesTriggerRef.current?.contains(target)) setSeriesPickerMode(null)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSeriesPickerMode(null)
+    }
+    document.addEventListener('pointerdown', closeOutside)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [seriesPickerMode])
 
   useEffect(() => {
     if (!draft || JSON.stringify(draft) === savedRef.current) return
@@ -1179,14 +1235,72 @@ function BookSettings({ book, onSave, onDelete }: {
   if (!book || !draft) return <section className="outline-empty"><Settings2 aria-hidden="true" /><p>Open a book to edit its details.</p></section>
 
   const update = <K extends keyof BookMetadata,>(key: K, value: BookMetadata[K]) => setDraft((current) => current ? { ...current, [key]: value } : current)
+  const selectedSeries = series.find((candidate) => candidate.id === draft.seriesId)
+  const normalizedQuery = seriesQuery.trim().replace(/\s+/g, ' ').toLocaleLowerCase()
+  const matchingSeries = series.filter((candidate) => candidate.title.toLocaleLowerCase().includes(normalizedQuery))
+  const exactMatch = series.some((candidate) => candidate.title.trim().toLocaleLowerCase() === normalizedQuery)
+  const seriesUsage = (seriesId: string) => books.filter((candidate) => candidate.seriesId === seriesId).length
+
+  const chooseSeries = (seriesId: string) => {
+    setDraft((current) => current ? { ...current, seriesId, seriesOrder: current.seriesId === seriesId ? current.seriesOrder : '' } : current)
+    setSeriesPickerMode(null)
+    setSeriesQuery('')
+    setSeriesError('')
+  }
+
+  const createAndChooseSeries = async () => {
+    if (!seriesQuery.trim() || seriesWorking) return
+    setSeriesWorking(true)
+    setSeriesError('')
+    try {
+      const created = await onCreateSeries(seriesQuery)
+      chooseSeries(created.id)
+    } catch (error) {
+      setSeriesError(error instanceof Error ? error.message : 'Could not create the series.')
+    } finally {
+      setSeriesWorking(false)
+    }
+  }
+
+  const saveSeriesRename = async () => {
+    if (!selectedSeries || !seriesQuery.trim() || seriesWorking) return
+    setSeriesWorking(true)
+    setSeriesError('')
+    try {
+      await onRenameSeries(selectedSeries.id, seriesQuery)
+      setSeriesPickerMode(null)
+      setSeriesQuery('')
+    } catch (error) {
+      setSeriesError(error instanceof Error ? error.message : 'Could not rename the series.')
+    } finally {
+      setSeriesWorking(false)
+    }
+  }
 
   return <section className="book-settings">
     <div className="panel-title book-settings-title"><div><small>Current book</small><h2>Identity & voice</h2></div><span className={`book-save-status ${saveStatus}`} aria-live="polite"><i />{saveStatus === 'saving' ? 'Saving' : saveStatus === 'error' ? 'Save failed' : 'Saved'}</span></div>
     <section className="book-settings-group" aria-labelledby="book-identity-title">
       <div className="book-settings-group-title"><span>01</span><h3 id="book-identity-title">Identity</h3></div>
       <label className="book-field"><span>Book title</span><input value={draft.title} onChange={(event) => update('title', event.target.value)} onBlur={() => { if (!draft.title.trim()) update('title', book.title) }} placeholder="Untitled Book" /></label>
-      <label className="book-field"><span>Series</span><input value={draft.series} onChange={(event) => update('series', event.target.value)} placeholder="Standalone or series title" /></label>
-      {draft.series !== 'Standalone' && <label className="book-field compact"><span>Book number in series</span><input inputMode="numeric" value={draft.seriesOrder} onChange={(event) => update('seriesOrder', event.target.value)} placeholder="1" /></label>}
+      <div className="book-field series-control">
+        <span>Series</span>
+        <button ref={seriesTriggerRef} className="series-trigger" type="button" aria-haspopup="listbox" aria-expanded={seriesPickerMode !== null} onClick={() => { setSeriesQuery(''); setSeriesError(''); setSeriesPickerMode('choose') }}><span><strong>{selectedSeries?.title ?? 'Standalone'}</strong><small>{selectedSeries ? `${seriesUsage(selectedSeries.id)} book${seriesUsage(selectedSeries.id) === 1 ? '' : 's'}` : 'Not part of a series'}</small></span><ChevronDown aria-hidden="true" /></button>
+        {selectedSeries && <button className="series-rename-trigger" type="button" onClick={() => { setSeriesQuery(selectedSeries.title); setSeriesError(''); setSeriesPickerMode('rename') }}><Pencil aria-hidden="true" /> Rename series <small>Changes all {seriesUsage(selectedSeries.id)} linked book{seriesUsage(selectedSeries.id) === 1 ? '' : 's'}</small></button>}
+        {seriesPickerMode && <section ref={seriesPickerRef} className={`series-picker ${seriesPickerMode}`} aria-label={seriesPickerMode === 'choose' ? 'Choose series' : 'Rename series'}>
+          <header><button type="button" onClick={() => seriesPickerMode === 'rename' ? setSeriesPickerMode('choose') : setSeriesPickerMode(null)} aria-label={seriesPickerMode === 'rename' ? 'Back to series list' : 'Back to book settings'}><ArrowLeft aria-hidden="true" /></button><div><small>Book identity</small><h3>{seriesPickerMode === 'choose' ? 'Choose series' : 'Rename series'}</h3></div></header>
+          {seriesPickerMode === 'choose' ? <>
+            <label className="series-search"><Search aria-hidden="true" /><input autoFocus type="search" value={seriesQuery} onChange={(event) => { setSeriesQuery(event.target.value); setSeriesError('') }} placeholder="Search or create a series…" aria-label="Search or create a series" /></label>
+            <div className="series-options" role="listbox" aria-label="Available series">
+              <button className={!draft.seriesId ? 'selected' : ''} type="button" role="option" aria-selected={!draft.seriesId} onClick={() => chooseSeries('')}><BookOpenText aria-hidden="true" /><span><strong>Standalone</strong><small>Not part of a series</small></span>{!draft.seriesId && <Check aria-hidden="true" />}</button>
+              {matchingSeries.map((candidate) => { const count = seriesUsage(candidate.id); return <button className={draft.seriesId === candidate.id ? 'selected' : ''} type="button" role="option" aria-selected={draft.seriesId === candidate.id} onClick={() => chooseSeries(candidate.id)} key={candidate.id}><BookOpenText aria-hidden="true" /><span><strong>{candidate.title}</strong><small>{count} book{count === 1 ? '' : 's'}</small></span>{draft.seriesId === candidate.id && <Check aria-hidden="true" />}</button> })}
+              {!matchingSeries.length && !seriesQuery.trim() && <p>No series yet. Type a name to create one.</p>}
+            </div>
+            {seriesQuery.trim() && !exactMatch && <button className="series-create" type="button" onClick={() => { void createAndChooseSeries() }} disabled={seriesWorking}><Plus aria-hidden="true" /><span><small>Create new series</small><strong>“{seriesQuery.trim()}”</strong></span></button>}
+          </> : selectedSeries && <form className="series-rename-form" onSubmit={(event) => { event.preventDefault(); void saveSeriesRename() }}><label><span>Series name</span><input autoFocus value={seriesQuery} onChange={(event) => { setSeriesQuery(event.target.value); setSeriesError('') }} /></label><p>This changes the name for all <strong>{seriesUsage(selectedSeries.id)}</strong> linked book{seriesUsage(selectedSeries.id) === 1 ? '' : 's'}.</p><div><button type="button" onClick={() => setSeriesPickerMode('choose')}>Cancel</button><button className="primary" type="submit" disabled={seriesWorking || !seriesQuery.trim() || seriesQuery.trim() === selectedSeries.title}>{seriesWorking ? 'Renaming…' : 'Rename'}</button></div></form>}
+          {seriesError && <p className="series-error" role="alert">{seriesError}</p>}
+        </section>}
+      </div>
+      {draft.seriesId && <label className="book-field compact"><span>Book index in series</span><input value={draft.seriesOrder} onChange={(event) => update('seriesOrder', event.target.value)} placeholder="1" /></label>}
     </section>
     <section className="book-settings-group" aria-labelledby="story-profile-title">
       <div className="book-settings-group-title"><span>02</span><h3 id="story-profile-title">Story profile</h3></div>
