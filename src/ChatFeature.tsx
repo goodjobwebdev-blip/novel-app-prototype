@@ -489,10 +489,7 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
 
     <section className="chat-composer functional-chat-composer">
       <div className="chat-config-row">
-        <label className="chat-model-selector"><span>Model</span><select value={chat.model} onChange={(event) => { void changeModel(event.target.value) }} aria-label="Chat model">
-          {chat.model && !models.some((model) => model.id === chat.model) && <option value={chat.model}>{chat.model}</option>}
-          {sortedModels.map((model) => <option key={model.id} value={model.id}>{model.name && model.name !== model.id ? `${model.name} — ${model.id}` : model.id}</option>)}
-        </select><ChevronDown aria-hidden="true" /></label>
+        <ChatModelPicker value={chat.model} models={sortedModels} onChange={(modelId) => { void changeModel(modelId) }} />
         <button className="chat-system-prompt-button" type="button" onClick={() => { setPromptDraft(chat.systemPrompt); setPromptOpen(true) }}><Bot aria-hidden="true" /><span>System prompt</span></button>
         {modelStatus && <small className="chat-model-status">{modelStatus}</small>}
       </div>
@@ -515,6 +512,57 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
       </section>
     </div>}
   </>
+}
+
+function ChatModelPicker({ value, models, onChange }: { value: string; models: ChatModel[]; onChange: (modelId: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const normalized = query.trim().toLowerCase()
+  const visible = models.filter((model) => !normalized || `${model.id} ${model.name ?? ''}`.toLowerCase().includes(normalized)).slice(0, 80)
+  const selected = models.find((model) => model.id === value)
+  const selectedLabel = selected?.name && selected.name !== selected.id ? selected.name : selected?.id || value || 'Choose model'
+
+  useEffect(() => {
+    if (!open) return
+    const close = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false)
+        setQuery('')
+      }
+    }
+    window.addEventListener('pointerdown', close)
+    return () => window.removeEventListener('pointerdown', close)
+  }, [open])
+
+  function choose(modelId: string) {
+    onChange(modelId)
+    setOpen(false)
+    setQuery('')
+  }
+
+  return <div className={`chat-model-picker ${open ? 'open' : ''}`} ref={rootRef}>
+    <button className="chat-model-selector" type="button" aria-haspopup="listbox" aria-expanded={open} onClick={() => {
+      setOpen((current) => !current)
+      setQuery('')
+    }}>
+      <span>Model</span><strong title={value}>{selectedLabel}</strong><ChevronDown aria-hidden="true" />
+    </button>
+    {open && <section className="chat-model-menu" aria-label="Choose chat model">
+      <label className="chat-model-search"><Search aria-hidden="true" /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => {
+        if (event.key === 'Escape') { setOpen(false); setQuery(''); return }
+        if (event.key === 'Enter' && visible[0]) { event.preventDefault(); choose(visible[0].id) }
+      }} placeholder="Search models by name or ID" aria-label="Search chat models" /></label>
+      <div className="chat-model-options" role="listbox" aria-label="Available chat models">
+        {value && !models.some((model) => model.id === value) && !normalized && <button type="button" className="selected" role="option" aria-selected="true" onClick={() => choose(value)}><span><strong>{value}</strong><small>Current model · not in loaded list</small></span><b>Current</b></button>}
+        {visible.map((model) => {
+          const isSelected = model.id === value
+          return <button type="button" className={isSelected ? 'selected' : ''} role="option" aria-selected={isSelected} onClick={() => choose(model.id)} key={model.id}><span><strong>{model.name || model.id}</strong>{model.name && model.name !== model.id && <small>{model.id}</small>}</span>{isSelected && <b>Current</b>}</button>
+        })}
+        {!visible.length && <p>No models match “{query.trim()}”.</p>}
+      </div>
+    </section>}
+  </div>
 }
 
 function DocumentEditCard({ proposal, onApply, onReject }: { proposal: ChatDocumentEditProposal; onApply: () => void; onReject: () => void }) {
