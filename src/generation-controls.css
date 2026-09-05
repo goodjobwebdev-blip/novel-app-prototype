@@ -39,6 +39,15 @@
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.24);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
+  cursor: pointer;
+  appearance: none;
+}
+
+.generation-activity-strip:hover,
+.generation-activity-strip:focus-visible {
+  border-color: rgba(198, 168, 107, 0.42);
+  background: rgba(34, 30, 26, 0.94);
+  color: var(--ink);
 }
 
 .generation-activity-strip > i {
@@ -78,12 +87,156 @@
   box-shadow: none;
 }
 
+.arc-drawer > div:first-child button.generation-activity-strip.drawer {
+  margin-left: 0;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  background: rgba(198, 168, 107, 0.07);
+  font-size: 10px;
+}
+
 .arc-drawer > div:first-child .generation-activity-strip span {
   font: inherit;
 }
 
 .generation-activity-strip.drawer + button {
   margin-left: auto;
+}
+
+.generation-details-backdrop {
+  position: fixed;
+  z-index: 220;
+  inset: 0;
+  padding: max(18px, env(safe-area-inset-top)) 14px max(18px, env(safe-area-inset-bottom));
+  background: rgba(8, 9, 8, 0.76);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  display: grid;
+  place-items: center;
+}
+
+.generation-details-dialog {
+  width: min(100%, 760px);
+  max-height: calc(100svh - 36px);
+  padding: 16px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--deep);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
+}
+
+.generation-details-dialog > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.generation-details-dialog > header small {
+  color: var(--accent);
+  font: 9px ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.generation-details-dialog > header h2 {
+  margin: 4px 0 0;
+  font: 500 22px var(--serif);
+}
+
+.generation-details-dialog > header button {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.generation-details-dialog > header svg {
+  width: 18px;
+  height: 18px;
+}
+
+.generation-details-content {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(230px, 0.8fr);
+  gap: 12px;
+}
+
+.generation-details-content > section {
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.generation-details-content h3 {
+  margin: 0 0 10px;
+  color: var(--accent);
+  font: 700 9px ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.generation-thoughts pre,
+.generation-thoughts p {
+  margin: 0;
+  color: var(--soft);
+  font: 12px/1.6 ui-sans-serif, system-ui, sans-serif;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.generation-thoughts pre {
+  max-height: min(57svh, 520px);
+  overflow: auto;
+}
+
+.generation-thoughts p {
+  color: var(--faint);
+  font-style: italic;
+}
+
+.generation-metadata dl {
+  margin: 0;
+}
+
+.generation-metadata dl > div {
+  padding: 8px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.generation-metadata dl > div:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.generation-metadata dt {
+  margin-bottom: 3px;
+  color: var(--faint);
+  font: 9px ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.generation-metadata dd {
+  margin: 0;
+  color: var(--ink);
+  font: 11px/1.45 ui-sans-serif, system-ui, sans-serif;
+  overflow-wrap: anywhere;
 }
 
 @keyframes generation-pulse {
@@ -443,5 +596,17 @@
   .generation-activity-strip.floating {
     min-height: 32px;
     padding: 0 9px;
+  }
+
+  .generation-details-dialog {
+    padding: 13px;
+  }
+
+  .generation-details-content {
+    grid-template-columns: 1fr;
+  }
+
+  .generation-thoughts pre {
+    max-height: 42svh;
   }
 }

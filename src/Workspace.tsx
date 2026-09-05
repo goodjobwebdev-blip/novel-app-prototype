@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   ArrowDown,
   ArrowLeft,
@@ -38,7 +39,7 @@ import { generationWordDelayMs, loadAiSettings, type AiSettings } from './ai-set
 import { createBufferedWordRenderer } from './buffered-word-renderer'
 import ExpandableTextInput from './ExpandableTextInput'
 import MarkdownEditor, { type MarkdownEditorHandle } from './MarkdownEditor'
-import { fetchNanoGPTModelContextLength, renderLorePrompt, renderStoryPrompt, streamNanoGPTCompletion } from './nanogpt'
+import { fetchNanoGPTModelContextLength, renderLorePrompt, renderStoryPrompt, streamNanoGPTCompletion, type NanoGPTStreamMetadata } from './nanogpt'
 import type { BookPromptValues } from './prompt-template'
 import { buildContextValues, generationContextDiagnostics } from './context-service'
 import {
@@ -100,6 +101,21 @@ type GenerationRequestSnapshot = {
   systemPrompt: string
   contextMessage: string
   userMessage: string
+  estimatedRequestTokens?: number
+  modelContextTokens?: number
+}
+type GenerationDetails = NanoGPTStreamMetadata & {
+  task: 'Story' | 'Codex' | 'Summary'
+  action: 'Generate' | 'Regenerate' | 'Summarize'
+  targetTitle: string
+  requestedModel: string
+  provider: 'NanoGPT'
+  startedAt: number
+  finishedAt?: number
+  status: GenerationPhase | 'complete' | 'cancelled' | 'error'
+  thoughts: string
+  estimatedRequestTokens?: number
+  modelContextTokens?: number
 }
 
 const chats = [
@@ -139,6 +155,8 @@ export default function Workspace() {
   const [generationActive, setGenerationActive] = useState(false)
   const [generationPhase, setGenerationPhase] = useState<GenerationPhase | null>(null)
   const [generationElapsedSeconds, setGenerationElapsedSeconds] = useState(0)
+  const [generationDetails, setGenerationDetails] = useState<GenerationDetails | null>(null)
+  const [generationDetailsOpen, setGenerationDetailsOpen] = useState(false)
   const [toast, setToast] = useState<ToastMessage | null>(null)
   const [bookList, setBookList] = useState<BookEntity[]>([])
   const [seriesList, setSeriesList] = useState<SeriesEntity[]>([])
@@ -616,17 +634,38 @@ export default function Workspace() {
     toastTimerRef.current = setTimeout(() => setToast(null), 5200)
   }
 
-  function startGenerationActivity() {
-    generationStartedAtRef.current = Date.now()
+  function startGenerationActivity(details: Omit<GenerationDetails, 'startedAt' | 'status' | 'thoughts'>) {
+    const startedAt = Date.now()
+    generationStartedAtRef.current = startedAt
     setGenerationElapsedSeconds(0)
     setGenerationPhase('sending')
+    setGenerationDetails({ ...details, startedAt, status: 'sending', thoughts: '' })
+    setGenerationDetailsOpen(false)
     setGenerationActive(true)
   }
 
-  function finishGenerationActivity() {
+  function setGenerationActivityPhase(phase: GenerationPhase) {
+    setGenerationPhase(phase)
+    setGenerationDetails((current) => current ? { ...current, status: phase } : current)
+  }
+
+  function appendGenerationThoughts(text: string) {
+    setGenerationDetails((current) => current ? { ...current, thoughts: current.thoughts + text } : current)
+  }
+
+  function updateGenerationMetadata(metadata: NanoGPTStreamMetadata) {
+    setGenerationDetails((current) => current ? {
+      ...current,
+      ...Object.fromEntries(Object.entries(metadata).filter(([, value]) => value !== undefined)),
+    } : current)
+  }
+
+  function finishGenerationActivity(status: 'complete' | 'cancelled' | 'error') {
+    const finishedAt = Date.now()
     setGenerationActive(false)
     setGenerationPhase(null)
-    setGenerationElapsedSeconds(0)
+    setGenerationElapsedSeconds(Math.max(0, Math.floor((finishedAt - generationStartedAtRef.current) / 1000)))
+    setGenerationDetails((current) => current ? { ...current, status, finishedAt } : current)
   }
 
   async function runGeneration(mode: 'generate' | 'regenerate') {
@@ -724,6 +763,8 @@ export default function Workspace() {
           systemPrompt,
           contextMessage,
           userMessage,
+          estimatedRequestTokens: diagnostics.requestTokens,
+          modelContextTokens: diagnostics.modelContextTokens,
         }
       } catch (error) {
         editor.finishGeneration('error')
@@ -734,7 +775,15 @@ export default function Workspace() {
 
     const controller = new AbortController()
     generationAbortRef.current = controller
-    startGenerationActivity()
+    startGenerationActivity({
+      task: isCodex ? 'Codex' : 'Story',
+      action: mode === 'regenerate' ? 'Regenerate' : 'Generate',
+      targetTitle: activeDocument.title,
+      requestedModel: requestSnapshot.model,
+      provider: 'NanoGPT',
+      estimatedRequestTokens: requestSnapshot.estimatedRequestTokens,
+      modelContextTokens: requestSnapshot.modelContextTokens,
+    })
     let status: 'complete' | 'cancelled' | 'error' = 'complete'
     const renderer = createBufferedWordRenderer({
       delayMs: generationWordDelayMs(settings),
@@ -754,12 +803,14 @@ export default function Workspace() {
         contextMessage: requestSnapshot.contextMessage,
         userMessage: requestSnapshot.userMessage,
       }, (chunk) => {
-        if (!controller.signal.aborted) setGenerationPhase('writing')
+        if (!controller.signal.aborted) setGenerationActivityPhase('writing')
         renderer.push(chunk)
       }, controller.signal, {
         onResponse: () => {
-          if (!controller.signal.aborted) setGenerationPhase('thinking')
+          if (!controller.signal.aborted) setGenerationActivityPhase('thinking')
         },
+        onThoughts: appendGenerationThoughts,
+        onMetadata: updateGenerationMetadata,
       })
       await renderer.finish()
       if (controller.signal.aborted) status = 'cancelled'
@@ -778,7 +829,7 @@ export default function Workspace() {
     } finally {
       const result = editor.finishGeneration(status)
       generationAbortRef.current = null
-      finishGenerationActivity()
+      finishGenerationActivity(status)
       if (result?.status === 'complete') {
         latestGenerationRequestRef.current = requestSnapshot
         if (isCodex) changedSinceSnapshotRef.current = true
@@ -813,8 +864,15 @@ export default function Workspace() {
     const source = await buildSummarySource(summary.sourceEntityId)
     const controller = new AbortController()
     generationAbortRef.current = controller
-    startGenerationActivity()
+    startGenerationActivity({
+      task: 'Summary',
+      action: 'Summarize',
+      targetTitle: source.source.title,
+      requestedModel: settings.supportModel,
+      provider: 'NanoGPT',
+    })
     let generated = ''
+    let status: 'complete' | 'cancelled' | 'error' = 'complete'
     try {
       await streamNanoGPTCompletion({
         apiKey: settings.apiKey.trim(),
@@ -823,12 +881,14 @@ export default function Workspace() {
         systemPrompt: renderSummaryPrompt(settings.prompts.summarize, summary.sourceType, summary.content, toBookPromptValues(currentBook, seriesList)),
         userMessage: `${summary.content.trim() ? `# Existing summary\n\n${summary.content.trim()}\n\n` : ''}# Source material\n\n${source.content}\n\nReturn only the updated summary as Markdown.`,
       }, (chunk) => {
-        if (!controller.signal.aborted) setGenerationPhase('writing')
+        if (!controller.signal.aborted) setGenerationActivityPhase('writing')
         generated += chunk
       }, controller.signal, {
         onResponse: () => {
-          if (!controller.signal.aborted) setGenerationPhase('thinking')
+          if (!controller.signal.aborted) setGenerationActivityPhase('thinking')
         },
+        onThoughts: appendGenerationThoughts,
+        onMetadata: updateGenerationMetadata,
       })
       await createSnapshot(summary.id, 'generation', summary.content)
       const saved = await saveSummaryContent(summary.id, generated, source.sourceRevision)
@@ -841,12 +901,13 @@ export default function Workspace() {
       setSummaryStates(await getSummaryStateMap(currentBook.id))
       setSaveState('saved')
     } catch (error) {
+      status = controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError') ? 'cancelled' : 'error'
       if (!controller.signal.aborted && !(error instanceof DOMException && error.name === 'AbortError')) {
         showToast(error instanceof Error ? error.message : 'Summary generation stopped unexpectedly.')
       }
     } finally {
       generationAbortRef.current = null
-      finishGenerationActivity()
+      finishGenerationActivity(status)
     }
   }
 
@@ -862,7 +923,7 @@ export default function Workspace() {
 
   function stopGeneration() {
     if (!generationAbortRef.current) return
-    setGenerationPhase('stopping')
+    setGenerationActivityPhase('stopping')
     generationAbortRef.current.abort()
   }
 
@@ -946,6 +1007,8 @@ export default function Workspace() {
 
       {toast && <div className="app-toast" role="alert" key={toast.id}><span>{toast.message}</span><button type="button" onClick={() => setToast(null)} aria-label="Dismiss notification"><X aria-hidden="true" /></button></div>}
 
+      {generationDetailsOpen && generationDetails && <GenerationDetailsDialog details={generationDetails} elapsedSeconds={generationElapsedSeconds} onClose={() => setGenerationDetailsOpen(false)} />}
+
       {screen === 'editor' ? <article className="story-editor">
         <small className="page-number">{pageLabel}</small><p className="document-path">{documentPath || 'No document selected'}</p>
         {(activeDocument?.type === 'note' || activeDocument?.type === 'codexEntry') && <div className="document-titlebar"><div><small>{activeDocument.type === 'note' ? 'Note' : activeDocument.category}</small><h1>{activeDocument.title}</h1></div><button type="button" onClick={() => { void renameContentEntity(activeDocument) }}><Pencil aria-hidden="true" /> Rename</button></div>}
@@ -953,9 +1016,9 @@ export default function Workspace() {
         {activeDocument ? <MarkdownEditor key={`${activeDocument.id}-${editorRevision}`} ref={editorRef} value={storyMarkdown} onChange={handleStoryChange} ariaLabel={`${activeDocument.title} Markdown editor`} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No document selected</strong><p>Choose a Scene, Note, Codex entry, or Summary from the book workspace.</p><button type="button" onClick={() => setRightOpen(true)}>Open Book Workspace</button></div>}
       </article> : currentBook ? <ChatView bookId={currentBook.id} chatId={activeChatId} bookPromptValues={toBookPromptValues(currentBook, seriesList)} currentSceneId={activeSceneId} onChatChange={openChat} onToast={showToast} /> : <section className="conversation chat-empty"><MessageCircle aria-hidden="true" /><p>Open a book before starting a chat.</p></section>}
 
-      {screen === 'editor' && (activeDocument?.type === 'scene' || activeDocument?.type === 'codexEntry') && !arcOpen && <div className="editor-bottom"><button type="button" onClick={() => setArcOpen(true)} aria-label="Open generation input"><PanelBottomOpen aria-hidden="true" /></button><GenerateControl isGenerating={generationActive} phase={generationPhase} elapsedSeconds={generationElapsedSeconds} onGenerate={generate} onStop={stopGeneration} onMicro={insertEditorSpeech} onMicro2={insertPromptSpeech} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} /></div>}
+      {screen === 'editor' && (activeDocument?.type === 'scene' || activeDocument?.type === 'codexEntry') && !arcOpen && <div className="editor-bottom"><button type="button" onClick={() => setArcOpen(true)} aria-label="Open generation input"><PanelBottomOpen aria-hidden="true" /></button><GenerateControl isGenerating={generationActive} phase={generationPhase} elapsedSeconds={generationElapsedSeconds} onOpenDetails={() => setGenerationDetailsOpen(true)} onGenerate={generate} onStop={stopGeneration} onMicro={insertEditorSpeech} onMicro2={insertPromptSpeech} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} /></div>}
       {screen === 'editor' && activeDocument?.type === 'summary' && <div className="summary-generate-wrap"><button className="summary-generate" type="button" onClick={generationActive ? stopGeneration : generate}>{generationActive ? <Square aria-hidden="true" fill="currentColor" /> : <RefreshCw aria-hidden="true" />} {generationActive ? 'Stop' : openSummaryState === 'missing' ? 'Summarize' : 'Re-summarize'}</button></div>}
-      {screen === 'editor' && (activeDocument?.type === 'scene' || activeDocument?.type === 'codexEntry') && arcOpen && <section className="arc-drawer"><div><small>{activeDocument.type === 'codexEntry' ? 'LORE' : 'ARC'}</small>{generationActive && generationPhase ? <GenerationActivityStrip phase={generationPhase} elapsedSeconds={generationElapsedSeconds} placement="drawer" /> : <span>{activeDocument.type === 'codexEntry' ? 'Create or revise this entry' : 'Guide the next passage'}</span>}<button type="button" onClick={() => setArcOpen(false)} aria-label="Close generation input"><X aria-hidden="true" /></button></div><div className="arc-compose"><div className="arc-prompt-field"><ExpandableTextInput ref={promptRef} value={activeDocument.type === 'codexEntry' ? lorePrompt : arcPrompt} onChange={activeDocument.type === 'codexEntry' ? setLorePrompt : setArcPrompt} aria-label="generation prompt" dialogTitle="Edit generation prompt" /><span aria-live="polite">{(activeDocument.type === 'codexEntry' ? lorePrompt : arcPrompt).length} characters</span></div><button className={`play ${generationActive ? 'generating' : ''}`} type="button" onClick={generationActive ? stopGeneration : generate} aria-label={generationActive ? 'Stop generation' : 'Generate'}>{generationActive ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" fill="currentColor" />}</button></div></section>}
+      {screen === 'editor' && (activeDocument?.type === 'scene' || activeDocument?.type === 'codexEntry') && arcOpen && <section className="arc-drawer"><div><small>{activeDocument.type === 'codexEntry' ? 'LORE' : 'ARC'}</small>{generationActive && generationPhase ? <GenerationActivityStrip phase={generationPhase} elapsedSeconds={generationElapsedSeconds} placement="drawer" onOpenDetails={() => setGenerationDetailsOpen(true)} /> : <span>{activeDocument.type === 'codexEntry' ? 'Create or revise this entry' : 'Guide the next passage'}</span>}<button type="button" onClick={() => setArcOpen(false)} aria-label="Close generation input"><X aria-hidden="true" /></button></div><div className="arc-compose"><div className="arc-prompt-field"><ExpandableTextInput ref={promptRef} value={activeDocument.type === 'codexEntry' ? lorePrompt : arcPrompt} onChange={activeDocument.type === 'codexEntry' ? setLorePrompt : setArcPrompt} aria-label="generation prompt" dialogTitle="Edit generation prompt" /><span aria-live="polite">{(activeDocument.type === 'codexEntry' ? lorePrompt : arcPrompt).length} characters</span></div><button className={`play ${generationActive ? 'generating' : ''}`} type="button" onClick={generationActive ? stopGeneration : generate} aria-label={generationActive ? 'Stop generation' : 'Generate'}>{generationActive ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" fill="currentColor" />}</button></div></section>}
 
       {rightOpen && <aside className="book-panel">
         <header><div><small>{formatSeries(currentBook, seriesList)}</small><strong>{currentBook?.title ?? 'Untitled Book'}</strong></div><button type="button" onClick={() => setRightOpen(false)} aria-label="Close book workspace"><X aria-hidden="true" /></button></header>
@@ -979,24 +1042,26 @@ function generationPhaseLabel(phase: GenerationPhase) {
   return 'Writing'
 }
 
-function GenerationActivityStrip({ phase, elapsedSeconds, placement }: {
+function GenerationActivityStrip({ phase, elapsedSeconds, placement, onOpenDetails }: {
   phase: GenerationPhase
   elapsedSeconds: number
   placement: 'drawer' | 'floating'
+  onOpenDetails: () => void
 }) {
   const label = generationPhaseLabel(phase)
-  return <span className={`generation-activity-strip ${placement} ${phase}`} aria-label={`${label}, ${formatGenerationTime(elapsedSeconds)} elapsed`}>
+  return <button className={`generation-activity-strip ${placement} ${phase}`} type="button" onClick={onOpenDetails} aria-label={`${label}, ${formatGenerationTime(elapsedSeconds)} elapsed. Open generation details.`} title="Open generation details">
     <i aria-hidden="true" />
     <span className="generation-phase" role="status" aria-live="polite">{label}</span>
     <span className="generation-separator" aria-hidden="true">·</span>
     <span className="generation-time" aria-hidden="true">{formatGenerationTime(elapsedSeconds)}</span>
-  </span>
+  </button>
 }
 
-function GenerateControl({ isGenerating, phase, elapsedSeconds, onGenerate, onStop, onMicro, onMicro2, onUndo, onRedo, onRegenerate }: {
+function GenerateControl({ isGenerating, phase, elapsedSeconds, onOpenDetails, onGenerate, onStop, onMicro, onMicro2, onUndo, onRedo, onRegenerate }: {
   isGenerating: boolean
   phase: GenerationPhase | null
   elapsedSeconds: number
+  onOpenDetails: () => void
   onGenerate: () => void
   onStop: () => void
   onMicro: () => void
@@ -1015,7 +1080,7 @@ function GenerateControl({ isGenerating, phase, elapsedSeconds, onGenerate, onSt
   }
 
   if (isGenerating && phase) return <div className="floating-generation-status">
-    <GenerationActivityStrip phase={phase} elapsedSeconds={elapsedSeconds} placement="floating" />
+    <GenerationActivityStrip phase={phase} elapsedSeconds={elapsedSeconds} placement="floating" onOpenDetails={onOpenDetails} />
     <button className="play generate-trigger generating" type="button" onClick={onStop} aria-label="Stop generation" title="Stop generation"><Square aria-hidden="true" fill="currentColor" /></button>
   </div>
 
@@ -1052,6 +1117,74 @@ function GenerateControl({ isGenerating, phase, elapsedSeconds, onGenerate, onSt
       onGenerate()
     }}
   ><Play aria-hidden="true" fill="currentColor" /></button>
+}
+
+function GenerationDetailsDialog({ details, elapsedSeconds, onClose }: {
+  details: GenerationDetails
+  elapsedSeconds: number
+  onClose: () => void
+}) {
+  const titleId = 'generation-details-title'
+  const visibleElapsed = details.finishedAt
+    ? Math.max(0, Math.floor((details.finishedAt - details.startedAt) / 1000))
+    : elapsedSeconds
+  const status = details.status === 'complete'
+    ? 'Complete'
+    : details.status === 'cancelled'
+      ? 'Cancelled'
+      : details.status === 'error'
+        ? 'Failed'
+        : generationPhaseLabel(details.status)
+  const tokens = details.totalTokens !== undefined
+    ? details.totalTokens.toLocaleString()
+    : details.promptTokens !== undefined || details.completionTokens !== undefined
+      ? `${(details.promptTokens ?? 0).toLocaleString()} input · ${(details.completionTokens ?? 0).toLocaleString()} output`
+      : 'Not reported by provider'
+
+  useEffect(() => {
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      onClose()
+    }
+    document.addEventListener('keydown', handleEscape)
+    return () => document.removeEventListener('keydown', handleEscape)
+  }, [onClose])
+
+  return createPortal(
+    <div className="generation-details-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+      <section className="generation-details-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+        <header>
+          <div><small>{status} · {formatGenerationTime(visibleElapsed)}</small><h2 id={titleId}>{details.task} generation</h2></div>
+          <button type="button" onClick={onClose} aria-label="Close generation details"><X aria-hidden="true" /></button>
+        </header>
+        <div className="generation-details-content">
+          <section className="generation-thoughts">
+            <h3>Thoughts</h3>
+            {details.thoughts ? <pre>{details.thoughts}</pre> : <p>{details.status === 'sending' || details.status === 'thinking' ? 'Waiting for thoughts from the model…' : 'This model did not expose thoughts for this generation.'}</p>}
+          </section>
+          <section className="generation-metadata">
+            <h3>Generation details</h3>
+            <dl>
+              <div><dt>Status</dt><dd>{status}</dd></div>
+              <div><dt>Elapsed</dt><dd>{formatGenerationTime(visibleElapsed)}</dd></div>
+              <div><dt>Action</dt><dd>{details.action}</dd></div>
+              <div><dt>Target</dt><dd>{details.targetTitle}</dd></div>
+              <div><dt>Provider</dt><dd>{details.provider}</dd></div>
+              <div><dt>Requested model</dt><dd>{details.requestedModel}</dd></div>
+              {details.responseModel && details.responseModel !== details.requestedModel && <div><dt>Response model</dt><dd>{details.responseModel}</dd></div>}
+              <div><dt>Tokens</dt><dd>{tokens}</dd></div>
+              {details.estimatedRequestTokens !== undefined && <div><dt>Estimated request</dt><dd>~{details.estimatedRequestTokens.toLocaleString()} tokens</dd></div>}
+              {details.modelContextTokens !== undefined && <div><dt>Context window</dt><dd>{details.modelContextTokens.toLocaleString()} tokens</dd></div>}
+              {details.finishReason && <div><dt>Finish reason</dt><dd>{details.finishReason}</dd></div>}
+              {details.responseId && <div><dt>Response ID</dt><dd>{details.responseId}</dd></div>}
+            </dl>
+          </section>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  )
 }
 
 function MessageActions({ user = false }: { user?: boolean }) { return <div className="message-tools"><button type="button"><Pencil aria-hidden="true" /> Edit</button>{!user && <><button type="button"><GitFork aria-hidden="true" /> Fork</button><button type="button"><Volume2 aria-hidden="true" /> Read aloud</button><button type="button"><RefreshCw aria-hidden="true" /> Regenerate</button></>}<button type="button"><Trash2 aria-hidden="true" /> Delete</button></div> }
