@@ -1,6 +1,15 @@
 import { listEntitiesByBook, type ArcEntity, type GenerationContextProfile, type GenerationContextType, type StructuralEntity, type SummaryEntity } from './persistence'
 
-export type PreparedContextValues = { previousSceneText: string; summaryContext: string; lastSceneText: string; additionalContext: string }
+export type PreparedContextValues = {
+  currentSceneText: string
+  currentSceneTitle: string
+  previousSceneText: string
+  previousSceneTitle: string
+  summaryContext: string
+  lastSceneText: string
+  lastSceneTitle: string
+  additionalContext: string
+}
 export type ContextDiagnostics = { modelId: string; modelContextTokens: number; requestTokens: number; responseReserveTokens: number; fits: boolean }
 type BuildOptions = { bookId: string; type: GenerationContextType; currentSceneId?: string; currentSceneText?: string; currentDocumentId?: string; profile: GenerationContextProfile }
 
@@ -72,7 +81,9 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
   const currentScene = currentIndex >= 0 ? scenes[currentIndex] : undefined
   const previousScene = currentIndex > 0 ? scenes[currentIndex - 1] : undefined
   const liveCurrentText = options.currentSceneText ?? String(currentScene?.content ?? '')
-  const previousSceneText = options.type === 'scene' && currentScene && !liveCurrentText.trim() ? String(previousScene?.content ?? '') : ''
+  const previousSceneText = options.type === 'scene' && options.profile.includePreviousSceneWhenEmpty && currentScene && !liveCurrentText.trim()
+    ? String(previousScene?.content ?? '')
+    : ''
   const automatic = options.type === 'scene'
     ? automaticSummaries(options.bookId, entities, outline, options.currentSceneId, previousSceneText ? previousScene?.id : undefined)
     : { text: '', ids: new Set<string>() }
@@ -93,10 +104,20 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
     .map((summary) => section(summary.title, summary.content))
   const notes = entities.filter((item) => item.type === 'note' && options.profile.noteIds.includes(item.id) && String(item.content ?? '').trim())
     .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)).map((item) => section(`Note — ${item.title ?? 'Untitled'}`, String(item.content)))
-  const codex = entities.filter((item) => item.type === 'codexEntry' && item.id !== options.currentDocumentId && options.profile.codexEntryIds.includes(item.id) && String(item.content ?? '').trim())
-    .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)).map((item) => section(`Codex — ${String(item.category ?? 'Other')}: ${item.title ?? 'Untitled'}`, String(item.content)))
+  const codex = entities.filter((item) => item.type === 'codexEntry' && item.id !== options.currentDocumentId && options.profile.codexEntryIds.includes(item.id))
+    .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+    .map((item) => section(`Codex — ${String(item.category ?? 'Other')}: ${item.title ?? 'Untitled'}`, String(item.content ?? '').trim() || '_No description provided._'))
 
-  return { previousSceneText, summaryContext: automatic.text, lastSceneText: options.type === 'codex' && options.profile.includeLastScene ? String(currentScene?.content ?? '') : '', additionalContext: [...fullSections, ...summarySections, ...notes, ...codex].join('\n\n') }
+  return {
+    currentSceneText: liveCurrentText,
+    currentSceneTitle: currentScene?.title ?? '',
+    previousSceneText,
+    previousSceneTitle: previousSceneText ? previousScene?.title ?? '' : '',
+    summaryContext: automatic.text,
+    lastSceneText: options.type === 'codex' && options.profile.includeLastScene ? String(currentScene?.content ?? '') : '',
+    lastSceneTitle: options.type === 'codex' && options.profile.includeLastScene ? currentScene?.title ?? '' : '',
+    additionalContext: [...fullSections, ...summarySections, ...notes, ...codex].join('\n\n'),
+  }
 }
 
 function modelContextLimit(modelId: string, catalogLimit?: number) {

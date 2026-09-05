@@ -67,6 +67,7 @@ export type GenerationContextType = 'scene' | 'codex' | 'note' | 'chat'
 export type SummaryRange = 'none' | 'all' | 'before' | 'after'
 export type GenerationContextProfile = {
   includeLastScene: boolean
+  includePreviousSceneWhenEmpty: boolean
   structuralIds: string[]
   noteIds: string[]
   codexEntryIds: string[]
@@ -93,6 +94,7 @@ export type BookContextSettingsEntity = ArcEntity & {
 
 export const defaultGenerationContextProfile: GenerationContextProfile = {
   includeLastScene: false,
+  includePreviousSceneWhenEmpty: false,
   structuralIds: [],
   noteIds: [],
   codexEntryIds: [],
@@ -102,16 +104,17 @@ export const defaultGenerationContextProfile: GenerationContextProfile = {
 export const defaultBookContextSettings: BookContextSettings = {
   lastOpenedSceneId: '',
   profiles: {
-    scene: { ...defaultGenerationContextProfile },
+    scene: { ...defaultGenerationContextProfile, includePreviousSceneWhenEmpty: true },
     codex: { ...defaultGenerationContextProfile, includeLastScene: true },
     note: { ...defaultGenerationContextProfile },
     chat: { ...defaultGenerationContextProfile },
   },
 }
 
-function normalizeContextProfile(value?: Partial<GenerationContextProfile>, includeLastScene = false): GenerationContextProfile {
+function normalizeContextProfile(value?: Partial<GenerationContextProfile>, defaults: Partial<GenerationContextProfile> = {}): GenerationContextProfile {
   return {
-    includeLastScene: value?.includeLastScene ?? includeLastScene,
+    includeLastScene: value?.includeLastScene ?? defaults.includeLastScene ?? false,
+    includePreviousSceneWhenEmpty: value?.includePreviousSceneWhenEmpty ?? defaults.includePreviousSceneWhenEmpty ?? false,
     structuralIds: uniqueIds(value?.structuralIds ?? []),
     noteIds: uniqueIds(value?.noteIds ?? []),
     codexEntryIds: uniqueIds(value?.codexEntryIds ?? []),
@@ -124,8 +127,8 @@ function normalizeBookContextSettings(value?: Partial<BookContextSettings>): Boo
   return {
     lastOpenedSceneId: typeof value?.lastOpenedSceneId === 'string' ? value.lastOpenedSceneId : '',
     profiles: {
-      scene: normalizeContextProfile(profiles.scene),
-      codex: normalizeContextProfile(profiles.codex, true),
+      scene: normalizeContextProfile(profiles.scene, { includePreviousSceneWhenEmpty: true }),
+      codex: normalizeContextProfile(profiles.codex, { includeLastScene: true }),
       note: normalizeContextProfile(profiles.note),
       chat: normalizeContextProfile(profiles.chat),
     },

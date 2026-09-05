@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bot,
   Check,
@@ -38,6 +38,8 @@ import {
   type GenerationContextType,
 } from './persistence'
 import { promptVariables } from './prompt-template'
+import type { BookPromptValues } from './prompt-template'
+import { buildContextValues, type PreparedContextValues } from './context-service'
 
 type Model = { id: string; name?: string; context_length?: number; pricing?: { prompt?: string; completion?: string }; architecture?: { modality?: string } }
 type SettingsTab = 'ai' | 'context' | 'appearance' | 'speech' | 'images'
@@ -60,7 +62,7 @@ type AiSettingsProps = {
   onHome?: () => void
   onBack?: () => void
   onSaved?: (settings: AiSettings) => void
-  book?: { id: string; title: string; contextType?: GenerationContextType; currentDocumentId?: string }
+  book?: { id: string; title: string; contextType?: GenerationContextType; currentDocumentId?: string; currentDocumentText?: string; promptValues?: BookPromptValues }
 }
 
 export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) {
@@ -78,6 +80,8 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   const [contextSettings, setContextSettings] = useState<BookContextSettings>(defaultBookContextSettings)
   const [contextSources, setContextSources] = useState<ArcEntity[]>([])
   const [contextSaved, setContextSaved] = useState(true)
+  const contextSaveVersionRef = useRef(0)
+  const contextSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const isBookSettings = Boolean(book)
 
   useEffect(() => {
@@ -215,10 +219,35 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
     }
   }
 
+  function updateContextDefaults(value: BookContextSettings) {
+    setContextSettings(value)
+    setContextSaved(false)
+    if (!book) return
+    const version = ++contextSaveVersionRef.current
+    contextSaveQueueRef.current = contextSaveQueueRef.current.catch(() => undefined).then(async () => {
+      const savedDefaults = await saveBookContextSettings(book.id, value)
+      if (version === contextSaveVersionRef.current) {
+        setContextSettings(savedDefaults)
+        setContextSaved(true)
+      }
+    }).catch(() => {
+      if (version === contextSaveVersionRef.current) setContextSaved(false)
+    })
+  }
+
+  function leaveSettings(destination?: () => void) {
+    if (!destination) return
+    if (book && settingsTab === 'context' && !contextSaved) {
+      void saveContextDefaults().finally(destination)
+      return
+    }
+    destination()
+  }
+
   return (
     <main className="app-shell">
       <aside className="settings-rail" aria-label={`${isBookSettings ? 'Book' : 'Default'} settings navigation`}>
-        <div className="rail-header"><button className="home-button" type="button" aria-label="Back to library" onClick={onHome}><Home aria-hidden="true" /><b>Home</b></button>{onBack && <button className="settings-close" type="button" onClick={onBack} aria-label="Close settings"><X aria-hidden="true" /></button>}</div>
+        <div className="rail-header"><button className="home-button" type="button" aria-label="Back to library" onClick={() => leaveSettings(onHome)}><Home aria-hidden="true" /><b>Home</b></button>{onBack && <button className="settings-close" type="button" onClick={() => leaveSettings(onBack)} aria-label="Close settings"><X aria-hidden="true" /></button>}</div>
         <nav>
           {([['ai', Bot, 'AI'], ['context', SlidersHorizontal, 'Context'], ['appearance', Type, 'UI'], ['speech', Volume2, 'Speech'], ['images', ImageIcon, 'Images']] as const).map(([key, Icon, label]) => (
             <button className={settingsTab === key ? 'active' : ''} type="button" onClick={() => setSettingsTab(key)} key={key}><Icon aria-hidden="true" /><span>{label}</span></button>
@@ -265,14 +294,16 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
           <div className="prompt-footer"><button type="button" onClick={() => update('prompts', { ...settings.prompts, [promptTab]: defaultAiPrompts[promptTab] })}>Reset default</button></div>
         </section>
         <footer className="save-bar"><div><strong>{isBookSettings ? book?.title : 'AI defaults'}</strong><span>{isBookSettings ? 'Independent book configuration' : settings.mainModel ? 'Ready to save for new books' : 'Choose models now or save them later'}</span></div><div className="save-actions">{book && <button className="reset-settings" type="button" onClick={() => { void resetFromDefaults() }} disabled={settingsLoading}><RefreshCw aria-hidden="true" /> Reset from defaults</button>}<button type="button" onClick={() => { void saveSettings() }} disabled={settingsLoading}><Check aria-hidden="true" /> {isBookSettings ? 'Save book settings' : 'Save defaults'}</button></div></footer>
-        </> : settingsTab === 'context' && book ? <ContextSettings bookTitle={book.title} type={book.contextType ?? 'scene'} currentDocumentId={book.currentDocumentId} value={contextSettings} sources={contextSources} saved={contextSaved} onChange={(value) => { setContextSettings(value); setContextSaved(false) }} onSave={() => { void saveContextDefaults() }} /> : <SettingsPlaceholder tab={settingsTab} scope={isBookSettings ? 'book' : 'defaults'} />}
+        </> : settingsTab === 'context' && book ? <ContextSettings bookId={book.id} bookTitle={book.title} bookPromptValues={book.promptValues} type={book.contextType ?? 'scene'} currentDocumentId={book.currentDocumentId} currentDocumentText={book.currentDocumentText} value={contextSettings} sources={contextSources} saved={contextSaved} onChange={updateContextDefaults} onSave={() => { void saveContextDefaults() }} /> : <SettingsPlaceholder tab={settingsTab} scope={isBookSettings ? 'book' : 'defaults'} />}
       </section>
     </main>
   )
 }
 
-function ContextSettings({ bookTitle, type, currentDocumentId, value, sources, saved, onChange, onSave }: { bookTitle: string; type: GenerationContextType; currentDocumentId?: string; value: BookContextSettings; sources: ArcEntity[]; saved: boolean; onChange: (value: BookContextSettings) => void; onSave: () => void }) {
+function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDocumentId, currentDocumentText, value, sources, saved, onChange, onSave }: { bookId: string; bookTitle: string; bookPromptValues?: BookPromptValues; type: GenerationContextType; currentDocumentId?: string; currentDocumentText?: string; value: BookContextSettings; sources: ArcEntity[]; saved: boolean; onChange: (value: BookContextSettings) => void; onSave: () => void }) {
   const [query, setQuery] = useState('')
+  const [preview, setPreview] = useState<PreparedContextValues | null>(null)
+  const [previewError, setPreviewError] = useState('')
   const profile = value.profiles[type]
   const updateProfile = (next: typeof profile) => onChange({ ...value, profiles: { ...value.profiles, [type]: next } })
   const toggle = (key: 'structuralIds' | 'noteIds' | 'codexEntryIds', id: string) => updateProfile({ ...profile, [key]: profile[key].includes(id) ? profile[key].filter((item) => item !== id) : [...profile[key], id] })
@@ -284,18 +315,51 @@ function ContextSettings({ bookTitle, type, currentDocumentId, value, sources, s
     ['Notes', visible.filter((item) => item.type === 'note'), 'noteIds'],
     ['Codex', visible.filter((item) => item.type === 'codexEntry'), 'codexEntryIds'],
   ] as const
+  useEffect(() => {
+    let cancelled = false
+    const currentSceneId = type === 'scene' ? currentDocumentId : value.lastOpenedSceneId || undefined
+    void buildContextValues({ bookId, type, currentSceneId, currentSceneText: type === 'scene' ? currentDocumentText : undefined, currentDocumentId, profile }).then((prepared) => {
+      if (!cancelled) { setPreview(prepared); setPreviewError('') }
+    }).catch(() => {
+      if (!cancelled) { setPreview(null); setPreviewError('Context preview could not be prepared.') }
+    })
+    return () => { cancelled = true }
+  }, [bookId, currentDocumentId, currentDocumentText, profile, sources, type, value.lastOpenedSceneId])
+
+  const currentDocument = sources.find((item) => item.id === currentDocumentId)
+  const metadata = bookPromptValues ?? { title: bookTitle, series: '', seriesOrder: '', overview: '', genre: '', style: '', pov: '', tense: '', language: '' }
+  const metadataText = [
+    ['Title', metadata.title], ['Series', metadata.series], ['Series order', metadata.seriesOrder], ['Overview', metadata.overview],
+    ['Genre', metadata.genre], ['Style', metadata.style], ['Point of view', metadata.pov], ['Tense', metadata.tense], ['Language', metadata.language],
+  ].filter((item) => item[1]).map(([label, content]) => `${label}: ${content}`).join('\n')
+  const previewSections = preview ? [
+    { title: 'Book metadata', detail: 'Prompt variables', content: metadataText },
+    ...(type === 'scene' && preview.previousSceneText ? [{ title: `Previous scene${preview.previousSceneTitle ? ` — ${preview.previousSceneTitle}` : ''}`, detail: 'Empty-scene fallback', content: preview.previousSceneText }] : []),
+    ...(type === 'scene' && preview.summaryContext ? [{ title: 'Earlier summaries', detail: 'Automatic', content: preview.summaryContext }] : []),
+    ...(type === 'codex' ? [{ title: `Current entry${currentDocument?.title ? ` — ${currentDocument.title}` : ''}`, detail: 'Required', content: currentDocumentText ?? String(currentDocument?.content ?? '') }] : []),
+    ...(type === 'codex' && preview.lastSceneText ? [{ title: `Last-opened scene${preview.lastSceneTitle ? ` — ${preview.lastSceneTitle}` : ''}`, detail: 'Automatic', content: preview.lastSceneText }] : []),
+    ...(preview.additionalContext ? [{ title: 'Additional context', detail: 'Selected', content: preview.additionalContext }] : []),
+    ...(type === 'scene' ? [{ title: `Current scene${preview.currentSceneTitle ? ` — ${preview.currentSceneTitle}` : ''}`, detail: 'Required', content: preview.currentSceneText }] : []),
+  ] : []
+  const exactPreview = previewSections.map((item) => `# ${item.title}\n\n${item.content || '[empty]'}`).join('\n\n')
   return <section className="context-defaults-settings">
-    <header className="page-heading"><div><p>{type} generation</p><h1 id="page-title">Context Management</h1><span>Saved independently for {type} generation in “{bookTitle}”.</span></div><div className={`save-state ${saved ? 'saved' : ''}`}><i />{saved ? 'Saved' : 'Unsaved changes'}</div></header>
+    <header className="page-heading"><div><p>{type} generation</p><h1 id="page-title">Context Management</h1><span>Saved independently for {type} generation in “{bookTitle}”.</span></div><div className={`save-state ${saved ? 'saved' : ''}`}><i />{saved ? 'Saved' : 'Saving…'}</div></header>
     <section className="settings-card context-defaults-card"><div className="card-heading"><div><span>01</span><h2>Automatic context</h2></div></div>
       <div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Book metadata</strong><small>Provided through the book prompt variables.</small></span><b>Required</b></div>
-      {type === 'scene' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current Scene</strong><small>If empty, the immediately previous Scene is included.</small></span><b>Required</b></div><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Earlier summaries</strong><small>Uses the highest completed Act or Chapter summary without exposing later material.</small></span><b>Automatic</b></div></> : type === 'codex' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current entry</strong><small>Title, category, and existing body are supplied through lore prompt variables.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includeLastScene} onChange={(event) => updateProfile({ ...profile, includeLastScene: event.target.checked })} /><span><strong>Last-opened Scene</strong><small>Included by default for Codex generation.</small></span></label></> : <div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Type-specific sources</strong><small>Automatic sources will be defined when {type} generation is implemented.</small></span><b>Planned</b></div>}
+      {type === 'scene' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current Scene</strong><small>The active editor content is always included.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} /><span><strong>Previous Scene when empty</strong><small>Use the immediately previous Scene only when the current Scene has no text.</small></span></label><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Earlier summaries</strong><small>Uses the highest completed Act or Chapter summary without exposing later material.</small></span><b>Automatic</b></div></> : type === 'codex' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current entry</strong><small>Title, category, and existing body are supplied through lore prompt variables.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includeLastScene} onChange={(event) => updateProfile({ ...profile, includeLastScene: event.target.checked })} /><span><strong>Last-opened Scene</strong><small>Included by default for Codex generation.</small></span></label></> : <div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Type-specific sources</strong><small>Automatic sources will be defined when {type} generation is implemented.</small></span><b>Planned</b></div>}
     </section>
     <section className="settings-card context-sources-card"><div className="card-heading"><div><span>02</span><h2>Additional context</h2></div><p>Inserted as <code>{'{{additional_context}}'}</code>.</p></div>
       <fieldset className="summary-range"><legend>Summaries</legend>{([['none','None'],['all','All summaries'],['before','Before current Scene'],['after','After current Scene']] as const).map(([range,label]) => <label key={range}><input type="radio" name="summary-range" checked={profile.summaryRange === range} onChange={() => updateProfile({ ...profile, summaryRange: range })}/><span>{label}</span></label>)}</fieldset>
       <div className="context-source-search"><Search aria-hidden="true" /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find Acts, Chapters, Scenes, Notes, or Codex" /></div>
       <div className="context-managed-list">{groups.map(([label, items, key]) => items.length > 0 && <section key={label}><h3>{label}</h3>{items.map((item) => <label key={item.id}><input type="checkbox" checked={profile[key].includes(item.id)} onChange={() => toggle(key, item.id)} /><span><strong>{item.title || 'Untitled'}</strong><small>{item.type}</small></span></label>)}</section>)}{!visible.length && <p>No matching sources.</p>}</div>
     </section>
-    <footer className="save-bar"><div><strong>{bookTitle}</strong><span>{type[0].toUpperCase() + type.slice(1)} context profile</span></div><button type="button" onClick={onSave}><Check aria-hidden="true" /> Save context</button></footer>
+    <section className="settings-card context-preview-card"><div className="card-heading"><div><span>03</span><h2>Context to be sent</h2></div><p>Live preview of the material available to the generation prompt.</p></div>
+      {previewError ? <p className="context-preview-error" role="alert">{previewError}</p> : preview ? <>
+        <div className="context-preview-rendered">{previewSections.map((item) => <section key={`${item.title}-${item.detail}`}><header><h3>{item.title}</h3><span>{item.detail}</span></header>{item.content ? <div className="context-preview-copy">{item.content}</div> : <p className="context-preview-empty">No content will be sent for this section.</p>}</section>)}</div>
+        <details className="context-preview-raw"><summary>View exact context text</summary><pre>{exactPreview}</pre></details>
+      </> : <p className="context-preview-empty">Preparing preview…</p>}
+    </section>
+    <footer className="save-bar"><div><strong>{bookTitle}</strong><span>Context changes save automatically</span></div><button type="button" onClick={onSave} disabled={saved}><Check aria-hidden="true" /> {saved ? 'Saved' : 'Save now'}</button></footer>
   </section>
 }
 
