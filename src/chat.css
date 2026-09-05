@@ -136,3 +136,13 @@
 .chat-follow-output { position: fixed; z-index: 48; left: 50%; bottom: calc(10.75rem + max(8px, env(safe-area-inset-bottom))); transform: translateX(-50%); min-height: 36px; padding: 0 .8rem; border: 1px solid var(--border); border-radius: 12px; background: rgba(20,21,19,.94); color: var(--muted); box-shadow: 0 8px 24px rgba(0,0,0,.36); backdrop-filter: blur(16px); cursor: pointer; font-size: .72rem; }
 .chat-follow-output:hover,.chat-follow-output:focus-visible { color: inherit; }
 @media (max-width: 720px) { .chat-follow-output { bottom: calc(11.5rem + max(8px, env(safe-area-inset-bottom))); } }
+
+
+/* Approval cards for Note/Codex lifecycle tools and initial Scene content. */
+.chat-entity-action-body { padding: .7rem .8rem; color: var(--soft); font-size: .82rem; line-height: 1.45; }
+.chat-entity-action-body p { margin: 0; }
+.chat-entity-action-body p > span,.chat-entity-action-body p > strong,.chat-entity-action-body p > b { margin-right: .35rem; }
+.chat-entity-action-body details,.chat-outline-action-body details { margin-top: .55rem; }
+.chat-entity-action-body summary,.chat-outline-action-body details > summary { cursor: pointer; color: var(--muted); font-size: .76rem; }
+.chat-entity-action-body pre,.chat-outline-action-body pre { max-height: 18rem; margin: .5rem 0 0; padding: .65rem .7rem; overflow: auto; border: 1px solid var(--border); border-radius: .65rem; background: rgba(255,255,255,.025); white-space: pre-wrap; overflow-wrap: anywhere; font: .76rem/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; }
+.chat-document-edit.chat-entity-action.delete > header > span { color: var(--danger); }
