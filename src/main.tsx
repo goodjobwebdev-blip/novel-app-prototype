@@ -6,6 +6,7 @@ import './styles.css'
 import './button-interactions.css'
 import './chat-composer-fix.css'
 import './chat-model-picker-shape.css'
+import './settings-scope.css'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
