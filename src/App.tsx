@@ -27,12 +27,15 @@ import {
 import {
   copyDefaultAiSettingsToBook,
   ensureBookAiSettings,
-  getBookContextDefaults,
+  getBookContextSettings,
   getBookAiSettings,
-  saveBookContextDefaults,
+  listEntitiesByBook,
+  saveBookContextSettings,
   saveBookAiSettings,
-  defaultBookContextDefaults,
-  type BookContextDefaults,
+  defaultBookContextSettings,
+  type ArcEntity,
+  type BookContextSettings,
+  type GenerationContextType,
 } from './persistence'
 import { promptVariables } from './prompt-template'
 
@@ -57,7 +60,7 @@ type AiSettingsProps = {
   onHome?: () => void
   onBack?: () => void
   onSaved?: (settings: AiSettings) => void
-  book?: { id: string; title: string }
+  book?: { id: string; title: string; contextType?: GenerationContextType; currentDocumentId?: string }
 }
 
 export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) {
@@ -72,7 +75,8 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   const [saved, setSaved] = useState(false)
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('ai')
   const [settingsLoading, setSettingsLoading] = useState(Boolean(book))
-  const [contextDefaults, setContextDefaults] = useState<BookContextDefaults>(defaultBookContextDefaults)
+  const [contextSettings, setContextSettings] = useState<BookContextSettings>(defaultBookContextSettings)
+  const [contextSources, setContextSources] = useState<ArcEntity[]>([])
   const [contextSaved, setContextSaved] = useState(true)
   const isBookSettings = Boolean(book)
 
@@ -111,13 +115,15 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   useEffect(() => {
     let cancelled = false
     if (!book) {
-      setContextDefaults(defaultBookContextDefaults)
+      setContextSettings(defaultBookContextSettings)
+      setContextSources([])
       setContextSaved(true)
       return () => { cancelled = true }
     }
-    void getBookContextDefaults(book.id).then((value) => {
+    void Promise.all([getBookContextSettings(book.id), listEntitiesByBook(book.id)]).then(([value, entities]) => {
       if (!cancelled) {
-        setContextDefaults(value)
+        setContextSettings(value)
+        setContextSources(entities)
         setContextSaved(true)
       }
     })
@@ -132,14 +138,14 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   function update<K extends keyof AiSettings>(key: K, value: AiSettings[K]) { setSettings((current) => ({ ...current, [key]: value })); setSaved(false) }
   function selectProvider(provider: AiProvider) {
     const baseUrl = provider === 'nanogpt' ? 'https://nano-gpt.com/api/v1' : provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : provider === 'openai' ? 'https://api.openai.com/v1' : settings.baseUrl
-    setSettings((current) => ({ ...current, provider, baseUrl, mainModel: '', mainModelContextLength: undefined, supportModel: '', supportModelContextLength: undefined }))
+    setSettings((current) => ({ ...current, provider, baseUrl, mainModel: '', mainModelContextLength: undefined, supportModel: '', supportModelContextLength: undefined, codexModel: '', codexModelContextLength: undefined }))
     setModels([]); setStatus('Provider changed. Reload its model list when ready.'); setStatusKind('quiet'); setSaved(false)
   }
-  function selectModel(kind: 'main' | 'support', id: string) {
+  function selectModel(kind: 'main' | 'support' | 'codex', id: string) {
     const contextLength = models.find((model) => model.id === id)?.context_length
     setSettings((current) => kind === 'main'
       ? { ...current, mainModel: id, mainModelContextLength: contextLength }
-      : { ...current, supportModel: id, supportModelContextLength: contextLength })
+      : kind === 'support' ? { ...current, supportModel: id, supportModelContextLength: contextLength } : { ...current, codexModel: id, codexModelContextLength: contextLength })
     setSaved(false)
   }
   async function refreshModels() {
@@ -155,8 +161,9 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
         ...current,
         mainModelContextLength: nextModels.find((model) => model.id === current.mainModel)?.context_length ?? current.mainModelContextLength,
         supportModelContextLength: nextModels.find((model) => model.id === current.supportModel)?.context_length ?? current.supportModelContextLength,
+        codexModelContextLength: nextModels.find((model) => model.id === current.codexModel)?.context_length ?? current.codexModelContextLength,
       }))
-      if (nextModels.some((model) => model.id === settings.mainModel || model.id === settings.supportModel)) setSaved(false)
+      if (nextModels.some((model) => model.id === settings.mainModel || model.id === settings.supportModel || model.id === settings.codexModel)) setSaved(false)
       setModels(nextModels); setStatus(nextModels.length ? `${nextModels.length} models available.` : 'The provider returned no models.'); setStatusKind(nextModels.length ? 'success' : 'error')
     } catch (error) {
       setModels([]); setStatus(error instanceof Error ? error.message : 'Could not load the model list.'); setStatusKind('error')
@@ -200,8 +207,8 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   async function saveContextDefaults() {
     if (!book) return
     try {
-      const savedDefaults = await saveBookContextDefaults(book.id, contextDefaults)
-      setContextDefaults(savedDefaults)
+      const savedDefaults = await saveBookContextSettings(book.id, contextSettings)
+      setContextSettings(savedDefaults)
       setContextSaved(true)
     } catch {
       setContextSaved(false)
@@ -237,7 +244,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
 
         <section className="settings-card models-card">
           <div className="card-heading"><div><span>02</span><h2>Models</h2></div><p>{isBookSettings ? 'Favorites are shared; model choices belong to this book.' : 'Main writes; Support handles summaries and names.'}</p></div>
-          <div className="model-pickers"><label><span>Main model <em>Story generation</em></span><input list="model-options" value={settings.mainModel} onChange={(event) => selectModel('main', event.target.value)} placeholder={models.length ? 'Search models…' : 'Reload models first'} /></label><label><span>Support model <em>Fast utility tasks</em></span><input list="model-options" value={settings.supportModel} onChange={(event) => selectModel('support', event.target.value)} placeholder={models.length ? 'Search models…' : 'Reload models first'} /></label><datalist id="model-options">{models.map((model) => <option key={model.id} value={model.id}>{model.name ?? model.id}</option>)}</datalist></div>
+          <div className="model-pickers"><label><span>Main model <em>Story generation and fallback</em></span><input list="model-options" value={settings.mainModel} onChange={(event) => selectModel('main', event.target.value)} placeholder={models.length ? 'Search models…' : 'Reload models first'} /></label><label><span>Support model <em>Fast utility tasks</em></span><input list="model-options" value={settings.supportModel} onChange={(event) => selectModel('support', event.target.value)} placeholder={models.length ? 'Search models…' : 'Reload models first'} /></label><label><span>Codex model <em>Optional · uses Main when empty</em></span><input list="model-options" value={settings.codexModel} onChange={(event) => selectModel('codex', event.target.value)} placeholder="Use Main model" /></label><datalist id="model-options">{models.map((model) => <option key={model.id} value={model.id}>{model.name ?? model.id}</option>)}</datalist></div>
           <label className="generation-speed-setting">
             <span><strong>Writing pace</strong><em>Milliseconds per word</em></span>
             <input type="text" inputMode="numeric" pattern="[0-9]*" value={settings.generationWordDelayMs} onChange={(event) => update('generationWordDelayMs', event.target.value)} aria-describedby="generation-speed-help" spellCheck={false} />
@@ -248,7 +255,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
 
         <section className="settings-card prompts-card">
           <div className="card-heading"><div><span>03</span><h2>System prompts</h2></div></div>
-          <div className="prompt-tabs" role="tablist">{([['story', 'Story'], ['summarize', 'Summarize'], ['titles', 'Titles & names']] as const).map(([key, label]) => <button key={key} className={promptTab === key ? 'active' : ''} type="button" onClick={() => setPromptTab(key)}>{label}</button>)}</div>
+          <div className="prompt-tabs" role="tablist">{([['story', 'Story'], ['summarize', 'Summarize'], ['titles', 'Titles & names'], ['lore', 'Lore entries']] as const).map(([key, label]) => <button key={key} className={promptTab === key ? 'active' : ''} type="button" onClick={() => setPromptTab(key)}>{label}</button>)}</div>
           <textarea className="prompt-editor" value={settings.prompts[promptTab]} onChange={(event) => update('prompts', { ...settings.prompts, [promptTab]: event.target.value })} spellCheck={false} />
           <details className="prompt-reference">
             <summary><CircleHelp aria-hidden="true" /><span>Variables & syntax</span></summary>
@@ -258,30 +265,37 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
           <div className="prompt-footer"><button type="button" onClick={() => update('prompts', { ...settings.prompts, [promptTab]: defaultAiPrompts[promptTab] })}>Reset default</button></div>
         </section>
         <footer className="save-bar"><div><strong>{isBookSettings ? book?.title : 'AI defaults'}</strong><span>{isBookSettings ? 'Independent book configuration' : settings.mainModel ? 'Ready to save for new books' : 'Choose models now or save them later'}</span></div><div className="save-actions">{book && <button className="reset-settings" type="button" onClick={() => { void resetFromDefaults() }} disabled={settingsLoading}><RefreshCw aria-hidden="true" /> Reset from defaults</button>}<button type="button" onClick={() => { void saveSettings() }} disabled={settingsLoading}><Check aria-hidden="true" /> {isBookSettings ? 'Save book settings' : 'Save defaults'}</button></div></footer>
-        </> : settingsTab === 'context' && book ? <ContextDefaultsSettings bookTitle={book.title} value={contextDefaults} saved={contextSaved} onChange={(value) => { setContextDefaults(value); setContextSaved(false) }} onSave={() => { void saveContextDefaults() }} /> : <SettingsPlaceholder tab={settingsTab} scope={isBookSettings ? 'book' : 'defaults'} />}
+        </> : settingsTab === 'context' && book ? <ContextSettings bookTitle={book.title} type={book.contextType ?? 'scene'} currentDocumentId={book.currentDocumentId} value={contextSettings} sources={contextSources} saved={contextSaved} onChange={(value) => { setContextSettings(value); setContextSaved(false) }} onSave={() => { void saveContextDefaults() }} /> : <SettingsPlaceholder tab={settingsTab} scope={isBookSettings ? 'book' : 'defaults'} />}
       </section>
     </main>
   )
 }
 
-function ContextDefaultsSettings({ bookTitle, value, saved, onChange, onSave }: {
-  bookTitle: string
-  value: BookContextDefaults
-  saved: boolean
-  onChange: (value: BookContextDefaults) => void
-  onSave: () => void
-}) {
+function ContextSettings({ bookTitle, type, currentDocumentId, value, sources, saved, onChange, onSave }: { bookTitle: string; type: GenerationContextType; currentDocumentId?: string; value: BookContextSettings; sources: ArcEntity[]; saved: boolean; onChange: (value: BookContextSettings) => void; onSave: () => void }) {
+  const [query, setQuery] = useState('')
+  const profile = value.profiles[type]
+  const updateProfile = (next: typeof profile) => onChange({ ...value, profiles: { ...value.profiles, [type]: next } })
+  const toggle = (key: 'structuralIds' | 'noteIds' | 'codexEntryIds', id: string) => updateProfile({ ...profile, [key]: profile[key].includes(id) ? profile[key].filter((item) => item !== id) : [...profile[key], id] })
+  const normalized = query.trim().toLowerCase()
+  const visible = sources.filter((item) => ['act', 'chapter', 'scene', 'note', 'codexEntry'].includes(item.type) && item.id !== currentDocumentId && (!normalized || `${item.title ?? ''} ${item.type} ${item.category ?? ''}`.toLowerCase().includes(normalized)))
+  const groups = [
+    ['Acts & chapters', visible.filter((item) => item.type === 'act' || item.type === 'chapter'), 'structuralIds'],
+    ['Scenes', visible.filter((item) => item.type === 'scene'), 'structuralIds'],
+    ['Notes', visible.filter((item) => item.type === 'note'), 'noteIds'],
+    ['Codex', visible.filter((item) => item.type === 'codexEntry'), 'codexEntryIds'],
+  ] as const
   return <section className="context-defaults-settings">
-    <header className="page-heading"><div><p>Book context</p><h1 id="page-title">Generation defaults</h1><span>Automatic sources for every scene in “{bookTitle}”. Notes and Codex selections stay scene-specific.</span></div><div className={`save-state ${saved ? 'saved' : ''}`}><i />{saved ? 'Saved' : 'Unsaved changes'}</div></header>
-    <section className="settings-card context-defaults-card">
-      <div className="card-heading"><div><span>01</span><h2>Automatic context</h2></div><p>Current scene is always included and cannot be disabled.</p></div>
-      <div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Whole current scene</strong><small>When empty, the full immediately previous scene is included instead.</small></span><b>Required</b></div>
-      <label><input type="checkbox" checked={value.includePreviousScene} onChange={(event) => onChange({ ...value, includePreviousScene: event.target.checked })} /><span><strong>Full previous scene</strong><small>Off by default; automatically included whenever the current scene is empty.</small></span></label>
-      <label><input type="checkbox" checked={value.includePreviousSummaries} onChange={(event) => onChange({ ...value, includePreviousSummaries: event.target.checked })} /><span><strong>All previous scene summaries</strong><small>A summary is skipped when that scene’s full text is already present.</small></span></label>
-      <label><input type="checkbox" checked={value.includeChapterSummary} onChange={(event) => onChange({ ...value, includeChapterSummary: event.target.checked })} /><span><strong>Current chapter summary</strong><small>Included only when a persisted summary exists.</small></span></label>
-      <label><input type="checkbox" checked={value.includeActSummary} onChange={(event) => onChange({ ...value, includeActSummary: event.target.checked })} /><span><strong>Current act summary</strong><small>Included only when the chapter belongs to an Act with a summary.</small></span></label>
+    <header className="page-heading"><div><p>{type} generation</p><h1 id="page-title">Context Management</h1><span>Saved independently for {type} generation in “{bookTitle}”.</span></div><div className={`save-state ${saved ? 'saved' : ''}`}><i />{saved ? 'Saved' : 'Unsaved changes'}</div></header>
+    <section className="settings-card context-defaults-card"><div className="card-heading"><div><span>01</span><h2>Automatic context</h2></div></div>
+      <div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Book metadata</strong><small>Provided through the book prompt variables.</small></span><b>Required</b></div>
+      {type === 'scene' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current Scene</strong><small>If empty, the immediately previous Scene is included.</small></span><b>Required</b></div><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Earlier summaries</strong><small>Uses the highest completed Act or Chapter summary without exposing later material.</small></span><b>Automatic</b></div></> : type === 'codex' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current entry</strong><small>Title, category, and existing body are supplied through lore prompt variables.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includeLastScene} onChange={(event) => updateProfile({ ...profile, includeLastScene: event.target.checked })} /><span><strong>Last-opened Scene</strong><small>Included by default for Codex generation.</small></span></label></> : <div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Type-specific sources</strong><small>Automatic sources will be defined when {type} generation is implemented.</small></span><b>Planned</b></div>}
     </section>
-    <footer className="save-bar"><div><strong>{bookTitle}</strong><span>Context budget is derived from the selected Main model.</span></div><button type="button" onClick={onSave}><Check aria-hidden="true" /> Save context defaults</button></footer>
+    <section className="settings-card context-sources-card"><div className="card-heading"><div><span>02</span><h2>Additional context</h2></div><p>Inserted as <code>{'{{additional_context}}'}</code>.</p></div>
+      <fieldset className="summary-range"><legend>Summaries</legend>{([['none','None'],['all','All summaries'],['before','Before current Scene'],['after','After current Scene']] as const).map(([range,label]) => <label key={range}><input type="radio" name="summary-range" checked={profile.summaryRange === range} onChange={() => updateProfile({ ...profile, summaryRange: range })}/><span>{label}</span></label>)}</fieldset>
+      <div className="context-source-search"><Search aria-hidden="true" /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find Acts, Chapters, Scenes, Notes, or Codex" /></div>
+      <div className="context-managed-list">{groups.map(([label, items, key]) => items.length > 0 && <section key={label}><h3>{label}</h3>{items.map((item) => <label key={item.id}><input type="checkbox" checked={profile[key].includes(item.id)} onChange={() => toggle(key, item.id)} /><span><strong>{item.title || 'Untitled'}</strong><small>{item.type}</small></span></label>)}</section>)}{!visible.length && <p>No matching sources.</p>}</div>
+    </section>
+    <footer className="save-bar"><div><strong>{bookTitle}</strong><span>{type[0].toUpperCase() + type.slice(1)} context profile</span></div><button type="button" onClick={onSave}><Check aria-hidden="true" /> Save context</button></footer>
   </section>
 }
 

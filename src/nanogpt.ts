@@ -4,6 +4,18 @@ export type StoryPromptValues = {
   book: BookPromptValues
   sceneText: string
   scenePov?: string
+  previousSceneText?: string
+  summaryContext?: string
+  additionalContext?: string
+}
+
+export type LorePromptValues = {
+  book: BookPromptValues
+  entryTitle: string
+  entryCategory: string
+  entryContent: string
+  sceneText?: string
+  additionalContext?: string
 }
 
 export type NanoGPTGenerationRequest = {
@@ -23,10 +35,24 @@ const templateValues = (values: StoryPromptValues): Record<string, string> => ({
   ...bookTemplateValues(values.book),
   'scene.text': values.sceneText,
   'scene.pov': values.scenePov ?? '',
+  'scene.previous_text': values.previousSceneText ?? '',
+  'scene.summary_context': values.summaryContext ?? '',
+  'additional_context': values.additionalContext ?? '',
 })
 
 export function renderStoryPrompt(template: string, values: StoryPromptValues) {
   return renderPromptTemplate(template, templateValues(values))
+}
+
+export function renderLorePrompt(template: string, values: LorePromptValues) {
+  return renderPromptTemplate(template, {
+    ...bookTemplateValues(values.book),
+    'entry.title': values.entryTitle,
+    'entry.category': values.entryCategory,
+    'entry.content': values.entryContent,
+    'scene.text': values.sceneText ?? '',
+    'additional_context': values.additionalContext ?? '',
+  })
 }
 
 function completionEndpoint(baseUrl: string) {
