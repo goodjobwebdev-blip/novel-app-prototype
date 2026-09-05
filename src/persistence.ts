@@ -10,7 +10,7 @@ type DexieModule = { default: new (name: string) => any }
 
 const dexieUrl = 'https://esm.sh/dexie@4.4.5'
 
-export type EntityType = 'book' | 'act' | 'chapter' | 'scene' | 'note' | 'codexEntry' | 'summary' | 'chat' | 'chatMessage' | 'settings'
+export type EntityType = 'book' | 'series' | 'act' | 'chapter' | 'scene' | 'note' | 'codexEntry' | 'summary' | 'chat' | 'chatMessage' | 'settings'
 export type SnapshotReason = 'autosave' | 'generation' | 'manual' | 'navigation' | 'lifecycle'
 
 export type ArcEntity = {
@@ -39,7 +39,7 @@ export type StructuralEntityType = 'act' | 'chapter' | 'scene'
 export type StructuralEntity = ArcEntity & { type: StructuralEntityType; bookId: string; parentId: string; order: number; title: string }
 export type BookMetadata = {
   title: string
-  series: string
+  seriesId: string
   seriesOrder: string
   overview: string
   genre: string
@@ -49,6 +49,7 @@ export type BookMetadata = {
   language: string
 }
 export type BookEntity = ArcEntity & { type: 'book'; title: string } & Partial<Omit<BookMetadata, 'title'>>
+export type SeriesEntity = ArcEntity & { type: 'series'; title: string }
 export type NoteEntity = ArcEntity & { type: 'note'; bookId: string; parentId: string; title: string; content: string }
 export type CodexEntryEntity = ArcEntity & { type: 'codexEntry'; bookId: string; parentId: string; title: string; category: string; content: string }
 export type SummaryEntity = ArcEntity & {
@@ -275,6 +276,86 @@ export async function listBooks(): Promise<BookEntity[]> {
   return books.sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
+function normalizedSeriesTitle(title: string) {
+  return title.trim().replace(/\s+/g, ' ').toLocaleLowerCase()
+}
+
+export async function ensureSeriesLibrary(): Promise<SeriesEntity[]> {
+  const db = await database()
+  const [books, storedSeries] = await Promise.all([
+    db.table('entities').where('type').equals('book').toArray() as Promise<BookEntity[]>,
+    db.table('entities').where('type').equals('series').toArray() as Promise<SeriesEntity[]>,
+  ])
+  const byTitle = new Map(storedSeries.map((series) => [normalizedSeriesTitle(series.title), series]))
+  const created: SeriesEntity[] = []
+  const migrated: BookEntity[] = []
+  const now = Date.now()
+
+  for (const book of books) {
+    if (typeof book.seriesId === 'string' && book.seriesId) continue
+    const legacyValue = typeof book.series === 'string' ? book.series.trim() : ''
+    if (!legacyValue || legacyValue.toLocaleLowerCase() === 'standalone') {
+      if (book.seriesOrder) migrated.push({ ...book, seriesId: '', seriesOrder: '' })
+      continue
+    }
+    const legacy = legacyValue.match(/^(.*?)\s*·\s*Book\s+(.+)$/i)
+    const title = legacy?.[1]?.trim() || legacyValue
+    const key = normalizedSeriesTitle(title)
+    let series = byTitle.get(key)
+    if (!series) {
+      series = { id: makeId('series'), type: 'series', title, createdAt: now, updatedAt: now }
+      byTitle.set(key, series)
+      created.push(series)
+    }
+    migrated.push({
+      ...book,
+      seriesId: series.id,
+      seriesOrder: typeof book.seriesOrder === 'string' && book.seriesOrder ? book.seriesOrder : legacy?.[2]?.trim() || '',
+    })
+  }
+
+  if (created.length || migrated.length) {
+    await db.transaction('rw', db.table('entities'), async () => {
+      if (created.length) await db.table('entities').bulkPut(created)
+      if (migrated.length) await db.table('entities').bulkPut(migrated)
+    })
+  }
+  return [...storedSeries, ...created].sort((a, b) => a.title.localeCompare(b.title))
+}
+
+export async function listSeries(): Promise<SeriesEntity[]> {
+  const db = await database()
+  const series: SeriesEntity[] = await db.table('entities').where('type').equals('series').toArray()
+  return series.sort((a, b) => a.title.localeCompare(b.title))
+}
+
+export async function createSeries(title: string): Promise<SeriesEntity> {
+  const cleanTitle = title.trim().replace(/\s+/g, ' ')
+  if (!cleanTitle) throw new Error('Enter a series name.')
+  const db = await database()
+  const series: SeriesEntity[] = await db.table('entities').where('type').equals('series').toArray()
+  const existing = series.find((candidate) => normalizedSeriesTitle(candidate.title) === normalizedSeriesTitle(cleanTitle))
+  if (existing) return existing
+  const now = Date.now()
+  const created: SeriesEntity = { id: makeId('series'), type: 'series', title: cleanTitle, createdAt: now, updatedAt: now }
+  await db.table('entities').put(created)
+  return created
+}
+
+export async function renameSeries(id: string, title: string): Promise<SeriesEntity> {
+  const cleanTitle = title.trim().replace(/\s+/g, ' ')
+  if (!cleanTitle) throw new Error('Enter a series name.')
+  const db = await database()
+  const series: SeriesEntity[] = await db.table('entities').where('type').equals('series').toArray()
+  const current = series.find((candidate) => candidate.id === id)
+  if (!current) throw new Error('That series is no longer available.')
+  const duplicate = series.find((candidate) => candidate.id !== id && normalizedSeriesTitle(candidate.title) === normalizedSeriesTitle(cleanTitle))
+  if (duplicate) throw new Error('A series with that name already exists.')
+  const updated = { ...current, title: cleanTitle, updatedAt: Date.now() }
+  await db.table('entities').put(updated)
+  return updated
+}
+
 export async function createBook(defaultAiSettings: AiSettings, title = 'Untitled Book'): Promise<{ book: BookEntity; chapter: StructuralEntity; scene: StructuralEntity }> {
   const db = await database()
   const now = Date.now()
@@ -284,7 +365,7 @@ export async function createBook(defaultAiSettings: AiSettings, title = 'Untitle
     id: bookId,
     type: 'book',
     title,
-    series: 'Standalone',
+    seriesId: '',
     seriesOrder: '',
     overview: '',
     genre: '',
@@ -527,8 +608,8 @@ export async function updateBookMetadata(id: string, metadata: BookMetadata): Pr
     ...entity,
     ...metadata,
     title: metadata.title.trim() || entity.title || 'Untitled Book',
-    series: metadata.series.trim() || 'Standalone',
-    seriesOrder: metadata.series.trim() === 'Standalone' ? '' : metadata.seriesOrder.trim(),
+    seriesId: metadata.seriesId,
+    seriesOrder: metadata.seriesId ? metadata.seriesOrder.trim() : '',
     updatedAt: Date.now(),
   }
   await db.table('entities').put(updated)
