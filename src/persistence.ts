@@ -621,6 +621,48 @@ export async function moveStructuralEntity(id: string, direction: -1 | 1): Promi
   })
 }
 
+export async function placeStructuralEntity(id: string, targetParentId: string, beforeId?: string): Promise<StructuralEntity> {
+  const db = await database()
+  return db.transaction('rw', db.table('entities'), async () => {
+    const entity = await db.table('entities').get(id) as StructuralEntity | undefined
+    const parent = await db.table('entities').get(targetParentId) as ArcEntity | undefined
+    if (!entity || !['act', 'chapter', 'scene'].includes(entity.type)) throw new Error(`Cannot move missing structural entity ${id}`)
+    const validParent = entity.type === 'act'
+      ? parent?.type === 'book' && parent.id === entity.bookId
+      : entity.type === 'chapter'
+        ? (parent?.type === 'book' && parent.id === entity.bookId) || (parent?.type === 'act' && parent.bookId === entity.bookId)
+        : parent?.type === 'chapter' && parent.bookId === entity.bookId
+    if (!validParent) throw new Error(`Cannot move ${entity.type} under ${parent?.type ?? 'missing parent'}`)
+
+    const sourceParentId = entity.parentId
+    const sourceSiblings = (await db.table('entities').where('parentId').equals(sourceParentId).toArray() as ArcEntity[])
+      .filter((candidate): candidate is StructuralEntity => candidate.type === entity.type && candidate.id !== entity.id)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    const targetSiblings = sourceParentId === targetParentId
+      ? sourceSiblings
+      : (await db.table('entities').where('parentId').equals(targetParentId).toArray() as ArcEntity[])
+          .filter((candidate): candidate is StructuralEntity => candidate.type === entity.type && candidate.id !== entity.id)
+          .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+
+    let targetIndex = targetSiblings.length
+    if (beforeId) {
+      targetIndex = targetSiblings.findIndex((candidate) => candidate.id === beforeId)
+      if (targetIndex < 0) throw new Error('The requested before_id is no longer a sibling in the target parent.')
+    }
+    const destination = [...targetSiblings]
+    destination.splice(targetIndex, 0, { ...entity, parentId: targetParentId })
+    const now = Date.now()
+    const updates: StructuralEntity[] = destination.map((candidate, index) => ({ ...candidate, parentId: targetParentId, order: index, updatedAt: now }))
+    if (sourceParentId !== targetParentId) {
+      updates.push(...sourceSiblings.map((candidate, index) => ({ ...candidate, order: index, updatedAt: now })))
+    }
+    await db.table('entities').bulkPut(updates)
+    await touchAncestors(db, sourceParentId, now)
+    if (targetParentId !== sourceParentId) await touchAncestors(db, targetParentId, now)
+    return updates.find((candidate) => candidate.id === entity.id)!
+  })
+}
+
 export async function deleteEntityTree(id: string): Promise<string[]> {
   const db = await database()
   const removedIds = new Set<string>()

@@ -119,3 +119,10 @@
 .chat-markdown .contains-task-list { padding-left: .2em; list-style: none; }
 .chat-markdown .task-list-item { display: flex; align-items: flex-start; gap: .45em; }
 .chat-markdown .task-list-item input { width: auto; min-height: 0; margin-top: .28em; accent-color: var(--accent); }
+
+
+.chat-outline-action-body { padding: .7rem .8rem; color: var(--soft); font-size: .82rem; line-height: 1.45; }
+.chat-outline-action-body p { margin: 0; }
+.chat-outline-action-body p > span,.chat-outline-action-body p > strong,.chat-outline-action-body p > b { margin-right: .35rem; }
+.chat-document-edit > footer button.danger { border-color: rgba(225,142,135,.35); background: rgba(225,142,135,.12); color: var(--danger); }
+.chat-document-edit.delete > header > span { color: var(--danger); }

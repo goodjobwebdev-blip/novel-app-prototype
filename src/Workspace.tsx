@@ -182,10 +182,27 @@ export default function Workspace() {
 
   useEffect(() => {
     const handleEntityChanged = (event: Event) => {
-      const detail = (event as CustomEvent<{ bookId?: string; entityId?: string }>).detail
+      const detail = (event as CustomEvent<{ bookId?: string; entityId?: string; deletedIds?: string[] }>).detail
       if (!detail?.bookId || !detail.entityId || detail.bookId !== currentBook?.id) return
       void (async () => {
-        await reloadBookContent(detail.bookId!)
+        const structural = await reloadBookContent(detail.bookId!)
+        if (activeDocumentIdRef.current && detail.deletedIds?.includes(activeDocumentIdRef.current)) {
+          const fallback = structural.find((entity) => entity.type === 'scene')
+          if (fallback) {
+            await loadDocument(fallback.id, false)
+          } else {
+            activeDocumentIdRef.current = null
+            activeSceneIdRef.current = null
+            setActiveSceneId(null)
+            setActiveDocument(null)
+            storyRef.current = ''
+            changedSinceSnapshotRef.current = false
+            setStoryMarkdown('')
+            setEditorRevision((revision) => revision + 1)
+            setSaveState('saved')
+          }
+          return
+        }
         if (activeDocumentIdRef.current !== detail.entityId) return
         const refreshed = await getEntity<EditableEntity>(detail.entityId!)
         if (!refreshed || !['scene', 'note', 'codexEntry', 'summary'].includes(refreshed.type)) return
