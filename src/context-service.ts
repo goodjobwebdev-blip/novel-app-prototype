@@ -12,6 +12,14 @@ export type PreparedContextValues = {
 }
 export type ContextDiagnostics = { modelId: string; modelContextTokens: number; requestTokens: number; responseReserveTokens: number; fits: boolean }
 type BuildOptions = { bookId: string; type: GenerationContextType; currentSceneId?: string; currentSceneText?: string; currentDocumentId?: string; profile: GenerationContextProfile }
+type AdditionalContextSection = {
+  text: string
+  id: string
+  updatedAt: number
+  stabilityRank: number
+  typeRank: number
+  outlineIndex: number
+}
 
 const tokenEstimate = (text: string) => Math.max(1, Math.ceil(text.length / 4))
 const section = (heading: string, content: string) => `## ${heading}\n\n${content.trim()}`
@@ -73,10 +81,19 @@ function summaryMatches(source: StructuralEntity, outline: StructuralEntity[], c
   return range === 'before' ? Math.max(...indices) < currentIndex : Math.min(...indices) > currentIndex
 }
 
+function additionalContextOrder(a: AdditionalContextSection, b: AdditionalContextSection) {
+  return a.stabilityRank - b.stabilityRank
+    || a.updatedAt - b.updatedAt
+    || a.typeRank - b.typeRank
+    || a.outlineIndex - b.outlineIndex
+    || a.id.localeCompare(b.id)
+}
+
 export async function buildContextValues(options: BuildOptions): Promise<PreparedContextValues> {
   const entities = await listEntitiesByBook(options.bookId)
   const outline = orderedOutline(options.bookId, entities)
   const scenes = outline.filter((item) => item.type === 'scene')
+  const outlineIndex = new Map(outline.map((item, index) => [item.id, index]))
   const currentIndex = options.currentSceneId ? scenes.findIndex((item) => item.id === options.currentSceneId) : -1
   const currentScene = currentIndex >= 0 ? scenes[currentIndex] : undefined
   const previousScene = currentIndex > 0 ? scenes[currentIndex - 1] : undefined
@@ -96,17 +113,46 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
   outline.filter((item) => options.profile.structuralIds.includes(item.id)).forEach((item) => descendantScenes(item, outline).forEach((scene) => {
     if (!automaticFullIds.has(scene.id)) selectedSceneIds.add(scene.id)
   }))
-  const fullSections = scenes.filter((scene) => selectedSceneIds.has(scene.id) && String(scene.content ?? '').trim()).map((scene) => section(`Scene — ${scene.title}`, String(scene.content)))
+  const fullSections: AdditionalContextSection[] = scenes
+    .filter((scene) => selectedSceneIds.has(scene.id) && String(scene.content ?? '').trim())
+    .map((scene) => ({
+      text: section(`Scene — ${scene.title}`, String(scene.content)),
+      id: scene.id,
+      updatedAt: scene.updatedAt,
+      stabilityRank: 0,
+      typeRank: 0,
+      outlineIndex: outlineIndex.get(scene.id) ?? Number.MAX_SAFE_INTEGER,
+    }))
 
   const summaries = summaryMap(entities)
-  const summarySections = outline.filter((item) => summaryMatches(item, outline, options.currentSceneId, options.profile.summaryRange))
+  const summarySections: AdditionalContextSection[] = outline.filter((item) => summaryMatches(item, outline, options.currentSceneId, options.profile.summaryRange))
     .map((item) => summaries.get(item.id)).filter((item): item is SummaryEntity => Boolean(item) && !automatic.ids.has(item!.id))
-    .map((summary) => section(summary.title, summary.content))
-  const notes = entities.filter((item) => item.type === 'note' && options.profile.noteIds.includes(item.id) && String(item.content ?? '').trim())
-    .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)).map((item) => section(`Note — ${item.title ?? 'Untitled'}`, String(item.content)))
-  const codex = entities.filter((item) => item.type === 'codexEntry' && item.id !== options.currentDocumentId && options.profile.codexEntryIds.includes(item.id))
-    .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
-    .map((item) => section(`Codex — ${String(item.category ?? 'Other')}: ${item.title ?? 'Untitled'}`, String(item.content ?? '').trim() || '_No description provided._'))
+    .map((summary) => ({
+      text: section(summary.title, summary.content),
+      id: summary.id,
+      updatedAt: summary.updatedAt,
+      stabilityRank: 1,
+      typeRank: 1,
+      outlineIndex: outlineIndex.get(summary.sourceEntityId) ?? Number.MAX_SAFE_INTEGER,
+    }))
+  const notes: AdditionalContextSection[] = entities.filter((item) => item.type === 'note' && options.profile.noteIds.includes(item.id) && String(item.content ?? '').trim())
+    .map((item) => ({
+      text: section(`Note — ${item.title ?? 'Untitled'}`, String(item.content)),
+      id: item.id,
+      updatedAt: item.updatedAt,
+      stabilityRank: 1,
+      typeRank: 2,
+      outlineIndex: Number.MAX_SAFE_INTEGER,
+    }))
+  const codex: AdditionalContextSection[] = entities.filter((item) => item.type === 'codexEntry' && item.id !== options.currentDocumentId && options.profile.codexEntryIds.includes(item.id))
+    .map((item) => ({
+      text: section(`Codex — ${String(item.category ?? 'Other')}: ${item.title ?? 'Untitled'}`, String(item.content ?? '').trim() || '_No description provided._'),
+      id: item.id,
+      updatedAt: item.updatedAt,
+      stabilityRank: 1,
+      typeRank: 0,
+      outlineIndex: Number.MAX_SAFE_INTEGER,
+    }))
 
   return {
     currentSceneText: liveCurrentText,
@@ -116,7 +162,7 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
     summaryContext: automatic.text,
     lastSceneText: (options.type === 'codex' || options.type === 'chat') && options.profile.includeLastScene ? String(currentScene?.content ?? '') : '',
     lastSceneTitle: (options.type === 'codex' || options.type === 'chat') && options.profile.includeLastScene ? currentScene?.title ?? '' : '',
-    additionalContext: [...fullSections, ...summarySections, ...notes, ...codex].join('\n\n'),
+    additionalContext: [...fullSections, ...summarySections, ...notes, ...codex].sort(additionalContextOrder).map((item) => item.text).join('\n\n'),
   }
 }
 
