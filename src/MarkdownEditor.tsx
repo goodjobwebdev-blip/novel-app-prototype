@@ -411,6 +411,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
         }
       }
       if (session.placement === 'append') viewRef.current?.dispatch({
+          selection: { anchor: session.generatedTo },
           effects: setGenerationHighlight.of({ from: session.generatedFrom, to: session.generatedTo, active: false }),
           annotations: isolateHistory.of('before'),
         })
