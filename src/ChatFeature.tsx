@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import {
   Bot,
+  Check,
   ChevronDown,
+  Copy,
   Feather,
   GitFork,
   MessageCircle,
@@ -71,6 +75,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   const [promptDraft, setPromptDraft] = useState('')
   const [editingId, setEditingId] = useState('')
   const [editingValue, setEditingValue] = useState('')
+  const [copiedMessageId, setCopiedMessageId] = useState('')
   const [generating, setGenerating] = useState(false)
   const [phase, setPhase] = useState<GenerationPhase | null>(null)
   const [elapsed, setElapsed] = useState(0)
@@ -80,6 +85,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   const abortRef = useRef<AbortController | null>(null)
   const startedAtRef = useRef(0)
   const bottomRef = useRef<HTMLDivElement | null>(null)
+  const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const sortedModels = useMemo(() => [...models].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)), [models])
 
@@ -141,7 +147,10 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     bottomRef.current?.scrollIntoView({ block: 'end' })
   }, [messages, streamedContent, streamedThoughts])
 
-  useEffect(() => () => abortRef.current?.abort(), [])
+  useEffect(() => () => {
+    abortRef.current?.abort()
+    if (copyResetRef.current) clearTimeout(copyResetRef.current)
+  }, [])
 
   async function reloadMessages() {
     if (!chat) return []
@@ -477,6 +486,34 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
     }
   }
 
+  async function copyMessage(message: ChatMessageEntity) {
+    if (!message.content) return
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(message.content)
+      } else {
+        const textarea = document.createElement('textarea')
+        textarea.value = message.content
+        textarea.setAttribute('readonly', '')
+        textarea.style.position = 'fixed'
+        textarea.style.opacity = '0'
+        document.body.appendChild(textarea)
+        textarea.select()
+        const copied = document.execCommand('copy')
+        textarea.remove()
+        if (!copied) throw new Error('Copy command was not accepted.')
+      }
+      setCopiedMessageId(message.id)
+      if (copyResetRef.current) clearTimeout(copyResetRef.current)
+      copyResetRef.current = setTimeout(() => {
+        setCopiedMessageId((current) => current === message.id ? '' : current)
+        copyResetRef.current = null
+      }, 1600)
+    } catch {
+      onToast('Could not copy this message to the clipboard.')
+    }
+  }
+
   function readAloud(message: ChatMessageEntity) {
     if (!('speechSynthesis' in window) || !message.content.trim()) return
     window.speechSynthesis.cancel()
@@ -495,20 +532,20 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
           {message.role === 'assistant' ? <div className="chat-message-stack">
             {editingId === message.id ? <InlineMessageEdit value={editingValue} onChange={setEditingValue} onCancel={() => setEditingId('')} onSave={() => { void saveEdit(message, false) }} /> : <>
               {message.thoughts && <details className="chat-thoughts"><summary>Thoughts</summary><div>{message.thoughts}</div></details>}
-              <div className="bubble">{message.content || (message.documentEdits?.length || message.codexCreations?.length ? <em>Workspace proposal</em> : <em>No final answer returned.</em>)}</div>
+              <div className="bubble chat-markdown-bubble">{message.content ? <MarkdownMessage content={message.content} /> : (message.documentEdits?.length || message.codexCreations?.length ? <em>Workspace proposal</em> : <em>No final answer returned.</em>)}</div>
               {message.documentEdits?.length ? <div className="chat-document-edits">{message.documentEdits.map((proposal) => <DocumentEditCard key={proposal.id} proposal={proposal} onApply={() => { void applyProposal(message, proposal) }} onReject={() => { void rejectProposal(message, proposal) }} />)}</div> : null}
               {message.codexCreations?.length ? <div className="chat-document-edits">{message.codexCreations.map((proposal) => <CodexCreationCard key={proposal.id} proposal={proposal} onCreate={() => { void createCodexProposal(message, proposal) }} onReject={() => { void rejectCodexProposal(message, proposal) }} />)}</div> : null}
               {message.status === 'stopped' && <small className="chat-message-status">Stopped</small>}
-              <div className="message-tools"><button type="button" onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" onClick={() => { void fork(message) }}><GitFork aria-hidden="true" /> Fork</button><button type="button" onClick={() => readAloud(message)}><Volume2 aria-hidden="true" /> Read aloud</button><button type="button" onClick={() => { void regenerate(message) }}><RefreshCw aria-hidden="true" /> Regenerate</button><button type="button" onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
+              <div className="message-tools"><button type="button" onClick={() => { void copyMessage(message) }}>{copiedMessageId === message.id ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />} {copiedMessageId === message.id ? 'Copied' : 'Copy'}</button><button type="button" onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" onClick={() => { void fork(message) }}><GitFork aria-hidden="true" /> Fork</button><button type="button" onClick={() => readAloud(message)}><Volume2 aria-hidden="true" /> Read aloud</button><button type="button" onClick={() => { void regenerate(message) }}><RefreshCw aria-hidden="true" /> Regenerate</button><button type="button" onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
             </>}
           </div> : editingId === message.id ? <InlineMessageEdit value={editingValue} onChange={setEditingValue} onCancel={() => setEditingId('')} onSave={() => { void saveEdit(message, false) }} onSaveAndRegenerate={() => { void saveEdit(message, true) }} /> : <>
-            <div className="bubble">{message.content}</div>
-            <div className="message-tools"><button type="button" onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
+            <div className="bubble chat-markdown-bubble"><MarkdownMessage content={message.content} /></div>
+            <div className="message-tools"><button type="button" onClick={() => { void copyMessage(message) }}>{copiedMessageId === message.id ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />} {copiedMessageId === message.id ? 'Copied' : 'Copy'}</button><button type="button" onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
           </>}
         </article>)}
         {generating && <article className="message bot no-thumb streaming"><div className="chat-message-stack">
           {streamedThoughts && <details className="chat-thoughts" open={!streamedContent}><summary>Thoughts</summary><div>{streamedThoughts}</div></details>}
-          {streamedContent && <div className="bubble">{streamedContent}</div>}
+          {streamedContent && <div className="bubble chat-markdown-bubble"><MarkdownMessage content={streamedContent} /></div>}
           {!streamedContent && !streamedThoughts && <div className="chat-thinking-indicator"><i /><span>{phase === 'sending' ? 'Sending' : 'Thinking'} · {formatElapsed(elapsed)}</span></div>}
         </div></article>}
         <div ref={bottomRef} />
@@ -540,6 +577,10 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
       </section>
     </div>}
   </>
+}
+
+function MarkdownMessage({ content }: { content: string }) {
+  return <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown></div>
 }
 
 function ChatModelPicker({ value, models, onChange }: { value: string; models: ChatModel[]; onChange: (modelId: string) => void }) {

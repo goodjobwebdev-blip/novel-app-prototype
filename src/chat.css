@@ -90,3 +90,32 @@
 .chat-document-edit > footer { display: flex; justify-content: flex-end; gap: .45rem; padding: .65rem .8rem; border-top: 1px solid var(--border); }
 .chat-document-edit > footer button { border: 1px solid var(--border); border-radius: .65rem; background: transparent; color: inherit; padding: .45rem .7rem; }
 .chat-document-edit > footer button.primary { background: var(--accent); border-color: transparent; color: var(--canvas); }
+
+
+/* Render chat message bodies as safe Markdown. react-markdown leaves raw HTML escaped. */
+.functional-chat .bubble.chat-markdown-bubble { white-space: normal; }
+.chat-markdown { min-width: 0; overflow-wrap: anywhere; }
+.chat-markdown > :first-child { margin-top: 0; }
+.chat-markdown > :last-child { margin-bottom: 0; }
+.chat-markdown p { margin: 0 0 .72em; }
+.chat-markdown p:last-child { margin-bottom: 0; }
+.chat-markdown h1,.chat-markdown h2,.chat-markdown h3,.chat-markdown h4,.chat-markdown h5,.chat-markdown h6 { margin: 1em 0 .45em; color: var(--ink); font-family: var(--serif); font-weight: 500; line-height: 1.2; }
+.chat-markdown h1 { font-size: 1.5em; }
+.chat-markdown h2 { font-size: 1.32em; }
+.chat-markdown h3 { font-size: 1.17em; }
+.chat-markdown h4,.chat-markdown h5,.chat-markdown h6 { font-size: 1em; }
+.chat-markdown ul,.chat-markdown ol { margin: .55em 0 .8em; padding-left: 1.45em; }
+.chat-markdown li + li { margin-top: .28em; }
+.chat-markdown blockquote { margin: .75em 0; padding: .1em 0 .1em .9em; border-left: 2px solid rgba(198,168,107,.45); color: var(--soft); }
+.chat-markdown blockquote > :last-child { margin-bottom: 0; }
+.chat-markdown code { padding: .12em .32em; border-radius: .35em; background: rgba(255,255,255,.055); color: #ddd5c6; font: .84em/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+.chat-markdown pre { max-width: 100%; margin: .75em 0; padding: .8em .9em; overflow: auto; border: 1px solid var(--line); border-radius: .7em; background: #0b0c0b; }
+.chat-markdown pre code { padding: 0; border-radius: 0; background: transparent; color: #d9d3c8; font-size: .78em; white-space: pre; }
+.chat-markdown a { color: var(--accent-bright); text-decoration-color: rgba(224,200,143,.45); text-underline-offset: 2px; }
+.chat-markdown hr { margin: 1em 0; border: 0; border-top: 1px solid var(--line); }
+.chat-markdown table { width: max-content; min-width: 100%; border-collapse: collapse; font: .78em/1.45 ui-sans-serif,system-ui; }
+.chat-markdown table th,.chat-markdown table td { padding: .48em .62em; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+.chat-markdown table th { background: rgba(255,255,255,.04); color: var(--ink); }
+.chat-markdown .contains-task-list { padding-left: .2em; list-style: none; }
+.chat-markdown .task-list-item { display: flex; align-items: flex-start; gap: .45em; }
+.chat-markdown .task-list-item input { width: auto; min-height: 0; margin-top: .28em; accent-color: var(--accent); }
