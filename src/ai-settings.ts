@@ -4,6 +4,7 @@ export type AiPrompts = {
   story: string
   summarize: string
   titles: string
+  lore: string
 }
 
 export type AiSettings = {
@@ -14,6 +15,8 @@ export type AiSettings = {
   mainModelContextLength?: number
   supportModel: string
   supportModelContextLength?: number
+  codexModel: string
+  codexModelContextLength?: number
   generationWordDelayMs: string
   favorites: string[]
   prompts: AiPrompts
@@ -25,7 +28,7 @@ export const AI_SETTINGS_STORAGE_KEY = 'arc-ai-defaults-v1'
 export const DEFAULT_GENERATION_WORD_DELAY_MS = 40
 export const MAX_GENERATION_WORD_DELAY_MS = 2000
 
-const previousDefaultAiPrompts: AiPrompts[] = [{
+const previousDefaultAiPrompts: Array<Partial<AiPrompts>> = [{
   story: `You are the story writer for {{book.title}}.
 
 {% if scene.pov %}
@@ -93,8 +96,23 @@ Write in {{book.language}}.
 {% if scene.pov %}
 This scene uses {{scene.pov}}; prefer it over the book default.
 {% endif %}
+{% if scene.previous_text %}
+# Previous scene
+{{scene.previous_text}}
+{% endif %}
+{% if scene.summary_context %}
+# Earlier summaries
+{{scene.summary_context}}
+{% endif %}
+{% if additional_context %}
+# Additional context
+{{additional_context}}
+{% endif %}
 
-Continue from the supplied Current scene section without summarizing it.`,
+# Current scene
+{{scene.text}}
+
+Continue the current scene without summarizing or repeating it.`,
   summarize: `Summarize {{target.type}} from {{book.title}} for future story context.
 
 Keep names, decisions, promises, and unresolved questions.
@@ -112,6 +130,30 @@ Genre: {{book.genre}}
 Tone: {{book.style}}
 Language: {{book.language}}
 Return {{count}} distinct options without commentary.`,
+  lore: `You are the canon editor for {{book.title}}.
+
+Create or revise the Codex entry “{{entry.title}}”.
+Category: {{entry.category}}.
+
+Preserve established facts. Do not turn uncertainty into certainty, and do not invent details unless the instruction asks you to develop new lore.
+
+{% if entry.content %}
+# Existing entry
+{{entry.content}}
+{% endif %}
+{% if scene.text %}
+# Current scene
+{{scene.text}}
+{% endif %}
+{% if additional_context %}
+# Additional context
+{{additional_context}}
+{% endif %}
+{% if book.language %}
+Write in {{book.language}}.
+{% endif %}
+
+Return only the final Markdown body. Do not repeat the entry title as a top-level heading.`,
 }
 
 export const initialAiSettings: AiSettings = {
@@ -120,6 +162,7 @@ export const initialAiSettings: AiSettings = {
   baseUrl: 'https://nano-gpt.com/api/v1',
   mainModel: '',
   supportModel: '',
+  codexModel: '',
   generationWordDelayMs: String(DEFAULT_GENERATION_WORD_DELAY_MS),
   favorites: [],
   prompts: defaultAiPrompts,
@@ -152,6 +195,7 @@ export function normalizeAiSettings(value?: Partial<AiSettings>): AiSettings {
     generationWordDelayMs: normalizeGenerationWordDelay(value?.generationWordDelayMs),
     mainModelContextLength: Number.isFinite(value?.mainModelContextLength) ? value?.mainModelContextLength : undefined,
     supportModelContextLength: Number.isFinite(value?.supportModelContextLength) ? value?.supportModelContextLength : undefined,
+    codexModelContextLength: Number.isFinite(value?.codexModelContextLength) ? value?.codexModelContextLength : undefined,
   }
 }
 
