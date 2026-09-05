@@ -5,6 +5,7 @@ import {
   CircleHelp,
   Home,
   Image as ImageIcon,
+  MessageCircle,
   Plus,
   RefreshCw,
   Search,
@@ -37,20 +38,44 @@ import {
   type BookContextSettings,
   type GenerationContextType,
 } from './persistence'
-import { promptVariables } from './prompt-template'
-import type { BookPromptValues } from './prompt-template'
+import { bookTemplateValues, promptVariables, renderPromptTemplate, type BookPromptValues } from './prompt-template'
 import { buildContextValues, type PreparedContextValues } from './context-service'
-import { getChat, saveChatContextProfile } from './chat-service'
+import { getChat, listChatMessages, saveChatContextProfile, type ChatEntity, type ChatMessageEntity } from './chat-service'
+import { renderLorePrompt, renderStoryPrompt } from './nanogpt'
 import { clearModelCatalog, getCachedModelCatalog, providerModelEndpoint, saveModelCatalog, type ProviderModel } from './model-catalog'
 type SettingsTab = 'ai' | 'context' | 'appearance' | 'speech' | 'images'
 type SaveState = 'loading' | 'saved' | 'saving' | 'error'
+type RequestPreviewMessage = {
+  key: string
+  role: 'system' | 'user' | 'assistant'
+  title: string
+  detail: string
+  content: string
+  reasoning?: string
+}
 
 const providerLabels: Record<AiProvider, string> = { openrouter: 'OpenRouter', nanogpt: 'nano-gpt.com', openai: 'OpenAI', compatible: 'OpenAI-compatible' }
+const chatWorkspaceInstructions = `# Workspace tools
+
+You can inspect and propose edits to Scenes, Notes, and Codex entries in this book. You can also propose creating a new Codex/lore entry. For the outline, use read_outline before structural changes; you may propose creating, renaming, moving/reordering, or deleting Acts, Chapters, and Scenes. Mutating tools only create approval proposals: never claim an edit, creation, rename, move, reorder, or deletion happened until the user approves the card in Chat. Outline deletion is allowed only when the target and every descendant Scene have empty content. Search/read tools are read-only and can run automatically. Use search_entities and read_entity when a document target is not already known. For localized document changes, prefer propose_document_edit with exact old_text copied from read_entity. Use propose_document_replacement only for whole-document rewrites.`
 
 function formatContext(value?: number) {
   if (!value) return 'Context unknown'
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value % 1_000_000 ? 1 : 0)}m context`
   return `${Math.round(value / 1000)}k context`
+}
+
+function chatHistoryContent(message: ChatMessageEntity) {
+  const editState = message.role === 'assistant' && message.documentEdits?.length
+    ? `\n\n[Workspace edit proposals: ${message.documentEdits.map((proposal) => `${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
+    : ''
+  const creationState = message.role === 'assistant' && message.codexCreations?.length
+    ? `\n\n[Codex creation proposals: ${message.codexCreations.map((proposal) => `${proposal.title}: ${proposal.status}`).join('; ')}]`
+    : ''
+  const outlineState = message.role === 'assistant' && message.outlineActions?.length
+    ? `\n\n[Outline proposals: ${message.outlineActions.map((proposal) => `${proposal.action} ${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
+    : ''
+  return `${message.content}${editState}${creationState}${outlineState}`
 }
 
 type AiSettingsProps = {
@@ -428,16 +453,29 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
           <div className="prompt-footer"><button type="button" onClick={() => update('prompts', { ...settings.prompts, [promptTab]: defaultAiPrompts[promptTab] })}>Reset default</button></div>
         </section>
         {book && <footer className="save-bar"><div><strong>{book.title}</strong><span>Changes save automatically</span></div><div className="save-actions"><button className="reset-settings" type="button" onClick={() => { void resetFromDefaults() }} disabled={settingsLoading}><RefreshCw aria-hidden="true" /> Reset from defaults</button></div></footer>}
-        </> : settingsTab === 'context' && book ? <ContextSettings bookId={book.id} bookTitle={book.title} bookPromptValues={book.promptValues} type={book.contextType ?? 'scene'} currentDocumentId={book.currentDocumentId} currentDocumentText={book.currentDocumentText} value={contextSettings} sources={contextSources} saved={contextSaved} onChange={updateContextDefaults} /> : <SettingsPlaceholder tab={settingsTab} scope={isBookSettings ? 'book' : 'defaults'} />}
+        </> : settingsTab === 'context' && book ? (book.contextType === 'note'
+          ? <NoteContextPlaceholder />
+          : <ContextSettings bookId={book.id} bookTitle={book.title} bookPromptValues={book.promptValues} type={book.contextType ?? 'scene'} currentDocumentId={book.currentDocumentId} currentDocumentText={book.currentDocumentText} chatId={book.chatId} settings={settings} value={contextSettings} sources={contextSources} saved={contextSaved} onChange={updateContextDefaults} />)
+          : <SettingsPlaceholder tab={settingsTab} scope={isBookSettings ? 'book' : 'defaults'} />}
       </section>
     </main>
   )
 }
 
-function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDocumentId, currentDocumentText, value, sources, saved, onChange }: { bookId: string; bookTitle: string; bookPromptValues?: BookPromptValues; type: GenerationContextType; currentDocumentId?: string; currentDocumentText?: string; value: BookContextSettings; sources: ArcEntity[]; saved: boolean; onChange: (value: BookContextSettings) => void }) {
+function NoteContextPlaceholder() {
+  return <section className="compact-settings-empty" aria-labelledby="page-title">
+    <MessageCircle aria-hidden="true" />
+    <h1 id="page-title">Context Management</h1>
+    <p>You can use Chat to generate notes!</p>
+  </section>
+}
+
+function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDocumentId, currentDocumentText, chatId, settings, value, sources, saved, onChange }: { bookId: string; bookTitle: string; bookPromptValues?: BookPromptValues; type: Exclude<GenerationContextType, 'note'>; currentDocumentId?: string; currentDocumentText?: string; chatId?: string; settings: AiSettings; value: BookContextSettings; sources: ArcEntity[]; saved: boolean; onChange: (value: BookContextSettings) => void }) {
   const [query, setQuery] = useState('')
   const [preview, setPreview] = useState<PreparedContextValues | null>(null)
   const [previewError, setPreviewError] = useState('')
+  const [previewChat, setPreviewChat] = useState<ChatEntity | null>(null)
+  const [previewHistory, setPreviewHistory] = useState<ChatMessageEntity[]>([])
   const profile = value.profiles[type]
   const updateProfile = (next: typeof profile) => onChange({ ...value, profiles: { ...value.profiles, [type]: next } })
   const toggle = (key: 'structuralIds' | 'noteIds' | 'codexEntryIds', id: string) => updateProfile({ ...profile, [key]: profile[key].includes(id) ? profile[key].filter((item) => item !== id) : [...profile[key], id] })
@@ -452,46 +490,111 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
   useEffect(() => {
     let cancelled = false
     const currentSceneId = type === 'scene' ? currentDocumentId : value.lastOpenedSceneId || undefined
-    void buildContextValues({ bookId, type, currentSceneId, currentSceneText: type === 'scene' ? currentDocumentText : undefined, currentDocumentId, profile }).then((prepared) => {
-      if (!cancelled) { setPreview(prepared); setPreviewError('') }
-    }).catch(() => {
-      if (!cancelled) { setPreview(null); setPreviewError('Context preview could not be prepared.') }
-    })
+    ;(async () => {
+      try {
+        const prepared = await buildContextValues({ bookId, type, currentSceneId, currentSceneText: type === 'scene' ? currentDocumentText : undefined, currentDocumentId, profile })
+        let chat: ChatEntity | null = null
+        let history: ChatMessageEntity[] = []
+        if (type === 'chat' && chatId) {
+          const [loadedChat, loadedHistory] = await Promise.all([getChat(chatId), listChatMessages(bookId, chatId)])
+          chat = loadedChat ?? null
+          history = loadedHistory
+        }
+        if (!cancelled) {
+          setPreview(prepared)
+          setPreviewChat(chat)
+          setPreviewHistory(history)
+          setPreviewError(type === 'chat' && !chatId ? 'Open a chat to preview its request.' : '')
+        }
+      } catch {
+        if (!cancelled) {
+          setPreview(null)
+          setPreviewChat(null)
+          setPreviewHistory([])
+          setPreviewError('Request preview could not be prepared.')
+        }
+      }
+    })()
     return () => { cancelled = true }
-  }, [bookId, currentDocumentId, currentDocumentText, profile, sources, type, value.lastOpenedSceneId])
+  }, [bookId, chatId, currentDocumentId, currentDocumentText, profile, sources, type, value.lastOpenedSceneId])
 
   const currentDocument = sources.find((item) => item.id === currentDocumentId)
   const metadata = bookPromptValues ?? { title: bookTitle, series: '', seriesOrder: '', overview: '', genre: '', style: '', pov: '', tense: '', language: '' }
-  const metadataText = [
-    ['Title', metadata.title], ['Series', metadata.series], ['Series order', metadata.seriesOrder], ['Overview', metadata.overview],
-    ['Genre', metadata.genre], ['Style', metadata.style], ['Point of view', metadata.pov], ['Tense', metadata.tense], ['Language', metadata.language],
-  ].filter((item) => item[1]).map(([label, content]) => `${label}: ${content}`).join('\n')
-  const previewSections = preview ? [
-    { title: 'Book metadata', detail: 'Prompt variables', content: metadataText },
-    ...(type === 'scene' && preview.previousSceneText ? [{ title: `Previous scene${preview.previousSceneTitle ? ` — ${preview.previousSceneTitle}` : ''}`, detail: 'Empty-scene fallback', content: preview.previousSceneText }] : []),
-    ...(type === 'scene' && preview.summaryContext ? [{ title: 'Earlier summaries', detail: 'Automatic', content: preview.summaryContext }] : []),
-    ...(type === 'codex' ? [{ title: `Current entry${currentDocument?.title ? ` — ${currentDocument.title}` : ''}`, detail: 'Required', content: currentDocumentText ?? String(currentDocument?.content ?? '') }] : []),
-    ...(type === 'codex' && preview.lastSceneText ? [{ title: `Last-opened scene${preview.lastSceneTitle ? ` — ${preview.lastSceneTitle}` : ''}`, detail: 'Automatic', content: preview.lastSceneText }] : []),
-    ...(type === 'chat' && preview.lastSceneText ? [{ title: `Current scene${preview.lastSceneTitle ? ` — ${preview.lastSceneTitle}` : ''}`, detail: 'Automatic', content: preview.lastSceneText }] : []),
-    ...(preview.additionalContext ? [{ title: 'Additional context', detail: 'Selected', content: preview.additionalContext }] : []),
-    ...(type === 'scene' ? [{ title: `Current scene${preview.currentSceneTitle ? ` — ${preview.currentSceneTitle}` : ''}`, detail: 'Required', content: preview.currentSceneText }] : []),
-  ] : []
-  const exactPreview = previewSections.map((item) => `# ${item.title}\n\n${item.content || '[empty]'}`).join('\n\n')
+  const typeLabel = type === 'scene' ? 'Story' : type === 'codex' ? 'Codex' : 'Chat'
+  const requestMessages: RequestPreviewMessage[] = []
+
+  if (preview && type === 'scene') {
+    const systemPrompt = renderStoryPrompt(settings.prompts.story, {
+      book: metadata,
+      sceneText: preview.currentSceneText,
+      scenePov: typeof currentDocument?.pov === 'string' ? currentDocument.pov : undefined,
+      previousSceneText: preview.previousSceneText,
+      summaryContext: preview.summaryContext,
+      additionalContext: preview.additionalContext,
+    })
+    requestMessages.push({ key: 'story-system', role: 'system', title: 'Story system prompt', detail: 'SYSTEM', content: systemPrompt })
+    if (!/{{\s*additional_context\s*}}/.test(settings.prompts.story) && preview.additionalContext.trim()) {
+      requestMessages.push({ key: 'story-context', role: 'user', title: 'Additional context', detail: 'USER', content: `# Additional context\n\n${preview.additionalContext}` })
+    }
+    requestMessages.push({ key: 'story-instruction', role: 'user', title: 'Generation instruction', detail: 'USER · default shown', content: '# Instruction\n\nContinue the story.' })
+  }
+
+  if (preview && type === 'codex') {
+    const systemPrompt = renderLorePrompt(settings.prompts.lore, {
+      book: metadata,
+      entryTitle: currentDocument?.title ?? '',
+      entryCategory: typeof currentDocument?.category === 'string' ? currentDocument.category : '',
+      entryContent: currentDocumentText ?? String(currentDocument?.content ?? ''),
+      sceneText: preview.lastSceneText,
+      additionalContext: preview.additionalContext,
+    })
+    requestMessages.push({ key: 'codex-system', role: 'system', title: 'Lore system prompt', detail: 'SYSTEM', content: systemPrompt })
+    if (!/{{\s*additional_context\s*}}/.test(settings.prompts.lore) && preview.additionalContext.trim()) {
+      requestMessages.push({ key: 'codex-context', role: 'user', title: 'Additional context', detail: 'USER', content: `# Additional context\n\n${preview.additionalContext}` })
+    }
+    requestMessages.push({ key: 'codex-instruction', role: 'user', title: 'Generation instruction', detail: 'USER · default shown', content: '# Instruction\n\nCreate a complete Codex entry.' })
+  }
+
+  if (preview && type === 'chat' && previewChat) {
+    const systemPrompt = renderPromptTemplate(previewChat.systemPrompt, bookTemplateValues(metadata))
+    requestMessages.push({ key: 'chat-system', role: 'system', title: 'Chat system prompt', detail: 'SYSTEM', content: systemPrompt })
+    requestMessages.push({ key: 'chat-workspace', role: 'system', title: 'Workspace instructions', detail: 'SYSTEM', content: chatWorkspaceInstructions })
+    const contextSections = [
+      preview.lastSceneText ? `# Current scene${preview.lastSceneTitle ? ` — ${preview.lastSceneTitle}` : ''}\n\n${preview.lastSceneText.trim()}` : '',
+      preview.additionalContext ? `# Additional context\n\n${preview.additionalContext.trim()}` : '',
+    ].filter(Boolean)
+    if (contextSections.length) {
+      requestMessages.push({ key: 'chat-context', role: 'system', title: 'Selected book context', detail: 'SYSTEM', content: `# Selected book context\n\n${contextSections.join('\n\n')}` })
+    }
+    previewHistory.forEach((message) => requestMessages.push({
+      key: message.id,
+      role: message.role,
+      title: message.role === 'user' ? 'User message' : 'Assistant message',
+      detail: message.role.toUpperCase(),
+      content: chatHistoryContent(message),
+      reasoning: message.role === 'assistant' ? message.thoughts : undefined,
+    }))
+  }
+
+  const exactPreview = requestMessages.map((message) => `${message.role.toUpperCase()}:\n\n${message.content || '[empty]'}${message.reasoning ? `\n\nreasoning:\n${message.reasoning}` : ''}`).join('\n\n---\n\n')
+  const selectedModel = type === 'codex' ? settings.codexModel.trim() || settings.mainModel.trim() : type === 'chat' ? previewChat?.model.trim() : settings.mainModel.trim()
+
   return <section className="context-defaults-settings">
-    <header className="page-heading"><div><p>{type} generation</p><h1 id="page-title">Context Management</h1><span>Saved independently for {type} generation in “{bookTitle}”.</span></div><div className={`save-state ${saved ? 'saved' : ''}`}><i />{saved ? 'Saved' : 'Saving…'}</div></header>
+    <header className="page-heading"><div><p>{typeLabel} generation</p><h1 id="page-title">Context Management</h1><span>Saved independently for {typeLabel.toLowerCase()} generation in “{bookTitle}”.</span></div><div className={`save-state ${saved ? 'saved' : ''}`}><i />{saved ? 'Saved' : 'Saving…'}</div></header>
     <section className="settings-card context-defaults-card"><div className="card-heading"><div><span>01</span><h2>Automatic context</h2></div></div>
       <div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Book metadata</strong><small>Provided through the book prompt variables.</small></span><b>Required</b></div>
-      {type === 'scene' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current Scene</strong><small>The active editor content is always included.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} /><span><strong>Previous Scene when empty</strong><small>Use the immediately previous Scene only when the current Scene has no text.</small></span></label><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Earlier summaries</strong><small>Uses the highest completed Act or Chapter summary without exposing later material.</small></span><b>Automatic</b></div></> : type === 'codex' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current entry</strong><small>Title, category, and existing body are supplied through lore prompt variables.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includeLastScene} onChange={(event) => updateProfile({ ...profile, includeLastScene: event.target.checked })} /><span><strong>Last-opened Scene</strong><small>Included by default for Codex generation.</small></span></label></> : type === 'chat' ? <label><input type="checkbox" checked={profile.includeLastScene} onChange={(event) => updateProfile({ ...profile, includeLastScene: event.target.checked })} /><span><strong>Current Scene</strong><small>The book's last-opened Scene is included automatically for this chat.</small></span></label> : <div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Type-specific sources</strong><small>Automatic sources will be defined when {type} generation is implemented.</small></span><b>Planned</b></div>}
+      {type === 'scene' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current Scene</strong><small>The active editor content is always included.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} /><span><strong>Previous Scene when empty</strong><small>Use the immediately previous Scene only when the current Scene has no text.</small></span></label><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Earlier summaries</strong><small>Uses the highest completed Act or Chapter summary without exposing later material.</small></span><b>Automatic</b></div></> : type === 'codex' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current entry</strong><small>Title, category, and existing body are supplied through lore prompt variables.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includeLastScene} onChange={(event) => updateProfile({ ...profile, includeLastScene: event.target.checked })} /><span><strong>Last-opened Scene</strong><small>Included by default for Codex generation.</small></span></label></> : <label><input type="checkbox" checked={profile.includeLastScene} onChange={(event) => updateProfile({ ...profile, includeLastScene: event.target.checked })} /><span><strong>Current Scene</strong><small>The book's last-opened Scene is included automatically for this chat.</small></span></label>}
     </section>
     <section className="settings-card context-sources-card"><div className="card-heading"><div><span>02</span><h2>Additional context</h2></div><p>Inserted as <code>{'{{additional_context}}'}</code>.</p></div>
       <fieldset className="summary-range"><legend>Summaries</legend>{([['none','None'],['all','All summaries'],['before','Before current Scene'],['after','After current Scene']] as const).map(([range,label]) => <label key={range}><input type="radio" name="summary-range" checked={profile.summaryRange === range} onChange={() => updateProfile({ ...profile, summaryRange: range })}/><span>{label}</span></label>)}</fieldset>
       <div className="context-source-search"><Search aria-hidden="true" /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find Acts, Chapters, Scenes, Notes, or Codex" /></div>
       <div className="context-managed-list">{groups.map(([label, items, key]) => items.length > 0 && <section key={label}><h3>{label}</h3>{items.map((item) => <label key={item.id}><input type="checkbox" checked={profile[key].includes(item.id)} onChange={() => toggle(key, item.id)} /><span><strong>{item.title || 'Untitled'}</strong><small>{item.type}</small></span></label>)}</section>)}{!visible.length && <p>No matching sources.</p>}</div>
     </section>
-    <section className="settings-card context-preview-card"><div className="card-heading"><div><span>03</span><h2>Context to be sent</h2></div><p>Live preview of the material available to the generation prompt.</p></div>
+    <section className="settings-card context-preview-card"><div className="card-heading"><div><span>03</span><h2>Request preview</h2></div><p>{selectedModel ? `Model: ${selectedModel}. ` : ''}Rendered message stack for the current {typeLabel.toLowerCase()} request.</p></div>
+      {type !== 'chat' && <p className="context-preview-empty">The generation instruction below shows the fallback used when the generation drawer is empty. Custom drawer text replaces it when you generate.</p>}
       {previewError ? <p className="context-preview-error" role="alert">{previewError}</p> : preview ? <>
-        <div className="context-preview-rendered">{previewSections.map((item) => <section key={`${item.title}-${item.detail}`}><header><h3>{item.title}</h3><span>{item.detail}</span></header>{item.content ? <div className="context-preview-copy">{item.content}</div> : <p className="context-preview-empty">No content will be sent for this section.</p>}</section>)}</div>
-        <details className="context-preview-raw"><summary>View exact context text</summary><pre>{exactPreview}</pre></details>
+        <div className="context-preview-rendered">{requestMessages.map((message) => <section key={message.key}><header><h3>{message.title}</h3><span>{message.detail}</span></header>{message.content ? <div className="context-preview-copy">{message.content}</div> : <p className="context-preview-empty">This message is empty.</p>}{message.reasoning && <div className="context-preview-copy"><strong>Reasoning</strong>\n\n{message.reasoning}</div>}</section>)}</div>
+        <details className="context-preview-raw"><summary>View message stack</summary><pre>{exactPreview || '[No messages would be sent yet.]'}</pre></details>
       </> : <p className="context-preview-empty">Preparing preview…</p>}
     </section>
   </section>
