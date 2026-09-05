@@ -325,3 +325,40 @@
     display: none;
   }
 }
+
+
+/* Reuse the story/Codex expandable text control for chat composing and message editing. */
+.functional-chat-composer > .chat-compose-row > .expandable-text-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.functional-chat-composer > .chat-compose-row > .expandable-text-input textarea {
+  margin: 0;
+}
+
+.chat-inline-edit {
+  width: min(100%, 48rem);
+  min-width: 0;
+  display: grid;
+  gap: .55rem;
+}
+
+.chat-inline-edit > .expandable-text-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.chat-inline-edit > div:last-child {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: .45rem;
+}
+
+@media (max-width: 720px) {
+  .functional-chat-composer > .chat-compose-row > .expandable-text-input,
+  .chat-inline-edit > .expandable-text-input {
+    width: 100%;
+  }
+}
