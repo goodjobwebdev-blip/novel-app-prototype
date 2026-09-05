@@ -13,7 +13,7 @@ The application should feel like a quiet writing workspace, not a general-purpos
 - The home screen is a book library with covers, book and optional series titles, last-edited information, and a **New book** action.
 - Creating a book immediately creates and opens an untitled book.
 - If text-model settings are incomplete, Home shows a warning that opens the default AI settings.
-- Global settings are saved as defaults. A new book copies those defaults and then keeps independent settings.
+- AI defaults are copied into a new book and then become independent book settings. UI appearance settings are global on the device and apply to every book; books cannot override them.
 - A book can contain optional acts, chapters, scenes, notes, summaries, a searchable story codex, and book-aware chats.
 - Scenes, notes, summaries, and Codex entries open in the main workspace.
 - Chat replaces the editor workspace. The right sidebar switches between the chat list and the current chat's settings.
@@ -32,8 +32,8 @@ The application should feel like a quiet writing workspace, not a general-purpos
 
 ### Left settings
 
-- The left side is for global defaults or AI, Context, UI, Speech, and Image settings belonging to the open book.
-- Only AI settings are functionally implemented in the current prototype; other categories establish the intended navigation and visual structure.
+- The left side contains AI, Context, UI, Speech, and Image settings. AI and Context may be scoped to the open book where applicable; UI is always global on the current device and has no per-book override.
+- UI settings control main-editor typography, expandable/scalable text-input typography, built-in themes, and custom themes. Typography and theme selection are independent.
 
 ### Right book workspace
 
@@ -58,7 +58,10 @@ The application should feel like a quiet writing workspace, not a general-purpos
 ### Visual system
 
 - Mobile is the source design; desktop expands panels and density without changing the main interaction model.
-- The initial theme is **Ink at Night**: a dark writing canvas, warm paper-colored type, muted gold accent, restrained borders, and translucent controls.
+- The initial theme direction is a dark writing canvas with warm paper-colored type, restrained borders, and translucent controls.
+- Six built-in themes are available: Very Dark, Blue Dark, Green Dark, Very White, Blue Light, and Green Light.
+- Custom themes expose semantic colors for background, elevated surface, editor background, primary text, muted text, border, accent, active accent, selection, and error states. Built-in themes are immutable but can be duplicated into custom themes.
+- Main-editor typography and expandable-input typography each have independent font family, font size, line height, and font weight controls. Theme changes never change typography.
 - Canvas, ink, muted text, accent, glass, borders, spacing, radii, and typography use semantic variables so additional themes can be developed later.
 - The interface should avoid unnecessary effects and keep the manuscript visually dominant.
 
@@ -79,6 +82,7 @@ The application should feel like a quiet writing workspace, not a general-purpos
 
 - Manuscripts and structured book data should use IndexedDB; Dexie is the preferred wrapper when the data layer is implemented.
 - Small interface preferences and global AI defaults use localStorage. Each book's AI settings are stored with its other entities in IndexedDB.
+- UI typography, active theme, and custom theme definitions are global interface preferences stored in localStorage on the current device.
 - Editing should autosave locally.
 - Local snapshots provide version history for accidental edits, but they are not backups because they live on the same device.
 - The app must provide manual export and import so work can be backed up and moved between devices.
@@ -142,6 +146,8 @@ Implemented as working behavior:
 - editable Story, Summarize, Titles & names, and Lore entries prompts;
 - saving and restoring global AI defaults;
 - independent per-book AI settings, explicit reset from defaults, and book-scoped generation;
+- global UI typography settings for the main editor and expandable/scalable text inputs;
+- six built-in themes plus persisted custom semantic themes, with typography independent from theme selection;
 - persisted current-book metadata in the right-side Book tab;
 - persisted shared Series entities with legacy migration, selection, creation, and global rename;
 - persisted books, acts, chapters, scenes, navigation, autosave, and local document snapshots;
@@ -169,6 +175,5 @@ The prototype is not yet an MVP. Chats are not yet backed by the planned Indexed
 - Cloud synchronization or a backend
 - Exact prompt-template parser and escaping rules
 - Provider-specific capability normalization
-- Final light themes and custom-theme persistence
 
 These items should not be treated as requirements until a later decision updates this document.
