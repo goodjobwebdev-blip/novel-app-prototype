@@ -38,7 +38,8 @@ The application should feel like a quiet writing workspace, not a general-purpos
 ### Right book workspace
 
 - The right side contains persistent Book, Outline, Notes, Codex, and Chat tabs.
-- Book contains current-book identity and story-profile metadata: title, series and order, overview, genre, writing style, point of view, tense, and language. It also contains the destructive delete action.
+- Book contains current-book identity and story-profile metadata: title, shared series and book index, overview, genre, writing style, point of view, tense, and language. It also contains the destructive delete action.
+- Series are library-level entities shared by books. The Book tab uses a searchable picker to choose `Standalone`, select an existing series, create one, or explicitly rename the selected series for every linked book. The picker is an anchored popover on desktop and a temporary Book-panel subview on mobile.
 - Outline supports optional acts, chapters, and scenes. Selecting a scene opens it in the editor.
 - Acts, chapters, and scenes expose distinct current, missing, and outdated summary states.
 - Summary icons open persisted Markdown summaries in the shared editor. Manual edits are supported, and NanoGPT summary generation uses the book's Support model.
@@ -136,6 +137,7 @@ Implemented as working behavior:
 - saving and restoring global AI defaults;
 - independent per-book AI settings, explicit reset from defaults, and book-scoped generation;
 - persisted current-book metadata in the right-side Book tab;
+- persisted shared Series entities with legacy migration, selection, creation, and global rename;
 - persisted books, acts, chapters, scenes, navigation, autosave, and local document snapshots;
 - persisted Scene, Chapter, and Act summaries with freshness tracking and Support-model generation;
 - persisted, searchable Notes and categorized Codex entries using the shared Markdown editor;
