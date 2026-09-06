@@ -1,4 +1,4 @@
-export type ProposalWithStatus = { id: string; status: string; [key: string]: unknown }
+export type ProposalWithStatus = { id: string; status: string }
 
 export function transitionProposalList<T extends ProposalWithStatus>(
   proposals: T[],
