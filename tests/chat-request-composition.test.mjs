@@ -1,8 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { finalizeChatProviderRequest } from '../src/chat-finalized-request.ts'
 
 const request = readFileSync(new URL('../src/chat-request.ts', import.meta.url), 'utf8')
+const finalizer = readFileSync(new URL('../src/chat-finalized-request.ts', import.meta.url), 'utf8')
 const defaults = readFileSync(new URL('../src/chat-default-composition.ts', import.meta.url), 'utf8')
 const feature = readFileSync(new URL('../src/ChatFeature.tsx', import.meta.url), 'utf8')
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
@@ -26,7 +28,7 @@ test('Chat assembly owns predefined configuration, chronological history, curren
   assert.match(request, /ownership: index === latestUserIndex \? 'current-turn' : 'conversation'/)
   assert.match(request, /after: historyParts/)
   assert.match(request, /structuredParts: \[normalizeStructuredTools/)
-  assert.match(feature, /chatProviderMessages\(normalizedRequest\)/)
+  assert.match(feature, /const finalizedRequest = finalizeChatProviderRequest\(normalizedRequest\)/)
 })
 
 test('Chat variables omit response length and cursor variables while exposing the requested namespace', () => {
@@ -53,7 +55,37 @@ test('tool rounds keep the finalized prefix and append normalized app-managed ch
   assert.match(feature, /const baseRequest = buildNormalizedRequest/)
   assert.match(feature, /runtimeParts\.push\(normalizeRuntimeMessagePart/)
   assert.match(feature, /role: 'tool', tool_call_id: call\.id/)
-  assert.match(feature, /serializeChatModelInput\(normalizedRequest\)/)
+  assert.match(feature, /roundDiagnostics[\s\S]*finalizedRequest\.diagnosticText/)
+  assert.match(feature, /messages: finalizedRequest\.messages[\s\S]*tools: finalizedRequest\.tools/)
+})
+
+test('one finalized Chat request drives diagnostics, preview, and every provider send', () => {
+  assert.match(finalizer, /function finalizeChatProviderRequest[\s\S]*const messages = structuredClone\(request\.providerMessages\)[\s\S]*const tools = structuredClone\(request\.providerTools\)[\s\S]*diagnosticText: JSON\.stringify/)
+  assert.match(feature, /setLastFinalizedRequest\(finalizedRequest\)/)
+  assert.match(feature, /previewFinalizedRequest = previewRequest \? finalizeChatProviderRequest\(previewRequest\)/)
+  assert.match(feature, /generationContextDiagnostics\([\s\S]*finalizedRequest\.diagnosticText/)
+  assert.doesNotMatch(feature, /chatProviderMessages|chatProviderTools|serializeChatModelInput/)
+})
+
+test('finalized payload preserves exact chronology and stays identical at a near-limit boundary', () => {
+  const normalized = {
+    providerMessages: [
+      { role: 'system', content: 'Stable prefix' },
+      { role: 'user', content: 'Current turn' },
+      { role: 'assistant', content: null, tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'read_entity', arguments: '{"id":"scene-1"}' } }] },
+      { role: 'tool', tool_call_id: 'call-1', content: 'Tool result' },
+    ],
+    providerTools: [{ type: 'function', function: { name: 'read_entity', description: 'Read one entity', parameters: { type: 'object' } } }],
+  }
+  const finalized = finalizeChatProviderRequest(normalized)
+  const sentBody = JSON.stringify({ messages: finalized.messages, tools: finalized.tools })
+  assert.equal(finalized.diagnosticText, sentBody)
+  assert.deepEqual(finalized.messages.map((message) => message.role), ['system', 'user', 'assistant', 'tool'])
+
+  const nearLimitCharacters = sentBody.length
+  assert.equal(finalized.diagnosticText.length <= nearLimitCharacters, sentBody.length <= nearLimitCharacters)
+  normalized.providerMessages[0].content = `${normalized.providerMessages[0].content} hidden transport mutation`
+  assert.equal(finalized.diagnosticText, sentBody)
 })
 
 test('workspace instruction omission warns without hidden reinjection', () => {
