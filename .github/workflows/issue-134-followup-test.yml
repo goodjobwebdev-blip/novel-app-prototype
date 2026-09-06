@@ -1,0 +1,25 @@
+name: Validate delayed Chat tool handoff regression
+
+on:
+  push:
+    branches:
+      - fix/issue-134-chat-generation-handoff
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/issue-134-chat-generation-handoff
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npm install --no-package-lock
+      - name: Regression tests
+        run: node --test tests/*.test.mjs
+      - name: Production build
+        run: npm run build
