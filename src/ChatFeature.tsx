@@ -283,7 +283,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   }
 
   async function runAssistantGeneration(activeChat: ChatEntity, history: ChatMessageEntity[]) {
-    if (abortRef.current) return
+    if (abortRef.current || selectedChatIdRef.current !== activeChat.id) return
     let settings
     try {
       settings = await getChatBookAiSettings(bookId)
@@ -466,6 +466,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           thinking: activeChat.thinking,
           tools: CHAT_TOOL_DEFINITIONS,
         }, (chunk) => {
+          if (selectedChatIdRef.current !== activeChat.id) return
           if (chunk.thoughts) {
             activeRoundThoughts += chunk.thoughts
             setStreamedThoughts(activeRoundThoughts)
@@ -477,9 +478,10 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
             setPhase('writing')
           }
         }, controller.signal, () => {
-          if (!controller.signal.aborted) setPhase('thinking')
+          if (!controller.signal.aborted && selectedChatIdRef.current === activeChat.id) setPhase('thinking')
         })
 
+        if (controller.signal.aborted || selectedChatIdRef.current !== activeChat.id) break
         if (result.toolCalls.length) {
           setPhase('using-tools')
           workingMessages.push({
@@ -554,12 +556,14 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           // Keep the already streamed partial visible until teardown even if persistence fails.
         }
       }
-      abortRef.current = null
-      setGenerating(false)
-      setPhase(null)
-      setElapsed(0)
-      setStreamedContent('')
-      setStreamedThoughts('')
+      if (abortRef.current === controller) abortRef.current = null
+      if (selectedChatIdRef.current === activeChat.id) {
+        setGenerating(false)
+        setPhase(null)
+        setElapsed(0)
+        setStreamedContent('')
+        setStreamedThoughts('')
+      }
       const refreshed = await getChat(activeChat.id).catch(() => undefined)
       if (refreshed) applyIfStillCurrent(activeChat.id, () => selectedChatIdRef.current, () => setChat(refreshed))
     }
