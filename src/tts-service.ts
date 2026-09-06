@@ -4,7 +4,7 @@ export type SpeechModel = {
   id: string
   name: string
   voices: string[]
-  averagePrice?: string
+  price?: string
   maxChars?: number
 }
 
@@ -54,18 +54,50 @@ function stringValue(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
+function recordValue(value: unknown) {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : {}
+}
+
+function bool(value: unknown) {
+  return value === true || value === 'true' || value === 1
+}
+
 function extractVoices(model: Record<string, unknown>) {
-  const raw = model.voices ?? model.available_voices ?? model.voice_options ?? (model.metadata as Record<string, unknown> | undefined)?.voices
+  const supported = recordValue(model.supported_parameters)
+  const metadata = recordValue(model.metadata)
+  const raw = supported.voices ?? supported.available_voices ?? supported.voice_options ?? model.voices ?? model.available_voices ?? model.voice_options ?? metadata.voices
   if (!Array.isArray(raw)) return []
   return [...new Set(raw.map((item) => typeof item === 'string' ? item : item && typeof item === 'object' ? stringValue((item as Record<string, unknown>).id) || stringValue((item as Record<string, unknown>).name) : undefined).filter((item): item is string => Boolean(item)))]
 }
 
 function extractPrice(model: Record<string, unknown>) {
-  const pricing = model.pricing && typeof model.pricing === 'object' ? model.pricing as Record<string, unknown> : undefined
-  const value = stringValue(model.average_price) || stringValue(model.avg_price) || stringValue(model.price) || stringValue(pricing?.average) || stringValue(pricing?.display)
+  const pricing = recordValue(model.pricing)
+  const value = stringValue(pricing.display) || stringValue(model.average_price) || stringValue(model.avg_price) || stringValue(model.price) || stringValue(pricing.average)
   if (value) return value
-  const numeric = finite(model.average_price) ?? finite(model.avg_price) ?? finite(pricing?.average)
+  const currency = (stringValue(pricing.currency) || 'USD').toUpperCase()
+  const rates: Array<[unknown, string]> = [
+    [pricing.per_thousand_chars, ' / 1k chars'],
+    [pricing.per_generation, ' / generation'],
+    [pricing.per_second, ' / second'],
+    [pricing.per_minute, ' / minute'],
+    [pricing.per_character, ' / character'],
+  ]
+  for (const [raw, unit] of rates) {
+    const numeric = finite(raw)
+    if (numeric === undefined) continue
+    const amount = String(Number(numeric.toFixed(6)))
+    return `${currency === 'USD' ? '$' : `${currency} `}${amount}${unit}`
+  }
+  const numeric = finite(model.average_price) ?? finite(model.avg_price) ?? finite(pricing.average)
   return numeric !== undefined ? String(numeric) : undefined
+}
+
+function isTextToSpeechModel(model: Record<string, unknown>) {
+  const capabilities = recordValue(model.capabilities)
+  if ('text_to_speech' in capabilities) return bool(capabilities.text_to_speech)
+  if (Object.keys(capabilities).length) return false
+  const modelType = stringValue(model.type) || stringValue(model.model_type) || stringValue(model.category)
+  return modelType ? /(?:text[-_ ]?to[-_ ]?speech|\btts\b)/i.test(modelType) : true
 }
 
 export async function fetchSpeechModels(apiKey = '', signal?: AbortSignal): Promise<SpeechModel[]> {
@@ -75,14 +107,16 @@ export async function fetchSpeechModels(apiKey = '', signal?: AbortSignal): Prom
   })
   if (!response.ok) throw new Error(`NanoGPT audio model list failed (${response.status}).`)
   const payload = await response.json().catch(() => ({})) as { data?: unknown[] }
-  return (Array.isArray(payload.data) ? payload.data : []).map((raw) => {
+  return (Array.isArray(payload.data) ? payload.data : []).map((raw): SpeechModel | null => {
     const model = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+    if (!isTextToSpeechModel(model)) return null
     const id = stringValue(model.id) || stringValue(model.model) || stringValue(model.slug) || ''
     const name = stringValue(model.name) || id
-    const metadata = model.metadata && typeof model.metadata === 'object' ? model.metadata as Record<string, unknown> : undefined
-    const maxChars = finite(model.max_chars) ?? finite(model.max_input_chars) ?? finite(metadata?.max_chars) ?? finite(metadata?.max_input_chars)
-    return { id, name, voices: extractVoices(model), averagePrice: extractPrice(model), maxChars }
-  }).filter((model) => model.id)
+    const supported = recordValue(model.supported_parameters)
+    const metadata = recordValue(model.metadata)
+    const maxChars = finite(supported.max_chars) ?? finite(supported.max_input_chars) ?? finite(model.max_chars) ?? finite(model.max_input_chars) ?? finite(metadata.max_chars) ?? finite(metadata.max_input_chars)
+    return id ? { id, name, voices: extractVoices(model), price: extractPrice(model), maxChars } : null
+  }).filter((model): model is SpeechModel => Boolean(model))
 }
 
 export function normalizeSpeakableText(markdown: string) {
@@ -162,7 +196,7 @@ export function estimateSpeechRequest(settings: SpeechSettings, markdown: string
     characters: text.length,
     words: text ? text.split(/\s+/).length : 0,
     chunks: chunks.length,
-    price: modelInfo?.averagePrice,
+    price: modelInfo?.price,
   }
 }
 
