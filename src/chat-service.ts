@@ -1,6 +1,7 @@
 import { defaultAiPrompts, loadAiSettings, previousDefaultAssistantPrompts, type AiSettings } from './ai-settings'
 import { getCachedModelCatalog } from './model-catalog'
 import { transitionProposalList } from './chat-proposal-transition'
+import { snapshotProposalListForFork } from './chat-fork-proposals'
 import {
   deleteEntityTree,
   getBookAiSettings,
@@ -28,7 +29,7 @@ export type ChatEntity = ArcEntity & {
 }
 
 export type ChatMessageStatus = 'complete' | 'stopped' | 'failed'
-export type ChatCodexCreationStatus = 'proposed' | 'applying' | 'created' | 'rejected' | 'duplicate'
+export type ChatCodexCreationStatus = 'proposed' | 'applying' | 'created' | 'rejected' | 'duplicate' | 'stale'
 export type ChatCodexCreationProposal = {
   id: string
   title: string
@@ -332,6 +333,10 @@ export async function forkChat(source: ChatEntity, throughOrder: number): Promis
       ...message,
       id: makeId('chat-message'),
       parentId: fork.id,
+      documentEdits: snapshotProposalListForFork(message.documentEdits),
+      codexCreations: snapshotProposalListForFork(message.codexCreations),
+      outlineActions: snapshotProposalListForFork(message.outlineActions),
+      entityActions: snapshotProposalListForFork(message.entityActions),
       createdAt: Date.now(),
       updatedAt: Date.now(),
     })

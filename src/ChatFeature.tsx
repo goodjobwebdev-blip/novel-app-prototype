@@ -955,7 +955,7 @@ function OutlineActionCard({ proposal, onApply, onReject }: { proposal: ChatOutl
 }
 
 function CodexCreationCard({ proposal, onCreate, onReject }: { proposal: ChatCodexCreationProposal; onCreate: () => void; onReject: () => void }) {
-  const statusLabel = proposal.status === 'proposed' ? 'Ready to create' : proposal.status === 'applying' ? 'Creating…' : proposal.status === 'created' ? 'Created' : proposal.status === 'duplicate' ? 'Already exists' : 'Rejected'
+  const statusLabel = proposal.status === 'proposed' ? 'Ready to create' : proposal.status === 'applying' ? 'Creating…' : proposal.status === 'created' ? 'Created' : proposal.status === 'duplicate' ? 'Already exists' : proposal.status === 'stale' ? 'Historical' : 'Rejected'
   return <section className={`chat-document-edit chat-codex-creation ${proposal.status}`}>
     <header><div><small>New Codex · {proposal.category}</small><strong>{proposal.title}</strong></div><span>{statusLabel}</span></header>
     {proposal.summary && <p>{proposal.summary}</p>}
