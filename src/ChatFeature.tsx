@@ -53,6 +53,7 @@ import { applyChatEntityAction, chatEntityToolNames, executeChatEntityTool, reje
 import { applyChatOutlineAction, chatOutlineToolNames, executeChatOutlineTool, rejectChatOutlineAction } from './chat-outline-tools'
 import { CHAT_TOOL_DEFINITIONS, CHAT_WORKSPACE_INSTRUCTIONS, serializeChatModelInput } from './chat-request'
 import { startTtsSession } from './tts-service'
+import { getSttState, normalizeTranscriptForInsertion, startSttSession, subscribeSttState, type SttState } from './stt-service'
 import './chat.css'
 import './context-limit-settings.css'
 
@@ -104,6 +105,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   const [liveThoughtsOpen, setLiveThoughtsOpen] = useState(true)
   const [openThoughtMessageIds, setOpenThoughtMessageIds] = useState<Set<string>>(new Set())
   const [followOutput, setFollowOutput] = useState(true)
+  const [sttState, setSttState] = useState<SttState>(() => getSttState())
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const startedAtRef = useRef(0)
@@ -114,6 +116,8 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   selectedChatIdRef.current = chatId
 
   const sortedModels = useMemo(() => [...models].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)), [models])
+
+  useEffect(() => subscribeSttState(setSttState), [])
 
   useEffect(() => {
     let cancelled = false
@@ -267,20 +271,36 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     }
   }
 
-  function insertMicroPlaceholder() {
+  async function dictateMessage() {
+    if (!chat || generating || chat.id !== selectedChatIdRef.current) return
+    const sourceChatId = chat.id
     const input = inputRef.current
-    const start = input?.selectionStart ?? draft.length
+    const base = draft
+    const start = input?.selectionStart ?? base.length
     const end = input?.selectionEnd ?? start
-    const insert = 'speech placeholder'
-    const next = `${draft.slice(0, start)}${insert}${draft.slice(end)}`
-    setDraft(next)
-    requestAnimationFrame(() => {
-      const target = inputRef.current
-      if (!target) return
-      const cursor = start + insert.length
-      target.focus()
-      target.setSelectionRange(cursor, cursor)
-    })
+    const render = (transcript: string) => {
+      const insertion = normalizeTranscriptForInsertion(transcript, base.slice(0, start), base.slice(end))
+      return { value: `${base.slice(0, start)}${insertion}${base.slice(end)}`, cursor: start + insertion.length }
+    }
+    try {
+      const settings = await getChatBookAiSettings(bookId)
+      await startSttSession(settings.speech, {
+        kind: 'chat',
+        label: 'Dictate message',
+        isValid: () => selectedChatIdRef.current === sourceChatId && Boolean(inputRef.current),
+        onProvisional: (transcript) => { if (selectedChatIdRef.current === sourceChatId) setDraft(render(transcript).value) },
+        onFinal: (transcript) => {
+          if (selectedChatIdRef.current !== sourceChatId) throw new Error('The original Chat composer is no longer available.')
+          const next = render(transcript)
+          setDraft(next.value)
+          requestAnimationFrame(() => { inputRef.current?.focus(); inputRef.current?.setSelectionRange(next.cursor, next.cursor) })
+        },
+        onCancel: () => { if (selectedChatIdRef.current === sourceChatId) setDraft(base) },
+      })
+    } catch (error) {
+      if (selectedChatIdRef.current === sourceChatId) setDraft(base)
+      onToast(error instanceof Error ? error.message : 'Could not start message dictation.')
+    }
   }
 
   async function runAssistantGeneration(activeChat: ChatEntity, history: ChatMessageEntity[]) {
@@ -845,13 +865,13 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
         {modelStatus && <small className="chat-model-status">{modelStatus}</small>}
       </div>
       <div className="chat-compose-row">
-        <ExpandableTextInput ref={inputRef} value={draft} onChange={setDraft} onKeyDown={(event) => {
+        <ExpandableTextInput ref={inputRef} value={draft} onChange={setDraft} readOnly={sttState.target === 'chat' && ['requesting-permission', 'recording', 'recording-live', 'stopping', 'transcribing', 'finalizing'].includes(sttState.status)} onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault()
             void send()
           }
         }} placeholder="Ask about the book…" aria-label="Chat message" dialogTitle="Write chat message" />
-        <ChatGenerateButton generating={generating} phase={phase} elapsed={elapsed} thinking={chat.thinking} onGenerate={() => { void send() }} onStop={stop} onMicro={insertMicroPlaceholder} onThinking={setThinking} />
+        <ChatGenerateButton generating={generating} phase={phase} elapsed={elapsed} thinking={chat.thinking} onGenerate={() => { void send() }} onStop={stop} onMicro={() => { void dictateMessage() }} onThinking={setThinking} />
       </div>
     </section>
 
@@ -1007,7 +1027,7 @@ function ChatGenerateButton({ generating, phase, elapsed, thinking, onGenerate, 
   if (generating) return <div className="chat-generation-running"><span><i />{generationPhaseLabel(phase)} · {formatElapsed(elapsed)}</span><button className="play generating" type="button" onClick={onStop} aria-label="Stop chat generation"><Square aria-hidden="true" fill="currentColor" /></button></div>
 
   if (expanded) return <div className="chat-generate-actions" role="toolbar" aria-label="Chat generation actions">
-    <button type="button" onClick={onMicro} title="Micro"><Mic aria-hidden="true" /><span>Micro</span></button>
+    <button type="button" onClick={onMicro} title="Micro"><Mic aria-hidden="true" /><span>Dictate message</span></button>
     <button type="button" className={thinking ? 'active' : ''} onClick={() => onThinking(!thinking)} title="Thinking"><Bot aria-hidden="true" /><span>Thinking {thinking ? 'on' : 'off'}</span></button>
     <button type="button" onClick={() => setExpanded(false)} aria-label="Collapse chat generation actions"><X aria-hidden="true" /></button>
   </div>

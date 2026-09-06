@@ -21,3 +21,12 @@
 .speech-model-unavailable { margin: 0; font-size: .82rem; }
 .read-aloud-action svg { width: 15px; height: 15px; }
 @media (max-width: 700px) { .speech-settings-grid { grid-template-columns: 1fr; } .tts-status { bottom: max(10px, env(safe-area-inset-bottom)); } .tts-status-copy small { white-space: normal; } }
+
+.stt-settings-card { gap: 12px; }
+.stt-model-list button > small { text-align: right; max-width: 180px; }
+.stt-live-toggle { align-self: start; }
+.stt-status.recording svg, .stt-status.recording-live svg { animation: stt-pulse 1.2s ease-in-out infinite; }
+.stt-status.failed { border-color: rgba(255,120,120,.38); }
+@keyframes stt-pulse { 0%,100% { opacity: .55; transform: scale(.94); } 50% { opacity: 1; transform: scale(1.06); } }
+@media (prefers-reduced-motion: reduce) { .stt-status.recording svg, .stt-status.recording-live svg { animation: none; } }
+@media (max-width: 700px) { .stt-model-list button { grid-template-columns: 1fr; } .stt-model-list button > small { text-align: left; max-width: none; } }

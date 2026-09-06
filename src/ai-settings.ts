@@ -7,6 +7,10 @@ export type SpeechSettings = {
   voice: string
   readAloudAfterGeneration: boolean
   maxParallelRequests: string
+  openaiApiKey: string
+  transcriptionModel: string
+  transcriptionLanguage: string
+  streamTranscription: boolean
 }
 
 export const initialSpeechSettings: SpeechSettings = {
@@ -16,6 +20,10 @@ export const initialSpeechSettings: SpeechSettings = {
   voice: 'af_bella',
   readAloudAfterGeneration: false,
   maxParallelRequests: '1',
+  openaiApiKey: '',
+  transcriptionModel: 'openai:whisper-1',
+  transcriptionLanguage: 'auto',
+  streamTranscription: false,
 }
 
 export type AiPrompts = {
@@ -316,6 +324,10 @@ function normalizeSpeechSettings(value: unknown): SpeechSettings {
     voice: typeof speech.voice === 'string' ? speech.voice : initialSpeechSettings.voice,
     readAloudAfterGeneration: speech.readAloudAfterGeneration === true,
     maxParallelRequests: String(concurrency),
+    openaiApiKey: typeof speech.openaiApiKey === 'string' ? speech.openaiApiKey : '',
+    transcriptionModel: typeof speech.transcriptionModel === 'string' && speech.transcriptionModel.trim() ? speech.transcriptionModel : initialSpeechSettings.transcriptionModel,
+    transcriptionLanguage: typeof speech.transcriptionLanguage === 'string' && speech.transcriptionLanguage.trim() ? speech.transcriptionLanguage.trim() : 'auto',
+    streamTranscription: speech.streamTranscription === true,
   }
 }
 
