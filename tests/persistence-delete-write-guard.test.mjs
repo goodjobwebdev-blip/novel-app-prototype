@@ -20,7 +20,11 @@ test('document and summary saves re-read liveness inside their write transaction
     const body = functionBody(name, next)
     const transaction = body.indexOf("db.transaction('rw'")
     const read = body.indexOf("db.table('entities').get")
-    const write = body.indexOf("db.table('entities').put")
+    const writes = [
+      body.indexOf("db.table('entities').put"),
+      body.indexOf("db.table('entities').update"),
+    ].filter((position) => position >= 0)
+    const write = writes.length ? Math.min(...writes) : -1
     assert.ok(transaction >= 0 && read > transaction && write > read, `${name} reads and writes inside one transaction`)
   }
 })
