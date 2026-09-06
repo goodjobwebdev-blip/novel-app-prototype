@@ -60,6 +60,7 @@ import {
   archiveCodexEntry,
   createBook,
   createCodexEntry,
+  createCodexDependency,
   createNote,
   createSeries as createSeriesEntity,
   createSnapshot,
@@ -76,23 +77,27 @@ import {
   getOrCreateSummary,
   isCodexEntryArchived,
   listBooks,
+  listCodexDependencies,
   listEntitiesByBook,
   listSeries,
   moveStructuralEntity,
   renameEntity,
   renameSeries as renameSeriesEntity,
   restoreCodexEntry,
+  removeCodexDependency,
   saveDocumentContent,
   saveBookAiSettings,
   rememberLastOpenedScene,
   saveSummaryContent,
   updateBookMetadata,
   updateCodexCategory,
+  updateCodexDependency,
   updateCodexAutoIncludeTriggers,
   updateCodexSummaryPreference,
   type ArcEntity,
   type BookEntity,
   type BookMetadata,
+  type CodexDependencyEdge,
   type CodexEntryEntity,
   type EditableEntity,
   type GenerationContextType,
@@ -116,6 +121,7 @@ import './autotitle.css'
 import './tts.css'
 import './codex-triggers.css'
 import './codex-mentions.css'
+import './codex-dependencies.css'
 
 type Screen = 'home' | 'editor' | 'chat' | 'settings'
 type RightTab = 'book' | 'outline' | 'notes' | 'codex' | 'chat'
@@ -203,6 +209,7 @@ export default function Workspace() {
   const [outlineEntities, setOutlineEntities] = useState<StructuralEntity[]>([])
   const [notes, setNotes] = useState<NoteEntity[]>([])
   const [codexEntries, setCodexEntries] = useState<CodexEntryEntity[]>([])
+  const [codexDependencies, setCodexDependencies] = useState<CodexDependencyEdge[]>([])
   const [summaryStates, setSummaryStates] = useState<Record<string, SummaryState>>({})
   const [activeDocument, setActiveDocument] = useState<EditableEntity | null>(null)
   const [editorRevision, setEditorRevision] = useState(0)
@@ -336,6 +343,7 @@ export default function Workspace() {
         await Promise.all(books.map((existingBook) => ensureBookAiSettings(existingBook.id, defaults)))
         const book = books.find((candidate) => candidate.id === PROTOTYPE_BOOK_ID) ?? books[0]
         const entities = book ? await listEntitiesByBook(book.id) : []
+        const initialCodexDependencies = book ? await listCodexDependencies(book.id) : []
         const structural = entities.filter((entity): entity is StructuralEntity => ['act', 'chapter', 'scene'].includes(entity.type))
         const scene = entities.find((entity) => entity.id === PROTOTYPE_SCENE_ID && entity.type === 'scene')
           ?? entities.find((entity) => entity.type === 'scene')
@@ -351,6 +359,7 @@ export default function Workspace() {
         setOutlineEntities(structural)
         setNotes(entities.filter((entity): entity is NoteEntity => entity.type === 'note'))
         setCodexEntries(entities.filter((entity): entity is CodexEntryEntity => entity.type === 'codexEntry'))
+        setCodexDependencies(initialCodexDependencies)
         setSummaryStates(initialSummaryStates)
         activeDocumentIdRef.current = scene?.id ?? null
         activeSceneIdRef.current = scene?.id ?? null
@@ -490,16 +499,21 @@ export default function Workspace() {
     structural: StructuralEntity[]
     notes: NoteEntity[]
     codexEntries: CodexEntryEntity[]
+    codexDependencies: CodexDependencyEdge[]
     summaryStates: Record<string, SummaryState>
   }
 
   async function readBookContent(bookId: string): Promise<LoadedBookContent> {
-    const entities = await listEntitiesByBook(bookId)
-    const summaryStateSnapshot = await getSummaryStateMap(bookId)
+    const [entities, codexDependencySnapshot, summaryStateSnapshot] = await Promise.all([
+      listEntitiesByBook(bookId),
+      listCodexDependencies(bookId),
+      getSummaryStateMap(bookId),
+    ])
     return {
       structural: entities.filter((entity): entity is StructuralEntity => ['act', 'chapter', 'scene'].includes(entity.type)),
       notes: entities.filter((entity): entity is NoteEntity => entity.type === 'note').sort((a, b) => b.updatedAt - a.updatedAt),
       codexEntries: entities.filter((entity): entity is CodexEntryEntity => entity.type === 'codexEntry').sort((a, b) => a.title.localeCompare(b.title)),
+      codexDependencies: codexDependencySnapshot,
       summaryStates: summaryStateSnapshot,
     }
   }
@@ -508,6 +522,7 @@ export default function Workspace() {
     setOutlineEntities(content.structural)
     setNotes(content.notes)
     setCodexEntries(content.codexEntries)
+    setCodexDependencies(content.codexDependencies)
     setSummaryStates(content.summaryStates)
   }
 
@@ -682,6 +697,7 @@ export default function Workspace() {
       setOutlineEntities([])
       setNotes([])
       setCodexEntries([])
+      setCodexDependencies([])
       setSummaryStates({})
       activeDocumentIdRef.current = null
       setActiveDocument(null)
@@ -866,6 +882,34 @@ export default function Workspace() {
     const updated = await updateCodexSummaryPreference(sourceId, prefer)
     setCodexEntries((items) => items.map((item) => item.id === updated.id ? updated : item))
     applyIfStillCurrent(sourceId, () => activeDocumentIdRef.current, () => setActiveDocument(updated))
+  }
+
+  async function addCodexDependency(sourceId: string, targetId: string) {
+    if (!currentBook || sourceId !== activeDocumentIdRef.current) return
+    try {
+      const edge = await createCodexDependency(currentBook.id, sourceId, targetId)
+      setCodexDependencies((items) => [...items, edge].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)))
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not add the dependency.')
+    }
+  }
+
+  async function changeCodexDependency(edgeId: string, patch: { relationLabel?: string; includeWithSource?: boolean }) {
+    try {
+      const updated = await updateCodexDependency(edgeId, patch)
+      setCodexDependencies((items) => items.map((edge) => edge.id === updated.id ? updated : edge))
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not update the dependency.')
+    }
+  }
+
+  async function deleteCodexDependency(edgeId: string) {
+    try {
+      await removeCodexDependency(edgeId)
+      setCodexDependencies((items) => items.filter((edge) => edge.id !== edgeId))
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not remove the dependency.')
+    }
   }
 
   async function archiveCodex(entity: CodexEntryEntity) {
@@ -1620,6 +1664,7 @@ export default function Workspace() {
         <small className="page-number">{pageLabel}</small><p className="document-path">{documentPath || 'No document selected'}</p>
         {(activeDocument?.type === 'note' || activeDocument?.type === 'codexEntry') && <div className={`document-titlebar ${activeCodexArchived ? 'archived' : ''}`}><div><small>{activeDocument.type === 'note' ? 'Note' : activeCodexArchived ? `Archived · ${activeDocument.category}` : activeDocument.category}</small><h1>{activeDocument.title}</h1></div><div className="document-title-actions">{(activeDocument.type === 'note' || !activeCodexArchived) && <button className="autotitle-trigger" type="button" onClick={() => { void startAutotitle(activeDocument) }} aria-label={`Autotitle ${activeDocument.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></button>}{activeDocument.type === 'codexEntry' && <SummaryIcon state={summaryStates[activeDocument.id] ?? 'missing'} kind="codex" onOpen={() => { void openSummary(activeDocument) }} />}{activeDocument.type === 'codexEntry' && activeCodexArchived ? <button type="button" onClick={() => { void restoreCodex(activeDocument) }}><ArchiveRestore aria-hidden="true" /> Restore</button> : <button type="button" onClick={() => { void renameContentEntity(activeDocument) }}><Pencil aria-hidden="true" /> Rename</button>}</div></div>}
         {activeDocument?.type === 'codexEntry' && <div className={`document-metadata ${activeCodexArchived ? 'archived' : ''}`}><label><span>Category</span><select disabled={activeCodexArchived} value={activeDocument.category} onChange={(event) => { void changeCodexCategory(event.target.value) }}><option>Character</option><option>Place</option><option>Object</option><option>Event</option><option>Group</option><option>Other</option></select></label>{!activeCodexArchived && <label className="codex-summary-preference"><input type="checkbox" checked={activeDocument.preferSummaryForContext === true} onChange={(event) => { void changeCodexSummaryPreference(event.target.checked) }} /><span><strong>Prefer summary for AI context</strong><small>{codexSummaryPolicyText(activeDocument, summaryStates[activeDocument.id] ?? 'missing')}</small></span></label>}{!activeCodexArchived && <label className="codex-trigger-editor"><span><strong>Auto include when text contains</strong></span><textarea value={codexTriggerDraft} onChange={(event) => setCodexTriggerDraft(event.target.value)} onBlur={() => { void saveCodexTriggers() }} placeholder="One literal trigger per line" /><small>One name, alias, phrase, or #tag per line. New entries start with their title; removing it keeps it removed, and renaming the entry does not rewrite triggers.</small></label>}{activeCodexArchived && <p className="archived-document-note"><Archive aria-hidden="true" /><span><strong>Archived lore</strong><small>Readable here, but excluded from AI context, Chat discovery, and normal Codex search until restored.</small></span></p>}</div>}
+        {activeDocument?.type === 'codexEntry' && <CodexDependenciesMetadata key={`dependencies-${activeDocument.id}`} source={activeDocument} entries={codexEntries} edges={codexDependencies} readOnly={activeCodexArchived} onAdd={(targetId) => addCodexDependency(activeDocument.id, targetId)} onUpdate={changeCodexDependency} onRemove={deleteCodexDependency} onOpen={(entryId) => { void loadDocument(entryId) }} />}
         {activeDocument?.type === 'summary' && summaryContextIndicator && <div className="summary-context-indicator">{summaryContextIndicator}</div>}
         {activeDocument ? <MarkdownEditor key={`${activeDocument.id}-${editorRevision}`} ref={editorRef} value={storyMarkdown} onChange={handleStoryChange} onHistoryChange={setEditorHistory} ariaLabel={`${activeDocument.title} Markdown editor`} readOnly={activeCodexArchived || activeSummarySourceArchived} mentionTerms={activeDocument.type === 'scene' ? codexMentionIndex : []} onMentionClick={activeDocument.type === 'scene' ? openLoreMention : undefined} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No document selected</strong><p>Choose a Scene, Note, Codex entry, or Summary from the book workspace.</p><button type="button" onClick={() => setRightOpen(true)}>Open Book Workspace</button></div>}
       </article> : currentBook ? <ChatView bookId={currentBook.id} chatId={activeChatId} bookPromptValues={toBookPromptValues(currentBook, seriesList)} currentSceneId={activeSceneId} onChatChange={openChat} onToast={showToast} /> : <section className="conversation chat-empty"><MessageCircle aria-hidden="true" /><p>Open a book before starting a chat.</p></section>}
@@ -2220,6 +2265,63 @@ type OutlineProps = {
   onRename: (entity: StructuralEntity) => void
   onMove: (entity: StructuralEntity, direction: -1 | 1) => void
   onDelete: (entity: StructuralEntity) => void
+}
+
+function CodexDependenciesMetadata({ source, entries, edges, readOnly, onAdd, onUpdate, onRemove, onOpen }: {
+  source: CodexEntryEntity
+  entries: CodexEntryEntity[]
+  edges: CodexDependencyEdge[]
+  readOnly: boolean
+  onAdd: (targetId: string) => Promise<void>
+  onUpdate: (edgeId: string, patch: { relationLabel?: string; includeWithSource?: boolean }) => Promise<void>
+  onRemove: (edgeId: string) => Promise<void>
+  onOpen: (entryId: string) => void
+}) {
+  const [adding, setAdding] = useState(false)
+  const [query, setQuery] = useState('')
+  const byId = new Map(entries.map((entry) => [entry.id, entry]))
+  const outgoing = edges.filter((edge) => edge.sourceId === source.id)
+  const incoming = edges.filter((edge) => edge.targetId === source.id)
+  const linkedIds = new Set(outgoing.map((edge) => edge.targetId))
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const candidates = entries
+    .filter((entry) => entry.id !== source.id && !linkedIds.has(entry.id) && !isCodexEntryArchived(entry))
+    .filter((entry) => !normalizedQuery || `${entry.title} ${entry.category}`.toLocaleLowerCase().includes(normalizedQuery))
+    .sort((a, b) => a.title.localeCompare(b.title))
+
+  return <section className={`codex-dependencies-metadata ${readOnly ? 'read-only' : ''}`} aria-label="Codex dependencies">
+    <details className="codex-dependency-section">
+      <summary><span>Dependencies · {outgoing.length}</span><small>Lore this entry may need when Arc includes it automatically.</small></summary>
+      <div className="codex-dependency-content">
+        {outgoing.length ? outgoing.map((edge) => {
+          const target = byId.get(edge.targetId)
+          const archived = Boolean(target && isCodexEntryArchived(target))
+          return <article className={`codex-dependency-row ${archived ? 'archived' : ''}`} key={edge.id}>
+            <button type="button" className="codex-dependency-open" disabled={!target} onClick={() => target && onOpen(target.id)}><span><strong>{target?.title ?? 'Missing dependency'}</strong><small>{target ? `${target.category}${archived ? ' · Archived · inactive for AI context' : ''}` : 'Target no longer exists'}</small></span><ChevronRight aria-hidden="true" /></button>
+            <label className="codex-dependency-label"><span>Relation</span><input disabled={readOnly} defaultValue={edge.relationLabel} placeholder="Optional, e.g. member of" onBlur={(event) => { if (event.target.value.trim() !== edge.relationLabel) void onUpdate(edge.id, { relationLabel: event.target.value }) }} /></label>
+            <label className="codex-dependency-include"><input type="checkbox" disabled={readOnly || archived || !target} checked={edge.includeWithSource} onChange={(event) => { void onUpdate(edge.id, { includeWithSource: event.target.checked }) }} /><span><strong>Include with this entry</strong><small>{archived ? 'Inactive while target is archived' : 'Available to automatic dependency cascade'}</small></span></label>
+            {!readOnly && <button type="button" className="codex-dependency-remove" onClick={() => { void onRemove(edge.id) }}><Trash2 aria-hidden="true" /> Remove</button>}
+          </article>
+        }) : <p className="codex-dependency-empty">No dependencies yet.</p>}
+        {!readOnly && <div className="codex-dependency-add">
+          <button type="button" onClick={() => { setAdding((value) => !value); setQuery('') }}><Plus aria-hidden="true" /> Add dependency</button>
+          {adding && <div className="codex-dependency-picker">
+            <label><Search aria-hidden="true" /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search active Codex by title or category" /></label>
+            <div>{candidates.length ? candidates.map((entry) => <button type="button" key={entry.id} onClick={() => { void onAdd(entry.id); setAdding(false); setQuery('') }}><span><strong>{entry.title}</strong><small>{entry.category}</small></span><Plus aria-hidden="true" /></button>) : <p>No available Codex entries match.</p>}</div>
+          </div>}
+        </div>}
+      </div>
+    </details>
+    <details className="codex-dependency-section needed-by">
+      <summary><span>Needed by · {incoming.length}</span><small>Entries that declare this lore as a dependency.</small></summary>
+      <div className="codex-dependency-content">
+        {incoming.length ? incoming.map((edge) => {
+          const owner = byId.get(edge.sourceId)
+          return <button className="codex-needed-by-row" type="button" key={edge.id} disabled={!owner} onClick={() => owner && onOpen(owner.id)}><span><strong>{owner?.title ?? 'Missing source'}</strong><small>{owner ? `${owner.category}${edge.relationLabel ? ` · ${edge.relationLabel}` : ''}` : 'Source no longer exists'}</small></span><ChevronRight aria-hidden="true" /></button>
+        }) : <p className="codex-dependency-empty">No entries currently need this one.</p>}
+      </div>
+    </details>
+  </section>
 }
 
 function Outline({ book, entities, activeSceneId, summaryStates, expandedIds, onToggle, onOpenScene, onOpenSummary, onCreate, onAutotitle, onRead, onRename, onMove, onDelete }: OutlineProps) {

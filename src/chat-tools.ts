@@ -15,6 +15,7 @@ import {
   getEntity,
   isCodexEntryArchived,
   listEntitiesByBook,
+  listCodexDependencies,
   saveDocumentContent,
   type ArcEntity,
 } from './persistence'
@@ -223,6 +224,24 @@ export async function executeChatWorkspaceTool(bookId: string, call: ChatToolCal
     if (call.function.name === 'read_entity') {
       const entityId = typeof args.entity_id === 'string' ? args.entity_id : ''
       const entity = await editableEntity(bookId, entityId)
+      let dependencyMetadata: Record<string, unknown> = {}
+      if (entity.type === 'codexEntry') {
+        const [edges, codexEntries] = await Promise.all([
+          listCodexDependencies(bookId),
+          listEntitiesByBook(bookId, 'codexEntry'),
+        ])
+        const byId = new Map(codexEntries.map((entry) => [entry.id, entry]))
+        dependencyMetadata = {
+          dependencies: edges.filter((edge) => edge.sourceId === entity.id).map((edge) => {
+            const target = byId.get(edge.targetId)
+            return { targetId: edge.targetId, title: titleFor(target ?? { title: 'Missing dependency' } as ArcEntity), category: target ? String(target.category ?? 'Other') : undefined, relationLabel: edge.relationLabel || undefined, includeWithSource: edge.includeWithSource, inactive: !target || isCodexEntryArchived(target) }
+          }),
+          neededBy: edges.filter((edge) => edge.targetId === entity.id).map((edge) => {
+            const source = byId.get(edge.sourceId)
+            return { sourceId: edge.sourceId, title: titleFor(source ?? { title: 'Missing source' } as ArcEntity), category: source ? String(source.category ?? 'Other') : undefined, relationLabel: edge.relationLabel || undefined, inactive: !source || isCodexEntryArchived(source) }
+          }),
+        }
+      }
       return { content: toolResult({
         ok: true,
         entity: {
@@ -232,6 +251,7 @@ export async function executeChatWorkspaceTool(bookId: string, call: ChatToolCal
           category: entity.type === 'codexEntry' ? String(entity.category ?? 'Other') : undefined,
           updatedAt: entity.updatedAt,
           content: String(entity.content ?? ''),
+          ...dependencyMetadata,
         },
       }) }
     }
