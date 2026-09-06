@@ -1,3 +1,5 @@
+import { PROMPT_COMPOSITION_SCHEMA_VERSION, clonePromptComposition, compositionsFromLegacyPrompts, legacyPromptMirror, normalizePromptCompositions, withSystemPrompt, type PromptCompositions, type PromptCompositionScope } from './prompt-composition'
+
 export type AiProvider = 'openrouter' | 'nanogpt' | 'openai' | 'compatible'
 export type SpeechProvider = 'nanogpt'
 export type SpeechSettings = {
@@ -49,10 +51,13 @@ export type AiSettings = {
   responseLength: string
   speech: SpeechSettings
   favorites: string[]
+  promptCompositionVersion: number
+  promptCompositions: PromptCompositions
+  /** Runtime compatibility mirror for pre-#119 consumers. New persistence omits this legacy field. */
   prompts: AiPrompts
 }
 
-export type BookAiSettings = Omit<AiSettings, 'favorites'>
+export type BookAiSettings = Omit<AiSettings, 'favorites' | 'prompts'> & { prompts?: AiPrompts }
 
 export const AI_SETTINGS_STORAGE_KEY = 'arc-ai-defaults-v1'
 export const DEFAULT_GENERATION_WORD_DELAY_MS = 40
@@ -283,6 +288,8 @@ Write in {{book.language}}.
 Return only the final Markdown body. Do not repeat the entry title as a top-level heading.`,
 }
 
+export const defaultPromptCompositions: PromptCompositions = compositionsFromLegacyPrompts(defaultAiPrompts)
+
 export const initialAiSettings: AiSettings = {
   provider: 'nanogpt',
   apiKey: '',
@@ -296,6 +303,8 @@ export const initialAiSettings: AiSettings = {
   responseLength: '',
   speech: initialSpeechSettings,
   favorites: [],
+  promptCompositionVersion: PROMPT_COMPOSITION_SCHEMA_VERSION,
+  promptCompositions: defaultPromptCompositions,
   prompts: defaultAiPrompts,
 }
 
@@ -342,14 +351,18 @@ export function normalizeAiSettings(value?: Partial<AiSettings>): AiSettings {
   ;(Object.keys(defaultAiPrompts) as Array<keyof AiPrompts>).forEach((key) => {
     if (previousDefaultAiPrompts.some((defaults) => prompts[key] === defaults[key])) prompts[key] = defaultAiPrompts[key]
   })
+  const promptCompositions = normalizePromptCompositions(value?.promptCompositions, prompts)
+  const promptMirror = legacyPromptMirror(promptCompositions) as AiPrompts
   return {
     ...initialAiSettings,
     ...value,
     responseLength: typeof value?.responseLength === 'string' ? value.responseLength : '',
     speech: normalizeSpeechSettings(value?.speech),
+    promptCompositionVersion: PROMPT_COMPOSITION_SCHEMA_VERSION,
+    promptCompositions,
+    prompts: promptMirror,
     mainEffectiveContextLimit: typeof value?.mainEffectiveContextLimit === 'string' ? value.mainEffectiveContextLimit : '',
     codexEffectiveContextLimit: typeof value?.codexEffectiveContextLimit === 'string' ? value.codexEffectiveContextLimit : '',
-    prompts,
     favorites: Array.isArray(value?.favorites) ? [...value.favorites] : [],
     generationWordDelayMs: normalizeGenerationWordDelay(value?.generationWordDelayMs),
     mainModelContextLength: Number.isFinite(value?.mainModelContextLength) ? value?.mainModelContextLength : undefined,
@@ -363,8 +376,27 @@ export function copyAiSettings(settings: AiSettings): AiSettings {
 }
 
 export function toBookAiSettings(settings: AiSettings): BookAiSettings {
-  const { favorites: _globalFavorites, ...bookSettings } = copyAiSettings(settings)
+  const { favorites: _globalFavorites, prompts: _legacyPromptMirror, ...bookSettings } = copyAiSettings(settings)
   return bookSettings
+}
+
+export function withPromptSystemPrompt(settings: AiSettings, scope: PromptCompositionScope, systemPrompt: string): AiSettings {
+  return normalizeAiSettings({
+    ...settings,
+    promptCompositions: withSystemPrompt(settings.promptCompositions, scope, systemPrompt),
+    prompts: undefined as unknown as AiPrompts,
+  })
+}
+
+export function resetPromptComposition(settings: AiSettings, scope: PromptCompositionScope): AiSettings {
+  return normalizeAiSettings({
+    ...settings,
+    promptCompositions: {
+      ...settings.promptCompositions,
+      [scope]: clonePromptComposition(defaultPromptCompositions[scope]),
+    },
+    prompts: undefined as unknown as AiPrompts,
+  })
 }
 
 export function withGlobalFavorites(settings: BookAiSettings, favorites: string[]): AiSettings {
@@ -385,7 +417,8 @@ export function loadAiSettings(): AiSettings {
 
 export function saveAiSettings(settings: AiSettings) {
   const normalized = copyAiSettings(settings)
-  localStorage.setItem(AI_SETTINGS_STORAGE_KEY, JSON.stringify(normalized))
+  const { prompts: _legacyPromptMirror, ...persisted } = normalized
+  localStorage.setItem(AI_SETTINGS_STORAGE_KEY, JSON.stringify(persisted))
   return normalized
 }
 
