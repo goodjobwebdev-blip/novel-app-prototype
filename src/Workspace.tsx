@@ -43,6 +43,7 @@ import AiSettingsScreen from './App'
 import { generationWordDelayMs, loadAiSettings, type AiSettings } from './ai-settings'
 import { createBufferedWordRenderer } from './buffered-word-renderer'
 import { applyIfStillCurrent } from './async-state-guard'
+import { LatestAsyncIntent, bookScopeMatches, documentBelongsToBook } from './book-scope-guard'
 import { KeyedAsyncQueue } from './keyed-async-queue'
 import { runDeletionSaveBarrier } from './deletion-save-barrier'
 import { navigateAfterRequiredSave, saveRequiredBeforeNavigation } from './navigation-save-guard'
@@ -226,6 +227,9 @@ export default function Workspace() {
   const summaryGenerationSequenceRef = useRef(0)
   const summaryGenerationOwnerRef = useRef<ActiveSummaryGenerationOwner | null>(null)
   const currentBookIdRef = useRef<string | null>(currentBook?.id ?? null)
+  const bookOpenIntentRef = useRef(new LatestAsyncIntent())
+  const documentLoadIntentRef = useRef(new LatestAsyncIntent())
+  const bookRefreshIntentRef = useRef(new LatestAsyncIntent())
   const screenRef = useRef<Screen>(screen)
   currentBookIdRef.current = currentBook?.id ?? null
   screenRef.current = screen
@@ -257,21 +261,27 @@ export default function Workspace() {
   useEffect(() => {
     const handleEntityChanged = (event: Event) => {
       const detail = (event as CustomEvent<{ bookId?: string; entityId?: string; deletedIds?: string[] }>).detail
-      if (!detail?.bookId || !detail.entityId || detail.bookId !== currentBook?.id) return
+      const expectedBookId = detail?.bookId
+      if (!expectedBookId || !detail?.entityId || !bookScopeMatches(expectedBookId, currentBookIdRef.current)) return
       void (async () => {
-        const structural = await reloadBookContent(detail.bookId!)
-        if (detail.entityId === currentBook?.id) {
-          const refreshedBook = await getEntity<BookEntity>(detail.bookId!)
+        const structural = await reloadBookContent(expectedBookId)
+        if (!structural || !bookScopeMatches(expectedBookId, currentBookIdRef.current)) return
+
+        if (detail.entityId === expectedBookId) {
+          const refreshedBook = await getEntity<BookEntity>(expectedBookId)
+          if (!bookScopeMatches(expectedBookId, currentBookIdRef.current)) return
           if (refreshedBook?.type === 'book') {
             setCurrentBook(refreshedBook)
             setBookList((books) => books.map((book) => book.id === refreshedBook.id ? refreshedBook : book))
           }
         }
+
+        if (!bookScopeMatches(expectedBookId, currentBookIdRef.current)) return
         if (activeDocumentIdRef.current && detail.deletedIds?.includes(activeDocumentIdRef.current)) {
           const fallback = structural.find((entity) => entity.type === 'scene')
           if (fallback) {
             await loadDocument(fallback.id, false)
-          } else {
+          } else if (bookScopeMatches(expectedBookId, currentBookIdRef.current)) {
             activeDocumentIdRef.current = null
             activeSceneIdRef.current = null
             setActiveSceneId(null)
@@ -285,8 +295,9 @@ export default function Workspace() {
           return
         }
         if (activeDocumentIdRef.current !== detail.entityId) return
-        const refreshed = await getEntity<EditableEntity>(detail.entityId!)
-        if (!refreshed || !['scene', 'note', 'codexEntry', 'summary'].includes(refreshed.type)) return
+        const refreshed = await getEntity<EditableEntity>(detail.entityId)
+        if (!bookScopeMatches(expectedBookId, currentBookIdRef.current)) return
+        if (!refreshed || !['scene', 'note', 'codexEntry', 'summary'].includes(refreshed.type) || !documentBelongsToBook(refreshed.bookId, expectedBookId)) return
         setActiveDocument(refreshed)
         const content = String(refreshed.content ?? '')
         storyRef.current = content
@@ -294,7 +305,9 @@ export default function Workspace() {
         setStoryMarkdown(content)
         setEditorRevision((revision) => revision + 1)
         setSaveState('saved')
-      })().catch(() => showToast('The edited document was saved, but the workspace could not refresh it.'))
+      })().catch(() => {
+        if (bookScopeMatches(expectedBookId, currentBookIdRef.current)) showToast('The edited document was saved, but the workspace could not refresh it.')
+      })
     }
     window.addEventListener('arc-entity-changed', handleEntityChanged)
     return () => window.removeEventListener('arc-entity-changed', handleEntityChanged)
@@ -312,6 +325,7 @@ export default function Workspace() {
 
   useEffect(() => {
     let cancelled = false
+    const initialBookIntent = bookOpenIntentRef.current.begin()
     ;(async () => {
       try {
         await ensurePrototypeSeed(initialStoryMarkdown)
@@ -324,15 +338,19 @@ export default function Workspace() {
         const structural = entities.filter((entity): entity is StructuralEntity => ['act', 'chapter', 'scene'].includes(entity.type))
         const scene = entities.find((entity) => entity.id === PROTOTYPE_SCENE_ID && entity.type === 'scene')
           ?? entities.find((entity) => entity.type === 'scene')
-        if (cancelled) return
+        const initialSummaryStates = book ? await getSummaryStateMap(book.id) : {}
+        if (book && scene) await rememberLastOpenedScene(book.id, scene.id)
+        if (cancelled || !bookOpenIntentRef.current.isCurrent(initialBookIntent)) return
+        currentBookIdRef.current = book?.id ?? null
+        documentLoadIntentRef.current.invalidate()
+        bookRefreshIntentRef.current.invalidate()
         setBookList(books)
         setSeriesList(availableSeries)
         setCurrentBook(book ?? null)
         setOutlineEntities(structural)
         setNotes(entities.filter((entity): entity is NoteEntity => entity.type === 'note'))
         setCodexEntries(entities.filter((entity): entity is CodexEntryEntity => entity.type === 'codexEntry'))
-        setSummaryStates(book ? await getSummaryStateMap(book.id) : {})
-        if (book && scene) await rememberLastOpenedScene(book.id, scene.id)
+        setSummaryStates(initialSummaryStates)
         activeDocumentIdRef.current = scene?.id ?? null
         activeSceneIdRef.current = scene?.id ?? null
         setActiveSceneId(scene?.id ?? null)
@@ -467,18 +485,46 @@ export default function Workspace() {
     if (storageReadyRef.current) setSaveState('saving')
   }
 
-  async function reloadBookContent(bookId: string) {
+  type LoadedBookContent = {
+    structural: StructuralEntity[]
+    notes: NoteEntity[]
+    codexEntries: CodexEntryEntity[]
+    summaryStates: Record<string, SummaryState>
+  }
+
+  async function readBookContent(bookId: string): Promise<LoadedBookContent> {
     const entities = await listEntitiesByBook(bookId)
-    const structural = entities.filter((entity): entity is StructuralEntity => ['act', 'chapter', 'scene'].includes(entity.type))
-    setOutlineEntities(structural)
-    setNotes(entities.filter((entity): entity is NoteEntity => entity.type === 'note').sort((a, b) => b.updatedAt - a.updatedAt))
-    setCodexEntries(entities.filter((entity): entity is CodexEntryEntity => entity.type === 'codexEntry').sort((a, b) => a.title.localeCompare(b.title)))
-    setSummaryStates(await getSummaryStateMap(bookId))
-    return structural
+    const summaryStateSnapshot = await getSummaryStateMap(bookId)
+    return {
+      structural: entities.filter((entity): entity is StructuralEntity => ['act', 'chapter', 'scene'].includes(entity.type)),
+      notes: entities.filter((entity): entity is NoteEntity => entity.type === 'note').sort((a, b) => b.updatedAt - a.updatedAt),
+      codexEntries: entities.filter((entity): entity is CodexEntryEntity => entity.type === 'codexEntry').sort((a, b) => a.title.localeCompare(b.title)),
+      summaryStates: summaryStateSnapshot,
+    }
+  }
+
+  function applyBookContent(content: LoadedBookContent) {
+    setOutlineEntities(content.structural)
+    setNotes(content.notes)
+    setCodexEntries(content.codexEntries)
+    setSummaryStates(content.summaryStates)
+  }
+
+  async function reloadBookContent(bookId: string) {
+    const intent = bookRefreshIntentRef.current.begin()
+    const content = await readBookContent(bookId)
+    if (!bookRefreshIntentRef.current.isCurrent(intent) || !bookScopeMatches(bookId, currentBookIdRef.current)) return null
+    applyBookContent(content)
+    return content.structural
   }
 
   async function loadDocument(documentId: string, closePanel = true) {
-    if (documentId === activeDocumentIdRef.current) {
+    const expectedBookId = currentBookIdRef.current
+    if (!expectedBookId) {
+      showToast('Open a book before opening a document.')
+      return
+    }
+    if (documentId === activeDocumentIdRef.current && documentBelongsToBook(activeDocument?.bookId, expectedBookId)) {
       setScreen('editor')
       if (closePanel) setRightOpen(false)
       return
@@ -487,23 +533,39 @@ export default function Workspace() {
       showToast('Stop generation before switching documents.')
       return
     }
+
+    const intent = documentLoadIntentRef.current.begin()
     if (!await saveRequiredBeforeNavigation(changedSinceSnapshotRef.current, () => flushDocument('navigation', true))) {
-      showToast('Could not save the current document. Fix the save problem before switching documents.')
+      if (documentLoadIntentRef.current.isCurrent(intent) && bookScopeMatches(expectedBookId, currentBookIdRef.current)) {
+        showToast('Could not save the current document. Fix the save problem before switching documents.')
+      }
       return
     }
+    if (!documentLoadIntentRef.current.isCurrent(intent) || !bookScopeMatches(expectedBookId, currentBookIdRef.current)) return
+
     const document = await getEntity<ArcEntity>(documentId)
+    if (!documentLoadIntentRef.current.isCurrent(intent) || !bookScopeMatches(expectedBookId, currentBookIdRef.current)) return
     if (!document || !['scene', 'note', 'codexEntry', 'summary'].includes(document.type)) {
       showToast('That document is no longer available.')
       return
     }
     const editableDocument = document as EditableEntity
+    if (!documentBelongsToBook(editableDocument.bookId, expectedBookId)) {
+      showToast('That document belongs to another book and cannot be opened here.')
+      return
+    }
+
+    if (editableDocument.type === 'scene') {
+      await rememberLastOpenedScene(expectedBookId, editableDocument.id)
+      if (!documentLoadIntentRef.current.isCurrent(intent) || !bookScopeMatches(expectedBookId, currentBookIdRef.current)) return
+    }
+
     activeDocumentIdRef.current = editableDocument.id
     setActiveDocument(editableDocument)
     if (editableDocument.type === 'scene') {
       activeSceneIdRef.current = editableDocument.id
       setActiveSceneId(editableDocument.id)
       scenePovRef.current = typeof editableDocument.pov === 'string' ? editableDocument.pov : ''
-      await rememberLastOpenedScene(editableDocument.bookId, editableDocument.id)
     }
     const content = typeof editableDocument.content === 'string' ? editableDocument.content : ''
     storyRef.current = content
@@ -524,29 +586,51 @@ export default function Workspace() {
       showToast('Stop generation before switching books.')
       return
     }
+
+    const intent = bookOpenIntentRef.current.begin()
+    documentLoadIntentRef.current.invalidate()
+    bookRefreshIntentRef.current.invalidate()
+
     if (!await saveRequiredBeforeNavigation(Boolean(activeDocumentIdRef.current && changedSinceSnapshotRef.current), () => flushDocument('navigation', true))) {
-      showToast('Could not save the current document. Fix the save problem before switching books.')
+      if (bookOpenIntentRef.current.isCurrent(intent)) showToast('Could not save the current document. Fix the save problem before switching books.')
       return
     }
-    const book = await getEntity<BookEntity>(bookId)
+    if (!bookOpenIntentRef.current.isCurrent(intent)) return
+
+    const [book, content] = await Promise.all([
+      getEntity<BookEntity>(bookId),
+      readBookContent(bookId),
+    ])
+    if (!bookOpenIntentRef.current.isCurrent(intent)) return
     if (!book || book.type !== 'book') {
       showToast('That book is no longer available.')
       return
     }
-    const entities = await reloadBookContent(bookId)
-    const scene = entities.find((entity) => entity.id === preferredSceneId && entity.type === 'scene')
-      ?? entities.find((entity) => entity.type === 'scene')
+
+    const scene = content.structural.find((entity) => entity.id === preferredSceneId && entity.type === 'scene')
+      ?? content.structural.find((entity) => entity.type === 'scene')
+    if (scene) {
+      await rememberLastOpenedScene(book.id, scene.id)
+      if (!bookOpenIntentRef.current.isCurrent(intent)) return
+    }
+
+    currentBookIdRef.current = book.id
     setCurrentBook(book)
-    setExpandedIds(new Set(entities.filter((entity) => entity.type !== 'scene').map((entity) => entity.id)))
-    activeDocumentIdRef.current = null
-    setActiveDocument(null)
-    activeSceneIdRef.current = null
-    setActiveSceneId(null)
-    storyRef.current = ''
-    setStoryMarkdown('')
+    applyBookContent(content)
+    setExpandedIds(new Set(content.structural.filter((entity) => entity.type !== 'scene').map((entity) => entity.id)))
+    activeDocumentIdRef.current = scene?.id ?? null
+    setActiveDocument(scene ?? null)
+    activeSceneIdRef.current = scene?.id ?? null
+    setActiveSceneId(scene?.id ?? null)
+    scenePovRef.current = scene && typeof scene.pov === 'string' ? scene.pov : ''
+    const sceneContent = scene && typeof scene.content === 'string' ? scene.content : ''
+    storyRef.current = sceneContent
+    setStoryMarkdown(sceneContent)
     changedSinceSnapshotRef.current = false
-    if (scene) await loadScene(scene.id, false)
-    else setScreen('editor')
+    latestGenerationRequestRef.current = null
+    setSaveState('saved')
+    setScreen('editor')
+    setRightOpen(false)
   }
 
   async function deleteWithSaveBarrier(rootId: string) {
@@ -589,6 +673,10 @@ export default function Workspace() {
     const books = await listBooks()
     setBookList(books)
     if (currentBook?.id === book.id) {
+      bookOpenIntentRef.current.invalidate()
+      documentLoadIntentRef.current.invalidate()
+      bookRefreshIntentRef.current.invalidate()
+      currentBookIdRef.current = null
       setCurrentBook(null)
       setOutlineEntities([])
       setNotes([])
@@ -625,6 +713,10 @@ export default function Workspace() {
     await deleteWithSaveBarrier(currentBook.id)
     const books = await listBooks()
     setBookList(books)
+    bookOpenIntentRef.current.invalidate()
+    documentLoadIntentRef.current.invalidate()
+    bookRefreshIntentRef.current.invalidate()
+    currentBookIdRef.current = null
     setCurrentBook(null)
     setOutlineEntities([])
     activeSceneIdRef.current = null
@@ -638,7 +730,8 @@ export default function Workspace() {
     try {
       const entity = await createStructuralEntity(type, currentBook.id, parentId)
       setExpandedIds((current) => new Set(current).add(parentId))
-      await reloadBookContent(currentBook.id)
+      const refreshed = await reloadBookContent(currentBook.id)
+      if (!refreshed) return
       if (entity.type === 'scene') await loadScene(entity.id)
     } catch (error) {
       showToast(error instanceof Error ? error.message : `Could not create ${type}.`)
@@ -665,6 +758,7 @@ export default function Workspace() {
     if (!window.confirm(`Delete “${entity.title}”?${warning} This cannot be undone.`)) return
     const removedIds = await deleteWithSaveBarrier(entity.id)
     const entities = await reloadBookContent(currentBook.id)
+    if (!entities) return
     if (activeDocumentIdRef.current && removedIds.includes(activeDocumentIdRef.current)) {
       const nextScene = entities.find((candidate) => candidate.type === 'scene')
       activeDocumentIdRef.current = null
@@ -680,20 +774,25 @@ export default function Workspace() {
   }
 
   async function openSummary(source: StructuralEntity | CodexEntryEntity) {
+    const sourceBookId = source.bookId
     try {
       const summary = await getOrCreateSummary(source)
+      if (!bookScopeMatches(sourceBookId, currentBookIdRef.current)) return
       await loadDocument(summary.id)
-      if (currentBook) setSummaryStates(await getSummaryStateMap(currentBook.id))
+      if (!bookScopeMatches(sourceBookId, currentBookIdRef.current)) return
+      const states = await getSummaryStateMap(sourceBookId)
+      if (bookScopeMatches(sourceBookId, currentBookIdRef.current)) setSummaryStates(states)
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Could not open the summary.')
+      if (bookScopeMatches(sourceBookId, currentBookIdRef.current)) showToast(error instanceof Error ? error.message : 'Could not open the summary.')
     }
   }
 
   async function addNote() {
     if (!currentBook) return
     try {
-      const note = await createNote(currentBook.id)
-      await reloadBookContent(currentBook.id)
+      const sourceBookId = currentBook.id
+      const note = await createNote(sourceBookId)
+      if (!await reloadBookContent(sourceBookId)) return
       await loadDocument(note.id)
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Could not create the note.')
@@ -703,8 +802,9 @@ export default function Workspace() {
   async function addCodexEntry() {
     if (!currentBook) return
     try {
-      const entry = await createCodexEntry(currentBook.id)
-      await reloadBookContent(currentBook.id)
+      const sourceBookId = currentBook.id
+      const entry = await createCodexEntry(sourceBookId)
+      if (!await reloadBookContent(sourceBookId)) return
       await loadDocument(entry.id)
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Could not create the Codex entry.')

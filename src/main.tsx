@@ -26,6 +26,7 @@ import './chat-composer-fix.css'
 import './chat-model-picker-shape.css'
 import './settings-scope.css'
 import './ui-settings.css'
+import './mobile-control-hardening.css'
 
 applyStoredUiSettings()
 
