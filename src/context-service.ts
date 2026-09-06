@@ -32,7 +32,7 @@ export type ContextDiagnostics = {
   limitError?: string
   wasClamped: boolean
 }
-type BuildOptions = { bookId: string; type: GenerationContextType; currentSceneId?: string; currentSceneText?: string; currentDocumentId?: string; profile: GenerationContextProfile }
+type BuildOptions = { bookId: string; type: GenerationContextType; currentSceneId?: string; currentSceneText?: string; currentDocumentId?: string; previousScenesForCodexTriggers?: number; profile: GenerationContextProfile }
 type AdditionalContextSection = {
   text: string
   id: string
@@ -166,14 +166,14 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
       typeRank: 2,
       outlineIndex: Number.MAX_SAFE_INTEGER,
     }))
-  const automaticMatches = automaticCodexMatches({
+  const automaticMatches = ['scene', 'codex', 'chat'].includes(options.type) ? automaticCodexMatches({
     entities,
     scenes,
     anchorSceneId,
     anchorSceneText: liveCurrentText,
-    previousSceneCount: contextSettings.previousScenesForCodexTriggers,
+    previousSceneCount: options.previousScenesForCodexTriggers ?? contextSettings.previousScenesForCodexTriggers,
     excludeEntryId: options.type === 'codex' ? options.currentDocumentId : undefined,
-  })
+  }) : []
   const automaticIds = new Set(automaticMatches.map((match) => match.entry.id))
   const automaticRepresentations = automaticMatches.map((match) => codexContextRepresentation(match.entry, entities))
   const automaticCodex: PreparedAutomaticCodex[] = automaticMatches.map((match) => {

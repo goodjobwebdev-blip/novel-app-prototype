@@ -535,7 +535,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
     const currentSceneId = type === 'scene' ? currentDocumentId : value.lastOpenedSceneId || undefined
     ;(async () => {
       try {
-        const prepared = await buildContextValues({ bookId, type, currentSceneId, currentSceneText: type === 'scene' ? currentDocumentText : undefined, currentDocumentId, profile })
+        const prepared = await buildContextValues({ bookId, type, currentSceneId, currentSceneText: type === 'scene' ? currentDocumentText : undefined, currentDocumentId, previousScenesForCodexTriggers: value.previousScenesForCodexTriggers, profile })
         let chat: ChatEntity | null = null
         let history: ChatMessageEntity[] = []
         if (type === 'chat' && chatId) {
@@ -559,7 +559,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
       }
     })()
     return () => { cancelled = true }
-  }, [bookId, chatId, currentDocumentId, currentDocumentText, profile, sources, type, value.lastOpenedSceneId])
+  }, [bookId, chatId, currentDocumentId, currentDocumentText, profile, sources, type, value.lastOpenedSceneId, value.previousScenesForCodexTriggers])
 
   const currentDocument = sources.find((item) => item.id === currentDocumentId)
   const metadata: BookPromptValues = { ...(bookPromptValues ?? { title: bookTitle, series: '', seriesOrder: '', overview: '', genre: '', style: '', pov: '', tense: '', language: '' }), responseLength: settings.responseLength }
