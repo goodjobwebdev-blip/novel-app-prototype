@@ -46,14 +46,14 @@ import {
   type BookContextSettings,
   type GenerationContextType,
 } from './persistence'
-import { bookTemplateValues, generationInstructionMessage, promptTemplateDiagnostics, promptVariables, renderPromptTemplate, responseLengthMessage, type BookPromptValues } from './prompt-template'
+import { bookTemplateValues, promptTemplateDiagnostics, promptVariables, renderPromptTemplate, type BookPromptValues } from './prompt-template'
 import PromptTemplateEditor, { type PromptTemplateEditorHandle } from './PromptTemplateEditor'
-import { makePredefinedMessage, likelyReusablePrefix, type NormalizedAssembledRequest, type PredefinedMessage } from './prompt-composition'
+import { makePredefinedMessage, likelyReusablePrefix, normalizedRequestDiagnosticText, type NormalizedAssembledRequest, type PredefinedMessage, type ProviderMessageRole } from './prompt-composition'
 import { assembleStoryGenerationRequest, STORY_CONTINUE_FALLBACK } from './story-request'
 import { buildContextValues, contextLimitInputError, generationContextDiagnostics, type PreparedContextValues } from './context-service'
 import { getChat, listChatMessages, saveChatContextProfile, type ChatEntity, type ChatMessageEntity } from './chat-service'
-import { CHAT_TOOL_DEFINITIONS, CHAT_WORKSPACE_INSTRUCTIONS, serializeChatModelInput } from './chat-request'
-import { renderLorePrompt } from './nanogpt'
+import { assembleChatRequest, serializeChatModelInput } from './chat-request'
+import { assembleCodexGenerationRequest } from './scope-request'
 import { clearModelCatalog, getCachedModelCatalog, providerModelEndpoint, saveModelCatalog, type ProviderModel } from './model-catalog'
 import { FAKE_PROVIDER_MODEL, clearFakeProviderTrace, getFakeProviderTrace, subscribeFakeProviderTrace } from './fake-provider'
 import { KeyedAsyncQueue } from './keyed-async-queue'
@@ -71,7 +71,7 @@ type SettingsTab = 'ai' | 'context' | 'appearance' | 'speech' | 'images'
 type SaveState = 'loading' | 'saved' | 'saving' | 'error'
 type RequestPreviewMessage = {
   key: string
-  role: 'system' | 'user' | 'assistant' | 'tool'
+  role: ProviderMessageRole
   title: string
   detail: string
   content: string
@@ -823,17 +823,16 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
   const metadata: BookPromptValues = { ...(bookPromptValues ?? { title: bookTitle, series: '', seriesOrder: '', overview: '', genre: '', style: '', pov: '', tense: '', language: '' }), responseLength: settings.responseLength }
   const typeLabel = type === 'scene' ? 'Story' : type === 'codex' ? 'Codex' : 'Chat'
   const previewPromptScope = type === 'scene' ? 'story' : type === 'codex' ? 'lore' : 'assistant'
-  const previewPromptTemplate = type === 'chat' ? previewChat?.systemPrompt ?? '' : settings.prompts[previewPromptScope]
-  const previewPromptDiagnostics = type === 'scene'
-    ? [settings.promptCompositions.story.systemPrompt, ...settings.promptCompositions.story.predefinedMessages.filter((message) => message.enabled).map((message) => message.template)]
-      .flatMap((template) => promptTemplateDiagnostics(template, 'story', bookTemplateValues(metadata)))
-    : promptTemplateDiagnostics(previewPromptTemplate, previewPromptScope, bookTemplateValues(metadata))
+  const previewComposition = type === 'scene' ? settings.promptCompositions.story : type === 'codex' ? settings.promptCompositions.lore : null
+  const previewPromptTemplates = previewComposition
+    ? [previewComposition.systemPrompt, ...previewComposition.predefinedMessages.filter((message) => message.enabled).map((message) => message.template)]
+    : [previewChat?.systemPrompt ?? '']
+  const previewPromptDiagnostics = previewPromptTemplates.flatMap((template) => promptTemplateDiagnostics(template, previewPromptScope, bookTemplateValues(metadata)))
   const previewPromptErrors = previewPromptDiagnostics.filter((diagnostic) => diagnostic.severity === 'error')
-  const requestMessages: RequestPreviewMessage[] = []
-  let storyNormalizedRequest: NormalizedAssembledRequest | null = null
+  let normalizedRequest: NormalizedAssembledRequest | null = null
 
   if (preview && type === 'scene') {
-    storyNormalizedRequest = assembleStoryGenerationRequest({
+    normalizedRequest = assembleStoryGenerationRequest({
       composition: settings.promptCompositions.story,
       book: metadata,
       sceneText: preview.currentSceneText,
@@ -843,68 +842,45 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
       responseLength: settings.responseLength,
       instruction: '',
     })
-    storyNormalizedRequest.parts.forEach((part, index) => requestMessages.push({
-      key: part.id,
-      role: part.role ?? 'user',
-      title: part.name || (part.sourceKind === 'current-turn' ? 'Current instruction' : `Message ${index + 1}`),
-      detail: `${part.role?.toUpperCase() ?? 'NO ROLE'} · ${part.sourceKind}${part.omitted ? ' · omitted' : ''}`,
-      content: part.content,
-      omitted: part.omitted,
-      references: part.referencedVariables,
-      diagnostics: part.dynamicVariables?.flatMap((item) => item.sources.map((source) => `${item.variable}: ${source.title || source.sourceId}${source.representation ? ` · ${source.representation}` : ''}${source.reason ? ` · ${source.reason}` : ''}`)),
-    }))
   }
 
   if (preview && type === 'codex') {
-    const systemPrompt = renderLorePrompt(settings.prompts.lore, {
+    normalizedRequest = assembleCodexGenerationRequest({
+      composition: settings.promptCompositions.lore,
       book: metadata,
+      context: preview,
+      entryId: currentDocument?.id ?? currentDocumentId ?? 'preview-entry',
       entryTitle: currentDocument?.title ?? '',
       entryCategory: typeof currentDocument?.category === 'string' ? currentDocument.category : '',
       entryContent: currentDocumentText ?? String(currentDocument?.content ?? ''),
-      sceneText: preview.lastSceneText,
-      additionalContext: preview.additionalContext,
+      instruction: 'Create a complete Codex entry.',
     })
-    requestMessages.push({ key: 'codex-system', role: 'system', title: 'Lore system prompt', detail: 'SYSTEM', content: systemPrompt })
-    if (!/{{\s*additional_context\s*}}/.test(settings.prompts.lore) && preview.additionalContext.trim()) {
-      requestMessages.push({ key: 'codex-context', role: 'user', title: 'Additional context', detail: 'USER', content: `# Additional context\n\n${preview.additionalContext}` })
-    }
-    requestMessages.push({ key: 'codex-instruction', role: 'user', title: 'Generation instruction', detail: 'USER · default shown', content: generationInstructionMessage(settings.prompts.lore, settings.responseLength, 'Create a complete Codex entry.') })
   }
 
   if (preview && type === 'chat' && previewChat) {
-    const systemPrompt = renderPromptTemplate(previewChat.systemPrompt, bookTemplateValues(metadata))
-    requestMessages.push({ key: 'chat-system', role: 'system', title: 'Chat system prompt', detail: 'SYSTEM', content: systemPrompt })
-    requestMessages.push({ key: 'chat-workspace', role: 'system', title: 'Workspace instructions', detail: 'SYSTEM', content: CHAT_WORKSPACE_INSTRUCTIONS })
-    const contextSections = [
-      preview.lastSceneText ? `# Current scene${preview.lastSceneTitle ? ` — ${preview.lastSceneTitle}` : ''}\n\n${preview.lastSceneText.trim()}` : '',
-      preview.additionalContext ? `# Additional context\n\n${preview.additionalContext.trim()}` : '',
-    ].filter(Boolean)
-    if (contextSections.length) {
-      requestMessages.push({ key: 'chat-context', role: 'system', title: 'Selected book context', detail: 'SYSTEM', content: `# Selected book context\n\n${contextSections.join('\n\n')}` })
-    }
-    const lengthMessage = responseLengthMessage(previewChat.systemPrompt, settings.responseLength)
-    let latestUserIndex = -1
-    previewHistory.forEach((message, index) => { if (message.role === 'user') latestUserIndex = index })
-    previewHistory.forEach((message, index) => {
-      if (lengthMessage && index === latestUserIndex) {
-        requestMessages.push({ key: 'chat-response-length', role: 'user', title: 'Response length', detail: 'USER · before latest instruction', content: lengthMessage })
-      }
-      requestMessages.push({
-        key: message.id,
-        role: message.role,
-        title: message.role === 'user' ? 'User message' : 'Assistant message',
-        detail: message.role.toUpperCase(),
-        content: chatHistoryContent(message),
-        reasoning: message.role === 'assistant' ? message.thoughts : undefined,
-      })
+    normalizedRequest = assembleChatRequest({
+      systemPrompt: previewChat.systemPrompt,
+      book: metadata,
+      context: preview,
+      history: previewHistory.map((message) => ({ id: message.id, role: message.role, content: chatHistoryContent(message), thoughts: message.role === 'assistant' ? message.thoughts : undefined })),
     })
-    if (lengthMessage && latestUserIndex < 0) {
-      requestMessages.push({ key: 'chat-response-length', role: 'user', title: 'Response length', detail: 'USER · before next message', content: lengthMessage })
-    }
   }
 
-  const providerPreviewMessages = storyNormalizedRequest?.providerMessages ?? requestMessages.filter((message) => !message.omitted).map((message) => ({ role: message.role, content: message.content }))
-  const exactPreview = providerPreviewMessages.map((message) => `${message.role.toUpperCase()}:\n\n${message.content || '[empty]'}`).join('\n\n---\n\n')
+  const requestMessages: RequestPreviewMessage[] = normalizedRequest?.parts.flatMap((part, index) => {
+    if (!part.role || part.role === 'tool') return []
+    return [{
+      key: part.id,
+      role: part.role,
+      title: part.name || (part.sourceKind === 'current-turn' ? 'Current instruction' : `Message ${index + 1}`),
+      detail: `${part.role.toUpperCase()} · ${part.sourceKind}${part.omitted ? ' · omitted' : ''}`,
+      content: part.providerMessage?.content ?? part.content,
+      omitted: part.omitted,
+      references: part.referencedVariables,
+      diagnostics: part.dynamicVariables?.flatMap((item) => item.sources.map((source) => `${item.variable}: ${source.title || source.sourceId}${source.representation ? ` · ${source.representation}` : ''}${source.reason ? ` · ${source.reason}` : ''}`)),
+      ...(part.providerMessage?.reasoning_content ? { reasoning: part.providerMessage.reasoning_content } : {}),
+    }]
+  }) ?? []
+  const exactPreview = normalizedRequest?.providerMessages.map((message) => `${message.role.toUpperCase()}:\n\n${message.content || '[empty]'}${message.reasoning_content ? `\n\nreasoning:\n${message.reasoning_content}` : ''}`).join('\n\n---\n\n') ?? ''
   const selectedModel = type === 'codex' ? settings.codexModel.trim() || settings.mainModel.trim() : type === 'chat' ? previewChat?.model.trim() : settings.mainModel.trim()
   const selectedModelContextLength = type === 'codex'
     ? (settings.codexModel.trim() ? settings.codexModelContextLength : settings.mainModelContextLength)
@@ -912,9 +888,8 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
   const effectiveLimitInput = type === 'codex'
     ? (settings.codexModel.trim() ? settings.codexEffectiveContextLimit : settings.mainEffectiveContextLimit)
     : type === 'chat' ? previewChat?.effectiveContextLimit ?? '' : settings.mainEffectiveContextLimit
-  const diagnosticMessages = storyNormalizedRequest?.providerMessages ?? requestMessages.filter((message) => !message.omitted).map((message) => ({ role: message.role, content: message.content || null, ...(message.reasoning ? { reasoning_content: message.reasoning } : {}) }))
   const diagnostics = selectedModel && requestMessages.length && !previewPromptErrors.length
-    ? generationContextDiagnostics(selectedModel, selectedModelContextLength, effectiveLimitInput, type === 'chat' ? serializeChatModelInput(diagnosticMessages) : JSON.stringify({ messages: diagnosticMessages }))
+    ? generationContextDiagnostics(selectedModel, selectedModelContextLength, effectiveLimitInput, type === 'chat' ? serializeChatModelInput(normalizedRequest!) : normalizedRequestDiagnosticText(normalizedRequest!))
     : null
 
   return <section className="context-defaults-settings">
@@ -939,8 +914,8 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
         {diagnostics && <div className={`context-budget ${!diagnostics.limitValid || !diagnostics.fits ? 'over' : diagnostics.warning ? 'warning' : ''}`}><strong>{diagnostics.limitValid ? `${diagnostics.requestTokens.toLocaleString()} estimated input tokens · ${Math.round(diagnostics.usageRatio * 100)}% of usable budget` : 'Invalid effective context cap'}</strong><span>Effective limit: {diagnostics.effectiveContextTokens.toLocaleString()} · Response reserve: {diagnostics.responseReserveTokens.toLocaleString()} · {diagnostics.modelContextKnown ? `Model hard window: ${diagnostics.modelContextTokens.toLocaleString()}` : `Model window estimate: ${diagnostics.modelContextTokens.toLocaleString()}`}</span>{diagnostics.wasClamped && <small>Your configured cap is above the model hard maximum, so Arc uses the model maximum.</small>}{diagnostics.limitError && <small>{diagnostics.limitError}</small>}{diagnostics.warning && diagnostics.fits && <small>Near the limit. Consider summaries, deselecting full-text context, or raising the cap.</small>}{!diagnostics.fits && diagnostics.limitValid && <small>Over the usable budget. Generation will be refused; Arc will not trim or replace context automatically.</small>}</div>}
         {preview.automaticCodex.length > 0 && <div className="automatic-codex-preview"><strong>Automatic Codex</strong>{preview.automaticCodex.map((item) => <article key={item.entryId} className={item.source === 'dependency' ? 'dependency-cascade' : 'trigger-match'}><header><b>{item.title}</b><small>{item.source === 'dependency' ? 'Dependency cascade' : 'Direct trigger'} · {item.representation === 'Summary' ? 'Summary' : 'Full entry'}{item.fallbackReason ? ` · ${item.fallbackReason}` : ''}</small></header>{item.source === 'dependency' ? <p>Dependency path: {(item.dependencyPath ?? []).map((step) => step.title).join(' → ')}</p> : <ul>{item.matches.map((match, index) => <li key={`${item.entryId}-${match.sceneId}-${match.trigger}-${index}`}><code>{match.trigger}</code> · {match.sceneTitle}</li>)}</ul>}</article>)}</div>}
         {preview.codexRepresentations.length > 0 && <div className="codex-context-representations"><strong>Codex context representation</strong>{preview.codexRepresentations.map((item) => <span key={item.entryId}><b>{item.title}</b><em>{item.representation}{item.fallbackReason ? ` · ${item.fallbackReason}` : ''}</em></span>)}</div>}
-        {storyNormalizedRequest?.dynamicSourceDedupe.length ? <div className="codex-context-representations"><strong>Deduplicated Additional sources</strong>{storyNormalizedRequest.dynamicSourceDedupe.map((decision) => <span key={decision.sourceId}><b>{decision.omittedAdditional.title || decision.sourceId}</b><em>Omitted because this source is already represented automatically{decision.automatic.representation ? ` as ${decision.automatic.representation}` : ''}.</em></span>)}</div> : null}
-        {storyNormalizedRequest && <div className="context-budget"><strong>Likely reusable prefix: {likelyReusablePrefix(storyNormalizedRequest.parts, (name) => promptVariables.find((variable) => variable.name === name)?.stability).partCount} message(s)</strong><span>Reuse stops before the first message that references turn-dynamic data.</span></div>}
+        {normalizedRequest?.dynamicSourceDedupe.length ? <div className="codex-context-representations"><strong>Deduplicated Additional sources</strong>{normalizedRequest.dynamicSourceDedupe.map((decision) => <span key={decision.sourceId}><b>{decision.omittedAdditional.title || decision.sourceId}</b><em>Omitted because this source is already represented automatically{decision.automatic.representation ? ` as ${decision.automatic.representation}` : ''}.</em></span>)}</div> : null}
+        {type === 'scene' && normalizedRequest && <div className="context-budget"><strong>Likely reusable prefix: {likelyReusablePrefix(normalizedRequest.parts, (name) => promptVariables.find((variable) => variable.name === name)?.stability).partCount} message(s)</strong><span>Reuse stops before the first message that references turn-dynamic data.</span></div>}
         <div className="context-preview-rendered">{requestMessages.map((message) => <section key={message.key} className={message.omitted ? 'omitted' : ''}><header><h3>{message.title}</h3><span>{message.detail}</span></header>{message.content ? <div className="context-preview-copy">{message.content}</div> : <p className="context-preview-empty">This message is empty.</p>}{message.references?.length ? <p className="context-preview-empty">References: {message.references.map((reference) => `{{${reference}}}`).join(', ')}</p> : null}{message.diagnostics?.length ? <ul>{message.diagnostics.map((diagnostic) => <li key={diagnostic}>{diagnostic}</li>)}</ul> : null}{message.reasoning && <div className="context-preview-copy"><strong>Reasoning</strong>\n\n{message.reasoning}</div>}</section>)}</div>
         <details className="context-preview-raw"><summary>View message stack</summary><pre>{exactPreview || '[No messages would be sent yet.]'}</pre></details>
       </> : <p className="context-preview-empty">Preparing preview…</p>}

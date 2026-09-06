@@ -1,6 +1,7 @@
 import { generationContextDiagnostics, type ContextDiagnostics } from './context-service'
-import { fetchTextProviderModelContextLength, streamTextProviderCompletion } from './text-provider'
+import { fetchTextProviderModelContextLength, streamTextProviderCompletion, textProviderRequestText } from './text-provider'
 import type { AiSettings } from './ai-settings'
+import { assembleNormalizedRequest, normalizeAppManagedPart, type NormalizedAssembledRequest } from './prompt-composition'
 import {
   getEntity,
   isCodexEntryArchived,
@@ -27,6 +28,7 @@ export type AutotitleRequest = {
   systemPrompt: string
   userMessage: string
   context: string
+  normalizedRequest: NormalizedAssembledRequest
   diagnostics: ContextDiagnostics
 }
 
@@ -178,8 +180,12 @@ export async function prepareAutotitleRequest(bookId: string, targetId: string, 
   const language = typeof bookEntity.language === 'string' ? bookEntity.language : ''
   const systemPrompt = systemPromptFor(targetEntity.type as AutotitleTargetType, language)
   const userMessage = `# Target\n${targetEntity.type}: ${targetEntity.title}\n\n# Automatic context\n${context}\n\nReturn one suitable title/name.`
+  const normalizedRequest = assembleNormalizedRequest([
+    normalizeAppManagedPart({ id: 'autotitle-system', role: 'system', sourceKind: 'app-managed', sourceId: 'autotitle-system', name: 'Autotitle system instruction', ownership: 'app-managed', content: systemPrompt }),
+    normalizeAppManagedPart({ id: 'autotitle-action', role: 'user', sourceKind: 'current-turn', sourceId: 'autotitle-action', name: 'Autotitle request', ownership: 'current-turn', content: userMessage }),
+  ])
   const effectiveContextLimit = usingSupport ? '' : settings.mainEffectiveContextLimit
-  const diagnostics = generationContextDiagnostics(model, modelContextLength, effectiveContextLimit, JSON.stringify({ messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }] }))
+  const diagnostics = generationContextDiagnostics(model, modelContextLength, effectiveContextLimit, textProviderRequestText({ normalizedRequest }))
   if (!diagnostics.limitValid) throw new Error(diagnostics.limitError ?? 'The effective context cap is invalid.')
   if (!diagnostics.fits) throw new Error(`Autotitle context is too large: ~${diagnostics.requestTokens.toLocaleString()} input tokens for a ${diagnostics.usableInputTokens.toLocaleString()}-token usable budget. Arc will not trim or substitute context automatically.`)
   return {
@@ -193,6 +199,7 @@ export async function prepareAutotitleRequest(bookId: string, targetId: string, 
     systemPrompt,
     userMessage,
     context,
+    normalizedRequest,
     diagnostics,
   }
 }
@@ -205,8 +212,7 @@ export async function generateAutotitleSuggestion(settings: AiSettings, request:
     apiKey: settings.apiKey.trim(),
     baseUrl: settings.baseUrl,
     model: request.model,
-    systemPrompt: request.systemPrompt,
-    userMessage: request.userMessage,
+    normalizedRequest: request.normalizedRequest,
   }, (chunk) => { output += chunk }, signal)
   return parseSuggestion(output)
 }

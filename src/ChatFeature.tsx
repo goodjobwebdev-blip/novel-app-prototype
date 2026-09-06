@@ -20,7 +20,7 @@ import {
   Volume2,
   X,
 } from 'lucide-react'
-import { streamChatCompletion, type ChatCompletionMessage } from './chat-api'
+import { streamChatCompletion } from './chat-api'
 import ExpandableTextInput from './ExpandableTextInput'
 import { chatMatchesBookSelection, onlyChatsForBook, reloadMatchesBookSelection } from './chat-book-guard'
 import { chatHistoryPrefixMatches } from './chat-history-guard'
@@ -61,11 +61,12 @@ import {
   type ChatOutlineActionProposal,
 } from './chat-service'
 import { buildContextValues, contextLimitInputError, generationContextDiagnostics } from './context-service'
-import { assertPromptTemplateValid, bookTemplateValues, renderPromptTemplate, responseLengthMessage, type BookPromptValues } from './prompt-template'
+import { assertPromptTemplateValid, type BookPromptValues } from './prompt-template'
 import { applyChatDocumentEdit, createChatCodexEntry, executeChatWorkspaceTool, rejectChatCodexEntry, rejectChatDocumentEdit } from './chat-tools'
 import { applyChatEntityAction, chatEntityToolNames, executeChatEntityTool, rejectChatEntityAction } from './chat-entity-tools'
 import { applyChatOutlineAction, chatOutlineToolNames, executeChatOutlineTool, rejectChatOutlineAction } from './chat-outline-tools'
-import { CHAT_TOOL_DEFINITIONS, CHAT_WORKSPACE_INSTRUCTIONS, serializeChatModelInput } from './chat-request'
+import { assembleChatRequest, CHAT_TOOL_DEFINITIONS, serializeChatModelInput } from './chat-request'
+import { appendNormalizedRequestPart, normalizeRuntimeMessagePart } from './prompt-composition'
 import { startTtsSession } from './tts-service'
 import { getSttState, normalizeTranscriptForInsertion, startSttSession, subscribeSttState, type SttState } from './stt-service'
 import './chat.css'
@@ -93,10 +94,6 @@ function generationPhaseLabel(phase: GenerationPhase | null) {
   if (phase === 'writing') return 'Writing'
   if (phase === 'stopping') return 'Stopping'
   return 'Thinking'
-}
-
-function section(title: string, content: string) {
-  return `# ${title}\n\n${content.trim()}`
 }
 
 export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onChatChange, onToast }: ChatViewProps) {
@@ -389,7 +386,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     }
   }
 
-  function buildProviderMessages(
+  function buildProviderRequest(
     activeChat: ChatEntity,
     history: ChatRequestHistoryItem[],
     prepared: PreparedAssistantGeneration,
@@ -397,12 +394,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     const { settings, context } = prepared
     const promptValues = { ...bookPromptValues, responseLength: settings.responseLength }
     assertPromptTemplateValid(activeChat.systemPrompt, 'assistant')
-    const systemPrompt = renderPromptTemplate(activeChat.systemPrompt, bookTemplateValues(promptValues))
-    const contextSections = [
-      context.lastSceneText ? section(`Current scene${context.lastSceneTitle ? ` — ${context.lastSceneTitle}` : ''}`, context.lastSceneText) : '',
-      context.additionalContext ? section('Additional context', context.additionalContext) : '',
-    ].filter(Boolean)
-    const historyMessages = history.map((message): ChatCompletionMessage => {
+    const historyMessages = history.map((message) => {
       const editState = message.role === 'assistant' && message.documentEdits?.length
         ? `\n\n[Workspace edit proposals: ${message.documentEdits.map((proposal) => `${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
         : ''
@@ -416,21 +408,13 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
         ? `\n\n[Entity proposals: ${message.entityActions.map((proposal) => `${proposal.action} ${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
         : ''
       return {
+        id: 'id' in message && typeof message.id === 'string' ? message.id : undefined,
         role: message.role,
         content: `${message.content}${editState}${creationState}${outlineState}${entityActionState}`,
-        ...(message.role === 'assistant' && message.thoughts ? { reasoning_content: message.thoughts } : {}),
+        ...(message.role === 'assistant' && message.thoughts ? { thoughts: message.thoughts } : {}),
       }
     })
-    const lengthMessage = responseLengthMessage(activeChat.systemPrompt, settings.responseLength)
-    let latestUserIndex = -1
-    history.forEach((message, index) => { if (message.role === 'user') latestUserIndex = index })
-    if (lengthMessage && latestUserIndex >= 0) historyMessages.splice(latestUserIndex, 0, { role: 'user', content: lengthMessage })
-    return [
-      { role: 'system' as const, content: systemPrompt },
-      { role: 'system' as const, content: CHAT_WORKSPACE_INSTRUCTIONS },
-      ...(contextSections.length ? [{ role: 'system' as const, content: `# Selected book context\n\n${contextSections.join('\n\n')}` }] : []),
-      ...historyMessages,
-    ] satisfies ChatCompletionMessage[]
+    return assembleChatRequest({ systemPrompt: activeChat.systemPrompt, book: promptValues, context, history: historyMessages })
   }
 
   async function prepareAssistantGeneration(
@@ -465,8 +449,8 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     assertGenerationOwnerCurrent(owner, activeChat)
 
     const prepared = { settings, context }
-    const providerMessages = buildProviderMessages(activeChat, history, prepared)
-    const diagnostics = generationContextDiagnostics(activeChat.model, activeChat.modelContextLength, activeChat.effectiveContextLimit, serializeChatModelInput(providerMessages))
+    const normalizedRequest = buildProviderRequest(activeChat, history, prepared)
+    const diagnostics = generationContextDiagnostics(activeChat.model, activeChat.modelContextLength, activeChat.effectiveContextLimit, serializeChatModelInput(normalizedRequest))
     if (!diagnostics.limitValid) throw new Error(diagnostics.limitError ?? 'The Chat context cap is invalid.')
     if (!diagnostics.fits) {
       const dependencyTitles = context.automaticCodex.filter((item) => item.source === 'dependency').map((item) => item.title)
@@ -583,10 +567,9 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       const prepared = preparedInputs ?? await prepareAssistantGeneration(activeChat, history, owner)
       assertGenerationOwnerCurrent(owner, activeChat)
       const { settings } = prepared
-      const providerMessages = buildProviderMessages(activeChat, history, prepared)
-      const workingMessages = [...providerMessages]
+      let workingRequest = buildProviderRequest(activeChat, history, prepared)
       for (let round = 0; round < 8 && !controller.signal.aborted; round += 1) {
-        const roundDiagnostics = generationContextDiagnostics(activeChat.model, activeChat.modelContextLength, activeChat.effectiveContextLimit, serializeChatModelInput(workingMessages))
+        const roundDiagnostics = generationContextDiagnostics(activeChat.model, activeChat.modelContextLength, activeChat.effectiveContextLimit, serializeChatModelInput(workingRequest))
         if (!roundDiagnostics.limitValid) throw new Error(roundDiagnostics.limitError ?? 'The Chat context cap is invalid.')
         if (!roundDiagnostics.fits) throw new Error(`Chat context exceeded its usable budget after workspace tool results (~${roundDiagnostics.requestTokens.toLocaleString()} / ${roundDiagnostics.usableInputTokens.toLocaleString()} input tokens). Reduce context or raise the cap; Arc will not remove older turns automatically.`)
         activeRoundContent = ''
@@ -599,9 +582,8 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           baseUrl: settings.baseUrl,
           provider: settings.provider,
           model: activeChat.model,
-          messages: workingMessages,
+          normalizedRequest: workingRequest,
           thinking: activeChat.thinking,
-          tools: CHAT_TOOL_DEFINITIONS,
         }, (chunk) => {
           if (!generationOwnsCurrentUi(owner)) return
           if (chunk.thoughts) {
@@ -621,12 +603,19 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
         if (controller.signal.aborted || !ownsChatGeneration(generationOwnersRef.current, owner)) break
         if (result.toolCalls.length) {
           setOwnedGenerationPhase(owner, 'using-tools')
-          workingMessages.push({
-            role: 'assistant',
-            content: activeRoundContent || null,
-            ...(activeRoundThoughts ? { reasoning_content: activeRoundThoughts } : {}),
-            tool_calls: result.toolCalls,
-          })
+          workingRequest = appendNormalizedRequestPart(workingRequest, normalizeRuntimeMessagePart({
+            id: `chat-tool-call-${round}`,
+            sourceKind: 'history',
+            sourceId: `chat-tool-call-${round}`,
+            name: 'Assistant tool call',
+            ownership: 'conversation',
+            message: {
+              role: 'assistant',
+              content: activeRoundContent || null,
+              ...(activeRoundThoughts ? { reasoning_content: activeRoundThoughts } : {}),
+              tool_calls: result.toolCalls,
+            },
+          }))
           const roundProposals: ChatDocumentEditProposal[] = []
           const roundCodexCreations: ChatCodexCreationProposal[] = []
           const roundOutlineActions: ChatOutlineActionProposal[] = []
@@ -638,14 +627,14 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
                 roundOutlineActions.push(execution.outlineAction)
                 activeRoundExtras.outlineActions = roundOutlineActions
               }
-              workingMessages.push({ role: 'tool', tool_call_id: call.id, content: execution.content })
+              workingRequest = appendNormalizedRequestPart(workingRequest, normalizeRuntimeMessagePart({ id: `chat-tool-result-${call.id}`, sourceKind: 'app-managed', sourceId: call.id, name: call.function.name, ownership: 'app-managed', message: { role: 'tool', tool_call_id: call.id, content: execution.content } }))
             } else if (chatEntityToolNames.has(call.function.name)) {
               const execution = await executeChatEntityTool(sourceBookId, call)
               if (execution.entityAction) {
                 roundEntityActions.push(execution.entityAction)
                 activeRoundExtras.entityActions = roundEntityActions
               }
-              workingMessages.push({ role: 'tool', tool_call_id: call.id, content: execution.content })
+              workingRequest = appendNormalizedRequestPart(workingRequest, normalizeRuntimeMessagePart({ id: `chat-tool-result-${call.id}`, sourceKind: 'app-managed', sourceId: call.id, name: call.function.name, ownership: 'app-managed', message: { role: 'tool', tool_call_id: call.id, content: execution.content } }))
             } else {
               const execution = await executeChatWorkspaceTool(sourceBookId, call)
               if (execution.proposal) {
@@ -656,7 +645,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
                 roundCodexCreations.push(execution.codexCreation)
                 activeRoundExtras.codexCreations = roundCodexCreations
               }
-              workingMessages.push({ role: 'tool', tool_call_id: call.id, content: execution.content })
+              workingRequest = appendNormalizedRequestPart(workingRequest, normalizeRuntimeMessagePart({ id: `chat-tool-result-${call.id}`, sourceKind: 'app-managed', sourceId: call.id, name: call.function.name, ownership: 'app-managed', message: { role: 'tool', tool_call_id: call.id, content: execution.content } }))
             }
           }
 

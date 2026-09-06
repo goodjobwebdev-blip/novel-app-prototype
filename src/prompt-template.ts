@@ -77,21 +77,6 @@ export function bookTemplateValues(book: BookPromptValues): Record<string, strin
   }
 }
 
-export function templateInterpolatesVariable(template: string, variableName: string) {
-  const escaped = variableName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return new RegExp(`{{\\s*${escaped}\\s*}}`).test(template)
-}
-
-export function responseLengthMessage(template: string, responseLength: string) {
-  const guidance = responseLength.trim()
-  if (!guidance || templateInterpolatesVariable(template, RESPONSE_LENGTH_VARIABLE)) return ''
-  return `# Response length\n\n${guidance}`
-}
-
-export function generationInstructionMessage(template: string, responseLength: string, instruction: string) {
-  return [responseLengthMessage(template, responseLength), `# Instruction\n\n${instruction.trim()}`].filter(Boolean).join('\n\n')
-}
-
 export function renderPromptTemplate(template: string, values: Record<string, string>) {
   return renderCompositionTemplate(template, values).content
 }

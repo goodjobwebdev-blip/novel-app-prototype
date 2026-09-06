@@ -6,9 +6,7 @@ import {
   type StructuralEntity,
   type StructuralEntityType,
   type SummaryEntity,
-  type SummarySourceType,
 } from './persistence'
-import { bookTemplateValues, renderPromptTemplate, type BookPromptValues } from './prompt-template'
 
 export type SummaryState = 'missing' | 'current' | 'outdated'
 export type SummarySourceEntity = StructuralEntity | CodexEntryEntity
@@ -147,13 +145,4 @@ export function codexContextRepresentation(entry: CodexEntryEntity, entities: Ar
     ...(fallbackReason ? { fallbackReason } : {}),
     content: String(entry.content ?? '').trim() || '_No description provided._',
   }
-}
-
-export function renderSummaryPrompt(template: string, targetType: SummarySourceType, previousSummary: string, book: BookPromptValues) {
-  const values: Record<string, string> = {
-    ...bookTemplateValues(book),
-    'target.type': targetType === 'codexEntry' ? 'Codex entry' : targetType,
-    'target.previous_summary': previousSummary,
-  }
-  return renderPromptTemplate(template, values)
 }
