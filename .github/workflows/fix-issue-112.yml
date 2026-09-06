@@ -1,0 +1,34 @@
+name: Fix issue 112
+
+on:
+  push:
+    branches:
+      - fix/issue-112-archived-codex-duplicate
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/issue-112-archived-codex-duplicate
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Apply fix
+        run: python .github/scripts/issue112.py
+      - run: npm install --no-package-lock
+      - run: node --test tests/chat-codex-duplicate.test.mjs tests/editor-unmount-guard.test.mjs tests/navigation-save-guard.test.mjs tests/deletion-save-barrier.test.mjs tests/persistence-delete-write-guard.test.mjs tests/keyed-async-queue.test.mjs tests/async-state-guard.test.mjs tests/chat-selection-guard.test.mjs tests/tts-service-*.test.mjs
+      - run: npm run build
+      - name: Commit validated fix
+        run: |
+          rm .github/scripts/issue112.py .github/workflows/fix-issue-112.yml
+          git config user.name "goodjobwebdev-blip"
+          git config user.email "goodjob.webdev@gmail.com"
+          git add -A
+          git commit -m "Ignore archived Codex entries in Chat duplicate approval checks"
+          git push origin HEAD:fix/issue-112-archived-codex-duplicate
