@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import { streamChatCompletion, type ChatCompletionMessage } from './chat-api'
 import ExpandableTextInput from './ExpandableTextInput'
+import { applyIfStillCurrent } from './async-state-guard'
 import {
   createChat,
   createChatMessage,
@@ -108,6 +109,8 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const followOutputRef = useRef(true)
+  const selectedChatIdRef = useRef(chatId)
+  selectedChatIdRef.current = chatId
 
   const sortedModels = useMemo(() => [...models].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)), [models])
 
@@ -198,19 +201,21 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
 
   async function reloadMessages() {
     if (!chat) return []
-    const next = await listChatMessages(chat.bookId, chat.id)
-    setMessages(next)
-    const refreshed = await getChat(chat.id)
-    if (refreshed) setChat(refreshed)
+    const sourceChat = chat
+    const next = await listChatMessages(sourceChat.bookId, sourceChat.id)
+    applyIfStillCurrent(sourceChat.id, () => selectedChatIdRef.current, () => setMessages(next))
+    const refreshed = await getChat(sourceChat.id)
+    if (refreshed) applyIfStillCurrent(sourceChat.id, () => selectedChatIdRef.current, () => setChat(refreshed))
     return next
   }
 
   async function changeModel(modelId: string) {
     if (!chat) return
+    const sourceChat = chat
     const selected = models.find((model) => model.id === modelId)
     try {
-      const updated = await updateChat(chat.id, { model: modelId, modelContextLength: selected?.context_length })
-      setChat(updated)
+      const updated = await updateChat(sourceChat.id, { model: modelId, modelContextLength: selected?.context_length })
+      applyIfStillCurrent(sourceChat.id, () => selectedChatIdRef.current, () => setChat(updated))
     } catch (error) {
       onToast(error instanceof Error ? error.message : 'Could not save the chat model.')
     }
@@ -218,12 +223,16 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
 
   async function saveEffectiveContextLimit() {
     if (!chat || limitDraft === chat.effectiveContextLimit) return
-    const error = contextLimitInputError(limitDraft)
+    const sourceChat = chat
+    const limitSnapshot = limitDraft
+    const error = contextLimitInputError(limitSnapshot)
     if (error) { onToast(error); return }
     try {
-      const updated = await updateChat(chat.id, { effectiveContextLimit: limitDraft })
-      setChat(updated)
-      setLimitDraft(updated.effectiveContextLimit)
+      const updated = await updateChat(sourceChat.id, { effectiveContextLimit: limitSnapshot })
+      applyIfStillCurrent(sourceChat.id, () => selectedChatIdRef.current, () => {
+        setChat(updated)
+        setLimitDraft(updated.effectiveContextLimit)
+      })
     } catch (error) {
       onToast(error instanceof Error ? error.message : 'Could not save the Chat context cap.')
     }
@@ -231,10 +240,15 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
 
   async function savePrompt() {
     if (!chat) return
+    const sourceChat = chat
+    const promptSnapshot = promptDraft
     try {
-      const updated = await updateChat(chat.id, { systemPrompt: promptDraft })
-      setChat(updated)
-      setPromptOpen(false)
+      const updated = await updateChat(sourceChat.id, { systemPrompt: promptSnapshot })
+      applyIfStillCurrent(sourceChat.id, () => selectedChatIdRef.current, () => {
+        setChat(updated)
+        setPromptDraft(updated.systemPrompt)
+        setPromptOpen(false)
+      })
     } catch (error) {
       onToast(error instanceof Error ? error.message : 'Could not save the system prompt.')
     }
@@ -242,10 +256,11 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
 
   async function setThinking(value: boolean) {
     if (!chat) return
-    setChat({ ...chat, thinking: value })
+    const sourceChat = chat
+    applyIfStillCurrent(sourceChat.id, () => selectedChatIdRef.current, () => setChat({ ...sourceChat, thinking: value }))
     try {
-      const updated = await updateChat(chat.id, { thinking: value })
-      setChat(updated)
+      const updated = await updateChat(sourceChat.id, { thinking: value })
+      applyIfStillCurrent(sourceChat.id, () => selectedChatIdRef.current, () => setChat(updated))
     } catch (error) {
       onToast(error instanceof Error ? error.message : 'Could not save the thinking setting.')
     }
@@ -268,7 +283,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   }
 
   async function runAssistantGeneration(activeChat: ChatEntity, history: ChatMessageEntity[]) {
-    if (abortRef.current) return
+    if (abortRef.current || selectedChatIdRef.current !== activeChat.id) return
     let settings
     try {
       settings = await getChatBookAiSettings(bookId)
@@ -402,6 +417,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     }
 
     function commitVisibleRound(saved: ChatMessageEntity | null, hadThoughts: boolean) {
+      if (selectedChatIdRef.current !== activeChat.id) return
       if (saved) {
         setMessages((current) => current.some((message) => message.id === saved.id) ? current : [...current, saved])
         if (hadThoughts && liveThoughtsOpen) {
@@ -450,6 +466,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           thinking: activeChat.thinking,
           tools: CHAT_TOOL_DEFINITIONS,
         }, (chunk) => {
+          if (selectedChatIdRef.current !== activeChat.id) return
           if (chunk.thoughts) {
             activeRoundThoughts += chunk.thoughts
             setStreamedThoughts(activeRoundThoughts)
@@ -461,9 +478,10 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
             setPhase('writing')
           }
         }, controller.signal, () => {
-          if (!controller.signal.aborted) setPhase('thinking')
+          if (!controller.signal.aborted && selectedChatIdRef.current === activeChat.id) setPhase('thinking')
         })
 
+        if (controller.signal.aborted || selectedChatIdRef.current !== activeChat.id) break
         if (result.toolCalls.length) {
           setPhase('using-tools')
           workingMessages.push({
@@ -538,31 +556,35 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           // Keep the already streamed partial visible until teardown even if persistence fails.
         }
       }
-      abortRef.current = null
-      setGenerating(false)
-      setPhase(null)
-      setElapsed(0)
-      setStreamedContent('')
-      setStreamedThoughts('')
+      if (abortRef.current === controller) abortRef.current = null
+      if (selectedChatIdRef.current === activeChat.id) {
+        setGenerating(false)
+        setPhase(null)
+        setElapsed(0)
+        setStreamedContent('')
+        setStreamedThoughts('')
+      }
       const refreshed = await getChat(activeChat.id).catch(() => undefined)
-      if (refreshed) setChat(refreshed)
+      if (refreshed) applyIfStillCurrent(activeChat.id, () => selectedChatIdRef.current, () => setChat(refreshed))
     }
   }
 
   async function send() {
-    if (!chat || generating) return
+    if (!chat || generating || chat.id !== selectedChatIdRef.current) return
+    const sourceChat = chat
     const text = draft.trim()
     if (!text) return
     setDraft('')
     try {
-      const userMessage = await createChatMessage(chat, 'user', text)
-      const refreshedChat = await getChat(chat.id) ?? chat
+      const userMessage = await createChatMessage(sourceChat, 'user', text)
+      const refreshedChat = await getChat(sourceChat.id) ?? sourceChat
       const history = [...messages, userMessage]
+      if (selectedChatIdRef.current !== sourceChat.id) return
       setChat(refreshedChat)
       setMessages(history)
       await runAssistantGeneration(refreshedChat, history)
     } catch (error) {
-      setDraft(text)
+      applyIfStillCurrent(sourceChat.id, () => selectedChatIdRef.current, () => setDraft(text))
       onToast(error instanceof Error ? error.message : 'Could not send the message.')
     }
   }
