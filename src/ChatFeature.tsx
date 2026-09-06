@@ -22,7 +22,7 @@ import {
 } from 'lucide-react'
 import { streamChatCompletion, type ChatCompletionMessage } from './chat-api'
 import ExpandableTextInput from './ExpandableTextInput'
-import { applyIfStillCurrent } from './async-state-guard'
+import { chatMatchesBookSelection, onlyChatsForBook, reloadMatchesBookSelection } from './chat-book-guard'
 import { chatHistoryPrefixMatches } from './chat-history-guard'
 import {
   createChat,
@@ -112,8 +112,20 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const followOutputRef = useRef(true)
+  const selectedBookIdRef = useRef(bookId)
   const selectedChatIdRef = useRef(chatId)
+  selectedBookIdRef.current = bookId
   selectedChatIdRef.current = chatId
+
+  function isCurrentChat(candidate: Pick<ChatEntity, 'id' | 'bookId'> | null | undefined) {
+    return chatMatchesBookSelection(candidate, selectedBookIdRef.current, selectedChatIdRef.current)
+  }
+
+  function applyIfCurrentChat(candidate: Pick<ChatEntity, 'id' | 'bookId'>, apply: () => void) {
+    if (!isCurrentChat(candidate)) return false
+    apply()
+    return true
+  }
 
   const sortedModels = useMemo(() => [...models].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)), [models])
 
@@ -131,24 +143,25 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     followOutputRef.current = true
     setFollowOutput(true)
     setEditingId('')
-    if (!bookId || !chatId) {
-      setChat(null)
-      setMessages([])
-      return () => { cancelled = true }
-    }
+    setChat(null)
+    setMessages([])
+    setModels([])
+    setModelStatus('')
+    if (!bookId || !chatId) return () => { cancelled = true }
     ;(async () => {
       try {
-        const [loadedChat, loadedMessages, settings] = await Promise.all([
-          getChat(chatId),
-          listChatMessages(bookId, chatId),
-          getChatBookAiSettings(bookId),
-        ])
+        const loadedChat = await getChat(chatId)
         if (cancelled) return
-        if (!loadedChat) {
+        if (!loadedChat || !chatMatchesBookSelection(loadedChat, bookId, chatId)) {
           setChat(null)
           setMessages([])
           return
         }
+        const [loadedMessages, settings] = await Promise.all([
+          listChatMessages(loadedChat.bookId, loadedChat.id),
+          getChatBookAiSettings(loadedChat.bookId),
+        ])
+        if (cancelled || !isCurrentChat(loadedChat)) return
         setChat(loadedChat)
         setPromptDraft(loadedChat.systemPrompt)
         setLimitDraft(loadedChat.effectiveContextLimit)
@@ -156,12 +169,12 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
         setModelStatus('Loading models…')
         try {
           const available = await fetchAvailableChatModels(settings)
-          if (!cancelled) {
+          if (!cancelled && isCurrentChat(loadedChat)) {
             setModels(available)
             setModelStatus(available.length ? '' : 'The provider returned no models.')
           }
         } catch (error) {
-          if (!cancelled) setModelStatus(error instanceof Error ? error.message : 'Could not load models.')
+          if (!cancelled && isCurrentChat(loadedChat)) setModelStatus(error instanceof Error ? error.message : 'Could not load models.')
         }
       } catch (error) {
         if (!cancelled) onToast(error instanceof Error ? error.message : 'Could not load this chat.')
@@ -205,36 +218,37 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   }, [])
 
   async function reloadMessages() {
-    if (!chat) return []
+    if (!chat || !isCurrentChat(chat)) return []
     const sourceChat = chat
     const next = await listChatMessages(sourceChat.bookId, sourceChat.id)
-    applyIfStillCurrent(sourceChat.id, () => selectedChatIdRef.current, () => setMessages(next))
+    applyIfCurrentChat(sourceChat, () => setMessages(next))
     const refreshed = await getChat(sourceChat.id)
-    if (refreshed) applyIfStillCurrent(sourceChat.id, () => selectedChatIdRef.current, () => setChat(refreshed))
+    if (refreshed?.bookId === sourceChat.bookId) applyIfCurrentChat(sourceChat, () => setChat(refreshed))
     return next
   }
 
   async function changeModel(modelId: string) {
-    if (!chat) return
+    if (!chat || !isCurrentChat(chat)) return
     const sourceChat = chat
     const selected = models.find((model) => model.id === modelId)
     try {
       const updated = await updateChat(sourceChat.id, { model: modelId, modelContextLength: selected?.context_length })
-      applyIfStillCurrent(sourceChat.id, () => selectedChatIdRef.current, () => setChat(updated))
+      if (updated.bookId === sourceChat.bookId) applyIfCurrentChat(sourceChat, () => setChat(updated))
     } catch (error) {
       onToast(error instanceof Error ? error.message : 'Could not save the chat model.')
     }
   }
 
   async function saveEffectiveContextLimit() {
-    if (!chat || limitDraft === chat.effectiveContextLimit) return
+    if (!chat || !isCurrentChat(chat) || limitDraft === chat.effectiveContextLimit) return
     const sourceChat = chat
     const limitSnapshot = limitDraft
     const error = contextLimitInputError(limitSnapshot)
     if (error) { onToast(error); return }
     try {
       const updated = await updateChat(sourceChat.id, { effectiveContextLimit: limitSnapshot })
-      applyIfStillCurrent(sourceChat.id, () => selectedChatIdRef.current, () => {
+      if (updated.bookId !== sourceChat.bookId) return
+      applyIfCurrentChat(sourceChat, () => {
         setChat(updated)
         setLimitDraft(updated.effectiveContextLimit)
       })
@@ -244,12 +258,13 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   }
 
   async function savePrompt() {
-    if (!chat) return
+    if (!chat || !isCurrentChat(chat)) return
     const sourceChat = chat
     const promptSnapshot = promptDraft
     try {
       const updated = await updateChat(sourceChat.id, { systemPrompt: promptSnapshot })
-      applyIfStillCurrent(sourceChat.id, () => selectedChatIdRef.current, () => {
+      if (updated.bookId !== sourceChat.bookId) return
+      applyIfCurrentChat(sourceChat, () => {
         setChat(updated)
         setPromptDraft(updated.systemPrompt)
         setPromptOpen(false)
@@ -260,20 +275,21 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   }
 
   async function setThinking(value: boolean) {
-    if (!chat) return
+    if (!chat || !isCurrentChat(chat)) return
     const sourceChat = chat
-    applyIfStillCurrent(sourceChat.id, () => selectedChatIdRef.current, () => setChat({ ...sourceChat, thinking: value }))
+    applyIfCurrentChat(sourceChat, () => setChat({ ...sourceChat, thinking: value }))
     try {
       const updated = await updateChat(sourceChat.id, { thinking: value })
-      applyIfStillCurrent(sourceChat.id, () => selectedChatIdRef.current, () => setChat(updated))
+      if (updated.bookId === sourceChat.bookId) applyIfCurrentChat(sourceChat, () => setChat(updated))
     } catch (error) {
       onToast(error instanceof Error ? error.message : 'Could not save the thinking setting.')
     }
   }
 
   async function dictateMessage() {
-    if (!chat || generating || chat.id !== selectedChatIdRef.current) return
-    const sourceChatId = chat.id
+    if (!chat || generating || !isCurrentChat(chat)) return
+    const sourceChat = chat
+    const sourceChatId = sourceChat.id
     const input = inputRef.current
     const base = draft
     const start = input?.selectionStart ?? base.length
@@ -283,35 +299,38 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       return { value: `${base.slice(0, start)}${insertion}${base.slice(end)}`, cursor: start + insertion.length }
     }
     try {
-      const settings = await getChatBookAiSettings(bookId)
+      const settings = await getChatBookAiSettings(sourceChat.bookId)
+      if (!isCurrentChat(sourceChat)) return
       await startSttSession(settings.speech, {
         kind: 'chat',
         label: 'Dictate message',
-        isValid: () => selectedChatIdRef.current === sourceChatId && Boolean(inputRef.current),
-        onProvisional: (transcript) => { if (selectedChatIdRef.current === sourceChatId) setDraft(render(transcript).value) },
+        isValid: () => isCurrentChat(sourceChat) && Boolean(inputRef.current),
+        onProvisional: (transcript) => { if (isCurrentChat(sourceChat)) setDraft(render(transcript).value) },
         onFinal: (transcript) => {
-          if (selectedChatIdRef.current !== sourceChatId) throw new Error('The original Chat composer is no longer available.')
+          if (!isCurrentChat(sourceChat)) throw new Error('The original Chat composer is no longer available.')
           const next = render(transcript)
           setDraft(next.value)
           requestAnimationFrame(() => { inputRef.current?.focus(); inputRef.current?.setSelectionRange(next.cursor, next.cursor) })
         },
-        onCancel: () => { if (selectedChatIdRef.current === sourceChatId) setDraft(base) },
+        onCancel: () => { if (isCurrentChat(sourceChat)) setDraft(base) },
       })
     } catch (error) {
-      if (selectedChatIdRef.current === sourceChatId) setDraft(base)
+      if (isCurrentChat(sourceChat)) setDraft(base)
       onToast(error instanceof Error ? error.message : 'Could not start message dictation.')
     }
   }
 
   async function runAssistantGeneration(activeChat: ChatEntity, history: ChatMessageEntity[]) {
-    if (abortRef.current || selectedChatIdRef.current !== activeChat.id) return
+    if (abortRef.current || !isCurrentChat(activeChat)) return
+    const sourceBookId = activeChat.bookId
     let settings
     try {
-      settings = await getChatBookAiSettings(bookId)
+      settings = await getChatBookAiSettings(sourceBookId)
     } catch {
       onToast('This book’s AI settings could not be loaded.')
       return
     }
+    if (!isCurrentChat(activeChat)) return
     if (!settings.apiKey.trim()) {
       onToast('Add an API key in Book AI settings before chatting.')
       return
@@ -324,7 +343,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     let prepared
     try {
       prepared = await buildContextValues({
-        bookId,
+        bookId: sourceBookId,
         type: 'chat',
         currentSceneId: currentSceneId || undefined,
         profile: activeChat.contextProfile,
@@ -333,6 +352,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       onToast(error instanceof Error ? error.message : 'Chat context could not be prepared.')
       return
     }
+    if (!isCurrentChat(activeChat)) return
 
     const promptValues = { ...bookPromptValues, responseLength: settings.responseLength }
     const systemPrompt = renderPromptTemplate(activeChat.systemPrompt, bookTemplateValues(promptValues))
@@ -380,6 +400,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       return
     }
     if (diagnostics.warning) onToast(`Chat context is near the configured limit (${Math.round(diagnostics.usageRatio * 100)}%). Consider reducing selected context or raising the cap.`)
+    if (!isCurrentChat(activeChat)) return
 
     const controller = new AbortController()
     abortRef.current = controller
@@ -403,7 +424,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     let activeRoundStartedAt = Date.now()
 
     async function ensureSourceHistoryStillCurrent() {
-      const durableHistory = await listChatMessages(activeChat.bookId, activeChat.id)
+      const durableHistory = await listChatMessages(sourceBookId, activeChat.id)
       if (chatHistoryPrefixMatches(history, durableHistory)) return
       historyInvalidated = true
       controller.abort()
@@ -440,7 +461,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
 
     async function findAlreadyPersistedRound() {
       const expectedProposalIds = workspaceProposalIds(activeRoundExtras)
-      const persisted = await listChatMessages(activeChat.bookId, activeChat.id)
+      const persisted = await listChatMessages(sourceBookId, activeChat.id)
       return [...persisted].reverse().find((message) => message.role === 'assistant'
         && message.createdAt >= activeRoundStartedAt
         && message.content === activeRoundContent
@@ -449,7 +470,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     }
 
     function commitVisibleRound(saved: ChatMessageEntity | null, hadThoughts: boolean) {
-      if (selectedChatIdRef.current !== activeChat.id) return
+      if (!isCurrentChat(activeChat)) return
       if (saved) {
         setMessages((current) => current.some((message) => message.id === saved.id) ? current : [...current, saved])
         if (hadThoughts && liveThoughtsOpen) {
@@ -498,7 +519,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           thinking: activeChat.thinking,
           tools: CHAT_TOOL_DEFINITIONS,
         }, (chunk) => {
-          if (selectedChatIdRef.current !== activeChat.id) return
+          if (!isCurrentChat(activeChat)) return
           if (chunk.thoughts) {
             activeRoundThoughts += chunk.thoughts
             setStreamedThoughts(activeRoundThoughts)
@@ -510,10 +531,10 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
             setPhase('writing')
           }
         }, controller.signal, () => {
-          if (!controller.signal.aborted && selectedChatIdRef.current === activeChat.id) setPhase('thinking')
+          if (!controller.signal.aborted && isCurrentChat(activeChat)) setPhase('thinking')
         })
 
-        if (controller.signal.aborted || selectedChatIdRef.current !== activeChat.id) break
+        if (controller.signal.aborted || !isCurrentChat(activeChat)) break
         if (result.toolCalls.length) {
           setPhase('using-tools')
           workingMessages.push({
@@ -528,21 +549,21 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           const roundEntityActions: ChatEntityActionProposal[] = []
           for (const call of result.toolCalls) {
             if (chatOutlineToolNames.has(call.function.name)) {
-              const execution = await executeChatOutlineTool(bookId, call)
+              const execution = await executeChatOutlineTool(sourceBookId, call)
               if (execution.outlineAction) {
                 roundOutlineActions.push(execution.outlineAction)
                 activeRoundExtras.outlineActions = roundOutlineActions
               }
               workingMessages.push({ role: 'tool', tool_call_id: call.id, content: execution.content })
             } else if (chatEntityToolNames.has(call.function.name)) {
-              const execution = await executeChatEntityTool(bookId, call)
+              const execution = await executeChatEntityTool(sourceBookId, call)
               if (execution.entityAction) {
                 roundEntityActions.push(execution.entityAction)
                 activeRoundExtras.entityActions = roundEntityActions
               }
               workingMessages.push({ role: 'tool', tool_call_id: call.id, content: execution.content })
             } else {
-              const execution = await executeChatWorkspaceTool(bookId, call)
+              const execution = await executeChatWorkspaceTool(sourceBookId, call)
               if (execution.proposal) {
                 roundProposals.push(execution.proposal)
                 activeRoundExtras.documentEdits = roundProposals
@@ -591,7 +612,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
         }
       }
       if (abortRef.current === controller) abortRef.current = null
-      if (selectedChatIdRef.current === activeChat.id) {
+      if (isCurrentChat(activeChat)) {
         setGenerating(false)
         setPhase(null)
         setElapsed(0)
@@ -599,26 +620,28 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
         setStreamedThoughts('')
       }
       const refreshed = await getChat(activeChat.id).catch(() => undefined)
-      if (refreshed) applyIfStillCurrent(activeChat.id, () => selectedChatIdRef.current, () => setChat(refreshed))
+      if (refreshed?.bookId === sourceBookId) applyIfCurrentChat(activeChat, () => setChat(refreshed))
     }
   }
 
   async function send() {
-    if (!chat || generating || chat.id !== selectedChatIdRef.current) return
+    if (!chat || generating || !isCurrentChat(chat)) return
     const sourceChat = chat
     const text = draft.trim()
     if (!text) return
     setDraft('')
     try {
       const userMessage = await createChatMessage(sourceChat, 'user', text)
-      const refreshedChat = await getChat(sourceChat.id) ?? sourceChat
+      if (!isCurrentChat(sourceChat)) return
+      const refreshedChat = await getChat(sourceChat.id)
+      if (!refreshedChat || refreshedChat.bookId !== sourceChat.bookId) throw new Error('This Chat no longer belongs to the current Book.')
       const history = [...messages, userMessage]
-      if (selectedChatIdRef.current !== sourceChat.id) return
+      if (!isCurrentChat(sourceChat)) return
       setChat(refreshedChat)
       setMessages(history)
       await runAssistantGeneration(refreshedChat, history)
     } catch (error) {
-      applyIfStillCurrent(sourceChat.id, () => selectedChatIdRef.current, () => setDraft(text))
+      applyIfCurrentChat(sourceChat, () => setDraft(text))
       onToast(error instanceof Error ? error.message : 'Could not send the message.')
     }
   }
@@ -631,10 +654,11 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
 
   async function deleteFrom(message: ChatMessageEntity) {
     if (generating) { onToast('Stop the current response before deleting Chat history.'); return }
-    if (!chat || !window.confirm('Delete this message and everything after it in this chat?')) return
+    if (!chat || !isCurrentChat(chat) || !window.confirm('Delete this message and everything after it in this chat?')) return
+    const sourceChat = chat
     try {
-      await deleteMessageAndFollowing(bookId, chat.id, message.order)
-      await reloadMessages()
+      await deleteMessageAndFollowing(sourceChat.bookId, sourceChat.id, message.order)
+      if (isCurrentChat(sourceChat)) await reloadMessages()
     } catch (error) {
       onToast(error instanceof Error ? error.message : 'Could not delete the message.')
     }
@@ -648,15 +672,18 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
 
   async function saveEdit(message: ChatMessageEntity, regenerate: boolean) {
     if (generating) { onToast('Stop the current response before saving a Chat history edit.'); return }
-    if (!chat || !editingValue.trim()) return
+    if (!chat || !isCurrentChat(chat) || !editingValue.trim()) return
+    const sourceChat = chat
     try {
       const updated = await updateChatMessage(message.id, { content: editingValue.trim() })
+      if (!isCurrentChat(sourceChat)) return
       setEditingId('')
       if (regenerate && message.role === 'user') {
-        await deleteMessageAndFollowing(bookId, chat.id, message.order + 1)
-        const history = (await listChatMessages(bookId, chat.id)).filter((item) => item.order <= updated.order)
+        await deleteMessageAndFollowing(sourceChat.bookId, sourceChat.id, message.order + 1)
+        const history = (await listChatMessages(sourceChat.bookId, sourceChat.id)).filter((item) => item.order <= updated.order)
+        if (!isCurrentChat(sourceChat)) return
         setMessages(history)
-        await runAssistantGeneration(chat, history)
+        await runAssistantGeneration(sourceChat, history)
       } else {
         await reloadMessages()
       }
@@ -666,22 +693,25 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   }
 
   async function regenerate(message: ChatMessageEntity) {
-    if (!chat || message.role !== 'assistant' || generating) return
+    if (!chat || !isCurrentChat(chat) || message.role !== 'assistant' || generating) return
+    const sourceChat = chat
     try {
-      await deleteMessageAndFollowing(bookId, chat.id, message.order)
-      const history = (await listChatMessages(bookId, chat.id)).filter((item) => item.order < message.order)
+      await deleteMessageAndFollowing(sourceChat.bookId, sourceChat.id, message.order)
+      const history = (await listChatMessages(sourceChat.bookId, sourceChat.id)).filter((item) => item.order < message.order)
+      if (!isCurrentChat(sourceChat)) return
       setMessages(history)
-      await runAssistantGeneration(chat, history)
+      await runAssistantGeneration(sourceChat, history)
     } catch (error) {
       onToast(error instanceof Error ? error.message : 'Could not regenerate the message.')
     }
   }
 
   async function fork(message: ChatMessageEntity) {
-    if (!chat) return
+    if (!chat || !isCurrentChat(chat)) return
+    const sourceChat = chat
     try {
-      const forked = await forkChat(chat, message.order)
-      onChatChange(forked.id)
+      const forked = await forkChat(sourceChat, message.order)
+      if (isCurrentChat(sourceChat) && forked.bookId === sourceChat.bookId) onChatChange(forked.id)
     } catch (error) {
       onToast(error instanceof Error ? error.message : 'Could not fork the chat.')
     }
@@ -812,17 +842,19 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   }
 
   async function readAloud(message: ChatMessageEntity) {
-    if (!message.content.trim()) return
+    if (!chat || !isCurrentChat(chat) || !message.content.trim()) return
+    const sourceChat = chat
     try {
-      const settings = await getChatBookAiSettings(bookId)
-      await startTtsSession(settings.speech, message.content, `Chat · ${chat?.title ?? 'Assistant'}`)
+      const settings = await getChatBookAiSettings(sourceChat.bookId)
+      if (!isCurrentChat(sourceChat)) return
+      await startTtsSession(settings.speech, message.content, `Chat · ${sourceChat.title}`)
     } catch (error) {
       onToast(error instanceof Error ? error.message : 'Could not start text to speech.')
     }
   }
 
   if (!chatId) return <section className="conversation chat-empty"><MessageCircle aria-hidden="true" /><strong>No chat selected</strong><p>Create or open a chat from the Chat panel.</p></section>
-  if (!chat) return <section className="conversation chat-empty"><span className="chat-loading" /> <p>Loading chat…</p></section>
+  if (!chat || !isCurrentChat(chat)) return <section className="conversation chat-empty"><span className="chat-loading" /> <p>Loading chat…</p></section>
 
   return <>
     <section className="conversation functional-chat">
@@ -1051,50 +1083,68 @@ function ChatGenerateButton({ generating, phase, elapsed, thinking, onGenerate, 
 export function ChatSidebar({ bookId, activeChatId, onOpen }: { bookId: string; activeChatId: string; onOpen: (chatId: string) => void }) {
   const [items, setItems] = useState<ChatEntity[]>([])
   const [query, setQuery] = useState('')
+  const bookIdRef = useRef(bookId)
+  const activeChatIdRef = useRef(activeChatId)
+  const reloadVersionRef = useRef(0)
+  bookIdRef.current = bookId
+  activeChatIdRef.current = activeChatId
 
-  async function reload() {
-    if (!bookId) { setItems([]); return }
-    setItems(await listChats(bookId))
+  async function reload(requestBookId = bookId) {
+    const requestVersion = ++reloadVersionRef.current
+    if (!requestBookId) {
+      if (reloadMatchesBookSelection(requestBookId, requestVersion, bookIdRef.current, reloadVersionRef.current)) setItems([])
+      return []
+    }
+    const next = await listChats(requestBookId)
+    if (!reloadMatchesBookSelection(requestBookId, requestVersion, bookIdRef.current, reloadVersionRef.current)) return []
+    const owned = onlyChatsForBook(next, requestBookId)
+    setItems(owned)
+    return owned
   }
 
   useEffect(() => {
-    void reload()
+    setItems([])
+    void reload(bookId)
     const handle = (event: Event) => {
       const detail = (event as CustomEvent<{ bookId?: string }>).detail
-      if (!detail?.bookId || detail.bookId === bookId) void reload()
+      if (!detail?.bookId || detail.bookId === bookId) void reload(bookId)
     }
     window.addEventListener('arc-chat-changed', handle)
     return () => window.removeEventListener('arc-chat-changed', handle)
   }, [bookId])
 
   const normalized = query.trim().toLowerCase()
-  const visible = items.filter((chat) => !normalized || `${chat.title} ${chat.lastMessagePreview ?? ''}`.toLowerCase().includes(normalized))
+  const visible = items.filter((chat) => chat.bookId === bookId && (!normalized || `${chat.title} ${chat.lastMessagePreview ?? ''}`.toLowerCase().includes(normalized)))
 
   async function add() {
-    if (!bookId) return
-    const chat = await createChat(bookId)
-    await reload()
-    onOpen(chat.id)
+    const sourceBookId = bookId
+    if (!sourceBookId) return
+    const chat = await createChat(sourceBookId)
+    await reload(sourceBookId)
+    if (bookIdRef.current === sourceBookId && chat.bookId === sourceBookId) onOpen(chat.id)
   }
 
   async function rename(chat: ChatEntity) {
+    const sourceBookId = chat.bookId
+    if (sourceBookId !== bookIdRef.current) return
     const title = window.prompt('Chat title', chat.title)
-    if (title === null || !title.trim()) return
+    if (title === null || !title.trim() || sourceBookId !== bookIdRef.current) return
     await updateChat(chat.id, { title: title.trim() })
-    await reload()
+    await reload(sourceBookId)
   }
 
   async function remove(chat: ChatEntity) {
-    if (!window.confirm(`Delete “${chat.title}” and its messages?`)) return
+    const sourceBookId = chat.bookId
+    if (sourceBookId !== bookIdRef.current || !window.confirm(`Delete “${chat.title}” and its messages?`)) return
     await deleteChat(chat.id)
-    await reload()
-    if (activeChatId === chat.id) onOpen('')
+    await reload(sourceBookId)
+    if (bookIdRef.current === sourceBookId && activeChatIdRef.current === chat.id) onOpen('')
   }
 
   return <section className="chat-sidebar"><div className="panel-title"><div><small>Conversations</small><h2>Chats</h2></div><button type="button" onClick={() => { void add() }} aria-label="Start new chat"><Plus aria-hidden="true" /></button></div>
     <label className="chat-sidebar-search"><Search aria-hidden="true" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search chats" /></label>
     <div className="chat-sidebar-list">{visible.map((chat) => <article className={`chat-row-wrap ${activeChatId === chat.id ? 'selected' : ''}`} key={chat.id}>
-      <button className="chat-row" type="button" onClick={() => onOpen(chat.id)}><i><MessageCircle aria-hidden="true" /></i><span><strong>{chat.title}</strong><small>{chat.lastMessagePreview || 'No messages yet'}</small></span><em>{formatChatEdited(chat.updatedAt)}</em></button>
+      <button className="chat-row" type="button" onClick={() => { if (chat.bookId === bookIdRef.current) onOpen(chat.id) }}><i><MessageCircle aria-hidden="true" /></i><span><strong>{chat.title}</strong><small>{chat.lastMessagePreview || 'No messages yet'}</small></span><em>{formatChatEdited(chat.updatedAt)}</em></button>
       <div className="chat-row-actions"><button type="button" onClick={() => { void rename(chat) }} aria-label={`Rename ${chat.title}`}><Pencil aria-hidden="true" /></button><button type="button" onClick={() => { void remove(chat) }} aria-label={`Delete ${chat.title}`}><Trash2 aria-hidden="true" /></button></div>
     </article>)}{!visible.length && <p className="content-empty">{query ? 'No matching chats.' : 'No chats yet.'}</p>}</div>
   </section>
