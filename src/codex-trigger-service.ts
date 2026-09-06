@@ -1,4 +1,4 @@
-import { isCodexEntryArchived, type ArcEntity, type CodexEntryEntity, type StructuralEntity } from './persistence'
+import type { ArcEntity, CodexEntryEntity, StructuralEntity } from './persistence'
 
 export type CodexTriggerSceneMatch = {
   trigger: string
@@ -54,6 +54,10 @@ function entryTriggers(entry: CodexEntryEntity) {
   return normalizeCodexTriggerList(Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [])
 }
 
+function archived(entry: CodexEntryEntity) {
+  return typeof entry.archivedAt === 'number' && entry.archivedAt > 0
+}
+
 function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -89,7 +93,7 @@ export function triggerMatchesText(text: string, trigger: string) {
 
 export function buildCodexMentionIndex(entities: ArcEntity[]): CodexMentionTerm[] {
   const byKey = new Map<string, CodexMentionTerm>()
-  entities.filter((entity): entity is CodexEntryEntity => entity.type === 'codexEntry' && !isCodexEntryArchived(entity)).forEach((entry) => {
+  entities.filter((entity): entity is CodexEntryEntity => entity.type === 'codexEntry' && !archived(entity)).forEach((entry) => {
     entryTriggers(entry).forEach((trigger) => {
       const key = triggerKey(trigger)
       const existing = byKey.get(key) ?? { key, text: trigger, entries: [] }
@@ -129,7 +133,7 @@ export function automaticCodexMatches({
   }))
   const activeEntries = entities
     .filter((entity): entity is CodexEntryEntity => entity.type === 'codexEntry')
-    .filter((entity) => entity.id !== excludeEntryId && !isCodexEntryArchived(entity) && entryTriggers(entity).length > 0)
+    .filter((entity) => entity.id !== excludeEntryId && !archived(entity) && entryTriggers(entity).length > 0)
     .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
 
   return activeEntries.map((entry) => {
