@@ -19,7 +19,9 @@ jobs:
         with:
           node-version: 24
       - name: Apply focused source edits
-        run: node scripts/apply-issue-109.mjs
+        run: |
+          sed -i "s/'cachedTextModelCatalog(defaults)', 3)/'cachedTextModelCatalog(defaults)', 2)/" scripts/apply-issue-109.mjs
+          node scripts/apply-issue-109.mjs
       - name: Commit patched source
         run: |
           git config user.name "github-actions[bot]"
