@@ -21,14 +21,16 @@ jobs:
         with:
           node-version: 24
       - name: Apply issue 83 implementation
-        run: python .github/scripts/issue83.py
+        run: |
+          python .github/scripts/issue83.py
+          python .github/scripts/issue83_fix.py
       - run: npm install --no-package-lock
       - run: npm run build
       - name: Commit validated implementation
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          rm .github/scripts/issue83.py .github/workflows/codex-issue-83.yml
+          rm .github/scripts/issue83.py .github/scripts/issue83_fix.py .github/workflows/codex-issue-83.yml
           git add -A
           git commit -m "Implement automatic Codex trigger context"
           git push origin HEAD:codex/issue-83-codex-triggers
