@@ -24,6 +24,7 @@ export type DynamicContextSource = {
   sourceId: string
   title?: string
   type?: string
+  category?: string
   representation?: string
   content: string
   reason?: string
@@ -39,6 +40,12 @@ export type DynamicSourceDedupeDecision = {
   automatic: DynamicContextSource
   omittedAdditional: DynamicContextSource
   reason: 'already-represented-automatically'
+}
+
+export type DynamicSourceExclusionDecision = {
+  sourceId: string
+  omitted: DynamicContextSource
+  reason: 'current-target'
 }
 
 export type ProviderToolCall = {
@@ -86,6 +93,7 @@ export type NormalizedAssembledRequest = {
   structuredParts: NormalizedStructuredRequestPart[]
   providerTools: Array<Record<string, unknown>>
   dynamicSourceDedupe: DynamicSourceDedupeDecision[]
+  dynamicSourceExclusions: DynamicSourceExclusionDecision[]
 }
 
 export type RenderedTemplate = {
@@ -129,7 +137,7 @@ const LEGACY_ALIASES: Record<string, string> = {
   additional_context: 'context.additional',
 }
 
-export const PROMPT_COMPOSITION_SCHEMA_VERSION = 1
+export const PROMPT_COMPOSITION_SCHEMA_VERSION = 2
 
 export function makePredefinedMessage(overrides: Partial<PredefinedMessage> = {}): PredefinedMessage {
   return {
@@ -572,6 +580,7 @@ export function normalizeStructuredTools(tools: Array<Record<string, unknown>>):
 export function assembleNormalizedRequest(parts: NormalizedRequestPart[], options: {
   structuredParts?: NormalizedStructuredRequestPart[]
   dynamicSourceDedupe?: DynamicSourceDedupeDecision[]
+  dynamicSourceExclusions?: DynamicSourceExclusionDecision[]
 } = {}): NormalizedAssembledRequest {
   const providerMessages = parts.flatMap((part) => !part.omitted && part.role
     ? [part.providerMessage ? cloneProviderMessage(part.providerMessage) : { role: part.role, content: part.content }]
@@ -590,6 +599,10 @@ export function assembleNormalizedRequest(parts: NormalizedRequestPart[], option
       automatic: { ...decision.automatic },
       omittedAdditional: { ...decision.omittedAdditional },
     })),
+    dynamicSourceExclusions: (options.dynamicSourceExclusions ?? []).map((decision) => ({
+      ...decision,
+      omitted: { ...decision.omitted },
+    })),
   }
 }
 
@@ -600,11 +613,16 @@ export function assembleCompositionRequest(input: {
   after?: NormalizedRequestPart[]
   structuredParts?: NormalizedStructuredRequestPart[]
   dynamicSourceDedupe?: DynamicSourceDedupeDecision[]
+  dynamicSourceExclusions?: DynamicSourceExclusionDecision[]
 }): NormalizedAssembledRequest {
   return assembleNormalizedRequest([
     ...renderPromptComposition(input.composition, input.values, input.dynamicSources),
     ...(input.after ?? []),
-  ], { structuredParts: input.structuredParts, dynamicSourceDedupe: input.dynamicSourceDedupe })
+  ], {
+    structuredParts: input.structuredParts,
+    dynamicSourceDedupe: input.dynamicSourceDedupe,
+    dynamicSourceExclusions: input.dynamicSourceExclusions,
+  })
 }
 
 export function providerCompatibilityError(request: NormalizedAssembledRequest, supportedRoles: ProviderRoleSupport) {

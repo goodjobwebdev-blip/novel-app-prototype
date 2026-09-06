@@ -70,7 +70,7 @@ test('new, reset, and forked Chats clone the correct composition', () => {
 })
 
 test('Book and individual Chat settings expose the complete composition editor and preview', () => {
-  assert.match(app, /promptTab === 'story' \|\| promptTab === 'assistant'/)
+  assert.match(app, /promptTab === 'story' \|\| promptTab === 'lore' \|\| promptTab === 'assistant'/)
   assert.match(feature, /ChatPredefinedMessages/)
   assert.match(feature, /Variables & syntax/)
   assert.match(feature, /Request Preview/)

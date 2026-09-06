@@ -51,10 +51,11 @@ import { canUnmountEditor } from './editor-unmount-guard'
 import { summaryGenerationOwnsUi, type SummaryGenerationOwner } from './summary-generation-owner'
 import ExpandableTextInput from './ExpandableTextInput'
 import MarkdownEditor, { type CodexMentionClick, type GenerationContext, type MarkdownEditorHandle } from './MarkdownEditor'
-import { renderLorePrompt, type NanoGPTStreamMetadata } from './nanogpt'
+import type { NanoGPTStreamMetadata } from './nanogpt'
 import { fetchTextProviderModelContextLength, streamTextProviderCompletion, textProviderRequestText } from './text-provider'
-import { assertPromptTemplateValid, generationInstructionMessage, type BookPromptValues } from './prompt-template'
+import { assertPromptTemplateValid, type BookPromptValues } from './prompt-template'
 import { assembleStoryGenerationRequest } from './story-request'
+import { assembleCodexGenerationRequest } from './codex-request'
 import type { NormalizedProviderMessage } from './prompt-composition'
 import { buildContextValues, generationContextDiagnostics } from './context-service'
 import {
@@ -960,7 +961,7 @@ export default function Workspace() {
       showToast('Stop generation before opening Settings.')
       return
     }
-    settingsGenerationContextRef.current = from === 'editor' && activeDocument?.type === 'scene'
+    settingsGenerationContextRef.current = from === 'editor' && (activeDocument?.type === 'scene' || activeDocument?.type === 'codexEntry')
       ? editorRef.current?.captureGenerationContext() ?? { sceneText: storyRef.current, insertionPosition: storyRef.current.length }
       : null
     if (from === 'editor' && changedSinceSnapshotRef.current) void flushDocument('navigation', true)
@@ -1231,8 +1232,10 @@ export default function Workspace() {
       return
     }
     try {
-      assertPromptTemplateValid(isCodex ? settings.prompts.lore : settings.prompts.story, isCodex ? 'lore' : 'story')
-      if (!isCodex) settings.promptCompositions.story.predefinedMessages.filter((message) => message.enabled).forEach((message) => assertPromptTemplateValid(message.template, 'story'))
+      const compositionScope = isCodex ? 'lore' : 'story'
+      const composition = settings.promptCompositions[compositionScope]
+      assertPromptTemplateValid(composition.systemPrompt, compositionScope)
+      composition.predefinedMessages.filter((message) => message.enabled).forEach((message) => assertPromptTemplateValid(message.template, compositionScope))
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Fix the invalid prompt in Book AI settings before generating.')
       return
@@ -1245,7 +1248,7 @@ export default function Workspace() {
     }
 
     const editor = editorRef.current
-    const context = editor?.beginGeneration(mode, isCodex ? 'replace' : 'append')
+    const context = editor?.beginGeneration(mode, 'append')
     if (!editor || !context) {
       showToast(mode === 'regenerate'
         ? 'Regenerate is available only while the latest generated passage is unchanged.'
@@ -1278,30 +1281,34 @@ export default function Workspace() {
             : { ...settings, mainModelContextLength: modelContextLength })
         }
         const instruction = isCodex ? lorePrompt : arcPrompt
-        const promptTemplate = isCodex ? settings.prompts.lore : settings.prompts.story
-        const promptBook = { ...toBookPromptValues(currentBook, seriesList), responseLength: settings.responseLength }
-        const storyRequest = isCodex ? undefined : assembleStoryGenerationRequest({
-          composition: settings.promptCompositions.story,
-          book: promptBook,
-          responseLength: settings.responseLength,
-          sceneText: context.sceneText,
-          insertionPosition: context.insertionPosition,
-          scenePov: scenePovRef.current || undefined,
-          context: prepared,
-          instruction,
-        })
-        const systemPrompt = isCodex
-          ? renderLorePrompt(settings.prompts.lore, { book: promptBook, entryTitle: activeDocument.title, entryCategory: activeDocument.category, entryContent: context.sceneText, sceneText: prepared.lastSceneText, additionalContext: prepared.additionalContext })
-          : ''
-        const userMessage = isCodex ? generationInstructionMessage(promptTemplate, settings.responseLength, instruction.trim() || 'Create a complete Codex entry.') : ''
-        const selectedContextIsTemplated = /{{\s*additional_context\s*}}/.test(promptTemplate)
-        const contextMessage = isCodex && !selectedContextIsTemplated && prepared.additionalContext.trim()
-          ? `# Additional context\n\n${prepared.additionalContext}`
-          : ''
+        const responseLength = isCodex ? settings.responseLengths.codex : settings.responseLengths.story
+        const promptBook = { ...toBookPromptValues(currentBook, seriesList), responseLength }
+        const normalizedRequest = isCodex
+          ? assembleCodexGenerationRequest({
+              composition: settings.promptCompositions.lore,
+              book: promptBook,
+              responseLength,
+              entry: { id: activeDocument.id, title: activeDocument.title, category: activeDocument.category, content: context.sceneText },
+              insertionPosition: context.insertionPosition,
+              context: prepared,
+              instruction,
+            })
+          : assembleStoryGenerationRequest({
+              composition: settings.promptCompositions.story,
+              book: promptBook,
+              responseLength,
+              sceneText: context.sceneText,
+              insertionPosition: context.insertionPosition,
+              scenePov: scenePovRef.current || undefined,
+              context: prepared,
+              instruction,
+            })
+        const systemPrompt = ''
+        const contextMessage = ''
+        const userMessage = ''
         const effectiveLimit = isCodex && settings.codexModel.trim() ? settings.codexEffectiveContextLimit : settings.mainEffectiveContextLimit
-        const messages = storyRequest?.providerMessages
-        const requestText = textProviderRequestText({ systemPrompt, contextMessage, userMessage })
-        const normalizedRequestText = messages ? textProviderRequestText({ systemPrompt, contextMessage, userMessage, messages }) : requestText
+        const messages = normalizedRequest.providerMessages
+        const normalizedRequestText = textProviderRequestText({ systemPrompt, contextMessage, userMessage, messages })
         const diagnostics = generationContextDiagnostics(selectedModel, modelContextLength, effectiveLimit, normalizedRequestText)
         if (!diagnostics.limitValid) {
           editor.finishGeneration('error')

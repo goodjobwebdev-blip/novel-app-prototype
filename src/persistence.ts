@@ -120,7 +120,7 @@ export const defaultBookContextSettings: BookContextSettings = {
   previousScenesForCodexTriggers: 2,
   profiles: {
     scene: { ...defaultGenerationContextProfile, includePreviousSceneWhenEmpty: true },
-    codex: { ...defaultGenerationContextProfile, includeLastScene: true },
+    codex: { ...defaultGenerationContextProfile, includeLastScene: true, includePreviousSceneWhenEmpty: true },
     note: { ...defaultGenerationContextProfile },
     chat: { ...defaultGenerationContextProfile, includeLastScene: true, includePreviousSceneWhenEmpty: true },
   },
@@ -145,7 +145,7 @@ function normalizeBookContextSettings(value?: Partial<BookContextSettings>): Boo
     previousScenesForCodexTriggers: Number.isSafeInteger(previousScenes) && previousScenes >= 0 ? previousScenes : 2,
     profiles: {
       scene: normalizeContextProfile(profiles.scene, { includePreviousSceneWhenEmpty: true }),
-      codex: normalizeContextProfile(profiles.codex, { includeLastScene: true }),
+      codex: normalizeContextProfile(profiles.codex, { includeLastScene: true, includePreviousSceneWhenEmpty: true }),
       note: normalizeContextProfile(profiles.note),
       chat: normalizeContextProfile(profiles.chat, { includeLastScene: true, includePreviousSceneWhenEmpty: true }),
     },

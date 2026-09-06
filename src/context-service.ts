@@ -24,6 +24,7 @@ export type PreparedContextValues = {
   storySoFarSources?: DynamicContextSource[]
   automaticSources?: DynamicContextSource[]
   additionalSources?: DynamicContextSource[]
+  targetExcludedSources?: DynamicContextSource[]
 }
 export type ContextDiagnostics = {
   modelId: string
@@ -133,14 +134,15 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
   const currentScene = currentIndex >= 0 ? scenes[currentIndex] : undefined
   const previousScene = currentIndex > 0 ? scenes[currentIndex - 1] : undefined
   const liveCurrentText = options.currentSceneText !== undefined && options.currentSceneId === anchorSceneId ? options.currentSceneText : String(currentScene?.content ?? '')
-  const previousSceneText = (options.type === 'scene' || options.type === 'chat') && options.profile.includePreviousSceneWhenEmpty && currentScene && !liveCurrentText.trim()
+  const storyAnchorEnabled = options.type === 'scene' || options.type === 'chat' || (options.type === 'codex' && options.profile.includeLastScene)
+  const previousSceneText = storyAnchorEnabled && options.profile.includePreviousSceneWhenEmpty && currentScene && !liveCurrentText.trim()
     ? String(previousScene?.content ?? '')
     : ''
-  const automatic = options.type === 'scene' || options.type === 'chat'
+  const automatic = storyAnchorEnabled
     ? automaticSummaries(options.bookId, entities, outline, anchorSceneId, previousSceneText ? previousScene?.id : undefined)
     : { text: '', ids: new Set<string>(), sources: [] as DynamicContextSource[] }
   const automaticFullIds = new Set<string>()
-  if ((options.type === 'scene' || options.type === 'chat') && anchorSceneId) automaticFullIds.add(anchorSceneId)
+  if (storyAnchorEnabled && anchorSceneId) automaticFullIds.add(anchorSceneId)
   if (previousSceneText && previousScene?.id) automaticFullIds.add(previousScene.id)
   if ((options.type === 'codex' || options.type === 'chat') && options.profile.includeLastScene && anchorSceneId) automaticFullIds.add(anchorSceneId)
 
@@ -179,14 +181,15 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
       typeRank: 2,
       outlineIndex: Number.MAX_SAFE_INTEGER,
     }))
-  const automaticMatches = ['scene', 'codex', 'chat'].includes(options.type) ? automaticCodexMatches({
+  const automaticMatchesIncludingTarget = ['scene', 'codex', 'chat'].includes(options.type) ? automaticCodexMatches({
     entities,
     scenes,
     anchorSceneId,
     anchorSceneText: liveCurrentText,
     previousSceneCount: options.previousScenesForCodexTriggers ?? contextSettings.previousScenesForCodexTriggers,
-    excludeEntryId: options.type === 'codex' ? options.currentDocumentId : undefined,
+    excludeEntryId: undefined,
   }) : []
+  const automaticMatches = automaticMatchesIncludingTarget.filter((match) => options.type !== 'codex' || match.entry.id !== options.currentDocumentId)
   const allCodexEntries = entities.filter((item): item is CodexEntryEntity => item.type === 'codexEntry')
   const cascadedDependencies = cascadeAutomaticCodexDependencies(
     automaticMatches.map((match) => match.entry),
@@ -230,6 +233,21 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
   })
 
   const manualSections = [...fullSections, ...summarySections, ...notes, ...codex].sort(additionalContextOrder)
+  const targetEntry = options.type === 'codex' && options.currentDocumentId
+    ? allCodexEntries.find((entry) => entry.id === options.currentDocumentId)
+    : undefined
+  const targetExcludedSources: DynamicContextSource[] = targetEntry && (
+    automaticMatchesIncludingTarget.some((match) => match.entry.id === targetEntry.id)
+    || options.profile.codexEntryIds.includes(targetEntry.id)
+  ) ? [{
+      sourceId: targetEntry.id,
+      title: targetEntry.title,
+      type: 'codex',
+      category: targetEntry.category,
+      representation: 'Authoritative target',
+      content: targetEntry.content,
+      reason: 'Current Codex target is represented through entry variables',
+    }] : []
   return {
     currentSceneId: currentScene?.id ?? '',
     currentSceneText: liveCurrentText,
@@ -238,8 +256,8 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
     previousSceneText,
     previousSceneTitle: previousSceneText ? previousScene?.title ?? '' : '',
     summaryContext: automatic.text,
-    lastSceneText: (options.type === 'codex' || options.type === 'chat') && options.profile.includeLastScene ? String(currentScene?.content ?? '') : '',
-    lastSceneTitle: (options.type === 'codex' || options.type === 'chat') && options.profile.includeLastScene ? currentScene?.title ?? '' : '',
+    lastSceneText: (options.type === 'codex' || options.type === 'chat') && options.profile.includeLastScene && liveCurrentText.trim() ? liveCurrentText : '',
+    lastSceneTitle: (options.type === 'codex' || options.type === 'chat') && options.profile.includeLastScene && liveCurrentText.trim() ? currentScene?.title ?? '' : '',
     codexRepresentations,
     automaticCodex,
     automaticCodexContext: automaticText,
@@ -247,7 +265,7 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
     storySoFarSources: automatic.sources,
     automaticSources: automaticEntries.map((item) => {
       const representation = automaticRepresentations.find((candidate) => candidate.entryId === item.entry.id)!
-      return { sourceId: item.entry.id, title: item.entry.title, type: 'codex', representation: representation.representation, content: representation.content, reason: item.source === 'dependency' ? 'Dependency cascade' : 'Trigger match' }
+      return { sourceId: item.entry.id, title: item.entry.title, type: 'codex', category: item.entry.category, representation: representation.representation, content: representation.content, reason: item.source === 'dependency' ? 'Dependency cascade' : 'Trigger match' }
     }),
     additionalSources: manualSections.map((item) => ({
       sourceId: item.id,
@@ -256,6 +274,7 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
       content: item.text,
       reason: 'Selected in Context Management',
     })),
+    targetExcludedSources,
     additionalContext: [automaticSection, ...manualSections.map((item) => item.text)].filter(Boolean).join('\n\n'),
   }
 }

@@ -19,7 +19,9 @@ test('prompt settings use the CodeMirror editor with live diagnostics and caret 
 test('invalid templates remain editable but block every current text-generation scope', () => {
   assert.match(app, /generation is blocked/)
   assert.match(app, /Request blocked by an invalid/)
-  assert.match(workspace, /assertPromptTemplateValid\(isCodex \? settings\.prompts\.lore : settings\.prompts\.story/)
+  assert.match(workspace, /const compositionScope = isCodex \? 'lore' : 'story'/)
+  assert.match(workspace, /assertPromptTemplateValid\(composition\.systemPrompt, compositionScope\)/)
+  assert.match(workspace, /composition\.predefinedMessages\.filter/)
   assert.match(workspace, /assertPromptTemplateValid\(settings\.prompts\.summarize, 'summarize'\)/)
   assert.match(chat, /promptTemplateDiagnostics\(template, 'assistant'\)/)
   assert.match(chat, /Fix the invalid Chat composition/)
