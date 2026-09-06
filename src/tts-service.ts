@@ -312,21 +312,36 @@ export async function startTtsSession(settings: SpeechSettings, markdown: string
     let resolve!: (value: { url: string; objectUrl: boolean }) => void
     let reject!: (reason?: unknown) => void
     const promise = new Promise<{ url: string; objectUrl: boolean }>((res, rej) => { resolve = res; reject = rej })
+    // Workers may reject chunks that the ordered playback loop never reaches after a fatal failure.
+    // Mark every deferred rejection as observed while preserving rejection for later awaiters.
+    void promise.catch(() => undefined)
     return { promise, resolve, reject, ready: false }
   })
   let nextIndex = 0
+  let fatalError: unknown
   const concurrency = Math.max(1, Math.min(8, Number.parseInt(settings.maxParallelRequests, 10) || 1))
   const worker = async () => {
-    while (currentSession === sessionId) {
+    while (currentSession === sessionId && !controller.signal.aborted) {
       const index = nextIndex++
       if (index >= chunks.length) return
       try {
         const result = await requestChunk(settings, chunks[index], controller.signal)
+        if (controller.signal.aborted || currentSession !== sessionId || fatalError !== undefined) {
+          if (result.objectUrl) {
+            URL.revokeObjectURL(result.url)
+            objectUrls.delete(result.url)
+          }
+          return
+        }
         deferred[index].ready = true
         deferred[index].resolve(result)
       } catch (error) {
         deferred[index].reject(error)
-        throw error
+        if (!controller.signal.aborted && currentSession === sessionId && fatalError === undefined) {
+          fatalError = error
+          controller.abort()
+        }
+        return
       }
     }
   }
@@ -342,13 +357,20 @@ export async function startTtsSession(settings: SpeechSettings, markdown: string
         objectUrls.delete(generated.url)
       }
     }
-    await Promise.all(workers)
+    await Promise.allSettled(workers)
     if (currentSession === sessionId) emit({ status: 'complete', label, chunkIndex: count, chunkCount: count })
   } catch (error) {
-    if (controller.signal.aborted || currentSession !== sessionId) return
-    const message = error instanceof Error ? error.message : 'Text-to-speech failed.'
-    emit({ status: 'failed', label, chunkIndex: state.chunkIndex, chunkCount: count, error: message })
-    throw error
+    const userCancelled = currentSession !== sessionId || (controller.signal.aborted && fatalError === undefined)
+    if (!userCancelled && fatalError === undefined) {
+      fatalError = error
+      controller.abort()
+    }
+    await Promise.allSettled(workers)
+    if (userCancelled) return
+    const failure = fatalError ?? error
+    const message = failure instanceof Error ? failure.message : 'Text-to-speech failed.'
+    if (currentSession === sessionId) emit({ status: 'failed', label, chunkIndex: state.chunkIndex, chunkCount: count, error: message })
+    throw failure
   } finally {
     if (currentSession === sessionId) {
       activeController = null
