@@ -31,9 +31,17 @@ jobs:
           start = workflow.index("          from pathlib import Path\n")
           end = workflow.index("          PY\n", start)
           script = textwrap.dedent(workflow[start:end])
-          marker = script.index('const chatWorkspaceInstructions')
-          malformed = script.index('""")', marker)
-          script = script[:malformed] + "'')" + script[malformed + 4:]
+          lines = script.splitlines()
+          marker_line = next(i for i, line in enumerate(lines) if 'const chatWorkspaceInstructions' in line)
+          fixed = False
+          for i in range(marker_line + 1, min(len(lines), marker_line + 8)):
+              if lines[i].strip().endswith(')') and lines[i].strip().startswith('"'):
+                  lines[i] = "'')"
+                  fixed = True
+                  break
+          if not fixed:
+              raise SystemExit('Could not identify malformed empty-string argument line.')
+          script = '\n'.join(lines) + '\n'
           exec(compile(script, 'issue29_patch', 'exec'))
           PY
       - name: Install dependencies
