@@ -38,9 +38,10 @@ test('reset mutates only the selected composition and preserves unrelated AI set
   assert.match(block, /\[scope\]: clonePromptComposition\(defaultPromptCompositions\[scope\]\)/)
 })
 
-test('existing System prompt editor now writes the composition System slot and reset is composition-scoped', () => {
+test('syntax-aware System prompt editor writes the composition System slot and reset is composition-scoped', () => {
   assert.match(app, /value=\{settings\.promptCompositions\[promptTab\]\.systemPrompt\}/)
-  assert.match(app, /withPromptSystemPrompt\(current, promptTab, event\.target\.value\)/)
+  assert.match(app, /withPromptSystemPrompt\(current, promptTab, value\)/)
+  assert.match(app, /PromptTemplateEditor/)
   assert.match(app, /resetPromptComposition\(current, promptTab\)/)
   assert.doesNotMatch(app, /update\('prompts'/)
 })
