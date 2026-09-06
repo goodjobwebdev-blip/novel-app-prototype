@@ -46,10 +46,12 @@ import { getChat, listChatMessages, saveChatContextProfile, type ChatEntity, typ
 import { CHAT_TOOL_DEFINITIONS, CHAT_WORKSPACE_INSTRUCTIONS, serializeChatModelInput } from './chat-request'
 import { renderLorePrompt, renderStoryPrompt } from './nanogpt'
 import { clearModelCatalog, getCachedModelCatalog, providerModelEndpoint, saveModelCatalog, type ProviderModel } from './model-catalog'
+import { fetchSpeechModels, type SpeechModel } from './tts-service'
 import './response-length-settings.css'
 import './context-limit-settings.css'
 import './codex-archive.css'
 import './codex-summary.css'
+import './tts.css'
 type SettingsTab = 'ai' | 'context' | 'appearance' | 'speech' | 'images'
 type SaveState = 'loading' | 'saved' | 'saving' | 'error'
 type RequestPreviewMessage = {
@@ -471,6 +473,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
         </> : settingsTab === 'context' && book ? (book.contextType === 'note'
           ? <NoteContextPlaceholder />
           : <ContextSettings bookId={book.id} bookTitle={book.title} bookPromptValues={book.promptValues} type={book.contextType ?? 'scene'} currentDocumentId={book.currentDocumentId} currentDocumentText={book.currentDocumentText} chatId={book.chatId} settings={settings} value={contextSettings} sources={contextSources} saved={contextSaved} onChange={updateContextDefaults} />)
+          : settingsTab === 'speech' ? <SpeechSettingsPanel settings={settings} scope={isBookSettings ? 'book' : 'defaults'} onChange={(speech) => update('speech', speech)} />
           : <SettingsPlaceholder tab={settingsTab} scope={isBookSettings ? 'book' : 'defaults'} />}
       </section>
     </main>
@@ -637,6 +640,57 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
         <div className="context-preview-rendered">{requestMessages.map((message) => <section key={message.key}><header><h3>{message.title}</h3><span>{message.detail}</span></header>{message.content ? <div className="context-preview-copy">{message.content}</div> : <p className="context-preview-empty">This message is empty.</p>}{message.reasoning && <div className="context-preview-copy"><strong>Reasoning</strong>\n\n{message.reasoning}</div>}</section>)}</div>
         <details className="context-preview-raw"><summary>View message stack</summary><pre>{exactPreview || '[No messages would be sent yet.]'}</pre></details>
       </> : <p className="context-preview-empty">Preparing preview…</p>}
+    </section>
+  </section>
+}
+
+function SpeechSettingsPanel({ settings, scope, onChange }: { settings: AiSettings; scope: 'book' | 'defaults'; onChange: (speech: AiSettings['speech']) => void }) {
+  const [models, setModels] = useState<SpeechModel[]>([])
+  const [query, setQuery] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [message, setMessage] = useState('')
+  const selected = models.find((model) => model.id === settings.speech.model)
+  const voices = selected?.voices ?? []
+  const filtered = models.filter((model) => !query.trim() || `${model.id} ${model.name}`.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 80)
+
+  async function loadModels() {
+    setLoading(true)
+    setMessage('Loading NanoGPT audio models…')
+    try {
+      const next = await fetchSpeechModels(settings.speech.apiKey)
+      setModels(next)
+      setMessage(next.length ? `${next.length} text-to-speech models available.` : 'NanoGPT returned no text-to-speech models.')
+    } catch (error) {
+      setModels([])
+      setMessage(error instanceof Error ? error.message : 'Could not load NanoGPT audio models.')
+    } finally { setLoading(false) }
+  }
+
+  useEffect(() => { void loadModels() }, [])
+  const updateSpeech = (patch: Partial<AiSettings['speech']>) => onChange({ ...settings.speech, ...patch })
+  const unavailableModel = models.length > 0 && !selected
+  const unavailableVoice = Boolean(selected?.voices.length && settings.speech.voice && !selected.voices.includes(settings.speech.voice))
+
+  return <section className="speech-settings">
+    <header className="page-heading"><div><p>{scope === 'book' ? 'Book Speech' : 'Default Speech'}</p><h1 id="page-title">Text to speech</h1><span>{scope === 'book' ? 'Independent TTS settings for this book.' : 'Copied into each new book, then edited independently.'}</span></div><Volume2 aria-hidden="true" /></header>
+    <section className="settings-card">
+      <div className="card-heading"><div><span>01</span><h2>Provider & credential</h2></div><p>Speech credentials are separate from text AI.</p></div>
+      <div className="speech-settings-grid">
+        <label><span>Provider</span><select value={settings.speech.provider} onChange={() => undefined}><option value="nanogpt">NanoGPT</option></select></label>
+        <label><span>NanoGPT Speech API key</span><div className="speech-key-row"><input type="password" value={settings.speech.apiKey} onChange={(event) => updateSpeech({ apiKey: event.target.value })} autoComplete="off" spellCheck={false} />{settings.provider === 'nanogpt' && settings.apiKey.trim() && <button type="button" onClick={() => updateSpeech({ apiKey: settings.apiKey })}>Copy NanoGPT key from AI settings</button>}</div></label>
+      </div>
+    </section>
+    <section className="settings-card">
+      <div className="card-heading"><div><span>02</span><h2>Voice model</h2></div><button type="button" onClick={() => { void loadModels() }} disabled={loading}><RefreshCw className={loading ? 'spinning' : ''} aria-hidden="true" /> Reload</button></div>
+      <div className="speech-model-search"><Search aria-hidden="true" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search TTS models" /></div>
+      {message && <p className="speech-help">{message}</p>}
+      {unavailableModel && <p className="speech-model-unavailable" role="alert">Saved model “{settings.speech.model}” is unavailable. Arc will not silently switch paid models.</p>}
+      <div className="speech-model-list">{filtered.map((model) => <button type="button" key={model.id} className={model.id === settings.speech.model ? 'selected' : ''} onClick={() => updateSpeech({ model: model.id, voice: model.voices.includes(settings.speech.voice) ? settings.speech.voice : model.voices[0] ?? '' })}><span><strong>{model.name}</strong><small>{model.id}</small></span><small>{model.averagePrice ? `Avg. ${model.averagePrice}` : 'Price not supplied'}</small></button>)}</div>
+      <div className="speech-settings-grid">
+        <label><span>Voice</span><select value={settings.speech.voice} onChange={(event) => updateSpeech({ voice: event.target.value })}>{unavailableVoice && <option value={settings.speech.voice}>{settings.speech.voice} — unavailable</option>}{!voices.length && settings.speech.voice && <option value={settings.speech.voice}>{settings.speech.voice}</option>}{voices.map((voice) => <option key={voice} value={voice}>{voice}</option>)}</select>{unavailableVoice && <small className="speech-model-unavailable">Choose an available voice before reading aloud.</small>}</label>
+        <label><span>Maximum parallel TTS requests</span><input type="number" min="1" max="8" value={settings.speech.maxParallelRequests} onChange={(event) => updateSpeech({ maxParallelRequests: event.target.value })} /><small className="speech-help">Default 1. Audio may generate concurrently but always plays in prose order.</small></label>
+      </div>
+      <label className="speech-toggle"><span><input type="checkbox" checked={settings.speech.readAloudAfterGeneration} onChange={(event) => updateSpeech({ readAloudAfterGeneration: event.target.checked })} /> Read aloud after generation</span><small className="speech-help">Story reads only the latest generated passage; Codex reads the resulting entry; Chat reads the new visible assistant answer.</small></label>
     </section>
   </section>
 }

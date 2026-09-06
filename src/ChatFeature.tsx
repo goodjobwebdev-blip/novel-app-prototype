@@ -50,6 +50,7 @@ import { applyChatDocumentEdit, createChatCodexEntry, executeChatWorkspaceTool, 
 import { applyChatEntityAction, chatEntityToolNames, executeChatEntityTool, rejectChatEntityAction } from './chat-entity-tools'
 import { applyChatOutlineAction, chatOutlineToolNames, executeChatOutlineTool, rejectChatOutlineAction } from './chat-outline-tools'
 import { CHAT_TOOL_DEFINITIONS, CHAT_WORKSPACE_INSTRUCTIONS, serializeChatModelInput } from './chat-request'
+import { startTtsSession } from './tts-service'
 import './chat.css'
 import './context-limit-settings.css'
 
@@ -515,6 +516,9 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
         const saved = await persistAssistantRound(activeRoundContent, activeRoundThoughts)
         activeRoundPersisted = Boolean(saved)
         commitVisibleRound(saved, Boolean(activeRoundThoughts))
+        if (saved?.content && settings.speech.readAloudAfterGeneration) {
+          void startTtsSession(settings.speech, saved.content, `Chat · ${activeChat.title}`).catch((error) => onToast(error instanceof Error ? error.message : 'Automatic read aloud failed.'))
+        }
         completed = true
         break
       }
@@ -748,10 +752,14 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     bottomRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' })
   }
 
-  function readAloud(message: ChatMessageEntity) {
-    if (!('speechSynthesis' in window) || !message.content.trim()) return
-    window.speechSynthesis.cancel()
-    window.speechSynthesis.speak(new SpeechSynthesisUtterance(message.content))
+  async function readAloud(message: ChatMessageEntity) {
+    if (!message.content.trim()) return
+    try {
+      const settings = await getChatBookAiSettings(bookId)
+      await startTtsSession(settings.speech, message.content, `Chat · ${chat?.title ?? 'Assistant'}`)
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : 'Could not start text to speech.')
+    }
   }
 
   if (!chatId) return <section className="conversation chat-empty"><MessageCircle aria-hidden="true" /><strong>No chat selected</strong><p>Create or open a chat from the Chat panel.</p></section>
@@ -772,7 +780,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
               {message.outlineActions?.length ? <div className="chat-document-edits">{message.outlineActions.map((proposal) => <OutlineActionCard key={proposal.id} proposal={proposal} onApply={() => { void applyOutlineProposal(message, proposal) }} onReject={() => { void rejectOutlineProposal(message, proposal) }} />)}</div> : null}
               {message.entityActions?.length ? <div className="chat-document-edits">{message.entityActions.map((proposal) => <EntityActionCard key={proposal.id} proposal={proposal} onApply={() => { void applyEntityProposal(message, proposal) }} onReject={() => { void rejectEntityProposal(message, proposal) }} />)}</div> : null}
               {message.status && message.status !== 'complete' && <small className="chat-message-status">{message.status === 'failed' ? 'Interrupted' : 'Stopped'}</small>}
-              <div className="message-tools"><button type="button" onClick={() => { void copyMessage(message) }}>{copiedMessageId === message.id ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />} {copiedMessageId === message.id ? 'Copied' : 'Copy'}</button><button type="button" onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" onClick={() => { void fork(message) }}><GitFork aria-hidden="true" /> Fork</button><button type="button" onClick={() => readAloud(message)}><Volume2 aria-hidden="true" /> Read aloud</button><button type="button" onClick={() => { void regenerate(message) }}><RefreshCw aria-hidden="true" /> Regenerate</button><button type="button" onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
+              <div className="message-tools"><button type="button" onClick={() => { void copyMessage(message) }}>{copiedMessageId === message.id ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />} {copiedMessageId === message.id ? 'Copied' : 'Copy'}</button><button type="button" onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" onClick={() => { void fork(message) }}><GitFork aria-hidden="true" /> Fork</button><button type="button" onClick={() => { void readAloud(message) }}><Volume2 aria-hidden="true" /> Read aloud</button><button type="button" onClick={() => { void regenerate(message) }}><RefreshCw aria-hidden="true" /> Regenerate</button><button type="button" onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
             </>}
           </div> : editingId === message.id ? <InlineMessageEdit value={editingValue} onChange={setEditingValue} onCancel={() => setEditingId('')} onSave={() => { void saveEdit(message, false) }} onSaveAndRegenerate={() => { void saveEdit(message, true) }} /> : <>
             <div className="bubble chat-markdown-bubble"><MarkdownMessage content={message.content} /></div>
