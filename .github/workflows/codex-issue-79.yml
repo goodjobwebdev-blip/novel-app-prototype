@@ -1,0 +1,37 @@
+name: Codex issue 79 implementation
+
+on:
+  push:
+    branches:
+      - codex/issue-79-tts
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/issue-79-tts
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Apply issue 79 implementation
+        run: python .github/scripts/issue79.py
+      - name: Install dependencies
+        run: npm install --no-package-lock
+      - name: Build application
+        run: npm run build
+      - name: Commit validated implementation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm .github/scripts/issue79.py .github/workflows/codex-issue-79.yml
+          git add -A
+          git commit -m "Implement provider-backed text to speech"
+          git push origin HEAD:codex/issue-79-tts
