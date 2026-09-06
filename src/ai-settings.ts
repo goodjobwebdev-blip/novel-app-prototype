@@ -19,6 +19,7 @@ export type AiSettings = {
   codexModel: string
   codexModelContextLength?: number
   generationWordDelayMs: string
+  responseLength: string
   favorites: string[]
   prompts: AiPrompts
 }
@@ -28,6 +29,14 @@ export type BookAiSettings = Omit<AiSettings, 'favorites'>
 export const AI_SETTINGS_STORAGE_KEY = 'arc-ai-defaults-v1'
 export const DEFAULT_GENERATION_WORD_DELAY_MS = 40
 export const MAX_GENERATION_WORD_DELAY_MS = 2000
+
+export const RESPONSE_LENGTH_PRESETS = [
+  { label: 'One paragraph', value: 'Write approximately one substantial paragraph, stopping at a natural beat rather than completing the whole scene.' },
+  { label: '2–3 paragraphs', value: 'Write 2–3 substantial paragraphs, developing the current beat and stopping at a natural transition.' },
+  { label: 'Half scene', value: 'Write roughly half of a typical scene continuation. Develop the current situation substantially, but do not rush to a full resolution.' },
+  { label: 'Finish scene', value: 'Continue with a full scene-sized passage and bring the current scene to a natural ending when the existing momentum supports it.' },
+  { label: '≤300 words', value: 'Keep the response concise and do not exceed 300 words.' },
+] as const
 
 export const previousDefaultAssistantPrompt = `You are a thoughtful writing assistant for {{book.title}}.
 
@@ -262,6 +271,7 @@ export const initialAiSettings: AiSettings = {
   supportModel: '',
   codexModel: '',
   generationWordDelayMs: String(DEFAULT_GENERATION_WORD_DELAY_MS),
+  responseLength: '',
   favorites: [],
   prompts: defaultAiPrompts,
 }
@@ -288,6 +298,7 @@ export function normalizeAiSettings(value?: Partial<AiSettings>): AiSettings {
   return {
     ...initialAiSettings,
     ...value,
+    responseLength: typeof value?.responseLength === 'string' ? value.responseLength : '',
     prompts,
     favorites: Array.isArray(value?.favorites) ? [...value.favorites] : [],
     generationWordDelayMs: normalizeGenerationWordDelay(value?.generationWordDelayMs),
