@@ -79,7 +79,7 @@ function chatHistoryContent(message: ChatMessageEntity) {
     ? `\n\n[Outline proposals: ${message.outlineActions.map((proposal) => `${proposal.action} ${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
     : ''
   const entityActionState = message.role === 'assistant' && message.entityActions?.length
-    ? `\n\n[Note/Codex proposals: ${message.entityActions.map((proposal) => `${proposal.action} ${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
+    ? `\n\n[Entity proposals: ${message.entityActions.map((proposal) => `${proposal.action} ${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
     : ''
   return `${message.content}${editState}${creationState}${outlineState}${entityActionState}`
 }
@@ -437,7 +437,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
         </section>
 
         <section className="settings-card models-card">
-          <div className="card-heading"><div><span>02</span><h2>Models</h2></div><p>{isBookSettings ? 'Favorites are shared; model choices belong to this book.' : 'Main writes; Support handles summaries and names.'}</p></div>
+          <div className="card-heading"><div><span>02</span><h2>Models</h2></div><p>{isBookSettings ? 'Favorites are shared; model choices belong to this book.' : 'Main writes; Support handles summaries and autotitles.'}</p></div>
           <div className="model-pickers"><label><span>Main model <em>Story generation and fallback</em></span><input list="model-options" value={settings.mainModel} onChange={(event) => selectModel('main', event.target.value)} placeholder={models.length ? 'Search models…' : 'Reload models first'} /></label><label><span>Support model <em>Fast utility tasks</em></span><input list="model-options" value={settings.supportModel} onChange={(event) => selectModel('support', event.target.value)} placeholder={models.length ? 'Search models…' : 'Reload models first'} /></label><label><span>Codex model <em>Optional · uses Main when empty</em></span><input list="model-options" value={settings.codexModel} onChange={(event) => selectModel('codex', event.target.value)} placeholder="Use Main model" /></label><datalist id="model-options">{models.map((model) => <option key={model.id} value={model.id}>{model.name ?? model.id}</option>)}</datalist></div>
           <label className="generation-speed-setting">
             <span><strong>Writing pace</strong><em>Milliseconds per word</em></span>
@@ -458,7 +458,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
 
         <section className="settings-card prompts-card">
           <div className="card-heading"><div><span>03</span><h2>System prompts</h2></div></div>
-          <div className="prompt-tabs" role="tablist">{([['story', 'Story'], ['summarize', 'Summarize'], ['titles', 'Titles & names'], ['lore', 'Lore entries'], ['assistant', 'Assistant']] as const).map(([key, label]) => <button key={key} className={promptTab === key ? 'active' : ''} type="button" onClick={() => setPromptTab(key)}>{label}</button>)}</div>
+          <div className="prompt-tabs" role="tablist">{([['story', 'Story'], ['summarize', 'Summarize'], ['lore', 'Lore entries'], ['assistant', 'Assistant']] as const).map(([key, label]) => <button key={key} className={promptTab === key ? 'active' : ''} type="button" onClick={() => setPromptTab(key)}>{label}</button>)}</div>
           <textarea className="prompt-editor" value={settings.prompts[promptTab]} onChange={(event) => update('prompts', { ...settings.prompts, [promptTab]: event.target.value })} spellCheck={false} />
           <details className="prompt-reference">
             <summary><CircleHelp aria-hidden="true" /><span>Variables & syntax</span></summary>

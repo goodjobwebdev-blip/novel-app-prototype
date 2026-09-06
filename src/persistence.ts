@@ -630,6 +630,10 @@ export async function renameEntity(id: string, title: string): Promise<ArcEntity
   const updated = { ...entity, title: title.trim() || entity.title || 'Untitled', updatedAt: now, ...(entity.type === 'codexEntry' ? { sourceRevision: now } : {}) }
   await db.transaction('rw', db.table('entities'), async () => {
     await db.table('entities').put(updated)
+    if (['act', 'chapter', 'scene', 'codexEntry'].includes(entity.type)) {
+      const summary = await db.table('entities').get(summaryId(entity.id)) as SummaryEntity | undefined
+      if (summary?.type === 'summary') await db.table('entities').put({ ...summary, title: `${updated.title} summary`, updatedAt: now })
+    }
     if (['act', 'chapter', 'scene'].includes(entity.type)) await touchAncestors(db, entity.parentId, updated.updatedAt)
     else if (entity.bookId) await touchAncestors(db, entity.bookId, updated.updatedAt)
   })

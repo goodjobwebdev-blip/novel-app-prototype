@@ -42,7 +42,7 @@ export type ChatEntityActionProposal = {
   id: string
   action: 'create_note' | 'rename' | 'delete' | 'set_codex_category'
   entityId?: string
-  entityType: 'note' | 'codexEntry'
+  entityType: 'book' | 'note' | 'codexEntry'
   entityTitle: string
   newTitle?: string
   content?: string
