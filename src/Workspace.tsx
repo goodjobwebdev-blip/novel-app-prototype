@@ -44,6 +44,7 @@ import { generationWordDelayMs, loadAiSettings, type AiSettings } from './ai-set
 import { createBufferedWordRenderer } from './buffered-word-renderer'
 import { applyIfStillCurrent } from './async-state-guard'
 import { KeyedAsyncQueue } from './keyed-async-queue'
+import { runDeletionSaveBarrier } from './deletion-save-barrier'
 import { navigateAfterRequiredSave } from './navigation-save-guard'
 import ExpandableTextInput from './ExpandableTextInput'
 import MarkdownEditor, { type CodexMentionClick, type MarkdownEditorHandle } from './MarkdownEditor'
@@ -60,6 +61,7 @@ import {
   createSeries as createSeriesEntity,
   createSnapshot,
   createStructuralEntity,
+  collectEntityTreeIds,
   deleteEntityTree,
   ensureBookAiSettings,
   ensurePrototypeSeed,
@@ -208,6 +210,7 @@ export default function Workspace() {
   const changedSinceSnapshotRef = useRef(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const documentSaveQueueRef = useRef(new KeyedAsyncQueue())
+  const deletingEntityIdsRef = useRef(new Set<string>())
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const generationAbortRef = useRef<AbortController | null>(null)
   const autotitleAbortRef = useRef<AbortController | null>(null)
@@ -334,7 +337,7 @@ export default function Workspace() {
 
   async function flushDocument(reason: SnapshotReason = 'autosave', snapshot = false): Promise<boolean> {
     const documentId = activeDocumentIdRef.current
-    if (!storageReadyRef.current || !documentId) return false
+    if (!storageReadyRef.current || !documentId || deletingEntityIdsRef.current.has(documentId)) return false
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
@@ -342,6 +345,7 @@ export default function Workspace() {
     if (activeDocumentIdRef.current === documentId) setSaveState('saving')
 
     while (true) {
+      if (deletingEntityIdsRef.current.has(documentId)) return false
       const contentSnapshot = storyRef.current
       const snapshotRequested = snapshot && changedSinceSnapshotRef.current
       let savedDocument: EditableEntity
@@ -518,6 +522,20 @@ export default function Workspace() {
     else setScreen('editor')
   }
 
+  async function deleteWithSaveBarrier(rootId: string) {
+    const ids = await collectEntityTreeIds(rootId)
+    if (activeDocumentIdRef.current && ids.includes(activeDocumentIdRef.current) && saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+    return runDeletionSaveBarrier(
+      ids,
+      deletingEntityIdsRef.current,
+      (id) => documentSaveQueueRef.current.whenIdle(id),
+      () => deleteEntityTree(rootId),
+    )
+  }
+
   async function makeBook() {
     try {
       const created = await createBook(loadAiSettings())
@@ -540,7 +558,7 @@ export default function Workspace() {
 
   async function removeBook(book: BookEntity) {
     if (!window.confirm(`Delete “${book.title}” and all of its chapters and scenes? This cannot be undone.`)) return
-    await deleteEntityTree(book.id)
+    await deleteWithSaveBarrier(book.id)
     const books = await listBooks()
     setBookList(books)
     if (currentBook?.id === book.id) {
@@ -577,7 +595,7 @@ export default function Workspace() {
 
   async function removeCurrentBookFromSettings() {
     if (!currentBook) return
-    await deleteEntityTree(currentBook.id)
+    await deleteWithSaveBarrier(currentBook.id)
     const books = await listBooks()
     setBookList(books)
     setCurrentBook(null)
@@ -618,7 +636,7 @@ export default function Workspace() {
     const nested = outlineEntities.some((candidate) => candidate.parentId === entity.id)
     const warning = nested ? ' All nested content will also be deleted.' : ''
     if (!window.confirm(`Delete “${entity.title}”?${warning} This cannot be undone.`)) return
-    const removedIds = await deleteEntityTree(entity.id)
+    const removedIds = await deleteWithSaveBarrier(entity.id)
     const entities = await reloadBookContent(currentBook.id)
     if (activeDocumentIdRef.current && removedIds.includes(activeDocumentIdRef.current)) {
       const nextScene = entities.find((candidate) => candidate.type === 'scene')
@@ -677,7 +695,7 @@ export default function Workspace() {
 
   async function removeContentEntity(entity: NoteEntity | CodexEntryEntity) {
     if (!currentBook || !window.confirm(`Delete “${entity.title}”? This cannot be undone.`)) return
-    await deleteEntityTree(entity.id)
+    await deleteWithSaveBarrier(entity.id)
     await reloadBookContent(currentBook.id)
     if (activeDocumentIdRef.current === entity.id) {
       activeDocumentIdRef.current = null

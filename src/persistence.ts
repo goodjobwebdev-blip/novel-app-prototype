@@ -573,14 +573,14 @@ export async function getOrCreateSummary(source: StructuralEntity | CodexEntryEn
 
 export async function saveSummaryContent(summaryIdValue: string, content: string, sourceRevision: number): Promise<SummaryEntity> {
   const db = await database()
-  const current = await db.table('entities').get(summaryIdValue) as SummaryEntity | undefined
-  if (!current || current.type !== 'summary') throw new Error(`Cannot save missing summary ${summaryIdValue}`)
-  const updated: SummaryEntity = { ...current, content, summarizedSourceRevision: sourceRevision, updatedAt: Date.now() }
-  await db.transaction('rw', db.table('entities'), async () => {
+  return db.transaction('rw', db.table('entities'), async () => {
+    const current = await db.table('entities').get(summaryIdValue) as SummaryEntity | undefined
+    if (!current || current.type !== 'summary') throw new Error(`Cannot save missing summary ${summaryIdValue}`)
+    const updated: SummaryEntity = { ...current, content, summarizedSourceRevision: sourceRevision, updatedAt: Date.now() }
     await db.table('entities').put(updated)
     await touchAncestors(db, current.bookId, updated.updatedAt)
+    return updated
   })
-  return updated
 }
 
 export function isCodexEntryArchived(entity: ArcEntity | CodexEntryEntity | undefined): boolean {
@@ -757,8 +757,7 @@ export async function placeStructuralEntity(id: string, targetParentId: string, 
   })
 }
 
-export async function deleteEntityTree(id: string): Promise<string[]> {
-  const db = await database()
+async function collectEntityTreeIdsWithDb(db: any, id: string): Promise<{ root?: ArcEntity; ids: string[] }> {
   const removedIds = new Set<string>()
   async function collect(entityId: string) {
     if (removedIds.has(entityId)) return
@@ -772,15 +771,28 @@ export async function deleteEntityTree(id: string): Promise<string[]> {
     const bookEntities: ArcEntity[] = await db.table('entities').where('bookId').equals(id).toArray()
     for (const entity of bookEntities) await collect(entity.id)
   }
-  const ids = [...removedIds]
+  return { root, ids: [...removedIds] }
+}
+
+export async function collectEntityTreeIds(id: string): Promise<string[]> {
+  const db = await database()
+  return (await collectEntityTreeIdsWithDb(db, id)).ids
+}
+
+export async function deleteEntityTree(id: string): Promise<string[]> {
+  const db = await database()
+  let deletedIds: string[] = []
   await db.transaction('rw', db.table('entities'), db.table('snapshots'), async () => {
+    const { root, ids } = await collectEntityTreeIdsWithDb(db, id)
+    deletedIds = ids
+    const removedIds = new Set(ids)
     await db.table('entities').bulkDelete(ids)
     const snapshots: DocumentSnapshot[] = await db.table('snapshots').toArray()
     const snapshotIds = snapshots.filter((snapshot) => removedIds.has(snapshot.entityId)).map((snapshot) => snapshot.id)
     if (snapshotIds.length) await db.table('snapshots').bulkDelete(snapshotIds)
     await touchAncestors(db, root?.parentId, Date.now())
   })
-  return ids
+  return deletedIds
 }
 
 export async function deleteEntity(id: string) {
@@ -790,19 +802,19 @@ export async function deleteEntity(id: string) {
 
 export async function saveDocumentContent(entityId: string, content: string) {
   const db = await database()
-  const current = await db.table('entities').get(entityId) as ArcEntity | undefined
-  if (!current) throw new Error(`Cannot save missing entity ${entityId}`)
-  const now = Date.now()
-  const updated = { ...current, content, updatedAt: now, ...(current.type === 'codexEntry' ? { sourceRevision: now } : {}) }
-  await db.transaction('rw', db.table('entities'), async () => {
+  return db.transaction('rw', db.table('entities'), async () => {
+    const current = await db.table('entities').get(entityId) as ArcEntity | undefined
+    if (!current) throw new Error(`Cannot save missing entity ${entityId}`)
+    const now = Date.now()
+    const updated = { ...current, content, updatedAt: now, ...(current.type === 'codexEntry' ? { sourceRevision: now } : {}) }
     await db.table('entities').put(updated)
     if (current.type === 'scene') await touchAncestors(db, current.parentId, now)
     if (current.bookId) {
       const book = await db.table('entities').get(current.bookId) as ArcEntity | undefined
       if (book) await db.table('entities').put({ ...book, updatedAt: now })
     }
+    return updated
   })
-  return updated
 }
 
 export async function listSnapshots(entityId: string): Promise<DocumentSnapshot[]> {
@@ -818,23 +830,32 @@ export async function readSnapshot(id: string): Promise<DocumentSnapshot | undef
 
 export async function createSnapshot(entityId: string, reason: SnapshotReason, contentOverride?: string) {
   const db = await database()
-  const entity = await db.table('entities').get(entityId) as ArcEntity | undefined
-  if (!entity) throw new Error(`Cannot snapshot missing entity ${entityId}`)
-  const content = contentOverride ?? String(entity.content ?? '')
-  const existing = await listSnapshots(entityId)
-  if (existing[0]?.content === content) return existing[0]
-
-  const snapshot: DocumentSnapshot = {
-    id: makeId('snapshot'),
-    entityId,
-    entityType: entity.type,
-    createdAt: Date.now(),
-    content,
-    reason,
-  }
-  await db.table('snapshots').put(snapshot)
-  await pruneSnapshots(entityId)
-  return snapshot
+  let result: DocumentSnapshot | undefined
+  let created = false
+  await db.transaction('rw', db.table('entities'), db.table('snapshots'), async () => {
+    const entity = await db.table('entities').get(entityId) as ArcEntity | undefined
+    if (!entity) throw new Error(`Cannot snapshot missing entity ${entityId}`)
+    const content = contentOverride ?? String(entity.content ?? '')
+    const snapshots: DocumentSnapshot[] = await db.table('snapshots').where('entityId').equals(entityId).toArray()
+    snapshots.sort((a, b) => b.createdAt - a.createdAt)
+    if (snapshots[0]?.content === content) {
+      result = snapshots[0]
+      return
+    }
+    result = {
+      id: makeId('snapshot'),
+      entityId,
+      entityType: entity.type,
+      createdAt: Date.now(),
+      content,
+      reason,
+    }
+    await db.table('snapshots').put(result)
+    created = true
+  })
+  if (!result) throw new Error(`Could not create snapshot for ${entityId}`)
+  if (created) await pruneSnapshots(entityId)
+  return result
 }
 
 export async function restoreSnapshot(snapshotId: string) {
