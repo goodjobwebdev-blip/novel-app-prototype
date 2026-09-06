@@ -1,0 +1,40 @@
+name: Validate issue 134 Chat generation handoff
+
+on:
+  push:
+    branches:
+      - fix/issue-134-chat-generation-handoff
+
+permissions:
+  contents: write
+
+concurrency:
+  group: issue-134-chat-generation-handoff
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/issue-134-chat-generation-handoff
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Apply issue 134 integration
+        run: python .github/scripts/issue134.py
+      - run: npm install --no-package-lock
+      - name: Regression tests
+        run: node --test tests/*.test.mjs
+      - name: Production build
+        run: npm run build
+      - name: Commit validated integration
+        run: |
+          rm .github/scripts/issue134.py .github/workflows/issue-134-validation.yml
+          git config user.name "goodjobwebdev-blip"
+          git config user.email "goodjob.webdev@gmail.com"
+          git add -A
+          git commit -m "Fix Chat generation handoff ownership"
+          git push origin HEAD:fix/issue-134-chat-generation-handoff
