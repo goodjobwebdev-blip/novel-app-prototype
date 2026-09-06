@@ -29,7 +29,6 @@ path.write_text(text)
 path = Path('src/chat-tools.ts')
 text = path.read_text()
 text = text.replace("  updateChatMessage,\n", "  claimChatMessageProposal,\n  transitionChatMessageProposal,\n", 1)
-# remove old message lookup helpers/status helpers and replace region
 start = text.index("async function messageWithProposal(")
 end = text.index("export async function applyChatDocumentEdit", start)
 replacement = """async function setProposalStatus(messageId: string, proposalId: string, status: ChatDocumentEditProposal['status'], appliedAt?: number) {\n  return transitionChatMessageProposal(messageId, 'documentEdits', proposalId, ['applying'], { status, ...(appliedAt ? { appliedAt } : {}) })\n}\n\n"""
@@ -43,14 +42,13 @@ new = """export async function rejectChatDocumentEdit(messageId: string, proposa
 if old not in text:
     raise SystemExit('reject document block not found')
 text = text.replace(old, new, 1)
-# codex helper region
 start = text.index("async function messageWithCodexCreation(")
 end = text.index("export async function createChatCodexEntry", start)
 replacement = """async function setCodexCreationStatus(messageId: string, proposalId: string, patch: Partial<ChatCodexCreationProposal>) {\n  return transitionChatMessageProposal(messageId, 'codexCreations', proposalId, ['applying'], patch)\n}\n\n"""
 text = text[:start] + replacement + text[end:]
 text = text.replace("""export async function createChatCodexEntry(messageId: string, proposalId: string) {\n  const { message, proposal } = await messageWithCodexCreation(messageId, proposalId)\n  if (proposal.status !== 'proposed') throw new Error(`This Codex proposal is already ${proposal.status}.`)\n""", """export async function createChatCodexEntry(messageId: string, proposalId: string) {\n  const claimed = await claimChatMessageProposal(messageId, 'codexCreations', proposalId)\n  const message = claimed.message\n  const proposal = claimed.proposal as ChatCodexCreationProposal\n""", 1)
 text = text.replace("await setCodexCreationStatus(message, proposal.id,", "await setCodexCreationStatus(message.id, proposal.id,")
-old = """export async function rejectChatCodexEntry(messageId: string, proposalId: string) {\n  const { message, proposal } = await messageWithCodexCreation(messageId, proposalId)\n  if (proposal.status !== 'proposed') return\n  await setCodexCreationStatus(message, proposal.id, { status: 'rejected' })\n}\n"""
+old = """export async function rejectChatCodexEntry(messageId: string, proposalId: string) {\n  const { message, proposal } = await messageWithCodexCreation(messageId, proposalId)\n  if (proposal.status !== 'proposed') return\n  await setCodexCreationStatus(message.id, proposal.id, { status: 'rejected' })\n}\n"""
 new = """export async function rejectChatCodexEntry(messageId: string, proposalId: string) {\n  await transitionChatMessageProposal(messageId, 'codexCreations', proposalId, ['proposed'], { status: 'rejected' })\n}\n"""
 if old not in text:
     raise SystemExit('reject codex block not found')
@@ -68,7 +66,7 @@ text = text[:start] + replacement + text[end:]
 text = text.replace("""export async function applyChatEntityAction(messageId: string, proposalId: string) {\n  const { message, proposal } = await messageWithAction(messageId, proposalId)\n  if (proposal.status !== 'proposed') throw new Error(`This proposal is already ${proposal.status}.`)\n""", """export async function applyChatEntityAction(messageId: string, proposalId: string) {\n  const claimed = await claimChatMessageProposal(messageId, 'entityActions', proposalId)\n  const message = claimed.message\n  const proposal = claimed.proposal as ChatEntityActionProposal\n""", 1)
 text = text.replace("await setActionStatus(message, proposal.id,", "await setActionStatus(message.id, proposal.id,")
 text = text.replace("() => setActionStatus(message, proposal.id,", "() => setActionStatus(message.id, proposal.id,")
-old = """export async function rejectChatEntityAction(messageId: string, proposalId: string) {\n  const { message, proposal } = await messageWithAction(messageId, proposalId)\n  if (proposal.status !== 'proposed') return\n  await setActionStatus(message, proposal.id, { status: 'rejected' })\n}\n"""
+old = """export async function rejectChatEntityAction(messageId: string, proposalId: string) {\n  const { message, proposal } = await messageWithAction(messageId, proposalId)\n  if (proposal.status !== 'proposed') return\n  await setActionStatus(message.id, proposal.id, { status: 'rejected' })\n}\n"""
 new = """export async function rejectChatEntityAction(messageId: string, proposalId: string) {\n  await transitionChatMessageProposal(messageId, 'entityActions', proposalId, ['proposed'], { status: 'rejected' })\n}\n"""
 if old not in text:
     raise SystemExit('reject entity block not found')
@@ -86,8 +84,7 @@ text = text[:start] + replacement + text[end:]
 text = text.replace("""export async function applyChatOutlineAction(messageId: string, proposalId: string) {\n  const { message, proposal } = await messageWithOutlineAction(messageId, proposalId)\n  if (proposal.status !== 'proposed') throw new Error(`This outline proposal is already ${proposal.status}.`)\n\n  try {\n""", """export async function applyChatOutlineAction(messageId: string, proposalId: string) {\n  const claimed = await claimChatMessageProposal(messageId, 'outlineActions', proposalId)\n  const message = claimed.message\n  const proposal = claimed.proposal as ChatOutlineActionProposal\n\n  try {\n""", 1)
 text = text.replace("await setOutlineActionStatus(message, proposal.id,", "await setOutlineActionStatus(message.id, proposal.id,")
 text = text.replace("if (proposal.status === 'proposed' && proposal.action !== 'create') {", "if (proposal.status === 'applying') {")
-text = text.replace("await setOutlineActionStatus(message.id, proposal.id, { status: 'stale' }).catch(() => undefined)", "await setOutlineActionStatus(message.id, proposal.id, { status: 'stale' }).catch(() => undefined)")
-old = """export async function rejectChatOutlineAction(messageId: string, proposalId: string) {\n  const { message, proposal } = await messageWithOutlineAction(messageId, proposalId)\n  if (proposal.status !== 'proposed') return\n  await setOutlineActionStatus(message, proposal.id, { status: 'rejected' })\n}\n"""
+old = """export async function rejectChatOutlineAction(messageId: string, proposalId: string) {\n  const { message, proposal } = await messageWithOutlineAction(messageId, proposalId)\n  if (proposal.status !== 'proposed') return\n  await setOutlineActionStatus(message.id, proposal.id, { status: 'rejected' })\n}\n"""
 new = """export async function rejectChatOutlineAction(messageId: string, proposalId: string) {\n  await transitionChatMessageProposal(messageId, 'outlineActions', proposalId, ['proposed'], { status: 'rejected' })\n}\n"""
 if old not in text:
     raise SystemExit('reject outline block not found')
