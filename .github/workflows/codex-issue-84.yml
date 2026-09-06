@@ -1,0 +1,34 @@
+name: Codex issue 84 implementation
+
+on:
+  push:
+    branches:
+      - codex/issue-84-codex-mentions
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/issue-84-codex-mentions
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Apply issue 84 implementation
+        run: python .github/scripts/issue84.py
+      - run: npm install --no-package-lock
+      - run: npm run build
+      - name: Commit validated implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm .github/scripts/issue84.py .github/workflows/codex-issue-84.yml
+          git add -A
+          git commit -m "Highlight Codex mentions in Scene text"
+          git push origin HEAD:codex/issue-84-codex-mentions
