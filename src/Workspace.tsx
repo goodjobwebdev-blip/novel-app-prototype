@@ -55,7 +55,7 @@ import { renderLorePrompt, type NanoGPTStreamMetadata } from './nanogpt'
 import { fetchTextProviderModelContextLength, streamTextProviderCompletion, textProviderRequestText } from './text-provider'
 import { assertPromptTemplateValid, generationInstructionMessage, type BookPromptValues } from './prompt-template'
 import { assembleStoryGenerationRequest } from './story-request'
-import type { ProviderMessageRole } from './prompt-composition'
+import type { NormalizedProviderMessage } from './prompt-composition'
 import { buildContextValues, generationContextDiagnostics } from './context-service'
 import {
   PROTOTYPE_BOOK_ID,
@@ -143,7 +143,7 @@ type GenerationRequestSnapshot = {
   systemPrompt: string
   contextMessage: string
   userMessage: string
-  messages?: Array<{ role: ProviderMessageRole; content: string }>
+  messages?: NormalizedProviderMessage[]
   estimatedRequestTokens?: number
   modelContextTokens?: number
 }

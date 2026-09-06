@@ -35,7 +35,7 @@ test('Story assembly exposes caret variables and deterministic automatic context
   assert.match(storyRequestSource, /'scene\.after_cursor': input\.sceneText\.slice\(insertionPosition\)/)
   const ordered = ['Story so far', 'Previous scene', 'Before generation point', 'After generation point', 'Automatic Codex'].map((name) => storyRequestSource.indexOf(`section('${name}'`))
   assert.ok(ordered.every((index) => index >= 0) && ordered.every((index, position) => position === 0 || index > ordered[position - 1]))
-  assert.match(storyRequestSource, /dedupeAdditionalSources\(automatic, input\.context\.additionalSources/)
+  assert.match(storyRequestSource, /dedupeDynamicSources\(automatic, input\.context\.additionalSources/)
 })
 
 test('Story migration, shared preview, and provider dispatch use the composition request', () => {

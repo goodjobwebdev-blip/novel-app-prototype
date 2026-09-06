@@ -17,8 +17,8 @@ export type TextProviderGenerationRequest = NanoGPTGenerationRequest & {
 
 function fakeMessages(request: Pick<TextProviderGenerationRequest, 'systemPrompt' | 'contextMessage' | 'userMessage' | 'messages'>): FakeProviderMessage[] {
   return nanoGPTCompletionMessages(request).map((message) => ({
-    role: message.role,
-    content: message.content,
+    ...message,
+    ...(message.tool_calls ? { tool_calls: message.tool_calls.map((call) => ({ ...call, function: { ...call.function } })) } : {}),
   }))
 }
 
