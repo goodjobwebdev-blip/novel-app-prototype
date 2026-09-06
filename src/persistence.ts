@@ -27,6 +27,17 @@ export type ArcEntity = {
   [key: string]: unknown
 }
 
+export type CodexDependencyEdge = {
+  id: string
+  bookId: string
+  sourceId: string
+  targetId: string
+  relationLabel: string
+  includeWithSource: boolean
+  createdAt: number
+  updatedAt: number
+}
+
 export type DocumentSnapshot = {
   id: string
   entityId: string
@@ -173,6 +184,12 @@ async function database() {
         snapshots: 'id,entityId,entityType,createdAt,[entityId+createdAt],reason',
         meta: 'key',
       })
+      db.version(2).stores({
+        entities: 'id,type,bookId,parentId,[parentId+order],updatedAt',
+        snapshots: 'id,entityId,entityType,createdAt,[entityId+createdAt],reason',
+        codexDependencies: 'id,bookId,sourceId,targetId,[bookId+sourceId],[bookId+targetId],[sourceId+targetId],updatedAt',
+        meta: 'key',
+      })
       return db.open().then(() => db)
     })
   }
@@ -310,6 +327,75 @@ export async function updateEntityAtomically<T extends ArcEntity = ArcEntity>(id
     await db.table('entities').put(next)
     return next
   })
+}
+
+export async function listCodexDependencies(bookId: string): Promise<CodexDependencyEdge[]> {
+  const db = await database()
+  const edges = await db.table('codexDependencies').where('bookId').equals(bookId).toArray() as CodexDependencyEdge[]
+  return edges.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+}
+
+export async function listOutgoingCodexDependencies(bookId: string, sourceId: string): Promise<CodexDependencyEdge[]> {
+  const db = await database()
+  const edges = await db.table('codexDependencies').where('[bookId+sourceId]').equals([bookId, sourceId]).toArray() as CodexDependencyEdge[]
+  return edges.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+}
+
+export async function listIncomingCodexDependencies(bookId: string, targetId: string): Promise<CodexDependencyEdge[]> {
+  const db = await database()
+  const edges = await db.table('codexDependencies').where('[bookId+targetId]').equals([bookId, targetId]).toArray() as CodexDependencyEdge[]
+  return edges.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+}
+
+export async function createCodexDependency(bookId: string, sourceId: string, targetId: string, relationLabel = ''): Promise<CodexDependencyEdge> {
+  if (sourceId === targetId) throw new Error('A Codex entry cannot depend on itself.')
+  const db = await database()
+  return db.transaction('rw', db.table('entities'), db.table('codexDependencies'), async () => {
+    const [source, target] = await Promise.all([
+      db.table('entities').get(sourceId) as Promise<CodexEntryEntity | undefined>,
+      db.table('entities').get(targetId) as Promise<CodexEntryEntity | undefined>,
+    ])
+    if (!source || source.type !== 'codexEntry' || source.bookId !== bookId) throw new Error('The dependency source is not available in this Book.')
+    if (!target || target.type !== 'codexEntry' || target.bookId !== bookId) throw new Error('The dependency target is not available in this Book.')
+    if (isCodexEntryArchived(target)) throw new Error('Restore the target Codex entry before adding it as a dependency.')
+    const duplicate = await db.table('codexDependencies').where('[sourceId+targetId]').equals([sourceId, targetId]).first() as CodexDependencyEdge | undefined
+    if (duplicate) throw new Error('This dependency already exists.')
+    const now = Date.now()
+    const edge: CodexDependencyEdge = {
+      id: makeId('codex-dependency'),
+      bookId,
+      sourceId,
+      targetId,
+      relationLabel: relationLabel.trim(),
+      includeWithSource: true,
+      createdAt: now,
+      updatedAt: now,
+    }
+    await db.table('codexDependencies').put(edge)
+    return edge
+  })
+}
+
+export async function updateCodexDependency(id: string, patch: { relationLabel?: string; includeWithSource?: boolean }): Promise<CodexDependencyEdge> {
+  const db = await database()
+  return db.transaction('rw', db.table('codexDependencies'), async () => {
+    const current = await db.table('codexDependencies').get(id) as CodexDependencyEdge | undefined
+    if (!current) throw new Error('This dependency no longer exists.')
+    const next = {
+      ...(patch.relationLabel !== undefined ? { relationLabel: patch.relationLabel.trim() } : {}),
+      ...(patch.includeWithSource !== undefined ? { includeWithSource: patch.includeWithSource } : {}),
+      updatedAt: Date.now(),
+    }
+    await db.table('codexDependencies').update(id, next)
+    const updated = await db.table('codexDependencies').get(id) as CodexDependencyEdge | undefined
+    if (!updated) throw new Error('This dependency no longer exists.')
+    return updated
+  })
+}
+
+export async function removeCodexDependency(id: string): Promise<void> {
+  const db = await database()
+  await db.table('codexDependencies').delete(id)
 }
 
 export async function listEntitiesByParent(parentId: string): Promise<ArcEntity[]> {
@@ -811,7 +897,7 @@ export async function collectEntityTreeIds(id: string): Promise<string[]> {
 export async function deleteEntityTree(id: string): Promise<string[]> {
   const db = await database()
   let deletedIds: string[] = []
-  await db.transaction('rw', db.table('entities'), db.table('snapshots'), async () => {
+  await db.transaction('rw', db.table('entities'), db.table('snapshots'), db.table('codexDependencies'), async () => {
     const { root, ids } = await collectEntityTreeIdsWithDb(db, id)
     deletedIds = ids
     const removedIds = new Set(ids)
@@ -819,6 +905,9 @@ export async function deleteEntityTree(id: string): Promise<string[]> {
     const snapshots: DocumentSnapshot[] = await db.table('snapshots').toArray()
     const snapshotIds = snapshots.filter((snapshot) => removedIds.has(snapshot.entityId)).map((snapshot) => snapshot.id)
     if (snapshotIds.length) await db.table('snapshots').bulkDelete(snapshotIds)
+    const dependencies = await db.table('codexDependencies').toArray() as CodexDependencyEdge[]
+    const dependencyIds = dependencies.filter((edge) => removedIds.has(edge.sourceId) || removedIds.has(edge.targetId)).map((edge) => edge.id)
+    if (dependencyIds.length) await db.table('codexDependencies').bulkDelete(dependencyIds)
     await touchAncestors(db, root?.parentId, Date.now())
   })
   return deletedIds
@@ -826,7 +915,12 @@ export async function deleteEntityTree(id: string): Promise<string[]> {
 
 export async function deleteEntity(id: string) {
   const db = await database()
-  await db.table('entities').delete(id)
+  await db.transaction('rw', db.table('entities'), db.table('codexDependencies'), async () => {
+    await db.table('entities').delete(id)
+    const dependencies = await db.table('codexDependencies').toArray() as CodexDependencyEdge[]
+    const dependencyIds = dependencies.filter((edge) => edge.sourceId === id || edge.targetId === id).map((edge) => edge.id)
+    if (dependencyIds.length) await db.table('codexDependencies').bulkDelete(dependencyIds)
+  })
 }
 
 export async function saveDocumentContent(entityId: string, content: string) {
