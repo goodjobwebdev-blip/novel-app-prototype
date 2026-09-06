@@ -47,12 +47,15 @@ import {
   type ArcEntity,
   type BookContextSettings,
   type GenerationContextType,
+  type SummarySourceType,
 } from './persistence'
 import { bookTemplateValues, promptTemplateDiagnostics, promptVariables, renderPromptTemplate, type BookPromptValues } from './prompt-template'
 import PromptTemplateEditor, { type PromptTemplateEditorHandle } from './PromptTemplateEditor'
-import { makePredefinedMessage, likelyReusablePrefix, type NormalizedAssembledRequest, type PredefinedMessage, type PromptCompositionScope } from './prompt-composition'
+import { makePredefinedMessage, likelyReusablePrefix, normalizedRequestDiagnosticText, type NormalizedAssembledRequest, type PredefinedMessage, type PromptCompositionScope } from './prompt-composition'
 import { assembleStoryGenerationRequest, STORY_CONTINUE_FALLBACK } from './story-request'
 import { assembleCodexGenerationRequest, CODEX_CONTINUE_FALLBACK } from './codex-request'
+import { assembleSummaryGenerationRequest } from './summary-request'
+import { buildSummarySource, type SummarySource } from './summary-service'
 import { buildContextValues, contextLimitInputError, generationContextDiagnostics, type PreparedContextValues } from './context-service'
 import { getChat, listChatMessages, saveChatContextProfile, type ChatEntity, type ChatMessageEntity } from './chat-service'
 import { assembleChatGenerationRequest, serializeChatModelInput } from './chat-request'
@@ -114,7 +117,7 @@ type AiSettingsProps = {
   onHome?: () => void
   onBack?: () => void
   onSaved?: (settings: AiSettings) => void
-  book?: { id: string; title: string; contextType?: GenerationContextType; currentDocumentId?: string; currentDocumentText?: string; insertionPosition?: number; promptValues?: BookPromptValues; chatId?: string }
+  book?: { id: string; title: string; contextType?: GenerationContextType; currentDocumentId?: string; currentDocumentText?: string; insertionPosition?: number; promptValues?: BookPromptValues; chatId?: string; currentSummary?: { id: string; sourceEntityId: string; sourceType: SummarySourceType; content: string } }
 }
 
 export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) {
@@ -136,6 +139,8 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   const [contextSaved, setContextSaved] = useState(true)
   const [leaveRecoveryOpen, setLeaveRecoveryOpen] = useState(false)
   const [leaveSaving, setLeaveSaving] = useState(false)
+  const [summaryPreviewSource, setSummaryPreviewSource] = useState<SummarySource | null>(null)
+  const [summaryPreviewError, setSummaryPreviewError] = useState('')
   const aiLoadedScopeRef = useRef<string | null>(null)
   const aiSavedRef = useRef('')
   const latestAiSettingsRef = useRef(settings)
@@ -154,6 +159,20 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   onSavedRef.current = onSaved
 
   useEffect(() => subscribeFakeProviderTrace(() => setFakeTrace(getFakeProviderTrace())), [])
+
+  useEffect(() => {
+    let cancelled = false
+    const summary = book?.currentSummary
+    setSummaryPreviewSource(null)
+    setSummaryPreviewError('')
+    if (!summary) return () => { cancelled = true }
+    void buildSummarySource(summary.sourceEntityId).then((source) => {
+      if (!cancelled) setSummaryPreviewSource(source)
+    }).catch(() => {
+      if (!cancelled) setSummaryPreviewError('The current Summary source could not be prepared for preview.')
+    })
+    return () => { cancelled = true }
+  }, [book?.currentSummary?.id, book?.currentSummary?.sourceEntityId, book?.currentSummary?.content])
 
   useEffect(() => () => {
     modelRefreshSequenceRef.current += 1
@@ -568,9 +587,18 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   const activeResponseLengthPresets = responseLengthScope === 'story'
     ? STORY_RESPONSE_LENGTH_PRESETS
     : responseLengthScope === 'codex' ? CODEX_RESPONSE_LENGTH_PRESETS : SUMMARY_RESPONSE_LENGTH_PRESETS
-  const promptPreviewValues = book?.promptValues
+  const basePromptPreviewValues = book?.promptValues
     ? bookTemplateValues({ ...book.promptValues, responseLength: activeResponseLength })
     : undefined
+  const promptPreviewValues = promptTab === 'summarize' && basePromptPreviewValues && book?.currentSummary && summaryPreviewSource
+    ? {
+        ...basePromptPreviewValues,
+        'target.type': summaryPreviewSource.source.type === 'codexEntry' ? 'Codex entry' : summaryPreviewSource.source.type[0].toUpperCase() + summaryPreviewSource.source.type.slice(1),
+        'target.title': summaryPreviewSource.source.title,
+        'target.source': summaryPreviewSource.content,
+        'target.previous_summary': book.currentSummary.content,
+      }
+    : basePromptPreviewValues
   const activePromptDiagnostics = promptTemplateDiagnostics(activePrompt, promptTab, promptPreviewValues)
   const compositionPromptDiagnostics = [activePrompt, ...settings.promptCompositions[promptTab].predefinedMessages.filter((message) => message.enabled).map((message) => message.template)]
     .flatMap((template) => promptTemplateDiagnostics(template, promptTab, promptPreviewValues))
@@ -580,6 +608,16 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   const availablePromptVariables = promptVariables.filter((variable) => variable.scopes.includes(promptTab))
     .filter((variable) => !normalizedVariableQuery || `${variable.name} ${variable.description}`.toLowerCase().includes(normalizedVariableQuery))
   const localPromptPreview = activePromptErrors.length ? '' : renderPromptTemplate(activePrompt, promptPreviewValues ?? {})
+  const summaryNormalizedRequest = promptTab === 'summarize' && !activePromptErrors.length && book?.currentSummary && summaryPreviewSource && book.promptValues
+    ? assembleSummaryGenerationRequest({
+        composition: settings.promptCompositions.summarize,
+        book: { ...book.promptValues, responseLength: settings.responseLengths.summary },
+        responseLength: settings.responseLengths.summary,
+        summary: { id: book.currentSummary.id, content: book.currentSummary.content },
+        target: { id: summaryPreviewSource.source.id, type: summaryPreviewSource.source.type, title: summaryPreviewSource.source.title, source: summaryPreviewSource.content },
+        sourceDiagnostics: summaryPreviewSource.diagnostics,
+      })
+    : null
 
   return (
     <main className="app-shell">
@@ -666,12 +704,12 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
             ariaLabel={`${promptTab} system prompt template`}
             onChange={(value) => changeAiSettings((current) => withPromptSystemPrompt(current, promptTab, value))}
           />
-          {(promptTab === 'story' || promptTab === 'lore' || promptTab === 'assistant') && <PredefinedMessages
+          <PredefinedMessages
             scope={promptTab}
             messages={settings.promptCompositions[promptTab].predefinedMessages}
             previewValues={promptPreviewValues}
             onChange={(messages) => changeAiSettings((current) => withPromptComposition(current, promptTab, { ...current.promptCompositions[promptTab], predefinedMessages: messages }))}
-          />}
+          />
           <div className={`prompt-validation-summary ${activePromptErrors.length ? 'invalid' : activePromptWarnings.length ? 'warning' : 'valid'}`} role="status">
             <strong>{activePromptErrors.length
               ? `${activePromptErrors.length} template error${activePromptErrors.length === 1 ? '' : 's'} — generation is blocked`
@@ -686,6 +724,14 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
               ? <p role="alert">Fix the template errors above to render this prompt.</p>
               : <pre>{localPromptPreview || '[This prompt renders as empty with the current preview values.]'}</pre>}
           </details>
+          {promptTab === 'summarize' && <SummaryRequestPreview
+            request={summaryNormalizedRequest}
+            source={summaryPreviewSource}
+            error={summaryPreviewError}
+            hasCurrentSummary={Boolean(book?.currentSummary)}
+            model={settings.supportModel}
+            modelContextLength={settings.supportModelContextLength}
+          />}
           <details className="prompt-reference">
             <summary><CircleHelp aria-hidden="true" /><span>Variables & syntax</span></summary>
             <div className="prompt-syntax"><span>Insert a value</span><code>{'{{book.title}}'}</code><span>Include a block only when a value exists</span><code>{'{% if book.genre %}Genre: {{book.genre}}{% endif %}'}</code></div>
@@ -715,7 +761,31 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   )
 }
 
-function PredefinedMessages({ scope = 'story', messages, previewValues, onChange }: { scope?: Extract<PromptCompositionScope, 'story' | 'lore' | 'assistant'>; messages: PredefinedMessage[]; previewValues?: Record<string, string>; onChange: (messages: PredefinedMessage[]) => void }) {
+function SummaryRequestPreview({ request, source, error, hasCurrentSummary, model, modelContextLength }: {
+  request: NormalizedAssembledRequest | null
+  source: SummarySource | null
+  error: string
+  hasCurrentSummary: boolean
+  model: string
+  modelContextLength?: number
+}) {
+  const diagnostics = request && model.trim()
+    ? generationContextDiagnostics(model.trim(), modelContextLength, '', normalizedRequestDiagnosticText(request))
+    : null
+  const exactPreview = request?.providerMessages.map((message) => `${message.role.toUpperCase()}:\n\n${message.content || '[empty]'}`).join('\n\n---\n\n') ?? ''
+  return <section className="settings-card context-preview-card summary-request-preview">
+    <div className="card-heading"><div><span>04</span><h2>Summary request preview</h2></div><p>{model.trim() ? `Model: ${model.trim()}. ` : ''}Exact normalized request for the open Summary.</p></div>
+    {error ? <p className="context-preview-error" role="alert">{error}</p> : !hasCurrentSummary ? <p className="context-preview-empty">Open a Scene, Chapter, Act, or Codex Summary to preview its authoritative source and complete request.</p> : !request || !source ? <p className="context-preview-empty">Preparing authoritative Summary source…</p> : <>
+      {diagnostics && <div className={`context-budget ${!diagnostics.fits ? 'over' : diagnostics.warning ? 'warning' : ''}`}><strong>{diagnostics.requestTokens.toLocaleString()} estimated input tokens · {Math.round(diagnostics.usageRatio * 100)}% of usable budget</strong><span>Effective limit: {diagnostics.effectiveContextTokens.toLocaleString()} · Response reserve: {diagnostics.responseReserveTokens.toLocaleString()}</span>{!diagnostics.fits && <small>Over the usable budget. Generation will be refused; Arc will not trim authoritative source material.</small>}</div>}
+      <div className="codex-context-representations"><strong>Authoritative source construction</strong>{source.diagnostics.map((item, index) => <span key={`${item.sourceId}-${index}`}><b>{item.title || item.sourceId}</b><em>{item.representation || item.type || 'Source'}{item.reason ? ` · ${item.reason}` : ''}</em></span>)}</div>
+      <div className="context-budget"><strong>Likely reusable prefix: {likelyReusablePrefix(request.parts, (name) => promptVariables.find((variable) => variable.name === name)?.stability).partCount} message(s)</strong><span>Reuse stops before the first message that references turn-dynamic target data.</span></div>
+      <div className="context-preview-rendered">{request.parts.map((part) => <section key={part.id} className={part.omitted ? 'omitted' : ''}><header><h3>{part.name || part.sourceId || part.id}</h3><span>{part.role?.toUpperCase() ?? 'NO ROLE'} · {part.ownership} · {part.sourceKind}{part.omitted ? ' · omitted' : ''}</span></header>{part.content ? <div className="context-preview-copy">{part.content}</div> : <p className="context-preview-empty">This message is empty.</p>}{part.referencedVariables.length ? <p className="context-preview-empty">References: {part.referencedVariables.map((reference) => `{{${reference}}}`).join(', ')}</p> : null}{part.dynamicVariables?.length ? <ul>{part.dynamicVariables.flatMap((item) => item.sources.map((value) => <li key={`${part.id}-${item.variable}-${value.sourceId}`}>{item.variable}: {value.title || value.sourceId} · {value.representation || value.type}</li>))}</ul> : null}</section>)}</div>
+      <details className="context-preview-raw"><summary>View message stack</summary><pre>{exactPreview}</pre></details>
+    </>}
+  </section>
+}
+
+function PredefinedMessages({ scope = 'story', messages, previewValues, onChange }: { scope?: PromptCompositionScope; messages: PredefinedMessage[]; previewValues?: Record<string, string>; onChange: (messages: PredefinedMessage[]) => void }) {
   const updateMessage = (id: string, patch: Partial<PredefinedMessage>) => onChange(messages.map((message) => message.id === id ? { ...message, ...patch } : message))
   const moveMessage = (index: number, direction: -1 | 1) => {
     const target = index + direction
@@ -724,7 +794,7 @@ function PredefinedMessages({ scope = 'story', messages, previewValues, onChange
     ;[next[index], next[target]] = [next[target], next[index]]
     onChange(next)
   }
-  const scopeLabel = scope === 'story' ? 'Story' : scope === 'lore' ? 'Codex' : 'Chat'
+  const scopeLabel = scope === 'story' ? 'Story' : scope === 'lore' ? 'Codex' : scope === 'summarize' ? 'Summary' : 'Chat'
   return <section className="story-predefined" aria-label={`${scopeLabel} predefined messages`}>
     <header><div><strong>Predefined messages</strong><span>Sent in this order between the System prompt and {scope === 'assistant' ? 'real Chat history' : 'Arc’s current instruction'}.</span></div><button type="button" onClick={() => onChange([...messages, makePredefinedMessage({ name: 'New message', role: 'user' })])}><Plus aria-hidden="true" /> Add message</button></header>
     {messages.map((message, index) => {

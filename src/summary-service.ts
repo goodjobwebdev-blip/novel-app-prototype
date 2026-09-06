@@ -9,6 +9,7 @@ import {
   type SummarySourceType,
 } from './persistence'
 import { bookTemplateValues, renderPromptTemplate, type BookPromptValues } from './prompt-template'
+import type { DynamicContextSource } from './prompt-composition'
 
 export type SummaryState = 'missing' | 'current' | 'outdated'
 export type SummarySourceEntity = StructuralEntity | CodexEntryEntity
@@ -17,6 +18,7 @@ export type SummarySource = {
   source: SummarySourceEntity
   content: string
   sourceRevision: number
+  diagnostics: DynamicContextSource[]
 }
 
 export type CodexContextRepresentation = {
@@ -89,16 +91,31 @@ export async function getSummaryStateMap(bookId: string): Promise<Record<string,
 }
 
 function sceneSource(scene: StructuralEntity, summary: SummaryEntity | undefined, state: SummaryState) {
-  const content = state === 'current' && summary?.content.trim() ? summary.content.trim() : String(scene.content ?? '').trim()
-  return `## Scene: ${scene.title}\n\n${content || '_No content_'}`
+  const usesSummary = state === 'current' && Boolean(summary?.content.trim())
+  const content = usesSummary ? summary!.content.trim() : String(scene.content ?? '').trim()
+  return {
+    content: `## Scene: ${scene.title}\n\n${content || '_No content_'}`,
+    diagnostic: {
+      sourceId: usesSummary ? summary!.id : scene.id,
+      title: scene.title,
+      type: usesSummary ? 'summary' : 'scene',
+      representation: usesSummary ? 'Current Scene summary' : 'Full Scene body',
+      content: content || '_No content_',
+      reason: usesSummary ? 'Current derived representation selected by the #77 hierarchy' : state === 'outdated' ? 'Outdated Scene summary rejected; authoritative full Scene body used' : 'No current Scene summary; authoritative full Scene body used',
+    } satisfies DynamicContextSource,
+  }
 }
 
 function chapterSource(chapter: StructuralEntity, entities: ArcEntity[], summaries: Map<string, SummaryEntity>) {
   const scenes = sortedChildren(entities, chapter.id, 'scene')
-  return [
+  const selected = scenes.map((scene) => sceneSource(scene, summaries.get(scene.id), stateFor(scene, summaries.get(scene.id), entities, summaries)))
+  return {
+    content: [
     `# Chapter: ${chapter.title}`,
-    ...scenes.map((scene) => sceneSource(scene, summaries.get(scene.id), stateFor(scene, summaries.get(scene.id), entities, summaries))),
-  ].join('\n\n')
+      ...selected.map((item) => item.content),
+    ].join('\n\n'),
+    diagnostics: selected.map((item) => item.diagnostic),
+  }
 }
 
 export async function buildSummarySource(sourceId: string): Promise<SummarySource> {
@@ -107,27 +124,35 @@ export async function buildSummarySource(sourceId: string): Promise<SummarySourc
   const entities = await listEntitiesByBook(source.bookId)
   const summaries = summariesBySource(entities)
   let content: string
+  let diagnostics: DynamicContextSource[]
 
   if (source.type === 'codexEntry') {
     content = `# Codex entry: ${source.title}\n\nCategory: ${source.category}\n\n${String(source.content ?? '').trim() || '_No content_'}`
+    diagnostics = [{ sourceId: source.id, title: source.title, type: 'codexEntry', category: source.category, representation: 'Full Codex body + metadata', content, reason: 'Authoritative Codex source; Summary preference never replaces canon here' }]
   } else if (source.type === 'scene') {
     content = `# Scene: ${source.title}\n\n${String(source.content ?? '').trim() || '_No content_'}`
+    diagnostics = [{ sourceId: source.id, title: source.title, type: 'scene', representation: 'Full Scene body', content, reason: 'Authoritative current Scene source' }]
   } else if (source.type === 'chapter') {
-    content = chapterSource(source, entities, summaries)
+    const selected = chapterSource(source, entities, summaries)
+    content = selected.content
+    diagnostics = selected.diagnostics
   } else {
     const chapters = sortedChildren(entities, source.id, 'chapter')
-    content = [
-      `# Act: ${source.title}`,
-      ...chapters.map((chapter) => {
-        const summary = summaries.get(chapter.id)
-        return stateFor(chapter, summary, entities, summaries) === 'current' && summary?.content.trim()
-          ? `## Chapter: ${chapter.title}\n\n${summary.content.trim()}`
-          : chapterSource(chapter, entities, summaries)
-      }),
-    ].join('\n\n')
+    const selected = chapters.map((chapter) => {
+      const summary = summaries.get(chapter.id)
+      if (stateFor(chapter, summary, entities, summaries) === 'current' && summary?.content.trim()) {
+        return {
+          content: `## Chapter: ${chapter.title}\n\n${summary.content.trim()}`,
+          diagnostics: [{ sourceId: summary.id, title: chapter.title, type: 'summary', representation: 'Current Chapter summary', content: summary.content.trim(), reason: 'Current derived Chapter representation selected by the #77 hierarchy' } satisfies DynamicContextSource],
+        }
+      }
+      return chapterSource(chapter, entities, summaries)
+    })
+    content = [`# Act: ${source.title}`, ...selected.map((item) => item.content)].join('\n\n')
+    diagnostics = selected.flatMap((item) => item.diagnostics)
   }
 
-  return { source, content, sourceRevision: sourceRevision(source, entities, summaries) }
+  return { source, content, sourceRevision: sourceRevision(source, entities, summaries), diagnostics }
 }
 
 export function codexContextRepresentation(entry: CodexEntryEntity, entities: ArcEntity[]): CodexContextRepresentation {

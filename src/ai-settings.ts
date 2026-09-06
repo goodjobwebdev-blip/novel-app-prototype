@@ -2,6 +2,7 @@ import { PROMPT_COMPOSITION_SCHEMA_VERSION, clonePromptComposition, compositions
 import { defaultStoryPromptComposition } from './story-request'
 import { defaultChatPromptComposition } from './chat-default-composition'
 import { defaultCodexPromptComposition } from './codex-request'
+import { defaultSummaryPromptComposition } from './summary-request'
 
 export type AiProvider = 'openrouter' | 'nanogpt' | 'openai' | 'compatible' | 'fake'
 export type SpeechProvider = 'nanogpt'
@@ -312,6 +313,7 @@ Return only the final Markdown body. Do not repeat the entry title as a top-leve
 export const defaultPromptCompositions: PromptCompositions = {
   ...compositionsFromLegacyPrompts(defaultAiPrompts),
   story: clonePromptComposition(defaultStoryPromptComposition),
+  summarize: clonePromptComposition(defaultSummaryPromptComposition),
   lore: clonePromptComposition(defaultCodexPromptComposition),
   assistant: clonePromptComposition(defaultChatPromptComposition),
 }
@@ -419,7 +421,20 @@ export function normalizeAiSettings(value?: StoredAiSettings): AiSettings {
     ? storedLorePromptWasHistoricalDefault || storedLoreCompositionWasHistoricalDefault
       ? clonePromptComposition(defaultCodexPromptComposition)
       : { systemPrompt: storedPrompts!.lore!, predefinedMessages: [] }
-    : promptCompositions.lore
+      : promptCompositions.lore
+  const storedSummaryComposition = value?.promptCompositions?.summarize
+  const storedSummaryCompositionWasHistoricalDefault = Boolean(storedSummaryComposition
+    && storedSummaryComposition.predefinedMessages?.length === 0
+    && (storedSummaryComposition.systemPrompt === defaultAiPrompts.summarize
+      || previousDefaultAiPrompts.some((defaults) => Boolean(defaults.summarize) && storedSummaryComposition.systemPrompt === defaults.summarize)))
+  const storedSummaryPromptWasHistoricalDefault = !storedPrompts?.summarize
+    || storedPrompts.summarize === defaultAiPrompts.summarize
+    || previousDefaultAiPrompts.some((defaults) => Boolean(defaults.summarize) && storedPrompts.summarize === defaults.summarize)
+  promptCompositions.summarize = !storedSummaryComposition || storedSummaryCompositionWasHistoricalDefault
+    ? storedSummaryPromptWasHistoricalDefault || storedSummaryCompositionWasHistoricalDefault
+      ? clonePromptComposition(defaultSummaryPromptComposition)
+      : { systemPrompt: storedPrompts!.summarize!, predefinedMessages: [] }
+    : promptCompositions.summarize
   const responseLengthsInput = value?.responseLengths && typeof value.responseLengths === 'object' ? value.responseLengths : undefined
   const legacyStoryResponseLength = typeof value?.responseLength === 'string' ? value.responseLength : ''
   const responseLengths: ResponseLengthSettings = {
