@@ -570,7 +570,8 @@ export async function archiveCodexEntry(id: string): Promise<CodexEntryEntity> {
   if (!current || current.type !== 'codexEntry') throw new Error(`Cannot archive missing Codex entry ${id}`)
   if (isCodexEntryArchived(current)) return current
   const now = Date.now()
-  const updated: CodexEntryEntity = { ...current, archivedAt: now, updatedAt: now }
+  const sourceRevision = typeof current.sourceRevision === 'number' ? current.sourceRevision : current.updatedAt
+  const updated: CodexEntryEntity = { ...current, sourceRevision, archivedAt: now, updatedAt: now }
   await db.transaction('rw', db.table('entities'), async () => {
     await db.table('entities').put(updated)
     await touchAncestors(db, current.bookId, now)
@@ -584,8 +585,9 @@ export async function restoreCodexEntry(id: string): Promise<CodexEntryEntity> {
   if (!current || current.type !== 'codexEntry') throw new Error(`Cannot restore missing Codex entry ${id}`)
   if (!isCodexEntryArchived(current)) return current
   const now = Date.now()
+  const sourceRevision = typeof current.sourceRevision === 'number' ? current.sourceRevision : current.updatedAt
   const { archivedAt: _archivedAt, ...active } = current
-  const updated: CodexEntryEntity = { ...active, updatedAt: now }
+  const updated: CodexEntryEntity = { ...active, sourceRevision, updatedAt: now }
   await db.transaction('rw', db.table('entities'), async () => {
     await db.table('entities').put(updated)
     await touchAncestors(db, current.bookId, now)
@@ -610,10 +612,12 @@ export async function updateCodexSummaryPreference(id: string, preferSummaryForC
   const db = await database()
   const current = await db.table('entities').get(id) as CodexEntryEntity | undefined
   if (!current || current.type !== 'codexEntry') throw new Error(`Cannot update missing Codex entry ${id}`)
-  const updated: CodexEntryEntity = { ...current, preferSummaryForContext }
+  const now = Date.now()
+  const sourceRevision = typeof current.sourceRevision === 'number' ? current.sourceRevision : current.updatedAt
+  const updated: CodexEntryEntity = { ...current, sourceRevision, preferSummaryForContext, updatedAt: now }
   await db.transaction('rw', db.table('entities'), async () => {
     await db.table('entities').put(updated)
-    await touchAncestors(db, current.bookId, Date.now())
+    await touchAncestors(db, current.bookId, now)
   })
   return updated
 }
