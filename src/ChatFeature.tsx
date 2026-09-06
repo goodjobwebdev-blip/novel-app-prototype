@@ -23,6 +23,7 @@ import {
 import { streamChatCompletion, type ChatCompletionUsage } from './chat-api'
 import ExpandableTextInput from './ExpandableTextInput'
 import PromptTemplateEditor from './PromptTemplateEditor'
+import PromptPresetControls from './PromptPresetControls'
 import { chatMatchesBookSelection, onlyChatsForBook, reloadMatchesBookSelection } from './chat-book-guard'
 import { chatHistoryPrefixMatches } from './chat-history-guard'
 import {
@@ -77,6 +78,7 @@ import {
   type FinalizedChatProviderRequest,
   type ChatRequestHistoryItem,
 } from './chat-request'
+import { defaultChatPromptComposition } from './chat-default-composition'
 import { clonePromptComposition, likelyReusablePrefix, makePredefinedMessage, normalizeRuntimeMessagePart, type NormalizedAssembledRequest, type NormalizedRequestPart, type PredefinedMessage, type PromptComposition } from './prompt-composition'
 import { startTtsSession } from './tts-service'
 import { getSttState, normalizeTranscriptForInsertion, startSttSession, subscribeSttState, type SttState } from './stt-service'
@@ -1068,6 +1070,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       <section className="chat-prompt-dialog" role="dialog" aria-modal="true" aria-labelledby="chat-prompt-title">
         <header><div><small>Current chat</small><h2 id="chat-prompt-title">Request composition</h2></div><button type="button" onClick={() => setPromptOpen(false)} aria-label="Close request composition"><X aria-hidden="true" /></button></header>
         <div className="chat-composition-editor">
+          <PromptPresetControls scope="chat" composition={compositionDraft} arcDefault={defaultChatPromptComposition} onApply={setCompositionDraft} />
           <h3>System prompt</h3>
           <PromptTemplateEditor value={compositionDraft.systemPrompt} diagnostics={promptTemplateDiagnostics(compositionDraft.systemPrompt, 'assistant')} ariaLabel="Chat system prompt template" onChange={(systemPrompt) => setCompositionDraft((current) => ({ ...current, systemPrompt }))} />
           <ChatPredefinedMessages messages={compositionDraft.predefinedMessages} previewValues={promptPreviewContext ? chatRequestValues(bookPromptValues, promptPreviewContext) : undefined} onChange={(predefinedMessages) => setCompositionDraft((current) => ({ ...current, predefinedMessages }))} />
