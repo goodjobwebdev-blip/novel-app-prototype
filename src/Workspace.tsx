@@ -1149,7 +1149,7 @@ export default function Workspace() {
       const models = await fetchSpeechModels(speech.apiKey).catch(() => [])
       const modelInfo = models.find((model) => model.id === speech.model)
       const estimate = estimateSpeechRequest(speech, text, modelInfo)
-      const price = modelInfo?.averagePrice ? `\nProvider average price: ${modelInfo.averagePrice}` : '\nProvider price: unavailable for a reliable estimate'
+      const price = modelInfo?.price ? `\nProvider price: ${modelInfo.averagePrice}` : '\nProvider price: unavailable for a reliable estimate'
       const confirmed = window.confirm(`Read ${entity.type === 'scene' ? 'Scene' : 'Chapter'} “${entity.title}” aloud with a paid NanoGPT request?\n\n${estimate.words.toLocaleString()} words · ${estimate.characters.toLocaleString()} characters · about ${estimate.chunks} TTS request${estimate.chunks === 1 ? '' : 's'}\nModel: ${speech.model}${price}`)
       if (!confirmed) return
       await startTtsSession(speech, text, `${entity.type === 'scene' ? 'Scene' : 'Chapter'} · ${entity.title}`)
