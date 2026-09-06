@@ -25,6 +25,20 @@ import ExpandableTextInput from './ExpandableTextInput'
 import { chatMatchesBookSelection, onlyChatsForBook, reloadMatchesBookSelection } from './chat-book-guard'
 import { chatHistoryPrefixMatches } from './chat-history-guard'
 import {
+  abortAllChatGenerations,
+  abortChatGeneration,
+  abortChatGenerationsOutsideSelection,
+  createChatGenerationOwner,
+  getChatGenerationOwner,
+  ownsChatGeneration,
+  registerChatGeneration,
+  releaseChatGeneration,
+  setChatGenerationPhase,
+  type ChatGenerationOwner,
+  type ChatGenerationOwners,
+} from './chat-generation-owner'
+import { runChatSendPipeline } from './chat-send-pipeline'
+import {
   createChat,
   createChatMessage,
   deleteChat,
@@ -107,7 +121,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   const [followOutput, setFollowOutput] = useState(true)
   const [sttState, setSttState] = useState<SttState>(() => getSttState())
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
-  const abortRef = useRef<AbortController | null>(null)
+  const generationOwnersRef = useRef<ChatGenerationOwners>(new Map())
   const startedAtRef = useRef(0)
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -133,7 +147,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
 
   useEffect(() => {
     let cancelled = false
-    abortRef.current?.abort()
+    abortChatGenerationsOutsideSelection(generationOwnersRef.current, bookId, chatId)
     setGenerating(false)
     setPhase(null)
     setStreamedContent('')
@@ -213,7 +227,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   }, [messages.length, streamedContent, streamedThoughts, phase])
 
   useEffect(() => () => {
-    abortRef.current?.abort()
+    abortAllChatGenerations(generationOwnersRef.current)
     if (copyResetRef.current) clearTimeout(copyResetRef.current)
   }, [])
 
@@ -320,47 +334,74 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     }
   }
 
-  async function runAssistantGeneration(activeChat: ChatEntity, history: ChatMessageEntity[]) {
-    if (abortRef.current || !isCurrentChat(activeChat)) return
-    const sourceBookId = activeChat.bookId
-    let settings
-    try {
-      settings = await getChatBookAiSettings(sourceBookId)
-    } catch {
-      onToast('This book’s AI settings could not be loaded.')
-      return
-    }
-    if (!isCurrentChat(activeChat)) return
-    if (!settings.apiKey.trim()) {
-      onToast('Add an API key in Book AI settings before chatting.')
-      return
-    }
-    if (!activeChat.model.trim()) {
-      onToast('Choose a chat model before sending.')
-      return
-    }
+  type ChatRequestHistoryItem = Pick<ChatMessageEntity, 'role' | 'content' | 'thoughts' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions'>
+  type PreparedAssistantGeneration = {
+    settings: Awaited<ReturnType<typeof getChatBookAiSettings>>
+    context: Awaited<ReturnType<typeof buildContextValues>>
+  }
 
-    let prepared
-    try {
-      prepared = await buildContextValues({
-        bookId: sourceBookId,
-        type: 'chat',
-        currentSceneId: currentSceneId || undefined,
-        profile: activeChat.contextProfile,
-      })
-    } catch (error) {
-      onToast(error instanceof Error ? error.message : 'Chat context could not be prepared.')
-      return
-    }
-    if (!isCurrentChat(activeChat)) return
+  function generationOwnsCurrentUi(owner: ChatGenerationOwner) {
+    return ownsChatGeneration(generationOwnersRef.current, owner)
+      && selectedBookIdRef.current === owner.bookId
+      && selectedChatIdRef.current === owner.chatId
+  }
 
+  function setOwnedGenerationPhase(owner: ChatGenerationOwner, nextPhase: GenerationPhase) {
+    if (!setChatGenerationPhase(generationOwnersRef.current, owner, nextPhase)) return false
+    if (generationOwnsCurrentUi(owner)) setPhase(nextPhase)
+    return true
+  }
+
+  function beginGenerationUi(owner: ChatGenerationOwner) {
+    if (!generationOwnsCurrentUi(owner)) return
+    startedAtRef.current = Date.now()
+    setElapsed(0)
+    setGenerating(true)
+    setEditingId('')
+    setPhase('sending')
+    setStreamedContent('')
+    setStreamedThoughts('')
+    setLiveThoughtsOpen(true)
+    followOutputRef.current = true
+    setFollowOutput(true)
+  }
+
+  function finishGenerationOwner(owner: ChatGenerationOwner) {
+    const ownsUi = generationOwnsCurrentUi(owner)
+    const released = releaseChatGeneration(generationOwnersRef.current, owner)
+    if (!released || !ownsUi) return
+    setGenerating(false)
+    setPhase(null)
+    setElapsed(0)
+    setStreamedContent('')
+    setStreamedThoughts('')
+  }
+
+  function reserveGeneration(activeChat: ChatEntity) {
+    const owner = createChatGenerationOwner(activeChat.bookId, activeChat.id)
+    if (!registerChatGeneration(generationOwnersRef.current, owner)) return null
+    beginGenerationUi(owner)
+    return owner
+  }
+
+  function assertGenerationOwnerCurrent(owner: ChatGenerationOwner, activeChat: ChatEntity) {
+    if (!ownsChatGeneration(generationOwnersRef.current, owner) || owner.controller.signal.aborted || !isCurrentChat(activeChat)) {
+      throw new DOMException('Chat generation was cancelled.', 'AbortError')
+    }
+  }
+
+  function buildProviderMessages(
+    activeChat: ChatEntity,
+    history: ChatRequestHistoryItem[],
+    prepared: PreparedAssistantGeneration,
+  ) {
+    const { settings, context } = prepared
     const promptValues = { ...bookPromptValues, responseLength: settings.responseLength }
     const systemPrompt = renderPromptTemplate(activeChat.systemPrompt, bookTemplateValues(promptValues))
     const contextSections = [
-      prepared.lastSceneText ? section(`Current scene${prepared.lastSceneTitle ? ` — ${prepared.lastSceneTitle}` : ''}`, prepared.lastSceneText) : '',
-      prepared.additionalContext ? section('Additional context', prepared.additionalContext) : '',
+      context.lastSceneText ? section(`Current scene${context.lastSceneTitle ? ` — ${context.lastSceneTitle}` : ''}`, context.lastSceneText) : '',
+      context.additionalContext ? section('Additional context', context.additionalContext) : '',
     ].filter(Boolean)
-    const workspaceInstructions = CHAT_WORKSPACE_INSTRUCTIONS
     const historyMessages = history.map((message): ChatCompletionMessage => {
       const editState = message.role === 'assistant' && message.documentEdits?.length
         ? `\n\n[Workspace edit proposals: ${message.documentEdits.map((proposal) => `${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
@@ -384,36 +425,71 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     let latestUserIndex = -1
     history.forEach((message, index) => { if (message.role === 'user') latestUserIndex = index })
     if (lengthMessage && latestUserIndex >= 0) historyMessages.splice(latestUserIndex, 0, { role: 'user', content: lengthMessage })
-    const providerMessages: ChatCompletionMessage[] = [
-      { role: 'system', content: systemPrompt },
-      { role: 'system', content: workspaceInstructions },
+    return [
+      { role: 'system' as const, content: systemPrompt },
+      { role: 'system' as const, content: CHAT_WORKSPACE_INSTRUCTIONS },
       ...(contextSections.length ? [{ role: 'system' as const, content: `# Selected book context\n\n${contextSections.join('\n\n')}` }] : []),
       ...historyMessages,
-    ]
-    const diagnostics = generationContextDiagnostics(activeChat.model, activeChat.modelContextLength, activeChat.effectiveContextLimit, serializeChatModelInput(providerMessages))
-    if (!diagnostics.limitValid) {
-      onToast(diagnostics.limitError ?? 'The Chat context cap is invalid.')
-      return
+    ] satisfies ChatCompletionMessage[]
+  }
+
+  async function prepareAssistantGeneration(
+    activeChat: ChatEntity,
+    history: ChatRequestHistoryItem[],
+    owner: ChatGenerationOwner,
+  ): Promise<PreparedAssistantGeneration> {
+    assertGenerationOwnerCurrent(owner, activeChat)
+    let settings: Awaited<ReturnType<typeof getChatBookAiSettings>>
+    try {
+      settings = await getChatBookAiSettings(activeChat.bookId)
+    } catch {
+      assertGenerationOwnerCurrent(owner, activeChat)
+      throw new Error('This book’s AI settings could not be loaded.')
     }
+    assertGenerationOwnerCurrent(owner, activeChat)
+    if (!settings.apiKey.trim()) throw new Error('Add an API key in Book AI settings before chatting.')
+    if (!activeChat.model.trim()) throw new Error('Choose a chat model before sending.')
+
+    let context: Awaited<ReturnType<typeof buildContextValues>>
+    try {
+      context = await buildContextValues({
+        bookId: activeChat.bookId,
+        type: 'chat',
+        currentSceneId: currentSceneId || undefined,
+        profile: activeChat.contextProfile,
+      })
+    } catch (error) {
+      assertGenerationOwnerCurrent(owner, activeChat)
+      throw new Error(error instanceof Error ? error.message : 'Chat context could not be prepared.')
+    }
+    assertGenerationOwnerCurrent(owner, activeChat)
+
+    const prepared = { settings, context }
+    const providerMessages = buildProviderMessages(activeChat, history, prepared)
+    const diagnostics = generationContextDiagnostics(activeChat.model, activeChat.modelContextLength, activeChat.effectiveContextLimit, serializeChatModelInput(providerMessages))
+    if (!diagnostics.limitValid) throw new Error(diagnostics.limitError ?? 'The Chat context cap is invalid.')
     if (!diagnostics.fits) {
-      onToast(`Context is too large: ~${diagnostics.requestTokens.toLocaleString()} input tokens for a ${diagnostics.usableInputTokens.toLocaleString()}-token usable Chat budget (${diagnostics.effectiveContextTokens.toLocaleString()} effective limit, ${diagnostics.responseReserveTokens.toLocaleString()} reserved for the response). Reduce Chat context, summarize older material, raise the cap, or choose a larger model.`)
-      return
+      throw new Error(`Context is too large: ~${diagnostics.requestTokens.toLocaleString()} input tokens for a ${diagnostics.usableInputTokens.toLocaleString()}-token usable Chat budget (${diagnostics.effectiveContextTokens.toLocaleString()} effective limit, ${diagnostics.responseReserveTokens.toLocaleString()} reserved for the response). Reduce Chat context, summarize older material, raise the cap, or choose a larger model.`)
     }
     if (diagnostics.warning) onToast(`Chat context is near the configured limit (${Math.round(diagnostics.usageRatio * 100)}%). Consider reducing selected context or raising the cap.`)
-    if (!isCurrentChat(activeChat)) return
+    assertGenerationOwnerCurrent(owner, activeChat)
+    return prepared
+  }
 
-    const controller = new AbortController()
-    abortRef.current = controller
-    startedAtRef.current = Date.now()
-    setElapsed(0)
-    setGenerating(true)
-    setEditingId('')
-    setPhase('sending')
-    setStreamedContent('')
-    setStreamedThoughts('')
-    setLiveThoughtsOpen(true)
-    followOutputRef.current = true
-    setFollowOutput(true)
+  async function runAssistantGeneration(
+    activeChat: ChatEntity,
+    history: ChatMessageEntity[],
+    reservedOwner?: ChatGenerationOwner,
+    preparedInputs?: PreparedAssistantGeneration,
+  ) {
+    const candidateOwner = reservedOwner ?? reserveGeneration(activeChat)
+    if (!candidateOwner) {
+      if (isCurrentChat(activeChat)) onToast('This Chat already has a generation finishing. Try again when it completes.')
+      return
+    }
+    const owner: ChatGenerationOwner = candidateOwner
+    const controller = owner.controller
+    const sourceBookId = activeChat.bookId
     let completed = false
     let unexpectedFailure = false
     let historyInvalidated = false
@@ -470,7 +546,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     }
 
     function commitVisibleRound(saved: ChatMessageEntity | null, hadThoughts: boolean) {
-      if (!isCurrentChat(activeChat)) return
+      if (!generationOwnsCurrentUi(owner)) return
       if (saved) {
         setMessages((current) => current.some((message) => message.id === saved.id) ? current : [...current, saved])
         if (hadThoughts && liveThoughtsOpen) {
@@ -500,6 +576,10 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     }
 
     try {
+      const prepared = preparedInputs ?? await prepareAssistantGeneration(activeChat, history, owner)
+      assertGenerationOwnerCurrent(owner, activeChat)
+      const { settings } = prepared
+      const providerMessages = buildProviderMessages(activeChat, history, prepared)
       const workingMessages = [...providerMessages]
       for (let round = 0; round < 8 && !controller.signal.aborted; round += 1) {
         const roundDiagnostics = generationContextDiagnostics(activeChat.model, activeChat.modelContextLength, activeChat.effectiveContextLimit, serializeChatModelInput(workingMessages))
@@ -519,24 +599,24 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           thinking: activeChat.thinking,
           tools: CHAT_TOOL_DEFINITIONS,
         }, (chunk) => {
-          if (!isCurrentChat(activeChat)) return
+          if (!generationOwnsCurrentUi(owner)) return
           if (chunk.thoughts) {
             activeRoundThoughts += chunk.thoughts
             setStreamedThoughts(activeRoundThoughts)
-            if (!activeRoundContent) setPhase('thinking')
+            if (!activeRoundContent) setOwnedGenerationPhase(owner, 'thinking')
           }
           if (chunk.content) {
             activeRoundContent += chunk.content
             setStreamedContent(activeRoundContent)
-            setPhase('writing')
+            setOwnedGenerationPhase(owner, 'writing')
           }
         }, controller.signal, () => {
-          if (!controller.signal.aborted && isCurrentChat(activeChat)) setPhase('thinking')
+          if (!controller.signal.aborted) setOwnedGenerationPhase(owner, 'thinking')
         })
 
-        if (controller.signal.aborted || !isCurrentChat(activeChat)) break
+        if (controller.signal.aborted || !ownsChatGeneration(generationOwnersRef.current, owner)) break
         if (result.toolCalls.length) {
-          setPhase('using-tools')
+          setOwnedGenerationPhase(owner, 'using-tools')
           workingMessages.push({
             role: 'assistant',
             content: activeRoundContent || null,
@@ -580,7 +660,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           activeRoundPersisted = Boolean(saved)
           commitVisibleRound(saved, Boolean(activeRoundThoughts))
           if (controller.signal.aborted) break
-          setPhase('thinking')
+          setOwnedGenerationPhase(owner, 'thinking')
           continue
         }
 
@@ -611,14 +691,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           // Keep the already streamed partial visible until teardown even if persistence fails.
         }
       }
-      if (abortRef.current === controller) abortRef.current = null
-      if (isCurrentChat(activeChat)) {
-        setGenerating(false)
-        setPhase(null)
-        setElapsed(0)
-        setStreamedContent('')
-        setStreamedThoughts('')
-      }
+      finishGenerationOwner(owner)
       const refreshed = await getChat(activeChat.id).catch(() => undefined)
       if (refreshed?.bookId === sourceBookId) applyIfCurrentChat(activeChat, () => setChat(refreshed))
     }
@@ -629,27 +702,60 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     const sourceChat = chat
     const text = draft.trim()
     if (!text) return
+
+    const owner = createChatGenerationOwner(sourceChat.bookId, sourceChat.id)
+    if (!registerChatGeneration(generationOwnersRef.current, owner)) {
+      onToast('This Chat already has a generation finishing. Try again when it completes.')
+      return
+    }
+    beginGenerationUi(owner)
     setDraft('')
+    let persisted = false
+
     try {
-      const userMessage = await createChatMessage(sourceChat, 'user', text)
-      if (!isCurrentChat(sourceChat)) return
-      const refreshedChat = await getChat(sourceChat.id)
-      if (!refreshedChat || refreshedChat.bookId !== sourceChat.bookId) throw new Error('This Chat no longer belongs to the current Book.')
-      const history = [...messages, userMessage]
-      if (!isCurrentChat(sourceChat)) return
-      setChat(refreshedChat)
-      setMessages(history)
-      await runAssistantGeneration(refreshedChat, history)
+      await runChatSendPipeline({
+        preflight: async () => {
+          const durableHistory = await listChatMessages(sourceChat.bookId, sourceChat.id)
+          assertGenerationOwnerCurrent(owner, sourceChat)
+          const previewHistory: ChatRequestHistoryItem[] = [...durableHistory, { role: 'user', content: text }]
+          const prepared = await prepareAssistantGeneration(sourceChat, previewHistory, owner)
+          return { durableHistory, prepared }
+        },
+        persist: async ({ durableHistory }) => {
+          assertGenerationOwnerCurrent(owner, sourceChat)
+          const userMessage = await createChatMessage(sourceChat, 'user', text)
+          persisted = true
+          const history = [...durableHistory, userMessage]
+          if (generationOwnsCurrentUi(owner)) {
+            setMessages(history)
+            setChat(sourceChat)
+          }
+          return { history }
+        },
+        generate: async ({ prepared }, { history }) => {
+          await runAssistantGeneration(sourceChat, history, owner, prepared)
+        },
+        onPostPersistError: (error) => {
+          finishGenerationOwner(owner)
+          if (!(error instanceof DOMException && error.name === 'AbortError')) {
+            onToast(error instanceof Error ? error.message : 'Chat generation stopped unexpectedly.')
+          }
+        },
+      })
     } catch (error) {
-      applyIfCurrentChat(sourceChat, () => setDraft(text))
-      onToast(error instanceof Error ? error.message : 'Could not send the message.')
+      finishGenerationOwner(owner)
+      if (!persisted) applyIfCurrentChat(sourceChat, () => setDraft(text))
+      if (!(error instanceof DOMException && error.name === 'AbortError')) {
+        onToast(error instanceof Error ? error.message : 'Could not send the message.')
+      }
     }
   }
 
   function stop() {
-    if (!abortRef.current) return
-    setPhase('stopping')
-    abortRef.current.abort()
+    const owner = getChatGenerationOwner(generationOwnersRef.current, selectedBookIdRef.current, selectedChatIdRef.current)
+    if (!owner) return
+    setOwnedGenerationPhase(owner, 'stopping')
+    abortChatGeneration(generationOwnersRef.current, owner.bookId, owner.chatId)
   }
 
   async function deleteFrom(message: ChatMessageEntity) {
