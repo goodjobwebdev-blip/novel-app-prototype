@@ -43,6 +43,7 @@ import AiSettingsScreen from './App'
 import { generationWordDelayMs, loadAiSettings, type AiSettings } from './ai-settings'
 import { createBufferedWordRenderer } from './buffered-word-renderer'
 import { applyIfStillCurrent } from './async-state-guard'
+import { KeyedAsyncQueue } from './keyed-async-queue'
 import { navigateAfterRequiredSave } from './navigation-save-guard'
 import ExpandableTextInput from './ExpandableTextInput'
 import MarkdownEditor, { type CodexMentionClick, type MarkdownEditorHandle } from './MarkdownEditor'
@@ -206,6 +207,7 @@ export default function Workspace() {
   const storageReadyRef = useRef(false)
   const changedSinceSnapshotRef = useRef(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const documentSaveQueueRef = useRef(new KeyedAsyncQueue())
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const generationAbortRef = useRef<AbortController | null>(null)
   const autotitleAbortRef = useRef<AbortController | null>(null)
@@ -337,30 +339,68 @@ export default function Workspace() {
       clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
     }
-    setSaveState('saving')
-    try {
-      const current = await getEntity<EditableEntity>(documentId)
-      if (!current) throw new Error(`Cannot save missing document ${documentId}`)
-      const savedDocument = current.type === 'summary'
-        ? await saveSummaryContent(current.id, storyRef.current, (await buildSummarySource(current.sourceEntityId)).sourceRevision)
-        : await saveDocumentContent(documentId, storyRef.current) as EditableEntity
-      if (snapshot && changedSinceSnapshotRef.current) {
-        await createSnapshot(documentId, reason, storyRef.current)
-        changedSinceSnapshotRef.current = false
+    if (activeDocumentIdRef.current === documentId) setSaveState('saving')
+
+    while (true) {
+      const contentSnapshot = storyRef.current
+      const snapshotRequested = snapshot && changedSinceSnapshotRef.current
+      let savedDocument: EditableEntity
+      try {
+        savedDocument = await documentSaveQueueRef.current.run(documentId, async () => {
+          const current = await getEntity<EditableEntity>(documentId)
+          if (!current) throw new Error(`Cannot save missing document ${documentId}`)
+          return current.type === 'summary'
+            ? await saveSummaryContent(current.id, contentSnapshot, (await buildSummarySource(current.sourceEntityId)).sourceRevision)
+            : await saveDocumentContent(documentId, contentSnapshot) as EditableEntity
+        })
+      } catch (error) {
+        console.error('Failed to persist document', error)
+        if (activeDocumentIdRef.current === documentId) setSaveState('error')
+        return false
       }
+
       const editedAt = Date.now()
-      setActiveDocument(savedDocument)
       if (savedDocument.type === 'note') setNotes((items) => items.map((item) => item.id === savedDocument.id ? savedDocument : item))
       if (savedDocument.type === 'codexEntry') setCodexEntries((items) => items.map((item) => item.id === savedDocument.id ? savedDocument : item))
       setCurrentBook((book) => book && book.id === savedDocument.bookId ? { ...book, updatedAt: editedAt } : book)
       setBookList((books) => books.map((book) => book.id === savedDocument.bookId ? { ...book, updatedAt: editedAt } : book))
-      if (savedDocument.bookId) setSummaryStates(await getSummaryStateMap(savedDocument.bookId))
+
+      if (activeDocumentIdRef.current !== documentId) return true
+      if (storyRef.current !== contentSnapshot) {
+        // A newer edit arrived while this immutable snapshot was saving. Autosave may
+        // leave it for the newly scheduled debounce; navigation/snapshot saves must
+        // continue until the exact current editor value is durable.
+        if (!snapshot) return true
+        setSaveState('saving')
+        continue
+      }
+
+      let nextSummaryStates: Record<string, SummaryState> | null = null
+      try {
+        if (savedDocument.bookId) nextSummaryStates = await getSummaryStateMap(savedDocument.bookId)
+        if (snapshotRequested) {
+          await documentSaveQueueRef.current.run(documentId, async () => {
+            await createSnapshot(documentId, reason, contentSnapshot)
+          })
+        }
+      } catch (error) {
+        console.error('Failed to finalize document save', error)
+        if (activeDocumentIdRef.current === documentId) setSaveState('error')
+        return false
+      }
+
+      if (activeDocumentIdRef.current !== documentId) return true
+      if (storyRef.current !== contentSnapshot) {
+        if (!snapshot) return true
+        setSaveState('saving')
+        continue
+      }
+
+      if (snapshotRequested) changedSinceSnapshotRef.current = false
+      setActiveDocument(savedDocument)
+      if (nextSummaryStates) setSummaryStates(nextSummaryStates)
       setSaveState('saved')
       return true
-    } catch (error) {
-      console.error('Failed to persist document', error)
-      setSaveState('error')
-      return false
     }
   }
 
