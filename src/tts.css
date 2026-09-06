@@ -1,0 +1,23 @@
+.tts-status { position: fixed; z-index: 70; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); width: min(560px, calc(100vw - 24px)); display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid rgba(255,255,255,.13); border-radius: 13px; background: rgba(20,20,22,.96); box-shadow: 0 16px 48px rgba(0,0,0,.35); backdrop-filter: blur(16px); }
+.tts-status > svg { width: 18px; height: 18px; flex: none; }
+.tts-status-copy { min-width: 0; flex: 1; display: grid; gap: 2px; }
+.tts-status-copy strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tts-status-copy small { opacity: .68; }
+.tts-status-actions { display: flex; gap: 6px; }
+.tts-status-actions button { min-width: 36px; min-height: 34px; display: inline-flex; align-items: center; justify-content: center; }
+.speech-settings { display: grid; gap: 16px; }
+.speech-settings .page-heading { margin-bottom: 0; }
+.speech-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.speech-settings-grid label, .speech-toggle { display: grid; gap: 7px; }
+.speech-key-row { display: flex; gap: 8px; align-items: stretch; }
+.speech-key-row input { min-width: 0; flex: 1; }
+.speech-model-search { display: flex; align-items: center; gap: 8px; }
+.speech-model-search svg { width: 16px; height: 16px; }
+.speech-model-list { display: grid; gap: 7px; max-height: 280px; overflow: auto; }
+.speech-model-list button { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; text-align: left; padding: 10px; }
+.speech-model-list button.selected { outline: 1px solid currentColor; }
+.speech-model-list span { display: grid; gap: 2px; min-width: 0; }
+.speech-model-list small, .speech-help { opacity: .68; }
+.speech-model-unavailable { margin: 0; font-size: .82rem; }
+.read-aloud-action svg { width: 15px; height: 15px; }
+@media (max-width: 700px) { .speech-settings-grid { grid-template-columns: 1fr; } .tts-status { bottom: max(10px, env(safe-area-inset-bottom)); } .tts-status-copy small { white-space: normal; } }
