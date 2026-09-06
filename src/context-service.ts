@@ -133,14 +133,14 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
   const currentScene = currentIndex >= 0 ? scenes[currentIndex] : undefined
   const previousScene = currentIndex > 0 ? scenes[currentIndex - 1] : undefined
   const liveCurrentText = options.currentSceneText !== undefined && options.currentSceneId === anchorSceneId ? options.currentSceneText : String(currentScene?.content ?? '')
-  const previousSceneText = options.type === 'scene' && options.profile.includePreviousSceneWhenEmpty && currentScene && !liveCurrentText.trim()
+  const previousSceneText = (options.type === 'scene' || options.type === 'chat') && options.profile.includePreviousSceneWhenEmpty && currentScene && !liveCurrentText.trim()
     ? String(previousScene?.content ?? '')
     : ''
-  const automatic = options.type === 'scene'
+  const automatic = options.type === 'scene' || options.type === 'chat'
     ? automaticSummaries(options.bookId, entities, outline, anchorSceneId, previousSceneText ? previousScene?.id : undefined)
     : { text: '', ids: new Set<string>(), sources: [] as DynamicContextSource[] }
   const automaticFullIds = new Set<string>()
-  if (options.type === 'scene' && anchorSceneId) automaticFullIds.add(anchorSceneId)
+  if ((options.type === 'scene' || options.type === 'chat') && anchorSceneId) automaticFullIds.add(anchorSceneId)
   if (previousSceneText && previousScene?.id) automaticFullIds.add(previousScene.id)
   if ((options.type === 'codex' || options.type === 'chat') && options.profile.includeLastScene && anchorSceneId) automaticFullIds.add(anchorSceneId)
 

@@ -46,13 +46,13 @@ import {
   type BookContextSettings,
   type GenerationContextType,
 } from './persistence'
-import { bookTemplateValues, generationInstructionMessage, promptTemplateDiagnostics, promptVariables, renderPromptTemplate, responseLengthMessage, type BookPromptValues } from './prompt-template'
+import { bookTemplateValues, generationInstructionMessage, promptTemplateDiagnostics, promptVariables, renderPromptTemplate, type BookPromptValues } from './prompt-template'
 import PromptTemplateEditor, { type PromptTemplateEditorHandle } from './PromptTemplateEditor'
 import { makePredefinedMessage, likelyReusablePrefix, type NormalizedAssembledRequest, type PredefinedMessage } from './prompt-composition'
 import { assembleStoryGenerationRequest, STORY_CONTINUE_FALLBACK } from './story-request'
 import { buildContextValues, contextLimitInputError, generationContextDiagnostics, type PreparedContextValues } from './context-service'
 import { getChat, listChatMessages, saveChatContextProfile, type ChatEntity, type ChatMessageEntity } from './chat-service'
-import { CHAT_TOOL_DEFINITIONS, CHAT_WORKSPACE_INSTRUCTIONS, serializeChatModelInput } from './chat-request'
+import { assembleChatGenerationRequest, serializeChatModelInput } from './chat-request'
 import { renderLorePrompt } from './nanogpt'
 import { clearModelCatalog, getCachedModelCatalog, providerModelEndpoint, saveModelCatalog, type ProviderModel } from './model-catalog'
 import { FAKE_PROVIDER_MODEL, clearFakeProviderTrace, getFakeProviderTrace, subscribeFakeProviderTrace } from './fake-provider'
@@ -106,22 +106,6 @@ function sttCatalogConnectionKey(settings: AiSettings['speech']) {
 
 function isAbortError(error: unknown) {
   return error instanceof Error && error.name === 'AbortError'
-}
-
-function chatHistoryContent(message: ChatMessageEntity) {
-  const editState = message.role === 'assistant' && message.documentEdits?.length
-    ? `\n\n[Workspace edit proposals: ${message.documentEdits.map((proposal) => `${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
-    : ''
-  const creationState = message.role === 'assistant' && message.codexCreations?.length
-    ? `\n\n[Codex creation proposals: ${message.codexCreations.map((proposal) => `${proposal.title}: ${proposal.status}`).join('; ')}]`
-    : ''
-  const outlineState = message.role === 'assistant' && message.outlineActions?.length
-    ? `\n\n[Outline proposals: ${message.outlineActions.map((proposal) => `${proposal.action} ${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
-    : ''
-  const entityActionState = message.role === 'assistant' && message.entityActions?.length
-    ? `\n\n[Entity proposals: ${message.entityActions.map((proposal) => `${proposal.action} ${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
-    : ''
-  return `${message.content}${editState}${creationState}${outlineState}${entityActionState}`
 }
 
 type AiSettingsProps = {
@@ -581,7 +565,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
     ? bookTemplateValues({ ...book.promptValues, responseLength: settings.responseLength })
     : undefined
   const activePromptDiagnostics = promptTemplateDiagnostics(activePrompt, promptTab, promptPreviewValues)
-  const compositionPromptDiagnostics = [activePrompt, ...(promptTab === 'story' ? settings.promptCompositions.story.predefinedMessages.filter((message) => message.enabled).map((message) => message.template) : [])]
+  const compositionPromptDiagnostics = [activePrompt, ...settings.promptCompositions[promptTab].predefinedMessages.filter((message) => message.enabled).map((message) => message.template)]
     .flatMap((template) => promptTemplateDiagnostics(template, promptTab, promptPreviewValues))
   const activePromptErrors = compositionPromptDiagnostics.filter((diagnostic) => diagnostic.severity === 'error')
   const activePromptWarnings = compositionPromptDiagnostics.filter((diagnostic) => diagnostic.severity === 'warning')
@@ -657,7 +641,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
             <label className={contextLimitInputError(settings.codexEffectiveContextLimit) ? 'invalid' : ''}><span><strong>Codex model context cap</strong><em>Used when a Codex model is set</em></span><input type="text" value={settings.codexEffectiveContextLimit} onChange={(event) => update('codexEffectiveContextLimit', event.target.value)} placeholder="Model maximum" spellCheck={false} /><small>{contextLimitInputError(settings.codexEffectiveContextLimit) || (settings.codexModel.trim() ? 'Optional cap for the selected Codex model.' : 'Codex currently falls back to Main, so the Story / Main cap applies.')}</small></label>
           </div>
           <div className="response-length-setting">
-            <label htmlFor="response-length"><span><strong>Response length</strong><em>Story, Codex, and Chat</em></span><textarea id="response-length" value={settings.responseLength} onChange={(event) => update('responseLength', event.target.value)} placeholder="Leave empty to let the model decide." /></label>
+            <label htmlFor="response-length"><span><strong>Response length</strong><em>Story and Codex</em></span><textarea id="response-length" value={settings.responseLength} onChange={(event) => update('responseLength', event.target.value)} placeholder="Leave empty to let the model decide." /></label>
             <div className="response-length-presets" aria-label="Response length presets">{RESPONSE_LENGTH_PRESETS.map((preset) => <button type="button" key={preset.label} onClick={() => update('responseLength', preset.value)}>{preset.label}</button>)}</div>
             <small>Applied near the end of each request, immediately before the current instruction. Custom prompts can place <code>{'{{response.length}}'}</code> explicitly instead.</small>
           </div>
@@ -675,10 +659,11 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
             ariaLabel={`${promptTab} system prompt template`}
             onChange={(value) => changeAiSettings((current) => withPromptSystemPrompt(current, promptTab, value))}
           />
-          {promptTab === 'story' && <StoryPredefinedMessages
-            messages={settings.promptCompositions.story.predefinedMessages}
+          {(promptTab === 'story' || promptTab === 'assistant') && <StoryPredefinedMessages
+            scope={promptTab}
+            messages={settings.promptCompositions[promptTab].predefinedMessages}
             previewValues={promptPreviewValues}
-            onChange={(messages) => changeAiSettings((current) => withPromptComposition(current, 'story', { ...current.promptCompositions.story, predefinedMessages: messages }))}
+            onChange={(messages) => changeAiSettings((current) => withPromptComposition(current, promptTab, { ...current.promptCompositions[promptTab], predefinedMessages: messages }))}
           />}
           <div className={`prompt-validation-summary ${activePromptErrors.length ? 'invalid' : activePromptWarnings.length ? 'warning' : 'valid'}`} role="status">
             <strong>{activePromptErrors.length
@@ -723,7 +708,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   )
 }
 
-function StoryPredefinedMessages({ messages, previewValues, onChange }: { messages: PredefinedMessage[]; previewValues?: Record<string, string>; onChange: (messages: PredefinedMessage[]) => void }) {
+function StoryPredefinedMessages({ scope = 'story', messages, previewValues, onChange }: { scope?: 'story' | 'assistant'; messages: PredefinedMessage[]; previewValues?: Record<string, string>; onChange: (messages: PredefinedMessage[]) => void }) {
   const updateMessage = (id: string, patch: Partial<PredefinedMessage>) => onChange(messages.map((message) => message.id === id ? { ...message, ...patch } : message))
   const moveMessage = (index: number, direction: -1 | 1) => {
     const target = index + direction
@@ -732,10 +717,10 @@ function StoryPredefinedMessages({ messages, previewValues, onChange }: { messag
     ;[next[index], next[target]] = [next[target], next[index]]
     onChange(next)
   }
-  return <section className="story-predefined" aria-label="Story predefined messages">
-    <header><div><strong>Predefined messages</strong><span>Sent in this order between the System prompt and Arc’s current instruction.</span></div><button type="button" onClick={() => onChange([...messages, makePredefinedMessage({ name: 'New message', role: 'user' })])}><Plus aria-hidden="true" /> Add message</button></header>
+  return <section className="story-predefined" aria-label={`${scope === 'story' ? 'Story' : 'Chat'} predefined messages`}>
+    <header><div><strong>Predefined messages</strong><span>Sent in this order between the System prompt and {scope === 'story' ? 'Arc’s current instruction' : 'real Chat history'}.</span></div><button type="button" onClick={() => onChange([...messages, makePredefinedMessage({ name: 'New message', role: 'user' })])}><Plus aria-hidden="true" /> Add message</button></header>
     {messages.map((message, index) => {
-      const diagnostics = promptTemplateDiagnostics(message.template, 'story', previewValues)
+      const diagnostics = promptTemplateDiagnostics(message.template, scope, previewValues)
       const errors = diagnostics.filter((diagnostic) => diagnostic.severity === 'error')
       return <article key={message.id} className={!message.enabled ? 'disabled' : ''}>
         <div className="story-message-toolbar">
@@ -744,7 +729,7 @@ function StoryPredefinedMessages({ messages, previewValues, onChange }: { messag
           <label className="story-message-enabled"><input type="checkbox" checked={message.enabled} onChange={(event) => updateMessage(message.id, { enabled: event.target.checked })} /><span>Enabled</span></label>
           <div className="story-message-actions"><button type="button" disabled={index === 0} onClick={() => moveMessage(index, -1)} aria-label={`Move ${message.name || 'message'} up`}>↑</button><button type="button" disabled={index === messages.length - 1} onClick={() => moveMessage(index, 1)} aria-label={`Move ${message.name || 'message'} down`}>↓</button><button type="button" onClick={() => onChange(messages.filter((candidate) => candidate.id !== message.id))} aria-label={`Delete ${message.name || 'message'}`}><Trash2 aria-hidden="true" /></button></div>
         </div>
-        <PromptTemplateEditor value={message.template} diagnostics={diagnostics} ariaLabel={`${message.name || `Story message ${index + 1}`} template`} onChange={(template) => updateMessage(message.id, { template })} />
+        <PromptTemplateEditor value={message.template} diagnostics={diagnostics} ariaLabel={`${message.name || `${scope === 'story' ? 'Story' : 'Chat'} message ${index + 1}`} template`} onChange={(template) => updateMessage(message.id, { template })} />
         <small className={errors.length ? 'story-message-error' : ''}>{errors.length ? `${errors.length} error${errors.length === 1 ? '' : 's'} — generation is blocked` : message.enabled ? `Message ${index + 1} · ${message.role}` : `Message ${index + 1} · omitted while disabled`}</small>
       </article>
     })}
@@ -823,14 +808,18 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
   const metadata: BookPromptValues = { ...(bookPromptValues ?? { title: bookTitle, series: '', seriesOrder: '', overview: '', genre: '', style: '', pov: '', tense: '', language: '' }), responseLength: settings.responseLength }
   const typeLabel = type === 'scene' ? 'Story' : type === 'codex' ? 'Codex' : 'Chat'
   const previewPromptScope = type === 'scene' ? 'story' : type === 'codex' ? 'lore' : 'assistant'
-  const previewPromptTemplate = type === 'chat' ? previewChat?.systemPrompt ?? '' : settings.prompts[previewPromptScope]
+  const previewPromptTemplate = type === 'chat' ? previewChat?.promptComposition.systemPrompt ?? '' : settings.prompts[previewPromptScope]
   const previewPromptDiagnostics = type === 'scene'
     ? [settings.promptCompositions.story.systemPrompt, ...settings.promptCompositions.story.predefinedMessages.filter((message) => message.enabled).map((message) => message.template)]
       .flatMap((template) => promptTemplateDiagnostics(template, 'story', bookTemplateValues(metadata)))
-    : promptTemplateDiagnostics(previewPromptTemplate, previewPromptScope, bookTemplateValues(metadata))
+    : type === 'chat' && previewChat
+      ? [previewChat.promptComposition.systemPrompt, ...previewChat.promptComposition.predefinedMessages.filter((message) => message.enabled).map((message) => message.template)]
+        .flatMap((template) => promptTemplateDiagnostics(template, 'assistant', bookTemplateValues(metadata)))
+      : promptTemplateDiagnostics(previewPromptTemplate, previewPromptScope, bookTemplateValues(metadata))
   const previewPromptErrors = previewPromptDiagnostics.filter((diagnostic) => diagnostic.severity === 'error')
   const requestMessages: RequestPreviewMessage[] = []
   let storyNormalizedRequest: NormalizedAssembledRequest | null = null
+  let chatNormalizedRequest: NormalizedAssembledRequest | null = null
 
   if (preview && type === 'scene') {
     storyNormalizedRequest = assembleStoryGenerationRequest({
@@ -872,38 +861,22 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
   }
 
   if (preview && type === 'chat' && previewChat) {
-    const systemPrompt = renderPromptTemplate(previewChat.systemPrompt, bookTemplateValues(metadata))
-    requestMessages.push({ key: 'chat-system', role: 'system', title: 'Chat system prompt', detail: 'SYSTEM', content: systemPrompt })
-    requestMessages.push({ key: 'chat-workspace', role: 'system', title: 'Workspace instructions', detail: 'SYSTEM', content: CHAT_WORKSPACE_INSTRUCTIONS })
-    const contextSections = [
-      preview.lastSceneText ? `# Current scene${preview.lastSceneTitle ? ` — ${preview.lastSceneTitle}` : ''}\n\n${preview.lastSceneText.trim()}` : '',
-      preview.additionalContext ? `# Additional context\n\n${preview.additionalContext.trim()}` : '',
-    ].filter(Boolean)
-    if (contextSections.length) {
-      requestMessages.push({ key: 'chat-context', role: 'system', title: 'Selected book context', detail: 'SYSTEM', content: `# Selected book context\n\n${contextSections.join('\n\n')}` })
-    }
-    const lengthMessage = responseLengthMessage(previewChat.systemPrompt, settings.responseLength)
-    let latestUserIndex = -1
-    previewHistory.forEach((message, index) => { if (message.role === 'user') latestUserIndex = index })
-    previewHistory.forEach((message, index) => {
-      if (lengthMessage && index === latestUserIndex) {
-        requestMessages.push({ key: 'chat-response-length', role: 'user', title: 'Response length', detail: 'USER · before latest instruction', content: lengthMessage })
-      }
-      requestMessages.push({
-        key: message.id,
-        role: message.role,
-        title: message.role === 'user' ? 'User message' : 'Assistant message',
-        detail: message.role.toUpperCase(),
-        content: chatHistoryContent(message),
-        reasoning: message.role === 'assistant' ? message.thoughts : undefined,
-      })
-    })
-    if (lengthMessage && latestUserIndex < 0) {
-      requestMessages.push({ key: 'chat-response-length', role: 'user', title: 'Response length', detail: 'USER · before next message', content: lengthMessage })
-    }
+    chatNormalizedRequest = assembleChatGenerationRequest({ composition: previewChat.promptComposition, book: metadata, context: preview, history: previewHistory })
+    chatNormalizedRequest.parts.forEach((part, index) => requestMessages.push({
+      key: part.id,
+      role: part.role ?? 'user',
+      title: part.name || `Message ${index + 1}`,
+      detail: `${part.role?.toUpperCase() ?? 'NO ROLE'} · ${part.ownership} · ${part.sourceKind}${part.omitted ? ' · omitted' : ''}`,
+      content: part.content,
+      omitted: part.omitted,
+      references: part.referencedVariables,
+      diagnostics: part.dynamicVariables?.flatMap((item) => item.sources.map((source) => `${item.variable}: ${source.title || source.sourceId}${source.representation ? ` · ${source.representation}` : ''}${source.reason ? ` · ${source.reason}` : ''}`)),
+      reasoning: part.providerMessage?.reasoning_content,
+    }))
   }
 
-  const providerPreviewMessages = storyNormalizedRequest?.providerMessages ?? requestMessages.filter((message) => !message.omitted).map((message) => ({ role: message.role, content: message.content }))
+  const normalizedRequest = storyNormalizedRequest ?? chatNormalizedRequest
+  const providerPreviewMessages = normalizedRequest?.providerMessages ?? requestMessages.filter((message) => !message.omitted).map((message) => ({ role: message.role, content: message.content }))
   const exactPreview = providerPreviewMessages.map((message) => `${message.role.toUpperCase()}:\n\n${message.content || '[empty]'}`).join('\n\n---\n\n')
   const selectedModel = type === 'codex' ? settings.codexModel.trim() || settings.mainModel.trim() : type === 'chat' ? previewChat?.model.trim() : settings.mainModel.trim()
   const selectedModelContextLength = type === 'codex'
@@ -912,9 +885,9 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
   const effectiveLimitInput = type === 'codex'
     ? (settings.codexModel.trim() ? settings.codexEffectiveContextLimit : settings.mainEffectiveContextLimit)
     : type === 'chat' ? previewChat?.effectiveContextLimit ?? '' : settings.mainEffectiveContextLimit
-  const diagnosticMessages = storyNormalizedRequest?.providerMessages ?? requestMessages.filter((message) => !message.omitted).map((message) => ({ role: message.role, content: message.content || null, ...(message.reasoning ? { reasoning_content: message.reasoning } : {}) }))
+  const diagnosticMessages = normalizedRequest?.providerMessages ?? requestMessages.filter((message) => !message.omitted).map((message) => ({ role: message.role, content: message.content || null, ...(message.reasoning ? { reasoning_content: message.reasoning } : {}) }))
   const diagnostics = selectedModel && requestMessages.length && !previewPromptErrors.length
-    ? generationContextDiagnostics(selectedModel, selectedModelContextLength, effectiveLimitInput, type === 'chat' ? serializeChatModelInput(diagnosticMessages) : JSON.stringify({ messages: diagnosticMessages }))
+    ? generationContextDiagnostics(selectedModel, selectedModelContextLength, effectiveLimitInput, type === 'chat' && chatNormalizedRequest ? serializeChatModelInput(chatNormalizedRequest) : JSON.stringify({ messages: diagnosticMessages }))
     : null
 
   return <section className="context-defaults-settings">
@@ -923,9 +896,9 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
       <label className="context-trigger-window"><span><strong>Previous Scenes to scan for Codex triggers</strong><small>The current/last-opened Scene is always scanned; this controls how many immediately previous Scenes join it.</small></span><input type="number" min="0" step="1" value={value.previousScenesForCodexTriggers} onChange={(event) => onChange({ ...value, previousScenesForCodexTriggers: Math.max(0, Math.floor(Number(event.target.value) || 0)) })} /></label>
       {archivedSelectedCodex.length > 0 && <div className="context-inactive-source"><div><strong>{archivedSelectedCodex.length} archived Codex {archivedSelectedCodex.length === 1 ? 'selection is' : 'selections are'} inactive</strong><small>{archivedSelectedCodex.map((item) => item.title ?? 'Untitled').join(', ')}. Archived lore is skipped from requests.</small></div><button type="button" onClick={() => updateProfile({ ...profile, codexEntryIds: profile.codexEntryIds.filter((id) => !archivedSelectedIds.has(id)) })}>Remove inactive</button></div>}
       <div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Book metadata</strong><small>Provided through the book prompt variables.</small></span><b>Required</b></div>
-      {type === 'scene' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current Scene</strong><small>The active editor content is always included.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} /><span><strong>Previous Scene when empty</strong><small>Use the immediately previous Scene only when the current Scene has no text.</small></span></label><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Earlier summaries</strong><small>Uses the highest completed Act or Chapter summary without exposing later material.</small></span><b>Automatic</b></div></> : type === 'codex' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current entry</strong><small>Title, category, and existing body are supplied through lore prompt variables.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includeLastScene} onChange={(event) => updateProfile({ ...profile, includeLastScene: event.target.checked })} /><span><strong>Last-opened Scene</strong><small>Included by default for Codex generation.</small></span></label></> : <label><input type="checkbox" checked={profile.includeLastScene} onChange={(event) => updateProfile({ ...profile, includeLastScene: event.target.checked })} /><span><strong>Current Scene</strong><small>The book's last-opened Scene is included automatically for this chat.</small></span></label>}
+      {type === 'scene' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current Scene</strong><small>The active editor content is always included.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} /><span><strong>Previous Scene when empty</strong><small>Use the immediately previous Scene only when the current Scene has no text.</small></span></label><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Earlier summaries</strong><small>Uses the highest completed Act or Chapter summary without exposing later material.</small></span><b>Automatic</b></div></> : type === 'codex' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current entry</strong><small>Title, category, and existing body are supplied through lore prompt variables.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includeLastScene} onChange={(event) => updateProfile({ ...profile, includeLastScene: event.target.checked })} /><span><strong>Last-opened Scene</strong><small>Included by default for Codex generation.</small></span></label></> : <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current Scene and earlier summaries</strong><small>Available through Chat composition variables from the book's last-opened Scene anchor.</small></span><b>Automatic</b></div><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} /><span><strong>Previous Scene when empty</strong><small>Expose the immediately previous Scene only when the anchor Scene has no text.</small></span></label></>}
     </section>
-    <section className="settings-card context-sources-card"><div className="card-heading"><div><span>02</span><h2>Additional context</h2></div><p>Inserted as <code>{'{{additional_context}}'}</code>.</p></div>
+    <section className="settings-card context-sources-card"><div className="card-heading"><div><span>02</span><h2>Additional context</h2></div><p>Available as <code>{type === 'chat' ? '{{context.additional}}' : '{{additional_context}}'}</code>.</p></div>
       <fieldset className="summary-range"><legend>Summaries</legend>{([['none','None'],['all','All summaries'],['before','Before current Scene'],['after','After current Scene']] as const).map(([range,label]) => <label key={range}><input type="radio" name="summary-range" checked={profile.summaryRange === range} onChange={() => updateProfile({ ...profile, summaryRange: range })}/><span>{label}</span></label>)}</fieldset>
       <div className="context-source-search"><Search aria-hidden="true" /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find Acts, Chapters, Scenes, Notes, or Codex" /></div>
       <div className="context-managed-list">{groups.map(([label, items, key]) => items.length > 0 && <section key={label}><h3>{label}</h3>{items.map((item) => <label key={item.id}><input type="checkbox" checked={profile[key].includes(item.id)} onChange={() => toggle(key, item.id)} /><span><strong>{item.title || 'Untitled'}</strong><small>{item.type}</small></span></label>)}</section>)}{!visible.length && <p>No matching sources.</p>}</div>
@@ -939,8 +912,9 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
         {diagnostics && <div className={`context-budget ${!diagnostics.limitValid || !diagnostics.fits ? 'over' : diagnostics.warning ? 'warning' : ''}`}><strong>{diagnostics.limitValid ? `${diagnostics.requestTokens.toLocaleString()} estimated input tokens · ${Math.round(diagnostics.usageRatio * 100)}% of usable budget` : 'Invalid effective context cap'}</strong><span>Effective limit: {diagnostics.effectiveContextTokens.toLocaleString()} · Response reserve: {diagnostics.responseReserveTokens.toLocaleString()} · {diagnostics.modelContextKnown ? `Model hard window: ${diagnostics.modelContextTokens.toLocaleString()}` : `Model window estimate: ${diagnostics.modelContextTokens.toLocaleString()}`}</span>{diagnostics.wasClamped && <small>Your configured cap is above the model hard maximum, so Arc uses the model maximum.</small>}{diagnostics.limitError && <small>{diagnostics.limitError}</small>}{diagnostics.warning && diagnostics.fits && <small>Near the limit. Consider summaries, deselecting full-text context, or raising the cap.</small>}{!diagnostics.fits && diagnostics.limitValid && <small>Over the usable budget. Generation will be refused; Arc will not trim or replace context automatically.</small>}</div>}
         {preview.automaticCodex.length > 0 && <div className="automatic-codex-preview"><strong>Automatic Codex</strong>{preview.automaticCodex.map((item) => <article key={item.entryId} className={item.source === 'dependency' ? 'dependency-cascade' : 'trigger-match'}><header><b>{item.title}</b><small>{item.source === 'dependency' ? 'Dependency cascade' : 'Direct trigger'} · {item.representation === 'Summary' ? 'Summary' : 'Full entry'}{item.fallbackReason ? ` · ${item.fallbackReason}` : ''}</small></header>{item.source === 'dependency' ? <p>Dependency path: {(item.dependencyPath ?? []).map((step) => step.title).join(' → ')}</p> : <ul>{item.matches.map((match, index) => <li key={`${item.entryId}-${match.sceneId}-${match.trigger}-${index}`}><code>{match.trigger}</code> · {match.sceneTitle}</li>)}</ul>}</article>)}</div>}
         {preview.codexRepresentations.length > 0 && <div className="codex-context-representations"><strong>Codex context representation</strong>{preview.codexRepresentations.map((item) => <span key={item.entryId}><b>{item.title}</b><em>{item.representation}{item.fallbackReason ? ` · ${item.fallbackReason}` : ''}</em></span>)}</div>}
-        {storyNormalizedRequest?.dynamicSourceDedupe.length ? <div className="codex-context-representations"><strong>Deduplicated Additional sources</strong>{storyNormalizedRequest.dynamicSourceDedupe.map((decision) => <span key={decision.sourceId}><b>{decision.omittedAdditional.title || decision.sourceId}</b><em>Omitted because this source is already represented automatically{decision.automatic.representation ? ` as ${decision.automatic.representation}` : ''}.</em></span>)}</div> : null}
-        {storyNormalizedRequest && <div className="context-budget"><strong>Likely reusable prefix: {likelyReusablePrefix(storyNormalizedRequest.parts, (name) => promptVariables.find((variable) => variable.name === name)?.stability).partCount} message(s)</strong><span>Reuse stops before the first message that references turn-dynamic data.</span></div>}
+        {normalizedRequest?.dynamicSourceDedupe.length ? <div className="codex-context-representations"><strong>Deduplicated Additional sources</strong>{normalizedRequest.dynamicSourceDedupe.map((decision) => <span key={decision.sourceId}><b>{decision.omittedAdditional.title || decision.sourceId}</b><em>Omitted because this source is already represented automatically{decision.automatic.representation ? ` as ${decision.automatic.representation}` : ''}.</em></span>)}</div> : null}
+        {normalizedRequest && <div className="context-budget"><strong>Likely reusable prefix: {likelyReusablePrefix(normalizedRequest.parts, (name) => promptVariables.find((variable) => variable.name === name)?.stability).partCount} message(s)</strong><span>Reuse stops before the first message that references turn-dynamic data.</span></div>}
+        {chatNormalizedRequest?.structuredParts.map((part) => <details className="context-preview-raw" key={part.id}><summary>{part.name || 'Structured request data'} · App managed</summary><pre>{JSON.stringify(part.value, null, 2)}</pre></details>)}
         <div className="context-preview-rendered">{requestMessages.map((message) => <section key={message.key} className={message.omitted ? 'omitted' : ''}><header><h3>{message.title}</h3><span>{message.detail}</span></header>{message.content ? <div className="context-preview-copy">{message.content}</div> : <p className="context-preview-empty">This message is empty.</p>}{message.references?.length ? <p className="context-preview-empty">References: {message.references.map((reference) => `{{${reference}}}`).join(', ')}</p> : null}{message.diagnostics?.length ? <ul>{message.diagnostics.map((diagnostic) => <li key={diagnostic}>{diagnostic}</li>)}</ul> : null}{message.reasoning && <div className="context-preview-copy"><strong>Reasoning</strong>\n\n{message.reasoning}</div>}</section>)}</div>
         <details className="context-preview-raw"><summary>View message stack</summary><pre>{exactPreview || '[No messages would be sent yet.]'}</pre></details>
       </> : <p className="context-preview-empty">Preparing preview…</p>}

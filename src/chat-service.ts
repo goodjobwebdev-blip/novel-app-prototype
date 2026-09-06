@@ -1,4 +1,5 @@
-import { defaultAiPrompts, loadAiSettings, previousDefaultAssistantPrompts, type AiSettings } from './ai-settings'
+import { loadAiSettings, type AiSettings } from './ai-settings'
+import { clonePromptComposition, normalizePromptComposition, type PromptComposition } from './prompt-composition'
 import { getCachedModelCatalog } from './model-catalog'
 import { FAKE_PROVIDER_MODEL } from './fake-provider'
 import { KeyedAsyncQueue } from './keyed-async-queue'
@@ -24,7 +25,7 @@ export type ChatEntity = ArcEntity & {
   model: string
   modelContextLength?: number
   effectiveContextLimit: string
-  systemPrompt: string
+  promptComposition: PromptComposition
   thinking: boolean
   contextProfile: GenerationContextProfile
   lastMessagePreview?: string
@@ -160,17 +161,17 @@ export async function getChat(chatId: string): Promise<ChatEntity | undefined> {
   const entity = await getEntity<ArcEntity>(chatId)
   if (entity?.type !== 'chat') return undefined
   const chat = entity as ChatEntity
-  const promptNeedsMigration = previousDefaultAssistantPrompts.some((prompt) => prompt === chat.systemPrompt)
+  const compositionNeedsNormalization = !chat.promptComposition || !Array.isArray(chat.promptComposition.predefinedMessages)
   const limitNeedsMigration = typeof chat.effectiveContextLimit !== 'string'
-  if (!promptNeedsMigration && !limitNeedsMigration) return chat
+  if (!compositionNeedsNormalization && !limitNeedsMigration) return chat
   return chatWriteQueue.run(chatId, () => updateEntityAtomically<ChatEntity>(chatId, (current) => {
     if (current.type !== 'chat') throw new Error('Chat is no longer available.')
-    const currentPromptNeedsMigration = previousDefaultAssistantPrompts.some((prompt) => prompt === current.systemPrompt)
+    const currentCompositionNeedsNormalization = !current.promptComposition || !Array.isArray(current.promptComposition.predefinedMessages)
     const currentLimitNeedsMigration = typeof current.effectiveContextLimit !== 'string'
-    if (!currentPromptNeedsMigration && !currentLimitNeedsMigration) return current
+    if (!currentCompositionNeedsNormalization && !currentLimitNeedsMigration) return current
     return {
       ...current,
-      systemPrompt: currentPromptNeedsMigration ? defaultAiPrompts.assistant : current.systemPrompt,
+      promptComposition: normalizePromptComposition(current.promptComposition),
       effectiveContextLimit: currentLimitNeedsMigration ? '' : current.effectiveContextLimit,
     }
   }))
@@ -192,7 +193,7 @@ export async function createChat(bookId: string, title = 'New chat'): Promise<Ch
     model: settings.mainModel,
     modelContextLength: settings.mainModelContextLength,
     effectiveContextLimit: settings.mainEffectiveContextLimit,
-    systemPrompt: settings.prompts.assistant,
+    promptComposition: clonePromptComposition(settings.promptCompositions.assistant),
     thinking: false,
     contextProfile: profileForNewChat(contextSettings.profiles.chat),
     createdAt: now,
@@ -203,9 +204,10 @@ export async function createChat(bookId: string, title = 'New chat'): Promise<Ch
   return chat
 }
 
-export async function updateChat(chatId: string, patch: Partial<Pick<ChatEntity, 'title' | 'model' | 'modelContextLength' | 'effectiveContextLimit' | 'systemPrompt' | 'thinking' | 'contextProfile' | 'lastMessagePreview'>>): Promise<ChatEntity> {
+export async function updateChat(chatId: string, patch: Partial<Pick<ChatEntity, 'title' | 'model' | 'modelContextLength' | 'effectiveContextLimit' | 'promptComposition' | 'thinking' | 'contextProfile' | 'lastMessagePreview'>>): Promise<ChatEntity> {
   const patchSnapshot = {
     ...patch,
+    ...(patch.promptComposition ? { promptComposition: clonePromptComposition(patch.promptComposition) } : {}),
     ...(patch.contextProfile ? { contextProfile: copyProfile(patch.contextProfile) } : {}),
   }
   return chatWriteQueue.run(chatId, async () => {
@@ -225,6 +227,13 @@ export async function updateChat(chatId: string, patch: Partial<Pick<ChatEntity,
 
 export async function saveChatContextProfile(chatId: string, profile: GenerationContextProfile) {
   return updateChat(chatId, { contextProfile: copyProfile(profile) })
+}
+
+export async function resetChatPromptComposition(chatId: string) {
+  const chat = await getChat(chatId)
+  if (!chat) throw new Error('Chat is no longer available.')
+  const settings = await getChatBookAiSettings(chat.bookId)
+  return updateChat(chatId, { promptComposition: clonePromptComposition(settings.promptCompositions.assistant) })
 }
 
 export async function deleteChat(chatId: string) {
@@ -343,6 +352,7 @@ export async function forkChat(source: ChatEntity, throughOrder: number): Promis
     ...source,
     id: makeId('chat'),
     title: `${source.title} — fork`,
+    promptComposition: clonePromptComposition(source.promptComposition),
     contextProfile: copyProfile(source.contextProfile),
     lastMessagePreview: '',
     createdAt: now,

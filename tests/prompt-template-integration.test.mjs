@@ -21,5 +21,6 @@ test('invalid templates remain editable but block every current text-generation 
   assert.match(app, /Request blocked by an invalid/)
   assert.match(workspace, /assertPromptTemplateValid\(isCodex \? settings\.prompts\.lore : settings\.prompts\.story/)
   assert.match(workspace, /assertPromptTemplateValid\(settings\.prompts\.summarize, 'summarize'\)/)
-  assert.match(chat, /assertPromptTemplateValid\(activeChat\.systemPrompt, 'assistant'\)/)
+  assert.match(chat, /promptTemplateDiagnostics\(template, 'assistant'\)/)
+  assert.match(chat, /Fix the invalid Chat composition/)
 })

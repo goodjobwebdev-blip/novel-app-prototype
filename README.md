@@ -15,6 +15,7 @@ Working behavior on `main` includes:
 - Scene continuation, summary generation, and whole-body Codex generation;
 - generation-type-specific Context Management with automatic context, explicit additional context, model-budget checks, and a rendered request preview for Story, Codex, and Chat;
 - persisted book Chat with streaming responses, Stop, edit, Save & regenerate, assistant regenerate/delete/fork/read-aloud actions, per-chat model/system prompt/context settings, and approval-based workspace edit proposals;
+- Chat request composition with per-Chat System and ordered Predefined messages, explicit context variables, exact normalized request previews, and structured workspace-tool rounds. The prototype database v3 migration removes legacy Chat and ChatMessage entities together; books, manuscript, notes, Codex, summaries, and Book settings are preserved;
 - responsive Outline, Notes, Codex, Chat, Book, AI, Context, and UI surfaces;
 - device-local typography/theme settings and custom themes;
 - an installable PWA shell and GitHub Pages deployment workflow.

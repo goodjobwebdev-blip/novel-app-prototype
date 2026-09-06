@@ -122,7 +122,7 @@ export const defaultBookContextSettings: BookContextSettings = {
     scene: { ...defaultGenerationContextProfile, includePreviousSceneWhenEmpty: true },
     codex: { ...defaultGenerationContextProfile, includeLastScene: true },
     note: { ...defaultGenerationContextProfile },
-    chat: { ...defaultGenerationContextProfile, includeLastScene: true },
+    chat: { ...defaultGenerationContextProfile, includeLastScene: true, includePreviousSceneWhenEmpty: true },
   },
 }
 
@@ -147,7 +147,7 @@ function normalizeBookContextSettings(value?: Partial<BookContextSettings>): Boo
       scene: normalizeContextProfile(profiles.scene, { includePreviousSceneWhenEmpty: true }),
       codex: normalizeContextProfile(profiles.codex, { includeLastScene: true }),
       note: normalizeContextProfile(profiles.note),
-      chat: normalizeContextProfile(profiles.chat, { includeLastScene: true }),
+      chat: normalizeContextProfile(profiles.chat, { includeLastScene: true, includePreviousSceneWhenEmpty: true }),
     },
   }
 }
@@ -190,6 +190,12 @@ async function database() {
         codexDependencies: 'id,bookId,sourceId,targetId,[bookId+sourceId],[bookId+targetId],[sourceId+targetId],updatedAt',
         meta: 'key',
       })
+      db.version(3).stores({
+        entities: 'id,type,bookId,parentId,[parentId+order],updatedAt',
+        snapshots: 'id,entityId,entityType,createdAt,[entityId+createdAt],reason',
+        codexDependencies: 'id,bookId,sourceId,targetId,[bookId+sourceId],[bookId+targetId],[sourceId+targetId],updatedAt',
+        meta: 'key',
+      }).upgrade((transaction: any) => transaction.table('entities').filter((entity: ArcEntity) => entity.type === 'chat' || entity.type === 'chatMessage').delete())
       return db.open().then(() => db)
     })
   }
