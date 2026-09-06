@@ -2,8 +2,9 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import { defaultKeymap, history, historyKeymap, isolateHistory, redo, undo } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
 import { syntaxTree } from '@codemirror/language'
-import { EditorState, StateEffect, StateField, Transaction } from '@codemirror/state'
+import { Annotation, Compartment, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state'
 import { findTriggerRanges, type CodexMentionTerm } from './codex-trigger-service'
+import { normalizeTranscriptForInsertion } from './stt-service'
 import {
   Decoration,
   EditorView,
@@ -35,7 +36,10 @@ export type MarkdownEditorHandle = {
   beginGeneration: (mode?: 'generate' | 'regenerate', placement?: 'append' | 'replace') => GenerationContext | null
   appendGenerationChunk: (text: string) => boolean
   finishGeneration: (status: GenerationStatus) => GenerationResult | null
-  insertSpeech: () => boolean
+  beginDictation: () => string | null
+  updateDictation: (sessionId: string, transcript: string) => boolean
+  finishDictation: (sessionId: string, transcript: string) => boolean
+  cancelDictation: (sessionId: string) => boolean
   undo: () => boolean
   redo: () => boolean
 }
@@ -69,7 +73,8 @@ type ActiveGeneration = {
   placement: 'append' | 'replace'
 }
 
-const SPEECH_TEXT = 'speech placeholder'
+type ActiveDictation = { id: string; preDocument: string; from: number; to: number; provisional: string }
+const dictationProvisional = Annotation.define<boolean>()
 
 class ListMarkerWidget extends WidgetType {
   constructor(readonly label: string) { super() }
@@ -314,15 +319,19 @@ function formattingKeymap() {
   ]
 }
 
-function insertAtSelection(view: EditorView, text: string) {
-  const selection = view.state.selection.main
-  view.dispatch({
-    changes: { from: selection.from, to: selection.to, insert: text },
-    selection: { anchor: selection.from + text.length },
-    scrollIntoView: true,
-  })
-  view.focus()
-  return true
+function dictationInsertion(session: ActiveDictation, transcript: string) {
+  const before = session.preDocument.slice(0, session.from)
+  const after = session.preDocument.slice(session.to)
+  return normalizeTranscriptForInsertion(transcript, before, after)
+}
+
+function dictationDocument(session: ActiveDictation, transcript: string) {
+  const insertion = dictationInsertion(session, transcript)
+  return {
+    insertion,
+    document: `${session.preDocument.slice(0, session.from)}${insertion}${session.preDocument.slice(session.to)}`,
+    cursor: session.from + insertion.length,
+  }
 }
 
 function generationSeparators(document: string, position: number) {
@@ -441,6 +450,8 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
   const onMentionClickRef = useRef(onMentionClick)
   const activeGenerationRef = useRef<ActiveGeneration | null>(null)
   const latestGenerationRef = useRef<GenerationRecord | null>(null)
+  const activeDictationRef = useRef<ActiveDictation | null>(null)
+  const editableCompartmentRef = useRef(new Compartment())
 
   useEffect(() => { onChangeRef.current = onChange }, [onChange])
   useEffect(() => { onMentionClickRef.current = onMentionClick }, [onMentionClick])
@@ -502,7 +513,66 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       if (status === 'complete') latestGenerationRef.current = result
       return result
     },
-    insertSpeech: () => viewRef.current ? insertAtSelection(viewRef.current, SPEECH_TEXT) : false,
+    beginDictation: () => {
+      const view = viewRef.current
+      if (!view || activeGenerationRef.current || activeDictationRef.current || readOnly) return null
+      const selection = view.state.selection.main
+      const session: ActiveDictation = {
+        id: `dictation-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        preDocument: view.state.doc.toString(),
+        from: selection.from,
+        to: selection.to,
+        provisional: '',
+      }
+      activeDictationRef.current = session
+      view.dispatch({ effects: editableCompartmentRef.current.reconfigure(EditorView.editable.of(false)) })
+      return session.id
+    },
+    updateDictation: (sessionId, transcript) => {
+      const view = viewRef.current
+      const session = activeDictationRef.current
+      if (!view || !session || session.id !== sessionId) return false
+      const next = dictationDocument(session, transcript)
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: next.document },
+        selection: { anchor: next.cursor },
+        annotations: [Transaction.addToHistory.of(false), dictationProvisional.of(true)],
+      })
+      session.provisional = transcript
+      return true
+    },
+    finishDictation: (sessionId, transcript) => {
+      const view = viewRef.current
+      const session = activeDictationRef.current
+      if (!view || !session || session.id !== sessionId) return false
+      if (session.provisional) view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: session.preDocument },
+        annotations: [Transaction.addToHistory.of(false), dictationProvisional.of(true)],
+      })
+      const insertion = dictationInsertion(session, transcript)
+      view.dispatch({
+        changes: { from: session.from, to: session.to, insert: insertion },
+        selection: { anchor: session.from + insertion.length },
+        annotations: [Transaction.userEvent.of('input.type.dictation'), isolateHistory.of('full')],
+        effects: editableCompartmentRef.current.reconfigure(EditorView.editable.of(!readOnly)),
+      })
+      activeDictationRef.current = null
+      view.focus()
+      return true
+    },
+    cancelDictation: (sessionId) => {
+      const view = viewRef.current
+      const session = activeDictationRef.current
+      if (!view || !session || session.id !== sessionId) return false
+      if (view.state.doc.toString() !== session.preDocument) view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: session.preDocument },
+        selection: { anchor: session.from, head: session.to },
+        annotations: [Transaction.addToHistory.of(false), dictationProvisional.of(true)],
+      })
+      view.dispatch({ effects: editableCompartmentRef.current.reconfigure(EditorView.editable.of(!readOnly)) })
+      activeDictationRef.current = null
+      return true
+    },
     undo: () => runHistoryCommand(viewRef.current, undo),
     redo: () => runHistoryCommand(viewRef.current, redo),
   }), [])
@@ -515,7 +585,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       extensions: [
         markdown(),
         EditorState.readOnly.of(readOnly),
-        EditorView.editable.of(!readOnly),
+        editableCompartmentRef.current.of(EditorView.editable.of(!readOnly)),
         history(),
         keymap.of([...formattingKeymap(), ...defaultKeymap, ...historyKeymap]),
         livePreview,
@@ -536,7 +606,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
         EditorView.lineWrapping,
         EditorView.contentAttributes.of({ 'aria-label': ariaLabel, spellcheck: 'true' }),
         EditorView.updateListener.of(update => {
-          if (update.docChanged) onChangeRef.current(update.state.doc.toString())
+          if (update.docChanged && !update.transactions.some((transaction) => transaction.annotation(dictationProvisional))) onChangeRef.current(update.state.doc.toString())
         }),
         EditorView.theme({
           '&': { backgroundColor: 'transparent', width: '100%', maxWidth: '100%' },
@@ -555,6 +625,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
 
     return () => {
       activeGenerationRef.current = null
+      activeDictationRef.current = null
       view.destroy()
       if (viewRef.current === view) viewRef.current = null
     }

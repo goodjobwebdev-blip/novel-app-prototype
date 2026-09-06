@@ -104,7 +104,7 @@ const ExpandableTextInput = forwardRef<HTMLTextAreaElement, ExpandableTextInputP
               <X aria-hidden="true" />
             </button>
           </header>
-          <textarea ref={expandedRef} value={draft} onChange={(event) => setDraft(event.target.value)} aria-label={`Expanded ${ariaLabel}`} />
+          <textarea ref={expandedRef} value={draft} onChange={(event) => setDraft(event.target.value)} aria-label={`Expanded ${ariaLabel}`} readOnly={textareaProps.readOnly} disabled={textareaProps.disabled} spellCheck={textareaProps.spellCheck} />
           <footer>
             <button type="button" onClick={applyDraft}>Apply</button>
           </footer>

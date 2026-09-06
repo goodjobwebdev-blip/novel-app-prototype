@@ -6,6 +6,7 @@ import {
   Home,
   Image as ImageIcon,
   MessageCircle,
+  Mic,
   Plus,
   RefreshCw,
   Search,
@@ -49,6 +50,7 @@ import { CHAT_TOOL_DEFINITIONS, CHAT_WORKSPACE_INSTRUCTIONS, serializeChatModelI
 import { renderLorePrompt, renderStoryPrompt } from './nanogpt'
 import { clearModelCatalog, getCachedModelCatalog, providerModelEndpoint, saveModelCatalog, type ProviderModel } from './model-catalog'
 import { fetchSpeechModels, type SpeechModel } from './tts-service'
+import { fetchTranscriptionModels, type SttModel } from './stt-service'
 import './response-length-settings.css'
 import './context-limit-settings.css'
 import './codex-archive.css'
@@ -674,9 +676,15 @@ function SpeechSettingsPanel({ settings, scope, onChange }: { settings: AiSettin
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
+  const [sttModels, setSttModels] = useState<SttModel[]>([])
+  const [sttQuery, setSttQuery] = useState('')
+  const [sttLoading, setSttLoading] = useState(false)
+  const [sttMessage, setSttMessage] = useState('')
   const selected = models.find((model) => model.id === settings.speech.model)
+  const selectedStt = sttModels.find((model) => model.id === settings.speech.transcriptionModel)
   const voices = selected?.voices ?? []
   const filtered = models.filter((model) => !query.trim() || `${model.id} ${model.name}`.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 80)
+  const filteredStt = sttModels.filter((model) => !sttQuery.trim() || `${model.provider} ${model.modelId} ${model.name}`.toLowerCase().includes(sttQuery.trim().toLowerCase())).slice(0, 100)
 
   async function loadModels() {
     setLoading(true)
@@ -691,22 +699,37 @@ function SpeechSettingsPanel({ settings, scope, onChange }: { settings: AiSettin
     } finally { setLoading(false) }
   }
 
-  useEffect(() => { void loadModels() }, [])
+  async function loadSttModels() {
+    setSttLoading(true)
+    setSttMessage('Loading transcription models…')
+    try {
+      const next = await fetchTranscriptionModels(settings.speech)
+      setSttModels(next)
+      setSttMessage(next.length ? `${next.length} transcription models available across OpenAI and NanoGPT.` : 'No transcription models were returned.')
+    } catch (error) {
+      setSttModels([])
+      setSttMessage(error instanceof Error ? error.message : 'Could not load transcription models.')
+    } finally { setSttLoading(false) }
+  }
+
+  useEffect(() => { void loadModels(); void loadSttModels() }, [])
   const updateSpeech = (patch: Partial<AiSettings['speech']>) => onChange({ ...settings.speech, ...patch })
   const unavailableModel = models.length > 0 && !selected
   const unavailableVoice = Boolean(selected?.voices.length && settings.speech.voice && !selected.voices.includes(settings.speech.voice))
+  const unavailableStt = sttModels.length > 0 && !selectedStt
+  const liveSupported = selectedStt?.supportsLive === true
 
   return <section className="speech-settings">
-    <header className="page-heading"><div><p>{scope === 'book' ? 'Book Speech' : 'Default Speech'}</p><h1 id="page-title">Text to speech</h1><span>{scope === 'book' ? 'Independent TTS settings for this book.' : 'Copied into each new book, then edited independently.'}</span></div><Volume2 aria-hidden="true" /></header>
+    <header className="page-heading"><div><p>{scope === 'book' ? 'Book Speech' : 'Default Speech'}</p><h1 id="page-title">Speech</h1><span>{scope === 'book' ? 'Independent TTS and dictation settings for this book.' : 'Copied into each new book, then edited independently.'}</span></div><Volume2 aria-hidden="true" /></header>
     <section className="settings-card">
-      <div className="card-heading"><div><span>01</span><h2>Provider & credential</h2></div><p>Speech credentials are separate from text AI.</p></div>
+      <div className="card-heading"><div><span>01</span><h2>Speech credentials</h2></div><p>Speech credentials are separate from text AI.</p></div>
       <div className="speech-settings-grid">
-        <label><span>Provider</span><select value={settings.speech.provider} onChange={() => undefined}><option value="nanogpt">NanoGPT</option></select></label>
-        <label><span>NanoGPT Speech API key</span><div className="speech-key-row"><input type="password" value={settings.speech.apiKey} onChange={(event) => updateSpeech({ apiKey: event.target.value })} autoComplete="off" spellCheck={false} />{settings.provider === 'nanogpt' && settings.apiKey.trim() && <button type="button" onClick={() => updateSpeech({ apiKey: settings.apiKey })}>Copy NanoGPT key from AI settings</button>}</div></label>
+        <label><span>NanoGPT Speech API key</span><div className="speech-key-row"><input type="password" value={settings.speech.apiKey} onChange={(event) => updateSpeech({ apiKey: event.target.value })} autoComplete="off" spellCheck={false} />{settings.provider === 'nanogpt' && settings.apiKey.trim() && <button type="button" onClick={() => updateSpeech({ apiKey: settings.apiKey })}>Copy NanoGPT key from AI settings</button>}</div><small className="speech-help">Used by NanoGPT TTS and NanoGPT transcription models.</small></label>
+        <label><span>OpenAI Speech API key</span><input type="password" value={settings.speech.openaiApiKey} onChange={(event) => updateSpeech({ openaiApiKey: event.target.value })} autoComplete="off" spellCheck={false} /><small className="speech-help">Used only for OpenAI transcription. Stored with this Speech configuration on this device.</small></label>
       </div>
     </section>
     <section className="settings-card">
-      <div className="card-heading"><div><span>02</span><h2>Voice model</h2></div><button type="button" onClick={() => { void loadModels() }} disabled={loading}><RefreshCw className={loading ? 'spinning' : ''} aria-hidden="true" /> Reload</button></div>
+      <div className="card-heading"><div><span>02</span><h2>Text to speech</h2></div><button type="button" onClick={() => { void loadModels() }} disabled={loading}><RefreshCw className={loading ? 'spinning' : ''} aria-hidden="true" /> Reload</button></div>
       <div className="speech-model-search"><Search aria-hidden="true" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search TTS models" /></div>
       {message && <p className="speech-help">{message}</p>}
       {unavailableModel && <p className="speech-model-unavailable" role="alert">Saved model “{settings.speech.model}” is unavailable. Arc will not silently switch paid models.</p>}
@@ -716,6 +739,19 @@ function SpeechSettingsPanel({ settings, scope, onChange }: { settings: AiSettin
         <label><span>Maximum parallel TTS requests</span><input type="number" min="1" max="8" value={settings.speech.maxParallelRequests} onChange={(event) => updateSpeech({ maxParallelRequests: event.target.value })} /><small className="speech-help">Default 1. Audio may generate concurrently but always plays in prose order.</small></label>
       </div>
       <label className="speech-toggle"><span><input type="checkbox" checked={settings.speech.readAloudAfterGeneration} onChange={(event) => updateSpeech({ readAloudAfterGeneration: event.target.checked })} /> Read aloud after generation</span><small className="speech-help">Story reads only the latest generated passage; Codex reads the resulting entry; Chat reads the new visible assistant answer.</small></label>
+    </section>
+    <section className="settings-card stt-settings-card">
+      <div className="card-heading"><div><span>03</span><h2>Speech to text</h2></div><button type="button" onClick={() => { void loadSttModels() }} disabled={sttLoading}><RefreshCw className={sttLoading ? 'spinning' : ''} aria-hidden="true" /> Reload</button></div>
+      <p className="speech-help">Dictation sends microphone audio only to the provider named by the selected transcription model. Raw recordings are not stored by Arc.</p>
+      <div className="speech-model-search"><Search aria-hidden="true" /><input value={sttQuery} onChange={(event) => setSttQuery(event.target.value)} placeholder="Search transcription models" /></div>
+      {sttMessage && <p className="speech-help">{sttMessage}</p>}
+      {unavailableStt && <p className="speech-model-unavailable" role="alert">Saved transcription model “{settings.speech.transcriptionModel}” is unavailable in the loaded catalogs. Arc will not silently substitute another paid model.</p>}
+      <div className="speech-model-list stt-model-list">{filteredStt.map((model) => <button type="button" key={model.id} className={model.id === settings.speech.transcriptionModel ? 'selected' : ''} onClick={() => updateSpeech({ transcriptionModel: model.id, streamTranscription: model.supportsLive })}><span><strong>{model.provider === 'openai' ? 'OpenAI' : 'NanoGPT'} · {model.name}</strong><small>{model.modelId} · {model.supportsLive ? 'Live + file transcription' : 'File transcription'}</small></span><small>{model.price || 'Price not supplied by catalog'}</small></button>)}</div>
+      <div className="speech-settings-grid">
+        <label><span>Language hint</span><input value={settings.speech.transcriptionLanguage === 'auto' ? '' : settings.speech.transcriptionLanguage} onChange={(event) => updateSpeech({ transcriptionLanguage: event.target.value.trim() || 'auto' })} placeholder="Auto-detect" /><small className="speech-help">Leave empty for Auto-detect. Enter a provider-supported language code/name to provide a hint.</small></label>
+        <label className="speech-toggle stt-live-toggle"><span><input type="checkbox" checked={settings.speech.streamTranscription && liveSupported} disabled={!liveSupported} onChange={(event) => updateSpeech({ streamTranscription: event.target.checked })} /> Stream text while speaking</span><small className="speech-help">{liveSupported ? 'Supported by this model. Partial text stays provisional until Stop/finalization.' : selectedStt ? 'This selected model does not expose live partial transcription.' : 'Load/select a model to check live-transcription capability.'}</small></label>
+      </div>
+      {settings.speech.transcriptionModel.startsWith('openai:') && <p className="speech-help"><Mic aria-hidden="true" /> OpenAI live-capable models use a direct browser Realtime connection; ordinary models record locally and upload once after Stop.</p>}
     </section>
   </section>
 }
