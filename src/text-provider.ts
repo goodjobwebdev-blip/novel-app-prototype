@@ -15,18 +15,18 @@ export type TextProviderGenerationRequest = NanoGPTGenerationRequest & {
   thinking?: boolean
 }
 
-function fakeMessages(request: Pick<TextProviderGenerationRequest, 'systemPrompt' | 'contextMessage' | 'userMessage'>): FakeProviderMessage[] {
+function fakeMessages(request: Pick<TextProviderGenerationRequest, 'systemPrompt' | 'contextMessage' | 'userMessage' | 'messages'>): FakeProviderMessage[] {
   return nanoGPTCompletionMessages(request).map((message) => ({
-    role: message.role === 'system' ? 'system' : 'user',
+    role: message.role,
     content: message.content,
   }))
 }
 
-export function textProviderMessages(request: Pick<TextProviderGenerationRequest, 'systemPrompt' | 'contextMessage' | 'userMessage'>) {
+export function textProviderMessages(request: Pick<TextProviderGenerationRequest, 'systemPrompt' | 'contextMessage' | 'userMessage' | 'messages'>) {
   return fakeMessages(request)
 }
 
-export function textProviderRequestText(request: Pick<TextProviderGenerationRequest, 'systemPrompt' | 'contextMessage' | 'userMessage'>) {
+export function textProviderRequestText(request: Pick<TextProviderGenerationRequest, 'systemPrompt' | 'contextMessage' | 'userMessage' | 'messages'>) {
   return JSON.stringify({ messages: textProviderMessages(request) })
 }
 

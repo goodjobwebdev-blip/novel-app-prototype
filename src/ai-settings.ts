@@ -1,4 +1,5 @@
-import { PROMPT_COMPOSITION_SCHEMA_VERSION, clonePromptComposition, compositionsFromLegacyPrompts, legacyPromptMirror, normalizePromptCompositions, withSystemPrompt, type PromptCompositions, type PromptCompositionScope } from './prompt-composition'
+import { PROMPT_COMPOSITION_SCHEMA_VERSION, clonePromptComposition, compositionsFromLegacyPrompts, legacyPromptMirror, normalizePromptCompositions, withSystemPrompt, type PromptComposition, type PromptCompositions, type PromptCompositionScope } from './prompt-composition'
+import { defaultStoryPromptComposition } from './story-request'
 
 export type AiProvider = 'openrouter' | 'nanogpt' | 'openai' | 'compatible' | 'fake'
 export type SpeechProvider = 'nanogpt'
@@ -288,7 +289,10 @@ Write in {{book.language}}.
 Return only the final Markdown body. Do not repeat the entry title as a top-level heading.`,
 }
 
-export const defaultPromptCompositions: PromptCompositions = compositionsFromLegacyPrompts(defaultAiPrompts)
+export const defaultPromptCompositions: PromptCompositions = {
+  ...compositionsFromLegacyPrompts(defaultAiPrompts),
+  story: clonePromptComposition(defaultStoryPromptComposition),
+}
 
 export const initialAiSettings: AiSettings = {
   provider: 'nanogpt',
@@ -357,6 +361,18 @@ export function normalizeAiSettings(value?: Partial<AiSettings>): AiSettings {
     if (previousDefaultAiPrompts.some((defaults) => prompts[key] === defaults[key])) prompts[key] = defaultAiPrompts[key]
   })
   const promptCompositions = normalizePromptCompositions(value?.promptCompositions, prompts)
+  const storedStoryComposition = value?.promptCompositions?.story
+  const storedCompositionWasHistoricalDefault = Boolean(storedStoryComposition)
+    && storedStoryComposition!.predefinedMessages?.length === 0
+    && (storedStoryComposition!.systemPrompt === defaultAiPrompts.story
+      || previousDefaultAiPrompts.some((defaults) => Boolean(defaults.story) && storedStoryComposition!.systemPrompt === defaults.story))
+  const storedStoryWasHistoricalDefault = !storedPrompts?.story || storedPrompts.story === defaultAiPrompts.story
+    || previousDefaultAiPrompts.some((defaults) => Boolean(defaults.story) && storedPrompts.story === defaults.story)
+  promptCompositions.story = !storedStoryComposition || storedCompositionWasHistoricalDefault
+      ? storedStoryWasHistoricalDefault || storedCompositionWasHistoricalDefault
+        ? clonePromptComposition(defaultStoryPromptComposition)
+        : { systemPrompt: storedPrompts!.story!, predefinedMessages: [] }
+      : promptCompositions.story
   const promptMirror = legacyPromptMirror(promptCompositions) as AiPrompts
   return {
     ...initialAiSettings,
@@ -391,6 +407,14 @@ export function withPromptSystemPrompt(settings: AiSettings, scope: PromptCompos
   return normalizeAiSettings({
     ...settings,
     promptCompositions: withSystemPrompt(settings.promptCompositions, scope, systemPrompt),
+    prompts: undefined as unknown as AiPrompts,
+  })
+}
+
+export function withPromptComposition(settings: AiSettings, scope: PromptCompositionScope, composition: PromptComposition): AiSettings {
+  return normalizeAiSettings({
+    ...settings,
+    promptCompositions: { ...settings.promptCompositions, [scope]: clonePromptComposition(composition) },
     prompts: undefined as unknown as AiPrompts,
   })
 }

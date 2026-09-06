@@ -34,6 +34,7 @@ type MarkdownEditorProps = {
 }
 
 export type MarkdownEditorHandle = {
+  captureGenerationContext: () => GenerationContext | null
   beginGeneration: (mode?: 'generate' | 'regenerate', placement?: 'append' | 'replace') => GenerationContext | null
   appendGenerationChunk: (text: string) => boolean
   finishGeneration: (status: GenerationStatus) => GenerationResult | null
@@ -464,6 +465,10 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
   }, [mentionTerms])
 
   useImperativeHandle(ref, () => ({
+    captureGenerationContext: () => {
+      const view = viewRef.current
+      return view ? { sceneText: view.state.doc.toString(), insertionPosition: view.state.selection.main.head } : null
+    },
     beginGeneration: (mode = 'generate', placement = 'append') => {
       const view = viewRef.current
       if (!view || activeGenerationRef.current) return null
