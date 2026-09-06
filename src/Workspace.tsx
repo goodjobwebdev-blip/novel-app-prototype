@@ -1061,8 +1061,11 @@ export default function Workspace() {
     }
   }
 
-  function compactLoreExcerpt(markdown: string, limit = 700) {
-    const text = markdown.trim()
+  function compactLoreExcerpt(markdown: string, title: string, limit = 700) {
+    const lines = markdown.trim().split('\n')
+    const firstHeading = lines[0]?.replace(/^#{1,6}\s+/, '').trim()
+    if (firstHeading?.localeCompare(title.trim(), undefined, { sensitivity: 'base' }) === 0) lines.shift()
+    const text = lines.join('\n').trim()
     if (text.length <= limit) return text || '_No description provided._'
     const cut = text.slice(0, limit)
     const boundary = Math.max(cut.lastIndexOf('\n\n'), cut.lastIndexOf(' '))
@@ -1084,7 +1087,7 @@ export default function Workspace() {
         entryId: entry.id,
         title: entry.title,
         category: entry.category,
-        content: currentSummary || compactLoreExcerpt(entry.content),
+        content: compactLoreExcerpt(currentSummary || entry.content, entry.title),
         source: currentSummary ? 'summary' : 'excerpt',
       }
       setLoreMention((current) => current?.id === popupId ? { ...current, selectedId: entry.id, loading: false, preview } : current)
@@ -1671,6 +1674,7 @@ export default function Workspace() {
         : 'AI context · Full entry'
     : ''
   const contextType: GenerationContextType = screen === 'chat' || (screen === 'settings' && returnScreen === 'chat') ? 'chat' : activeDocument?.type === 'codexEntry' ? 'codex' : activeDocument?.type === 'note' ? 'note' : 'scene'
+  const autotitleOverlay = autotitle && <AutotitlePanel state={autotitle} onAccept={() => { void acceptAutotitle() }} onRegenerate={() => { void regenerateAutotitle() }} onStop={stopAutotitle} onCancel={() => { autotitleAbortRef.current?.abort(); setAutotitle(null) }} />
 
   if (screen === 'settings') return <AiSettingsScreen
     book={returnScreen === 'home' || !currentBook ? undefined : { id: currentBook.id, title: currentBook.title, contextType, currentDocumentId: activeDocument?.id, currentDocumentText: settingsGenerationContextRef.current?.sceneText ?? storyMarkdown, insertionPosition: settingsGenerationContextRef.current?.insertionPosition, promptValues: toBookPromptValues(currentBook, seriesList), chatId: contextType === 'chat' ? activeChatId || undefined : undefined }}
@@ -1683,6 +1687,7 @@ export default function Workspace() {
 
   if (screen === 'home') return (
     <main className="library-screen">
+      {autotitleOverlay}
       <header className="library-top"><div className="arc-brand"><Feather aria-hidden="true" /> ARC</div><button type="button" onClick={() => openSettings('home')} aria-label="Open default settings"><Settings2 aria-hidden="true" /></button></header>
       <section className="library-content">
         <div className="library-title"><div><small>Your library</small><h1>Books</h1></div><button type="button" disabled={saveState === 'loading'} onClick={() => { void makeBook() }}><Plus aria-hidden="true" /><span>New book</span></button></div>
@@ -1709,7 +1714,7 @@ export default function Workspace() {
 
       {generationDetailsOpen && generationDetails && <GenerationDetailsDialog details={generationDetails} elapsedSeconds={generationElapsedSeconds} onClose={() => setGenerationDetailsOpen(false)} />}
       {loreMention && <LoreMentionPopover state={loreMention} onClose={() => setLoreMention(null)} onSelect={(entry) => { void loadLoreMentionPreview(loreMention.id, entry) }} onOpen={(entryId) => { void openLoreMentionEntry(entryId) }} />}
-      {autotitle && <AutotitlePanel state={autotitle} onAccept={() => { void acceptAutotitle() }} onRegenerate={() => { void regenerateAutotitle() }} onStop={stopAutotitle} onCancel={() => { autotitleAbortRef.current?.abort(); setAutotitle(null) }} />}
+      {autotitleOverlay}
 
       {screen === 'editor' ? <article className="story-editor">
         <small className="page-number">{pageLabel}</small><p className="document-path">{documentPath || 'No document selected'}</p>
@@ -1764,12 +1769,13 @@ function LoreMentionPopover({ state, onClose, onSelect, onOpen }: {
   const top = preferBelow ? state.anchor.bottom + 8 : Math.max(12, state.anchor.top - 292)
   const selected = state.term.entries.find((entry) => entry.id === state.selectedId)
 
-  return createPortal(<section ref={panelRef} className="codex-mention-popover" role="dialog" aria-label={`Lore preview for ${state.term.text}`} style={{ left, top, width, maxHeight: Math.max(180, viewportHeight - top - 12) }}>
-    <header><div><small>Codex mention</small><strong>{state.term.text}</strong></div><button type="button" onClick={onClose} aria-label="Close lore preview"><X aria-hidden="true" /></button></header>
+  const titleId = `codex-mention-title-${state.id}`
+  return createPortal(<section ref={panelRef} className="codex-mention-popover" role="dialog" aria-labelledby={titleId} style={{ left, top, width, maxHeight: Math.max(180, viewportHeight - top - 12) }}>
+    <header><div><small>Codex mention</small><strong id={titleId}>{state.term.text}</strong></div><button className="codex-mention-close" type="button" onClick={onClose} aria-label="Close lore preview" title="Close"><X aria-hidden="true" /></button></header>
     {state.term.entries.length > 1 && <div className="codex-mention-choices"><p>{selected ? 'Other matching entries' : 'Multiple Codex entries use this name. Choose one:'}</p>{state.term.entries.map((entry) => <button key={entry.id} className={entry.id === state.selectedId ? 'selected' : ''} type="button" onClick={() => onSelect(entry)}><span><strong>{entry.title}</strong><small>{entry.category}</small></span>{entry.id === state.selectedId && <Check aria-hidden="true" />}</button>)}</div>}
     {state.loading && <p className="codex-mention-loading">Loading lore…</p>}
     {state.error && <p className="codex-mention-error" role="alert">{state.error}</p>}
-    {state.preview && <div className="codex-mention-preview"><div className="codex-mention-preview-heading"><span><strong>{state.preview.title}</strong><small>{state.preview.category} · {state.preview.source === 'summary' ? 'Current summary' : 'Entry excerpt'}</small></span></div><div className="codex-mention-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{state.preview.content}</ReactMarkdown></div><button className="codex-mention-open" type="button" onClick={() => onOpen(state.preview!.entryId)}>Open Codex entry <ChevronRight aria-hidden="true" /></button></div>}
+    {state.preview && <div className="codex-mention-preview"><div className="codex-mention-preview-heading"><span><small>Preview</small><strong>{state.preview.title}</strong><em>{state.preview.category} · {state.preview.source === 'summary' ? 'Current summary' : 'Entry excerpt'}</em></span></div><div className="codex-mention-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{state.preview.content}</ReactMarkdown></div><button className="codex-mention-open" type="button" onClick={() => onOpen(state.preview!.entryId)}>Open Codex entry <ChevronRight aria-hidden="true" /></button></div>}
     {!state.loading && !state.preview && !state.error && state.term.entries.length === 1 && <button className="codex-mention-choice-single" type="button" onClick={() => onSelect(state.term.entries[0])}>Load lore preview</button>}
   </section>, document.body)
 }
@@ -2000,13 +2006,26 @@ function GenerateControl({ isGenerating, phase, elapsedSeconds, sttState, ttsSta
 function AutotitlePanel({ state, onAccept, onRegenerate, onStop, onCancel }: { state: AutotitleUiState; onAccept: () => void; onRegenerate: () => void; onStop: () => void; onCancel: () => void }) {
   const label = state.targetType === 'codexEntry' ? 'Codex entry' : state.targetType[0].toUpperCase() + state.targetType.slice(1)
   const diagnostics = state.request?.diagnostics
-  return <section className="autotitle-panel" role="dialog" aria-label={`Autotitle ${state.targetTitle}`}>
-    <header><div><small>Autotitle · {label}</small><strong>{state.targetTitle}</strong></div><button type="button" onClick={onCancel} aria-label="Cancel autotitle"><X aria-hidden="true" /></button></header>
-    {state.status === 'loading' ? <div className="autotitle-suggestion">Generating one suggestion…</div> : state.suggestion ? <div className="autotitle-suggestion">{state.suggestion}</div> : null}
-    {state.error && <p className="autotitle-error" role="alert">{state.error}</p>}
-    {state.request && <><div className="autotitle-meta">Target: {label} · {state.request.targetId}<br />Model: {state.request.model}{diagnostics ? ` · ~${diagnostics.requestTokens.toLocaleString()} input tokens · ${Math.round(diagnostics.usageRatio * 100)}% of usable context` : ''}</div><details className="autotitle-request"><summary>View app-managed request</summary><pre>{`SYSTEM:\n${state.request.systemPrompt}\n\nUSER:\n${state.request.userMessage}`}</pre></details></>}
-    <div className="autotitle-actions">{state.status === 'loading' ? <button type="button" onClick={onStop}><Square aria-hidden="true" /> Stop</button> : <><button type="button" onClick={onCancel}>Cancel</button><button type="button" onClick={onRegenerate}><RefreshCw aria-hidden="true" /> Regenerate</button>{state.suggestion && <button className="primary" type="button" onClick={onAccept}><Check aria-hidden="true" /> Accept</button>}</>}</div>
-  </section>
+  const titleId = `autotitle-title-${state.targetId}`
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      onCancel()
+    }
+    document.addEventListener('keydown', handleEscape)
+    return () => document.removeEventListener('keydown', handleEscape)
+  }, [onCancel])
+
+  return createPortal(<div className="autotitle-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget) onCancel() }}>
+    <section className="autotitle-panel" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <header><div className="autotitle-heading-icon"><WandSparkles aria-hidden="true" /></div><div><small>AI title · {label}</small><strong id={titleId}>{state.targetTitle}</strong></div><button className="autotitle-close" type="button" onClick={onCancel} aria-label="Close title generator" title="Close"><X aria-hidden="true" /></button></header>
+      {state.status === 'loading' ? <div className="autotitle-suggestion loading" aria-live="polite"><small>Suggested title</small><span><RefreshCw aria-hidden="true" /> Generating suggestion…</span></div> : state.suggestion ? <div className="autotitle-suggestion" aria-live="polite"><small>Suggested title</small><strong>{state.suggestion}</strong></div> : null}
+      {state.error && <p className="autotitle-error" role="alert">{state.error}</p>}
+      {state.request && <><div className="autotitle-meta"><span>{label}</span><span>{state.request.model}</span>{diagnostics && <span>~{diagnostics.requestTokens.toLocaleString()} tokens · {Math.round(diagnostics.usageRatio * 100)}% context</span>}</div><details className="autotitle-request"><summary>Request details</summary><pre>{`TARGET: ${state.request.targetId}\n\nSYSTEM:\n${state.request.systemPrompt}\n\nUSER:\n${state.request.userMessage}`}</pre></details></>}
+      <div className="autotitle-actions">{state.status === 'loading' ? <button className="danger" type="button" onClick={onStop}><Square aria-hidden="true" fill="currentColor" /> Stop</button> : <><button type="button" onClick={onCancel}>Cancel</button><button type="button" onClick={onRegenerate}><RefreshCw aria-hidden="true" /> Regenerate</button>{state.suggestion && <button className="primary" type="button" onClick={onAccept}><Check aria-hidden="true" /> Use title</button>}</>}</div>
+    </section>
+  </div>, document.body)
 }
 
 function GenerationDetailsDialog({ details, elapsedSeconds, onClose }: {
