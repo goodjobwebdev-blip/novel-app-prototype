@@ -1,5 +1,8 @@
-import { isCodexEntryArchived, listEntitiesByBook, type ArcEntity, type CodexEntryEntity, type GenerationContextProfile, type GenerationContextType, type StructuralEntity, type SummaryEntity } from './persistence'
+import { getBookContextSettings, isCodexEntryArchived, listEntitiesByBook, type ArcEntity, type CodexEntryEntity, type GenerationContextProfile, type GenerationContextType, type StructuralEntity, type SummaryEntity } from './persistence'
+import { automaticCodexMatches, type CodexTriggerSceneMatch } from './codex-trigger-service'
 import { codexContextRepresentation, type CodexContextRepresentation } from './summary-service'
+
+export type PreparedAutomaticCodex = { entryId: string; title: string; category: string; representation: 'Full entry' | 'Summary'; fallbackReason?: string; matches: CodexTriggerSceneMatch[] }
 
 export type PreparedContextValues = {
   currentSceneText: string
@@ -11,6 +14,7 @@ export type PreparedContextValues = {
   lastSceneTitle: string
   additionalContext: string
   codexRepresentations: CodexContextRepresentation[]
+  automaticCodex: PreparedAutomaticCodex[]
 }
 export type ContextDiagnostics = {
   modelId: string
@@ -107,24 +111,25 @@ function additionalContextOrder(a: AdditionalContextSection, b: AdditionalContex
 }
 
 export async function buildContextValues(options: BuildOptions): Promise<PreparedContextValues> {
-  const entities = await listEntitiesByBook(options.bookId)
+  const [entities, contextSettings] = await Promise.all([listEntitiesByBook(options.bookId), getBookContextSettings(options.bookId)])
   const outline = orderedOutline(options.bookId, entities)
   const scenes = outline.filter((item) => item.type === 'scene')
+  const anchorSceneId = options.currentSceneId || contextSettings.lastOpenedSceneId || undefined
   const outlineIndex = new Map(outline.map((item, index) => [item.id, index]))
-  const currentIndex = options.currentSceneId ? scenes.findIndex((item) => item.id === options.currentSceneId) : -1
+  const currentIndex = anchorSceneId ? scenes.findIndex((item) => item.id === anchorSceneId) : -1
   const currentScene = currentIndex >= 0 ? scenes[currentIndex] : undefined
   const previousScene = currentIndex > 0 ? scenes[currentIndex - 1] : undefined
-  const liveCurrentText = options.currentSceneText ?? String(currentScene?.content ?? '')
+  const liveCurrentText = options.currentSceneText !== undefined && options.currentSceneId === anchorSceneId ? options.currentSceneText : String(currentScene?.content ?? '')
   const previousSceneText = options.type === 'scene' && options.profile.includePreviousSceneWhenEmpty && currentScene && !liveCurrentText.trim()
     ? String(previousScene?.content ?? '')
     : ''
   const automatic = options.type === 'scene'
-    ? automaticSummaries(options.bookId, entities, outline, options.currentSceneId, previousSceneText ? previousScene?.id : undefined)
+    ? automaticSummaries(options.bookId, entities, outline, anchorSceneId, previousSceneText ? previousScene?.id : undefined)
     : { text: '', ids: new Set<string>() }
   const automaticFullIds = new Set<string>()
-  if (options.type === 'scene' && options.currentSceneId) automaticFullIds.add(options.currentSceneId)
+  if (options.type === 'scene' && anchorSceneId) automaticFullIds.add(anchorSceneId)
   if (previousSceneText && previousScene?.id) automaticFullIds.add(previousScene.id)
-  if ((options.type === 'codex' || options.type === 'chat') && options.profile.includeLastScene && options.currentSceneId) automaticFullIds.add(options.currentSceneId)
+  if ((options.type === 'codex' || options.type === 'chat') && options.profile.includeLastScene && anchorSceneId) automaticFullIds.add(anchorSceneId)
 
   const selectedSceneIds = new Set<string>()
   outline.filter((item) => options.profile.structuralIds.includes(item.id)).forEach((item) => descendantScenes(item, outline).forEach((scene) => {
@@ -142,7 +147,7 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
     }))
 
   const summaries = summaryMap(entities)
-  const summarySections: AdditionalContextSection[] = outline.filter((item) => summaryMatches(item, outline, options.currentSceneId, options.profile.summaryRange))
+  const summarySections: AdditionalContextSection[] = outline.filter((item) => summaryMatches(item, outline, anchorSceneId, options.profile.summaryRange))
     .map((item) => summaries.get(item.id)).filter((item): item is SummaryEntity => Boolean(item) && !automatic.ids.has(item!.id))
     .map((summary) => ({
       text: section(summary.title, summary.content),
@@ -161,10 +166,33 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
       typeRank: 2,
       outlineIndex: Number.MAX_SAFE_INTEGER,
     }))
-  const selectedCodex = entities.filter((item): item is CodexEntryEntity => item.type === 'codexEntry' && !isCodexEntryArchived(item) && item.id !== options.currentDocumentId && options.profile.codexEntryIds.includes(item.id))
-  const codexRepresentations = selectedCodex.map((item) => codexContextRepresentation(item, entities))
+  const automaticMatches = automaticCodexMatches({
+    entities,
+    scenes,
+    anchorSceneId,
+    anchorSceneText: liveCurrentText,
+    previousSceneCount: contextSettings.previousScenesForCodexTriggers,
+    excludeEntryId: options.type === 'codex' ? options.currentDocumentId : undefined,
+  })
+  const automaticIds = new Set(automaticMatches.map((match) => match.entry.id))
+  const automaticRepresentations = automaticMatches.map((match) => codexContextRepresentation(match.entry, entities))
+  const automaticCodex: PreparedAutomaticCodex[] = automaticMatches.map((match) => {
+    const representation = automaticRepresentations.find((candidate) => candidate.entryId === match.entry.id)!
+    return { entryId: match.entry.id, title: match.entry.title, category: match.entry.category, representation: representation.representation, fallbackReason: representation.fallbackReason, matches: match.matches }
+  })
+  const automaticText = automaticMatches.map((match) => {
+    const representation = automaticRepresentations.find((candidate) => candidate.entryId === match.entry.id)!
+    return `### ${match.entry.category}: ${match.entry.title}
+
+${representation.content}`
+  }).join('\n\n')
+  const automaticSection = automaticText ? section('Automatic Codex', automaticText) : ''
+
+  const selectedCodex = entities.filter((item): item is CodexEntryEntity => item.type === 'codexEntry' && !isCodexEntryArchived(item) && item.id !== options.currentDocumentId && !automaticIds.has(item.id) && options.profile.codexEntryIds.includes(item.id))
+  const manualRepresentations = selectedCodex.map((item) => codexContextRepresentation(item, entities))
+  const codexRepresentations = [...automaticRepresentations, ...manualRepresentations]
   const codex: AdditionalContextSection[] = selectedCodex.map((item) => {
-    const representation = codexRepresentations.find((candidate) => candidate.entryId === item.id)!
+    const representation = manualRepresentations.find((candidate) => candidate.entryId === item.id)!
     return {
       text: section(`Codex — ${String(item.category ?? 'Other')}: ${item.title ?? 'Untitled'}`, representation.content),
       id: item.id,
@@ -184,7 +212,8 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
     lastSceneText: (options.type === 'codex' || options.type === 'chat') && options.profile.includeLastScene ? String(currentScene?.content ?? '') : '',
     lastSceneTitle: (options.type === 'codex' || options.type === 'chat') && options.profile.includeLastScene ? currentScene?.title ?? '' : '',
     codexRepresentations,
-    additionalContext: [...fullSections, ...summarySections, ...notes, ...codex].sort(additionalContextOrder).map((item) => item.text).join('\n\n'),
+    automaticCodex,
+    additionalContext: [automaticSection, ...[...fullSections, ...summarySections, ...notes, ...codex].sort(additionalContextOrder).map((item) => item.text)].filter(Boolean).join('\n\n'),
   }
 }
 

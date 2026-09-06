@@ -5,6 +5,7 @@ import {
   type AiSettings,
   type BookAiSettings,
 } from './ai-settings'
+import { normalizeCodexTriggerList } from './codex-trigger-service'
 
 type DexieModule = { default: new (name: string) => any }
 
@@ -52,7 +53,7 @@ export type BookMetadata = {
 export type BookEntity = ArcEntity & { type: 'book'; title: string } & Partial<Omit<BookMetadata, 'title'>>
 export type SeriesEntity = ArcEntity & { type: 'series'; title: string }
 export type NoteEntity = ArcEntity & { type: 'note'; bookId: string; parentId: string; title: string; content: string }
-export type CodexEntryEntity = ArcEntity & { type: 'codexEntry'; bookId: string; parentId: string; title: string; category: string; content: string; archivedAt?: number; preferSummaryForContext?: boolean; sourceRevision?: number }
+export type CodexEntryEntity = ArcEntity & { type: 'codexEntry'; bookId: string; parentId: string; title: string; category: string; content: string; archivedAt?: number; preferSummaryForContext?: boolean; sourceRevision?: number; autoIncludeTriggers?: string[] }
 export type SummaryEntity = ArcEntity & {
   type: 'summary'
   bookId: string
@@ -76,6 +77,7 @@ export type GenerationContextProfile = {
 }
 export type BookContextSettings = {
   lastOpenedSceneId: string
+  previousScenesForCodexTriggers: number
   profiles: Record<GenerationContextType, GenerationContextProfile>
 }
 export type BookAiSettingsEntity = ArcEntity & {
@@ -104,6 +106,7 @@ export const defaultGenerationContextProfile: GenerationContextProfile = {
 
 export const defaultBookContextSettings: BookContextSettings = {
   lastOpenedSceneId: '',
+  previousScenesForCodexTriggers: 2,
   profiles: {
     scene: { ...defaultGenerationContextProfile, includePreviousSceneWhenEmpty: true },
     codex: { ...defaultGenerationContextProfile, includeLastScene: true },
@@ -125,8 +128,10 @@ function normalizeContextProfile(value?: Partial<GenerationContextProfile>, defa
 
 function normalizeBookContextSettings(value?: Partial<BookContextSettings>): BookContextSettings {
   const profiles = value?.profiles ?? {} as BookContextSettings['profiles']
+  const previousScenes = Number(value?.previousScenesForCodexTriggers)
   return {
     lastOpenedSceneId: typeof value?.lastOpenedSceneId === 'string' ? value.lastOpenedSceneId : '',
+    previousScenesForCodexTriggers: Number.isSafeInteger(previousScenes) && previousScenes >= 0 ? previousScenes : 2,
     profiles: {
       scene: normalizeContextProfile(profiles.scene, { includePreviousSceneWhenEmpty: true }),
       codex: normalizeContextProfile(profiles.codex, { includeLastScene: true }),
@@ -134,6 +139,24 @@ function normalizeBookContextSettings(value?: Partial<BookContextSettings>): Boo
       chat: normalizeContextProfile(profiles.chat, { includeLastScene: true }),
     },
   }
+}
+
+export const CONTEXT_DEFAULTS_STORAGE_KEY = 'arc-context-defaults-v1'
+
+export function loadDefaultBookContextSettings(): BookContextSettings {
+  if (typeof localStorage === 'undefined') return normalizeBookContextSettings(defaultBookContextSettings)
+  try {
+    const stored = localStorage.getItem(CONTEXT_DEFAULTS_STORAGE_KEY)
+    return stored ? normalizeBookContextSettings(JSON.parse(stored)) : normalizeBookContextSettings(defaultBookContextSettings)
+  } catch {
+    return normalizeBookContextSettings(defaultBookContextSettings)
+  }
+}
+
+export function saveDefaultBookContextSettings(value: BookContextSettings): BookContextSettings {
+  const normalized = normalizeBookContextSettings(value)
+  if (typeof localStorage !== 'undefined') localStorage.setItem(CONTEXT_DEFAULTS_STORAGE_KEY, JSON.stringify(normalized))
+  return normalized
 }
 
 export const PROTOTYPE_BOOK_ID = 'book-city-beneath-tide'
@@ -254,9 +277,9 @@ export async function ensurePrototypeSeed(initialStoryMarkdown: string) {
     const contentEntities: ArcEntity[] = [
       { id: 'note-remembered-doors', type: 'note', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, title: 'Rules of the remembered doors', content: '# Rules of the remembered doors\n\nA door that remembers a name should never be answered alone.', createdAt: now, updatedAt: now },
       { id: 'note-act-two-questions', type: 'note', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, title: 'Questions for Act II', content: '- What does crossing cost Mara?\n- Why did her father hide the map?', createdAt: now, updatedAt: now },
-      { id: 'codex-mara-vale', type: 'codexEntry', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, title: 'Mara Vale', category: 'Character', content: 'A cartographer who inherited her father’s rules and his unfinished map.', createdAt: now, updatedAt: now },
-      { id: 'codex-drowned-quarter', type: 'codexEntry', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, title: 'The Drowned Quarter', category: 'Place', content: 'A district exposed only at low tide.', createdAt: now, updatedAt: now },
-      { id: 'codex-brass-compass', type: 'codexEntry', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, title: 'Brass Compass', category: 'Object', content: 'One of several compasses that point toward remembered doors.', createdAt: now, updatedAt: now },
+      { id: 'codex-mara-vale', type: 'codexEntry', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, title: 'Mara Vale', category: 'Character', content: 'A cartographer who inherited her father’s rules and his unfinished map.', autoIncludeTriggers: ['Mara Vale'], createdAt: now, updatedAt: now },
+      { id: 'codex-drowned-quarter', type: 'codexEntry', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, title: 'The Drowned Quarter', category: 'Place', content: 'A district exposed only at low tide.', autoIncludeTriggers: ['The Drowned Quarter'], createdAt: now, updatedAt: now },
+      { id: 'codex-brass-compass', type: 'codexEntry', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, title: 'Brass Compass', category: 'Object', content: 'One of several compasses that point toward remembered doors.', autoIncludeTriggers: ['Brass Compass'], createdAt: now, updatedAt: now },
     ]
     await db.transaction('rw', db.table('entities'), db.table('meta'), async () => {
       for (const entity of contentEntities) {
@@ -399,7 +422,7 @@ export async function createBook(defaultAiSettings: AiSettings, title = 'Untitle
   const chapter: StructuralEntity = { id: chapterId, type: 'chapter', bookId, parentId: bookId, order: 0, title: 'Chapter 1', createdAt: now, updatedAt: now }
   const scene: StructuralEntity = { id: makeId('scene'), type: 'scene', bookId, parentId: chapterId, order: 0, title: 'Scene 1', content: '', createdAt: now, updatedAt: now }
   const aiSettings = makeBookAiSettingsEntity(bookId, defaultAiSettings, now)
-  const contextSettings = makeBookContextSettingsEntity(bookId, defaultBookContextSettings, now)
+  const contextSettings = makeBookContextSettingsEntity(bookId, loadDefaultBookContextSettings(), now)
   await db.table('entities').bulkPut([book, chapter, scene, aiSettings, contextSettings])
   return { book, chapter, scene }
 }
@@ -518,7 +541,7 @@ export async function createNote(bookId: string, title = 'Untitled Note'): Promi
 export async function createCodexEntry(bookId: string, title = 'Untitled Entry', category = 'Character'): Promise<CodexEntryEntity> {
   const db = await database()
   const now = Date.now()
-  const entry: CodexEntryEntity = { id: makeId('codex'), type: 'codexEntry', bookId, parentId: bookId, title, category, content: '', preferSummaryForContext: false, sourceRevision: now, createdAt: now, updatedAt: now }
+  const entry: CodexEntryEntity = { id: makeId('codex'), type: 'codexEntry', bookId, parentId: bookId, title, category, content: '', autoIncludeTriggers: normalizeCodexTriggerList([title]), preferSummaryForContext: false, sourceRevision: now, createdAt: now, updatedAt: now }
   await db.transaction('rw', db.table('entities'), async () => {
     await db.table('entities').put(entry)
     await touchAncestors(db, bookId, now)
@@ -615,6 +638,21 @@ export async function updateCodexSummaryPreference(id: string, preferSummaryForC
   const now = Date.now()
   const sourceRevision = typeof current.sourceRevision === 'number' ? current.sourceRevision : current.updatedAt
   const updated: CodexEntryEntity = { ...current, sourceRevision, preferSummaryForContext, updatedAt: now }
+  await db.transaction('rw', db.table('entities'), async () => {
+    await db.table('entities').put(updated)
+    await touchAncestors(db, current.bookId, now)
+  })
+  return updated
+}
+
+export async function updateCodexAutoIncludeTriggers(id: string, triggers: string[]): Promise<CodexEntryEntity> {
+  const db = await database()
+  const current = await db.table('entities').get(id) as CodexEntryEntity | undefined
+  if (!current || current.type !== 'codexEntry') throw new Error(`Cannot update missing Codex entry ${id}`)
+  if (isCodexEntryArchived(current)) throw new Error('Restore this archived Codex entry before editing automatic triggers.')
+  const now = Date.now()
+  const sourceRevision = typeof current.sourceRevision === 'number' ? current.sourceRevision : current.updatedAt
+  const updated: CodexEntryEntity = { ...current, sourceRevision, autoIncludeTriggers: normalizeCodexTriggerList(triggers), updatedAt: now }
   await db.transaction('rw', db.table('entities'), async () => {
     await db.table('entities').put(updated)
     await touchAncestors(db, current.bookId, now)
