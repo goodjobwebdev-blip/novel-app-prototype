@@ -1,32 +1,9 @@
-import { bookTemplateValues, renderPromptTemplate, type BookPromptValues } from './prompt-template'
 import type { NormalizedProviderMessage } from './prompt-composition'
-
-export type StoryPromptValues = {
-  book: BookPromptValues
-  sceneText: string
-  scenePov?: string
-  previousSceneText?: string
-  summaryContext?: string
-  additionalContext?: string
-}
-
-export type LorePromptValues = {
-  book: BookPromptValues
-  entryTitle: string
-  entryCategory: string
-  entryContent: string
-  sceneText?: string
-  additionalContext?: string
-}
-
 export type NanoGPTGenerationRequest = {
   apiKey: string
   baseUrl: string
   model: string
-  systemPrompt: string
-  contextMessage?: string
-  userMessage?: string
-  messages?: NormalizedProviderMessage[]
+  messages: NormalizedProviderMessage[]
 }
 
 export type NanoGPTStreamLifecycle = {
@@ -42,62 +19,6 @@ export type NanoGPTStreamMetadata = {
   promptTokens?: number
   completionTokens?: number
   totalTokens?: number
-}
-
-const STORY_BOOK_CONTEXT_SEPARATOR = '\n\n<<<ARC_STORY_BOOK_CONTEXT_V1>>>\n\n'
-const STORY_SCENE_CONTEXT_SEPARATOR = '\n\n<<<ARC_STORY_SCENE_CONTEXT_V1>>>\n\n'
-
-const templateValues = (values: StoryPromptValues): Record<string, string> => ({
-  ...bookTemplateValues(values.book),
-  'scene.text': values.sceneText,
-  'scene.pov': values.scenePov ?? '',
-  'scene.previous_text': values.previousSceneText ?? '',
-  'scene.summary_context': values.summaryContext ?? '',
-  'additional_context': values.additionalContext ?? '',
-})
-
-function storyTemplateEmbedsContext(template: string) {
-  return /{{\s*(?:book\.[\w.]+|scene\.[\w.]+|additional_context)\s*}}/.test(template)
-}
-
-function storyBookContext(values: StoryPromptValues) {
-  const lines = ['# Book context']
-  if (values.book.title.trim()) lines.push(`Title: ${values.book.title}`)
-  if (values.book.series.trim()) lines.push(`Series: ${values.book.series}`)
-  if (values.book.seriesOrder.trim()) lines.push(`Series position: Book ${values.book.seriesOrder}`)
-  if (values.book.overview.trim()) lines.push(`Overview: ${values.book.overview}`)
-  if (values.book.genre.trim()) lines.push(`Genre: ${values.book.genre}`)
-  if (values.book.style.trim()) lines.push(`Book-level style guidance: ${values.book.style}`)
-  if (values.book.pov.trim()) lines.push(`Default point of view: ${values.book.pov}`)
-  if (values.book.tense.trim()) lines.push(`Default narrative tense: ${values.book.tense}`)
-  if (values.book.language.trim()) lines.push(`Language: ${values.book.language}`)
-  return lines.join('\n')
-}
-
-function storySceneContext(values: StoryPromptValues) {
-  const sections: string[] = []
-  if (values.summaryContext?.trim()) sections.push(`# Earlier story context\n\n${values.summaryContext.trim()}`)
-  if (values.previousSceneText?.trim()) sections.push(`# Previous scene\n\n${values.previousSceneText}`)
-  if (values.scenePov?.trim()) sections.push(`# Scene settings\n\nPoint of view: ${values.scenePov}`)
-  sections.push(`# Current manuscript\n\n${values.sceneText}`)
-  return sections.join('\n\n')
-}
-
-export function renderStoryPrompt(template: string, values: StoryPromptValues) {
-  const rendered = renderPromptTemplate(template, templateValues(values))
-  if (storyTemplateEmbedsContext(template)) return rendered
-  return `${rendered}${STORY_BOOK_CONTEXT_SEPARATOR}${storyBookContext(values)}${STORY_SCENE_CONTEXT_SEPARATOR}${storySceneContext(values)}`
-}
-
-export function renderLorePrompt(template: string, values: LorePromptValues) {
-  return renderPromptTemplate(template, {
-    ...bookTemplateValues(values.book),
-    'entry.title': values.entryTitle,
-    'entry.category': values.entryCategory,
-    'entry.content': values.entryContent,
-    'scene.text': values.sceneText ?? '',
-    'additional_context': values.additionalContext ?? '',
-  })
 }
 
 function completionEndpoint(baseUrl: string) {
@@ -180,33 +101,14 @@ function hasMetadata(metadata: NanoGPTStreamMetadata) {
   return Object.values(metadata).some((value) => value !== undefined)
 }
 
-function splitStoryPrompt(systemPrompt: string) {
-  const bookIndex = systemPrompt.indexOf(STORY_BOOK_CONTEXT_SEPARATOR)
-  if (bookIndex < 0) return null
-  const sceneIndex = systemPrompt.indexOf(STORY_SCENE_CONTEXT_SEPARATOR, bookIndex + STORY_BOOK_CONTEXT_SEPARATOR.length)
-  if (sceneIndex < 0) return null
-  return {
-    systemPrompt: systemPrompt.slice(0, bookIndex),
-    bookContext: systemPrompt.slice(bookIndex + STORY_BOOK_CONTEXT_SEPARATOR.length, sceneIndex),
-    sceneContext: systemPrompt.slice(sceneIndex + STORY_SCENE_CONTEXT_SEPARATOR.length),
-  }
-}
-
-export function nanoGPTCompletionMessages(request: Pick<NanoGPTGenerationRequest, 'systemPrompt' | 'contextMessage' | 'userMessage' | 'messages'>): NormalizedProviderMessage[] {
-  if (request.messages) return request.messages.map((message) => ({
+export function nanoGPTCompletionMessages(request: Pick<NanoGPTGenerationRequest, 'messages'>) {
+  return request.messages.map((message) => ({
     ...message,
     ...(message.tool_calls ? { tool_calls: message.tool_calls.map((call) => ({ ...call, function: { ...call.function } })) } : {}),
   }))
-  const storyPrompt = splitStoryPrompt(request.systemPrompt)
-  const messages: NormalizedProviderMessage[] = [{ role: 'system', content: storyPrompt?.systemPrompt ?? request.systemPrompt }]
-  if (storyPrompt?.bookContext.trim()) messages.push({ role: 'user', content: storyPrompt.bookContext })
-  if (request.contextMessage?.trim()) messages.push({ role: 'user', content: request.contextMessage })
-  if (storyPrompt?.sceneContext.trim()) messages.push({ role: 'user', content: storyPrompt.sceneContext })
-  if (request.userMessage?.trim()) messages.push({ role: 'user', content: request.userMessage })
-  return messages
 }
 
-export function nanoGPTRequestText(request: Pick<NanoGPTGenerationRequest, 'systemPrompt' | 'contextMessage' | 'userMessage' | 'messages'>) {
+export function nanoGPTRequestText(request: Pick<NanoGPTGenerationRequest, 'messages'>) {
   return JSON.stringify({ messages: nanoGPTCompletionMessages(request) })
 }
 

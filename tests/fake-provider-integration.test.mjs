@@ -32,11 +32,11 @@ test('AI settings expose one local Fake model without API key or endpoint fields
 
 test('Story, Codex, and Summary use the shared text provider boundary and diagnostics serialize that same message representation', () => {
   assert.match(workspace, /fetchTextProviderModelContextLength/)
-  assert.match(workspace, /const requestText = textProviderRequestText\(\{ systemPrompt, contextMessage, userMessage \}\)/)
+  assert.match(workspace, /const requestText = textProviderRequestText\(\{ normalizedRequest \}\)/)
   assert.match(workspace, /streamTextProviderCompletion\(\{[\s\S]*task: isCodex \? 'codex' : 'story'/)
   assert.match(workspace, /streamTextProviderCompletion\(\{[\s\S]*task: 'summary'/)
-  assert.match(textProvider, /return JSON\.stringify\(\{ messages: textProviderMessages\(request\) \}\)/)
-  assert.match(textProvider, /nanoGPTCompletionMessages\(request\)/)
+  assert.match(textProvider, /return normalizedRequestDiagnosticText\(request\.normalizedRequest\)/)
+  assert.match(textProvider, /providerMessagesFromNormalized\(request\.normalizedRequest/)
 })
 
 test('Autotitle accepts Fake and routes through the same local text provider boundary', () => {
@@ -51,7 +51,7 @@ test('Chat loads Fake locally, skips key validation, and dispatches Fake before 
   const fakeBranch = chatApi.indexOf("if (request.provider === 'fake')")
   const networkFetch = chatApi.indexOf('const response = await fetch(')
   assert.ok(fakeBranch >= 0 && networkFetch > fakeBranch)
-  assert.match(chatApi, /const providerMessages = cacheFriendlyMessages\(request\.messages\)[\s\S]*streamFakeProvider\(\{[\s\S]*messages: providerMessages,[\s\S]*tools: request\.tools,[\s\S]*thinking: request\.thinking/)
+  assert.match(chatApi, /const providerMessages = providerMessagesFromNormalized\(request\.normalizedRequest[\s\S]*const providerTools = request\.normalizedRequest\.providerTools[\s\S]*streamFakeProvider\(\{[\s\S]*messages: providerMessages,[\s\S]*tools: providerTools,[\s\S]*thinking: request\.thinking/)
 })
 
 test('unsupported real providers remain unsupported for Story/Codex/Summary while Chat keeps existing provider behavior', () => {

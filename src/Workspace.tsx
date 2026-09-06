@@ -51,11 +51,12 @@ import { canUnmountEditor } from './editor-unmount-guard'
 import { summaryGenerationOwnsUi, type SummaryGenerationOwner } from './summary-generation-owner'
 import ExpandableTextInput from './ExpandableTextInput'
 import MarkdownEditor, { type CodexMentionClick, type GenerationContext, type MarkdownEditorHandle } from './MarkdownEditor'
-import { renderLorePrompt, type NanoGPTStreamMetadata } from './nanogpt'
+import { type NanoGPTStreamMetadata } from './nanogpt'
 import { fetchTextProviderModelContextLength, streamTextProviderCompletion, textProviderRequestText } from './text-provider'
-import { assertPromptTemplateValid, generationInstructionMessage, type BookPromptValues } from './prompt-template'
+import { assertPromptTemplateValid, type BookPromptValues } from './prompt-template'
 import { assembleStoryGenerationRequest } from './story-request'
-import type { NormalizedProviderMessage } from './prompt-composition'
+import { assembleCodexGenerationRequest, assembleSummaryGenerationRequest } from './scope-request'
+import type { NormalizedAssembledRequest } from './prompt-composition'
 import { buildContextValues, generationContextDiagnostics } from './context-service'
 import {
   PROTOTYPE_BOOK_ID,
@@ -111,7 +112,7 @@ import {
   type StructuralEntityType,
   type SummaryEntity,
 } from './persistence'
-import { buildSummarySource, getSummaryStateMap, renderSummaryPrompt, summaryStateForSource, type SummaryState } from './summary-service'
+import { buildSummarySource, getSummaryStateMap, summaryStateForSource, type SummaryState } from './summary-service'
 import { buildCodexMentionIndex, type CodexMentionEntry, type CodexMentionTerm } from './codex-trigger-service'
 import { generateAutotitleSuggestion, prepareAutotitleRequest, type AutotitleEntity, type AutotitleRequest, type AutotitleTargetType } from './autotitle-service'
 import { dismissTtsState, estimateSpeechRequest, fetchSpeechModels, getTtsState, pauseTtsSession, resumeTtsSession, startTtsSession, stopTtsSession, subscribeTtsState, type TtsState } from './tts-service'
@@ -140,10 +141,7 @@ type GenerationRequestSnapshot = {
   provider: AiSettings['provider']
   baseUrl: string
   model: string
-  systemPrompt: string
-  contextMessage: string
-  userMessage: string
-  messages?: NormalizedProviderMessage[]
+  normalizedRequest: NormalizedAssembledRequest
   estimatedRequestTokens?: number
   modelContextTokens?: number
 }
@@ -1231,8 +1229,10 @@ export default function Workspace() {
       return
     }
     try {
-      assertPromptTemplateValid(isCodex ? settings.prompts.lore : settings.prompts.story, isCodex ? 'lore' : 'story')
-      if (!isCodex) settings.promptCompositions.story.predefinedMessages.filter((message) => message.enabled).forEach((message) => assertPromptTemplateValid(message.template, 'story'))
+      const scope = isCodex ? 'lore' : 'story'
+      const composition = isCodex ? settings.promptCompositions.lore : settings.promptCompositions.story
+      assertPromptTemplateValid(composition.systemPrompt, scope)
+      composition.predefinedMessages.filter((message) => message.enabled).forEach((message) => assertPromptTemplateValid(message.template, scope))
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Fix the invalid prompt in Book AI settings before generating.')
       return
@@ -1278,31 +1278,31 @@ export default function Workspace() {
             : { ...settings, mainModelContextLength: modelContextLength })
         }
         const instruction = isCodex ? lorePrompt : arcPrompt
-        const promptTemplate = isCodex ? settings.prompts.lore : settings.prompts.story
         const promptBook = { ...toBookPromptValues(currentBook, seriesList), responseLength: settings.responseLength }
-        const storyRequest = isCodex ? undefined : assembleStoryGenerationRequest({
-          composition: settings.promptCompositions.story,
-          book: promptBook,
-          responseLength: settings.responseLength,
-          sceneText: context.sceneText,
-          insertionPosition: context.insertionPosition,
-          scenePov: scenePovRef.current || undefined,
-          context: prepared,
-          instruction,
-        })
-        const systemPrompt = isCodex
-          ? renderLorePrompt(settings.prompts.lore, { book: promptBook, entryTitle: activeDocument.title, entryCategory: activeDocument.category, entryContent: context.sceneText, sceneText: prepared.lastSceneText, additionalContext: prepared.additionalContext })
-          : ''
-        const userMessage = isCodex ? generationInstructionMessage(promptTemplate, settings.responseLength, instruction.trim() || 'Create a complete Codex entry.') : ''
-        const selectedContextIsTemplated = /{{\s*additional_context\s*}}/.test(promptTemplate)
-        const contextMessage = isCodex && !selectedContextIsTemplated && prepared.additionalContext.trim()
-          ? `# Additional context\n\n${prepared.additionalContext}`
-          : ''
+        const normalizedRequest = isCodex
+          ? assembleCodexGenerationRequest({
+              composition: settings.promptCompositions.lore,
+              book: promptBook,
+              context: prepared,
+              entryId: activeDocument.id,
+              entryTitle: activeDocument.title,
+              entryCategory: activeDocument.category,
+              entryContent: context.sceneText,
+              instruction: instruction.trim() || 'Create a complete Codex entry.',
+            })
+          : assembleStoryGenerationRequest({
+              composition: settings.promptCompositions.story,
+              book: promptBook,
+              responseLength: settings.responseLength,
+              sceneText: context.sceneText,
+              insertionPosition: context.insertionPosition,
+              context: prepared,
+              scenePov: scenePovRef.current || undefined,
+              instruction,
+            })
         const effectiveLimit = isCodex && settings.codexModel.trim() ? settings.codexEffectiveContextLimit : settings.mainEffectiveContextLimit
-        const messages = storyRequest?.providerMessages
-        const requestText = textProviderRequestText({ systemPrompt, contextMessage, userMessage })
-        const normalizedRequestText = messages ? textProviderRequestText({ systemPrompt, contextMessage, userMessage, messages }) : requestText
-        const diagnostics = generationContextDiagnostics(selectedModel, modelContextLength, effectiveLimit, normalizedRequestText)
+        const requestText = textProviderRequestText({ normalizedRequest })
+        const diagnostics = generationContextDiagnostics(selectedModel, modelContextLength, effectiveLimit, requestText)
         if (!diagnostics.limitValid) {
           editor.finishGeneration('error')
           showToast(diagnostics.limitError ?? 'The effective context cap is invalid. Check Book AI settings.')
@@ -1322,10 +1322,7 @@ export default function Workspace() {
           provider: settings.provider,
           baseUrl: settings.baseUrl,
           model: selectedModel,
-          systemPrompt,
-          contextMessage,
-          userMessage,
-          ...(messages ? { messages } : {}),
+          normalizedRequest,
           estimatedRequestTokens: diagnostics.requestTokens,
           modelContextTokens: diagnostics.modelContextTokens,
         }
@@ -1364,10 +1361,7 @@ export default function Workspace() {
         apiKey: settings.apiKey.trim(),
         baseUrl: requestSnapshot.baseUrl,
         model: requestSnapshot.model,
-        systemPrompt: requestSnapshot.systemPrompt,
-        contextMessage: requestSnapshot.contextMessage,
-        userMessage: requestSnapshot.userMessage,
-        messages: requestSnapshot.messages,
+        normalizedRequest: requestSnapshot.normalizedRequest,
       }, (chunk) => {
         if (!controller.signal.aborted) setGenerationActivityPhase('writing')
         renderer.push(chunk)
@@ -1496,6 +1490,15 @@ export default function Workspace() {
         thoughts: '',
       })
 
+      const normalizedRequest = assembleSummaryGenerationRequest({
+        composition: settings.promptCompositions.summarize,
+        book: { ...toBookPromptValues(book, seriesList), responseLength: settings.responseLength },
+        sourceId: source.source.id,
+        sourceTitle: source.source.title,
+        sourceType: summary.sourceType,
+        sourceContent: source.content,
+        previousSummary: summary.content,
+      })
       let generated = ''
       await streamTextProviderCompletion({
         provider: settings.provider,
@@ -1503,8 +1506,7 @@ export default function Workspace() {
         apiKey: settings.apiKey.trim(),
         baseUrl: settings.baseUrl,
         model: settings.supportModel,
-        systemPrompt: renderSummaryPrompt(settings.prompts.summarize, summary.sourceType, summary.content, toBookPromptValues(book, seriesList)),
-        userMessage: `${summary.content.trim() ? `# Existing summary\n\n${summary.content.trim()}\n\n` : ''}# Source material\n\n${source.content}\n\nReturn only the updated summary as Markdown.`,
+        normalizedRequest,
       }, (chunk) => {
         if (!controller.signal.aborted) setGenerationActivityPhase('writing')
         generated += chunk

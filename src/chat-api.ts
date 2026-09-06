@@ -1,5 +1,6 @@
 import type { AiProvider } from './ai-settings'
 import { streamFakeProvider } from './fake-provider'
+import { providerMessagesFromNormalized, type NormalizedAssembledRequest } from './prompt-composition'
 
 export type ChatToolCall = {
   id: string
@@ -29,9 +30,8 @@ export type ChatCompletionRequest = {
   baseUrl: string
   provider: AiProvider
   model: string
-  messages: ChatCompletionMessage[]
+  normalizedRequest: NormalizedAssembledRequest
   thinking: boolean
-  tools?: ChatToolDefinition[]
 }
 
 export type ChatCompletionChunk = {
@@ -138,54 +138,20 @@ function hasUsage(usage: ChatCompletionUsage) {
   return Object.values(usage).some((value) => value !== undefined)
 }
 
-function stableProposalItems(items: string, statuses: string[]) {
-  const statusPattern = new RegExp(`: (?:${statuses.join('|')})$`)
-  return items.split('; ').map((item) => item.replace(statusPattern, '')).join('; ')
-}
-
-function stabilizeProposalHistory(content: string) {
-  return content
-    .replace(/\[Workspace edit proposals: ([^\]]*)\]/g, (_match, items: string) => `[Workspace edit proposals: ${stableProposalItems(items, ['proposed', 'applied', 'rejected', 'stale'])}]`)
-    .replace(/\[Codex creation proposals: ([^\]]*)\]/g, (_match, items: string) => `[Codex creation proposals: ${stableProposalItems(items, ['proposed', 'created', 'rejected', 'duplicate'])}]`)
-    .replace(/\[Outline proposals: ([^\]]*)\]/g, (_match, items: string) => `[Outline proposals: ${stableProposalItems(items, ['proposed', 'applied', 'rejected', 'stale'])}]`)
-    .replace(/\[Note\/Codex proposals: ([^\]]*)\]/g, (_match, items: string) => `[Note/Codex proposals: ${stableProposalItems(items, ['proposed', 'applied', 'rejected', 'stale'])}]`)
-}
-
-function reorderSelectedBookContext(content: string) {
-  const header = '# Selected book context\n\n'
-  if (!content.startsWith(header)) return content
-  const additionalMarker = '\n\n# Additional context\n\n'
-  const additionalIndex = content.lastIndexOf(additionalMarker)
-  if (additionalIndex < header.length) return content
-  const firstSection = content.slice(header.length, additionalIndex)
-  if (!firstSection.startsWith('# Current scene')) return content
-  const additionalSection = content.slice(additionalIndex + 2)
-  return `${header}${additionalSection}\n\n${firstSection}`
-}
-
-function cacheFriendlyMessages(messages: ChatCompletionMessage[]) {
-  return messages.map((message) => {
-    if (!message.content) return message
-    let content = message.content
-    if (message.role === 'system') content = reorderSelectedBookContext(content)
-    if (message.role === 'assistant') content = stabilizeProposalHistory(content)
-    return content === message.content ? message : { ...message, content }
-  })
-}
-
 export async function streamChatCompletion(
   request: ChatCompletionRequest,
   onChunk: (chunk: ChatCompletionChunk) => void,
   signal: AbortSignal,
   onResponse?: () => void,
 ): Promise<ChatCompletionResult> {
-  const providerMessages = cacheFriendlyMessages(request.messages)
+  const providerMessages = providerMessagesFromNormalized(request.normalizedRequest, { system: true, user: true, assistant: true, tool: true }) as ChatCompletionMessage[]
+  const providerTools = request.normalizedRequest.providerTools as ChatToolDefinition[]
   if (request.provider === 'fake') {
     const result = await streamFakeProvider({
       task: 'chat',
       model: request.model,
       messages: providerMessages,
-      tools: request.tools,
+      tools: providerTools,
       thinking: request.thinking,
     }, {
       onResponse,
@@ -201,8 +167,8 @@ export async function streamChatCompletion(
     stream: true,
   }
   if (request.provider !== 'compatible') body.stream_options = { include_usage: true }
-  if (request.tools?.length) {
-    body.tools = request.tools
+  if (providerTools.length) {
+    body.tools = providerTools
     body.tool_choice = 'auto'
   }
   if (request.thinking && request.provider === 'nanogpt') {

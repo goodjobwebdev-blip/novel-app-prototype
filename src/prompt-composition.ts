@@ -593,6 +593,13 @@ export function assembleNormalizedRequest(parts: NormalizedRequestPart[], option
   }
 }
 
+export function appendNormalizedRequestPart(request: NormalizedAssembledRequest, part: NormalizedRequestPart) {
+  return assembleNormalizedRequest([...request.parts, part], {
+    structuredParts: request.structuredParts,
+    dynamicSourceDedupe: request.dynamicSourceDedupe,
+  })
+}
+
 export function assembleCompositionRequest(input: {
   composition: PromptComposition
   values: Record<string, string>

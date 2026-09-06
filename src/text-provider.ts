@@ -2,32 +2,28 @@ import type { AiProvider } from './ai-settings'
 import { FAKE_PROVIDER_MODEL, streamFakeProvider, type FakeProviderMessage } from './fake-provider'
 import {
   fetchNanoGPTModelContextLength,
-  nanoGPTCompletionMessages,
   streamNanoGPTCompletion,
-  type NanoGPTGenerationRequest,
   type NanoGPTStreamLifecycle,
 } from './nanogpt'
+import { normalizedRequestDiagnosticText, providerMessagesFromNormalized, type NormalizedAssembledRequest } from './prompt-composition'
 
 export type TextProviderTask = 'story' | 'codex' | 'summary' | 'autotitle'
-export type TextProviderGenerationRequest = NanoGPTGenerationRequest & {
+export type TextProviderGenerationRequest = {
   provider: AiProvider
   task: TextProviderTask
+  apiKey: string
+  baseUrl: string
+  model: string
+  normalizedRequest: NormalizedAssembledRequest
   thinking?: boolean
 }
 
-function fakeMessages(request: Pick<TextProviderGenerationRequest, 'systemPrompt' | 'contextMessage' | 'userMessage' | 'messages'>): FakeProviderMessage[] {
-  return nanoGPTCompletionMessages(request).map((message) => ({
-    ...message,
-    ...(message.tool_calls ? { tool_calls: message.tool_calls.map((call) => ({ ...call, function: { ...call.function } })) } : {}),
-  }))
+export function textProviderMessages(request: Pick<TextProviderGenerationRequest, 'normalizedRequest'>): FakeProviderMessage[] {
+  return providerMessagesFromNormalized(request.normalizedRequest, { system: true, user: true, assistant: true }).map((message) => ({ ...message }))
 }
 
-export function textProviderMessages(request: Pick<TextProviderGenerationRequest, 'systemPrompt' | 'contextMessage' | 'userMessage' | 'messages'>) {
-  return fakeMessages(request)
-}
-
-export function textProviderRequestText(request: Pick<TextProviderGenerationRequest, 'systemPrompt' | 'contextMessage' | 'userMessage' | 'messages'>) {
-  return JSON.stringify({ messages: textProviderMessages(request) })
+export function textProviderRequestText(request: Pick<TextProviderGenerationRequest, 'normalizedRequest'>) {
+  return normalizedRequestDiagnosticText(request.normalizedRequest)
 }
 
 export async function fetchTextProviderModelContextLength(request: Pick<TextProviderGenerationRequest, 'provider' | 'apiKey' | 'baseUrl' | 'model'>) {
@@ -57,6 +53,15 @@ export async function streamTextProviderCompletion(
   if (request.provider !== 'nanogpt') {
     throw new Error('Text generation currently supports NanoGPT or Fake (testing) only.')
   }
-  await streamNanoGPTCompletion(request, onChunk, signal, lifecycle)
+  const messages = textProviderMessages(request)
+  if (messages.some((message) => message.role === 'tool' || message.content === null)) {
+    throw new Error('This text-generation provider cannot represent tool messages or null content.')
+  }
+  await streamNanoGPTCompletion({
+    apiKey: request.apiKey,
+    baseUrl: request.baseUrl,
+    model: request.model,
+    messages: messages.map((message) => ({ role: message.role as 'system' | 'user' | 'assistant', content: message.content as string })),
+  }, onChunk, signal, lifecycle)
   return { toolCalls: [], finishReason: 'stop' as const }
 }
