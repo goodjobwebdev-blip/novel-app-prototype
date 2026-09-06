@@ -22,6 +22,7 @@ jobs:
           node-version: 24
       - name: Apply issue 78 implementation
         run: |
+          python .github/scripts/issue78_pre.py
           python .github/scripts/issue78.py
           python .github/scripts/issue78_fix.py
       - name: Install dependencies
@@ -33,7 +34,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          rm .github/scripts/issue78.py .github/scripts/issue78_fix.py .github/workflows/codex-issue-78.yml .github/issue78-trigger.txt
+          rm .github/scripts/issue78_pre.py .github/scripts/issue78.py .github/scripts/issue78_fix.py .github/workflows/codex-issue-78.yml .github/issue78-trigger.txt
           git add -A
           git commit -m "Implement direct autotitle generation"
           git push origin HEAD:codex/issue-78-autotitle
