@@ -1359,7 +1359,7 @@ function LoreMentionPopover({ state, onClose, onSelect, onOpen }: {
   const top = preferBelow ? state.anchor.bottom + 8 : Math.max(12, state.anchor.top - 292)
   const selected = state.term.entries.find((entry) => entry.id === state.selectedId)
 
-  return createPortal(<section ref={panelRef} className="codex-mention-popover" role="dialog" aria-label={`Lore preview for ${state.term.text}`} style={{ left, top, width }}>
+  return createPortal(<section ref={panelRef} className="codex-mention-popover" role="dialog" aria-label={`Lore preview for ${state.term.text}`} style={{ left, top, width, maxHeight: Math.max(180, viewportHeight - top - 12) }}>
     <header><div><small>Codex mention</small><strong>{state.term.text}</strong></div><button type="button" onClick={onClose} aria-label="Close lore preview"><X aria-hidden="true" /></button></header>
     {state.term.entries.length > 1 && <div className="codex-mention-choices"><p>{selected ? 'Other matching entries' : 'Multiple Codex entries use this name. Choose one:'}</p>{state.term.entries.map((entry) => <button key={entry.id} className={entry.id === state.selectedId ? 'selected' : ''} type="button" onClick={() => onSelect(entry)}><span><strong>{entry.title}</strong><small>{entry.category}</small></span>{entry.id === state.selectedId && <Check aria-hidden="true" />}</button>)}</div>}
     {state.loading && <p className="codex-mention-loading">Loading lore…</p>}
