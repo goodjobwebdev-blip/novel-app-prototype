@@ -29,6 +29,8 @@ import {
   Plus,
   Redo2,
   RefreshCw,
+  RotateCcw,
+  RotateCw,
   Search,
   Send,
   Settings2,
@@ -116,7 +118,7 @@ import {
 import { buildSummarySource, getSummaryStateMap, summaryStateForSource, type SummaryState } from './summary-service'
 import { buildCodexMentionIndex, type CodexMentionEntry, type CodexMentionTerm } from './codex-trigger-service'
 import { generateAutotitleSuggestion, prepareAutotitleRequest, type AutotitleEntity, type AutotitleRequest, type AutotitleTargetType } from './autotitle-service'
-import { dismissTtsState, estimateSpeechRequest, fetchSpeechModels, getTtsState, pauseTtsSession, resumeTtsSession, startTtsSession, stopTtsSession, subscribeTtsState, type TtsState } from './tts-service'
+import { dismissTtsState, estimateSpeechRequest, fetchSpeechModels, getTtsState, pauseTtsSession, replayTtsSession, resumeTtsSession, seekTtsBy, seekTtsTo, startTtsSession, stopTtsSession, subscribeTtsState, type TtsState } from './tts-service'
 import { cancelSttSession, dismissSttState, getSttState, normalizeTranscriptForInsertion, startSttSession, stopSttSession, subscribeSttState, type SttState } from './stt-service'
 import { ChatSidebar, ChatView } from './ChatFeature'
 import './generation-controls.css'
@@ -1864,19 +1866,39 @@ function TtsStatusBar() {
               : tts.status === 'stopped' ? 'Stopped'
                 : tts.status === 'complete' ? 'Complete'
                 : 'Failed'
-  return <section className={`tts-status ${tts.status}`} aria-live="polite">
-    <Volume2 aria-hidden="true" />
-    <div className="tts-status-copy">
-      <strong>{tts.label || 'Read aloud'}</strong>
-      <small>{label}{tts.chunkCount ? ` · ${Math.max(1, tts.chunkIndex || 1)}/${tts.chunkCount}` : ''}{tts.error ? ` · ${tts.error}` : ''}</small>
+  const playbackActive = tts.status === 'playing' || tts.status === 'paused'
+  const showTimeline = playbackActive || Boolean(tts.canReplay && tts.duration)
+  const currentTime = Math.max(0, tts.currentTime ?? 0)
+  const duration = Math.max(0, tts.duration ?? 0)
+  return <section className={`tts-status tts-player ${tts.status}`} role="region" aria-label="Text to speech player">
+    <div className="tts-player-main">
+      <Volume2 aria-hidden="true" />
+      <div className="tts-status-copy">
+        <strong>{tts.label || 'Read aloud'}</strong>
+        <small aria-live="polite">{label}{tts.chunkCount ? ` · Part ${Math.max(1, tts.chunkIndex || 1)} of ${tts.chunkCount}` : ''}{tts.error ? ` · ${tts.error}` : ''}</small>
+      </div>
+      <div className="tts-status-actions">
+        {tts.status === 'playing' && <button className="tts-playback-toggle" type="button" onClick={pauseTtsSession} aria-label="Pause audio" title="Pause"><Pause aria-hidden="true" /></button>}
+        {tts.status === 'paused' && <button className="tts-playback-toggle" type="button" onClick={() => { void resumeTtsSession() }} aria-label="Resume audio" title="Resume"><Play aria-hidden="true" fill="currentColor" /></button>}
+        {tts.canReplay && !playbackActive && <button className="tts-playback-toggle" type="button" onClick={() => { void replayTtsSession() }} aria-label="Replay generated audio" title="Replay"><RotateCcw aria-hidden="true" /></button>}
+        {!['complete','failed','stopped'].includes(tts.status) && <button className="tts-stop" type="button" onClick={stopTtsSession} aria-label="Stop audio" title="Stop"><Square aria-hidden="true" fill="currentColor" /></button>}
+        {['complete','failed','stopped'].includes(tts.status) && <button type="button" onClick={dismissTtsState} aria-label="Dismiss audio status" title="Dismiss"><X aria-hidden="true" /></button>}
+      </div>
     </div>
-    <div className="tts-status-actions">
-      {tts.status === 'playing' && <button className="tts-playback-toggle" type="button" onClick={pauseTtsSession} aria-label="Pause audio" title="Pause"><Pause aria-hidden="true" /></button>}
-      {tts.status === 'paused' && <button className="tts-playback-toggle" type="button" onClick={() => { void resumeTtsSession() }} aria-label="Resume audio" title="Resume"><Play aria-hidden="true" fill="currentColor" /></button>}
-      {!['complete','failed','stopped'].includes(tts.status) && <button className="tts-stop" type="button" onClick={stopTtsSession} aria-label="Stop audio" title="Stop"><Square aria-hidden="true" fill="currentColor" /></button>}
-      {['complete','failed','stopped'].includes(tts.status) && <button type="button" onClick={dismissTtsState} aria-label="Dismiss audio status" title="Dismiss"><X aria-hidden="true" /></button>}
-    </div>
+    {showTimeline && <div className="tts-playback-timeline">
+      <button type="button" onClick={() => seekTtsBy(-10)} disabled={!playbackActive} aria-label="Go back 10 seconds" title="Back 10 seconds"><RotateCcw aria-hidden="true" /><span>10</span></button>
+      <time>{formatPlaybackTime(currentTime)}</time>
+      <input type="range" min="0" max={Math.max(duration, 0.1)} step="0.1" value={Math.min(currentTime, Math.max(duration, 0.1))} disabled={!playbackActive || !duration} onChange={(event) => seekTtsTo(Number(event.target.value))} aria-label={`Audio position in part ${Math.max(1, tts.chunkIndex || 1)}`} aria-valuetext={`${formatPlaybackTime(currentTime)} of ${duration ? formatPlaybackTime(duration) : 'unknown duration'}`} />
+      <time>{duration ? formatPlaybackTime(duration) : '–:––'}</time>
+      <button type="button" onClick={() => seekTtsBy(10)} disabled={!playbackActive} aria-label="Go forward 10 seconds" title="Forward 10 seconds"><RotateCw aria-hidden="true" /><span>10</span></button>
+    </div>}
   </section>
+}
+
+function formatPlaybackTime(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00'
+  const whole = Math.floor(seconds)
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`
 }
 
 function formatGenerationTime(seconds: number) {
