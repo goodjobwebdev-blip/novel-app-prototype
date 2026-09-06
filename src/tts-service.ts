@@ -286,7 +286,13 @@ export async function startTtsSession(settings: SpeechSettings, markdown: string
   activeController = controller
   emit({ status: 'preparing', label, chunkIndex: 0, chunkCount: 0 })
   let models: SpeechModel[] = []
-  try { models = await fetchSpeechModels(settings.apiKey, controller.signal) } catch { /* generation can still use saved model */ }
+  try {
+    models = await fetchSpeechModels(settings.apiKey, controller.signal)
+  } catch (error) {
+    if (controller.signal.aborted || currentSession !== sessionId) return
+    // A catalog failure is recoverable because generation can still use the saved model.
+  }
+  if (controller.signal.aborted || currentSession !== sessionId) return
   const modelInfo = models.find((model) => model.id === settings.model)
   if (models.length && !modelInfo) {
     activeController = null
