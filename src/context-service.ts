@@ -1,4 +1,5 @@
-import { isCodexEntryArchived, listEntitiesByBook, type ArcEntity, type GenerationContextProfile, type GenerationContextType, type StructuralEntity, type SummaryEntity } from './persistence'
+import { isCodexEntryArchived, listEntitiesByBook, type ArcEntity, type CodexEntryEntity, type GenerationContextProfile, type GenerationContextType, type StructuralEntity, type SummaryEntity } from './persistence'
+import { codexContextRepresentation, type CodexContextRepresentation } from './summary-service'
 
 export type PreparedContextValues = {
   currentSceneText: string
@@ -9,6 +10,7 @@ export type PreparedContextValues = {
   lastSceneText: string
   lastSceneTitle: string
   additionalContext: string
+  codexRepresentations: CodexContextRepresentation[]
 }
 export type ContextDiagnostics = {
   modelId: string
@@ -159,15 +161,19 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
       typeRank: 2,
       outlineIndex: Number.MAX_SAFE_INTEGER,
     }))
-  const codex: AdditionalContextSection[] = entities.filter((item) => item.type === 'codexEntry' && !isCodexEntryArchived(item) && item.id !== options.currentDocumentId && options.profile.codexEntryIds.includes(item.id))
-    .map((item) => ({
-      text: section(`Codex — ${String(item.category ?? 'Other')}: ${item.title ?? 'Untitled'}`, String(item.content ?? '').trim() || '_No description provided._'),
+  const selectedCodex = entities.filter((item): item is CodexEntryEntity => item.type === 'codexEntry' && !isCodexEntryArchived(item) && item.id !== options.currentDocumentId && options.profile.codexEntryIds.includes(item.id))
+  const codexRepresentations = selectedCodex.map((item) => codexContextRepresentation(item, entities))
+  const codex: AdditionalContextSection[] = selectedCodex.map((item) => {
+    const representation = codexRepresentations.find((candidate) => candidate.entryId === item.id)!
+    return {
+      text: section(`Codex — ${String(item.category ?? 'Other')}: ${item.title ?? 'Untitled'}`, representation.content),
       id: item.id,
       updatedAt: item.updatedAt,
       stabilityRank: 1,
       typeRank: 0,
       outlineIndex: Number.MAX_SAFE_INTEGER,
-    }))
+    }
+  })
 
   return {
     currentSceneText: liveCurrentText,
@@ -177,6 +183,7 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
     summaryContext: automatic.text,
     lastSceneText: (options.type === 'codex' || options.type === 'chat') && options.profile.includeLastScene ? String(currentScene?.content ?? '') : '',
     lastSceneTitle: (options.type === 'codex' || options.type === 'chat') && options.profile.includeLastScene ? currentScene?.title ?? '' : '',
+    codexRepresentations,
     additionalContext: [...fullSections, ...summarySections, ...notes, ...codex].sort(additionalContextOrder).map((item) => item.text).join('\n\n'),
   }
 }

@@ -1,0 +1,13 @@
+.codex-summary-status.missing { opacity: .55; }
+.codex-summary-status.outdated { opacity: .78; }
+.document-title-actions { display: flex; align-items: center; gap: 6px; }
+.codex-summary-preference { display: flex !important; align-items: flex-start; gap: 9px; margin-top: 10px; }
+.codex-summary-preference input { margin-top: 3px; }
+.codex-summary-preference span { display: grid; gap: 2px; }
+.codex-summary-preference small { opacity: .68; line-height: 1.4; }
+.summary-context-indicator { width: fit-content; margin: 0 auto 10px; padding: 5px 9px; border: 1px solid rgba(255,255,255,.1); border-radius: 999px; font-size: .72rem; opacity: .72; }
+.codex-context-representations { display: grid; gap: 6px; margin-bottom: 12px; padding: 10px 12px; border: 1px solid rgba(255,255,255,.09); border-radius: 10px; }
+.codex-context-representations > strong { font-size: .78rem; }
+.codex-context-representations > span { display: flex; justify-content: space-between; gap: 12px; font-size: .76rem; }
+.codex-context-representations em { font-style: normal; opacity: .68; }
+@media (max-width: 640px) { .codex-context-representations > span { align-items: flex-start; flex-direction: column; gap: 2px; } }
