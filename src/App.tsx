@@ -58,7 +58,7 @@ import { assembleSummaryGenerationRequest } from './summary-request'
 import { buildSummarySource, type SummarySource } from './summary-service'
 import { buildContextValues, contextLimitInputError, generationContextDiagnostics, type PreparedContextValues } from './context-service'
 import { getChat, listChatMessages, saveChatContextProfile, type ChatEntity, type ChatMessageEntity } from './chat-service'
-import { assembleChatGenerationRequest, serializeChatModelInput } from './chat-request'
+import { assembleChatGenerationRequest, finalizeChatProviderRequest } from './chat-request'
 import { clearModelCatalog, getCachedModelCatalog, providerModelEndpoint, saveModelCatalog, type ProviderModel } from './model-catalog'
 import { FAKE_PROVIDER_MODEL, clearFakeProviderTrace, getFakeProviderTrace, subscribeFakeProviderTrace } from './fake-provider'
 import { KeyedAsyncQueue } from './keyed-async-queue'
@@ -976,7 +976,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
     : type === 'chat' ? previewChat?.effectiveContextLimit ?? '' : settings.mainEffectiveContextLimit
   const diagnosticMessages = normalizedRequest?.providerMessages ?? requestMessages.filter((message) => !message.omitted).map((message) => ({ role: message.role, content: message.content || null, ...(message.reasoning ? { reasoning_content: message.reasoning } : {}) }))
   const diagnostics = selectedModel && requestMessages.length && !previewPromptErrors.length
-    ? generationContextDiagnostics(selectedModel, selectedModelContextLength, effectiveLimitInput, type === 'chat' && chatNormalizedRequest ? serializeChatModelInput(chatNormalizedRequest) : JSON.stringify({ messages: diagnosticMessages }))
+    ? generationContextDiagnostics(selectedModel, selectedModelContextLength, effectiveLimitInput, type === 'chat' && chatNormalizedRequest ? finalizeChatProviderRequest(chatNormalizedRequest).diagnosticText : JSON.stringify({ messages: diagnosticMessages }))
     : null
 
   return <section className="context-defaults-settings">

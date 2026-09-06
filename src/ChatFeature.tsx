@@ -70,12 +70,11 @@ import { applyChatOutlineAction, chatOutlineToolNames, executeChatOutlineTool, r
 import {
   appendChatRuntimeMessages,
   assembleChatGenerationRequest,
-  chatProviderMessages,
-  chatProviderTools,
   chatRequestValues,
   chatWorkspaceInstructionsWarning,
   CHAT_TOOL_DEFINITIONS,
-  serializeChatModelInput,
+  finalizeChatProviderRequest,
+  type FinalizedChatProviderRequest,
   type ChatRequestHistoryItem,
 } from './chat-request'
 import { clonePromptComposition, likelyReusablePrefix, makePredefinedMessage, normalizeRuntimeMessagePart, type NormalizedAssembledRequest, type NormalizedRequestPart, type PredefinedMessage, type PromptComposition } from './prompt-composition'
@@ -118,6 +117,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   const [compositionDraft, setCompositionDraft] = useState<PromptComposition>({ systemPrompt: '', predefinedMessages: [] })
   const [promptPreviewContext, setPromptPreviewContext] = useState<Awaited<ReturnType<typeof buildContextValues>> | null>(null)
   const [lastNormalizedRequest, setLastNormalizedRequest] = useState<NormalizedAssembledRequest | null>(null)
+  const [lastFinalizedRequest, setLastFinalizedRequest] = useState<FinalizedChatProviderRequest | null>(null)
   const [lastCacheUsage, setLastCacheUsage] = useState<ChatCompletionUsage | null>(null)
   const [limitDraft, setLimitDraft] = useState('')
   const [editingId, setEditingId] = useState('')
@@ -172,6 +172,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     setChat(null)
     setMessages([])
     setLastNormalizedRequest(null)
+    setLastFinalizedRequest(null)
     setLastCacheUsage(null)
     setPromptOpen(false)
     setModels([])
@@ -491,7 +492,8 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
 
     const prepared = { settings, context }
     const normalizedRequest = buildNormalizedRequest(activeChat, history, prepared)
-    const diagnostics = generationContextDiagnostics(activeChat.model, activeChat.modelContextLength, activeChat.effectiveContextLimit, serializeChatModelInput(normalizedRequest))
+    const finalizedRequest = finalizeChatProviderRequest(normalizedRequest)
+    const diagnostics = generationContextDiagnostics(activeChat.model, activeChat.modelContextLength, activeChat.effectiveContextLimit, finalizedRequest.diagnosticText)
     if (!diagnostics.limitValid) throw new Error(diagnostics.limitError ?? 'The Chat context cap is invalid.')
     if (!diagnostics.fits) {
       const dependencyTitles = context.automaticCodex.filter((item) => item.source === 'dependency').map((item) => item.title)
@@ -612,8 +614,12 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       const runtimeParts: NormalizedRequestPart[] = []
       for (let round = 0; round < 8 && !controller.signal.aborted; round += 1) {
         const normalizedRequest = appendChatRuntimeMessages(baseRequest, runtimeParts)
-        if (generationOwnsCurrentUi(owner)) setLastNormalizedRequest(normalizedRequest)
-        const roundDiagnostics = generationContextDiagnostics(activeChat.model, activeChat.modelContextLength, activeChat.effectiveContextLimit, serializeChatModelInput(normalizedRequest))
+        const finalizedRequest = finalizeChatProviderRequest(normalizedRequest)
+        if (generationOwnsCurrentUi(owner)) {
+          setLastNormalizedRequest(normalizedRequest)
+          setLastFinalizedRequest(finalizedRequest)
+        }
+        const roundDiagnostics = generationContextDiagnostics(activeChat.model, activeChat.modelContextLength, activeChat.effectiveContextLimit, finalizedRequest.diagnosticText)
         if (!roundDiagnostics.limitValid) throw new Error(roundDiagnostics.limitError ?? 'The Chat context cap is invalid.')
         if (!roundDiagnostics.fits) throw new Error(`Chat context exceeded its usable budget after workspace tool results (~${roundDiagnostics.requestTokens.toLocaleString()} / ${roundDiagnostics.usableInputTokens.toLocaleString()} input tokens). Reduce context or raise the cap; Arc will not remove older turns automatically.`)
         activeRoundContent = ''
@@ -626,9 +632,9 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           baseUrl: settings.baseUrl,
           provider: settings.provider,
           model: activeChat.model,
-          messages: chatProviderMessages(normalizedRequest),
+          messages: finalizedRequest.messages,
           thinking: activeChat.thinking,
-          tools: chatProviderTools(normalizedRequest),
+          tools: finalizedRequest.tools,
         }, (chunk) => {
           if (!generationOwnsCurrentUi(owner)) return
           if (chunk.thoughts) {
@@ -995,8 +1001,9 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     ? assembleChatGenerationRequest({ composition: compositionDraft, book: bookPromptValues, context: promptPreviewContext, history: messages, tools: CHAT_TOOL_DEFINITIONS })
     : null
   const previewRequest = promptOpen ? draftNormalizedRequest : lastNormalizedRequest
+  const previewFinalizedRequest = previewRequest ? finalizeChatProviderRequest(previewRequest) : null
   const previewDiagnostics = chat && previewRequest
-    ? generationContextDiagnostics(chat.model, chat.modelContextLength, chat.effectiveContextLimit, serializeChatModelInput(previewRequest))
+    ? generationContextDiagnostics(chat.model, chat.modelContextLength, chat.effectiveContextLimit, previewFinalizedRequest?.diagnosticText ?? '')
     : null
   const workspaceWarning = chatWorkspaceInstructionsWarning(compositionDraft)
 
@@ -1074,7 +1081,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
               {previewRequest.parts.map((part) => <section key={part.id} className={part.omitted ? 'omitted' : ''}><strong>{part.name || part.id}</strong><small>{part.role?.toUpperCase() || 'STRUCTURED'} · {part.ownership} · {part.sourceKind}{part.omitted ? ' · omitted' : ''}</small><pre>{part.content || '[empty]'}</pre></section>)}
               {previewRequest.structuredParts.map((part) => <section key={part.id}><strong>{part.name || part.id}</strong><small>APP MANAGED · structured tools</small><pre>{JSON.stringify(part.value, null, 2)}</pre></section>)}
               {previewRequest.dynamicSourceDedupe.map((decision) => <p key={decision.sourceId}>Omitted Additional source “{decision.omittedAdditional.title || decision.sourceId}” because it is already represented automatically.</p>)}
-              {lastNormalizedRequest && <details><summary>Last sent provider payload</summary><pre>{JSON.stringify({ messages: lastNormalizedRequest.providerMessages, tools: lastNormalizedRequest.providerTools }, null, 2)}</pre></details>}
+              {lastFinalizedRequest && <details><summary>Last sent provider payload</summary><pre>{JSON.stringify({ messages: lastFinalizedRequest.messages, tools: lastFinalizedRequest.tools }, null, 2)}</pre></details>}
             </> : <p>Preparing the current Chat context…</p>}
           </details>
           {compositionDiagnostics.some((diagnostic) => diagnostic.severity === 'error') && <div className="chat-composition-warning" role="alert">Fix template errors before saving.<ul>{compositionDiagnostics.map((diagnostic, index) => <li key={`${diagnostic.code}-${index}`}>{diagnostic.message}</li>)}</ul></div>}

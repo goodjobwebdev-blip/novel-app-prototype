@@ -1,4 +1,4 @@
-import type { ChatCompletionMessage, ChatToolDefinition } from './chat-api'
+import type { ChatToolDefinition } from './chat-api'
 import { chatWorkspaceTools } from './chat-tools'
 import { chatEntityTools } from './chat-entity-tools'
 import { chatOutlineTools } from './chat-outline-tools'
@@ -10,8 +10,6 @@ import {
   dedupeDynamicSources,
   normalizeRuntimeMessagePart,
   normalizeStructuredTools,
-  normalizedRequestDiagnosticText,
-  providerMessagesFromNormalized,
   type DynamicContextSource,
   type NormalizedAssembledRequest,
   type NormalizedRequestPart,
@@ -19,6 +17,7 @@ import {
 } from './prompt-composition'
 import type { PreparedContextValues } from './context-service'
 export { defaultChatPromptComposition } from './chat-default-composition'
+export { finalizeChatProviderRequest, type FinalizedChatProviderRequest } from './chat-finalized-request'
 
 export const CHAT_WORKSPACE_INSTRUCTIONS = `# Workspace tools
 
@@ -152,16 +151,4 @@ export function chatWorkspaceInstructionsWarning(composition: PromptComposition)
   return templates.some((template) => /{{\s*chat\.workspace_instructions\s*}}/.test(template))
     ? ''
     : 'Workspace tools are enabled, but their Arc instructions are not included in this Chat composition.'
-}
-
-export function serializeChatModelInput(request: NormalizedAssembledRequest) {
-  return normalizedRequestDiagnosticText(request)
-}
-
-export function chatProviderMessages(request: NormalizedAssembledRequest): ChatCompletionMessage[] {
-  return providerMessagesFromNormalized(request) as ChatCompletionMessage[]
-}
-
-export function chatProviderTools(request: NormalizedAssembledRequest): ChatToolDefinition[] {
-  return request.providerTools as unknown as ChatToolDefinition[]
 }
