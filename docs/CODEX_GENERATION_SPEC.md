@@ -1,11 +1,14 @@
 # Codex Generation and Context Management Specification
 
-Status: Approved  
-Date: 2026-09-05
+Status: Approved and implemented on `main`  
+Original decision date: 2026-09-05  
+Implementation status reconciled: 2026-09-06
 
 ## Purpose
 
-Add AI generation to the Codex editor while preserving the interaction model of Scene generation. Context configuration becomes book-scoped and generation-type-specific, with automatic context kept separate from explicitly selected additional context.
+Add AI generation to the Codex editor while preserving the interaction model of Scene generation. Context configuration is book-scoped and generation-type-specific, with automatic context kept separate from explicitly selected additional context.
+
+The current implementation also exposes a rendered request preview in Context Management for Story, Codex, and Chat. Chat now uses its persisted per-chat context profile. A Note profile is persisted, but dedicated Note generation is not implemented yet.
 
 ## Codex generation
 
@@ -26,7 +29,7 @@ Add AI generation to the Codex editor while preserving the interaction model of 
 
 1. Add an optional **Codex model** control.
 2. When Codex model is empty, Codex generation uses the existing Main model.
-3. Add a **Lore entries** system-prompt tab alongside the existing prompt tabs.
+3. Add a **Lore entries** system-prompt tab alongside the other prompt tabs.
 4. The Lore entries prompt has an editable default.
 5. Lore prompts support:
    - `{{entry.title}}`
@@ -39,8 +42,8 @@ Add AI generation to the Codex editor while preserving the interaction model of 
 ## Context profiles
 
 1. Context configuration is persisted per book and generation type.
-2. Profiles are defined for Scene, Codex, Note, and Chat. Note and Chat generation may use them when those generation flows are implemented.
-3. Context Management displays the profile matching the document type currently open in the main workspace.
+2. Profiles exist for Scene, Codex, Note, and Chat. Chat uses a persisted per-chat copy of its profile; Note keeps its profile for the future dedicated Note-generation flow.
+3. Context Management displays the profile matching the document/generation type currently active in the main workspace.
 4. Switching between Scene and Codex restores each type's independent context configuration.
 5. Codex's current Scene is the last Scene opened in that book.
 6. If a book has no Scene, the Codex current-Scene value is empty.
@@ -130,6 +133,17 @@ The system-prompt template controls where its variables appear. Context assembly
    - Leave the editor unchanged.
    - Do not silently omit or truncate context.
 4. The user must reduce the selected context or choose a model with a larger context window before retrying.
+
+## Request preview
+
+The implemented Context Management screen previews the request shape before generation:
+
+- Story shows the rendered Story system prompt, automatic/additional context, and fallback generation instruction.
+- Codex shows the rendered Lore system prompt, selected context, and fallback generation instruction.
+- Chat shows its per-chat system prompt, workspace instructions, selected book context, and saved message history.
+- Dedicated Note request preview is deferred with dedicated Note generation.
+
+The preview is diagnostic UI; the actual generation code remains the source of truth for the provider request.
 
 ## Acceptance criteria
 
