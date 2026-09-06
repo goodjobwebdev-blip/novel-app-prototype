@@ -75,6 +75,22 @@ function formatContext(value?: number) {
   return `${Math.round(value / 1000)}k context`
 }
 
+function textModelConnectionKey(settings: Pick<AiSettings, 'provider' | 'baseUrl' | 'apiKey'>) {
+  return `${settings.provider}\n${providerModelEndpoint(settings)}\n${settings.apiKey.trim()}`
+}
+
+function ttsCatalogConnectionKey(settings: AiSettings['speech']) {
+  return settings.apiKey.trim()
+}
+
+function sttCatalogConnectionKey(settings: AiSettings['speech']) {
+  return `${settings.apiKey.trim()}\n${settings.openaiApiKey.trim()}`
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
 function chatHistoryContent(message: ChatMessageEntity) {
   const editState = message.role === 'assistant' && message.documentEdits?.length
     ? `\n\n[Workspace edit proposals: ${message.documentEdits.map((proposal) => `${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
@@ -122,11 +138,23 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   const onSavedRef = useRef(onSaved)
   const contextSaveVersionRef = useRef(0)
   const contextSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const modelRefreshSequenceRef = useRef(0)
+  const modelRefreshControllerRef = useRef<AbortController | null>(null)
   const isBookSettings = Boolean(book)
   onSavedRef.current = onSaved
 
+  useEffect(() => () => {
+    modelRefreshSequenceRef.current += 1
+    modelRefreshControllerRef.current?.abort()
+    modelRefreshControllerRef.current = null
+  }, [])
+
   useEffect(() => {
     let cancelled = false
+    modelRefreshSequenceRef.current += 1
+    modelRefreshControllerRef.current?.abort()
+    modelRefreshControllerRef.current = null
+    setLoading(false)
     const scope = book?.id ?? 'defaults'
     aiLoadedScopeRef.current = null
     aiSaveVersionRef.current += 1
@@ -258,10 +286,18 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
     await persistAiSettings(snapshot, scope, version)
   }
 
+  function invalidateModelRefresh() {
+    modelRefreshSequenceRef.current += 1
+    modelRefreshControllerRef.current?.abort()
+    modelRefreshControllerRef.current = null
+    setLoading(false)
+  }
+
   function update<K extends keyof AiSettings>(key: K, value: AiSettings[K]) { changeAiSettings((current) => ({ ...current, [key]: value })) }
   function updateConnection<K extends 'apiKey' | 'baseUrl'>(key: K, value: AiSettings[K]) {
     const current = latestAiSettingsRef.current
     if (current[key] === value) return
+    invalidateModelRefresh()
     const next = { ...current, [key]: value } as AiSettings
     clearModelCatalog(current)
     clearModelCatalog(next)
@@ -272,6 +308,8 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   }
   function selectProvider(provider: AiProvider) {
     const current = latestAiSettingsRef.current
+    if (current.provider === provider) return
+    invalidateModelRefresh()
     const baseUrl = provider === 'nanogpt' ? 'https://nano-gpt.com/api/v1' : provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : provider === 'openai' ? 'https://api.openai.com/v1' : current.baseUrl
     const next = { ...current, provider, baseUrl, mainModel: '', mainModelContextLength: undefined, supportModel: '', supportModelContextLength: undefined, codexModel: '', codexModelContextLength: undefined }
     clearModelCatalog(current)
@@ -286,26 +324,36 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
       : kind === 'support' ? { ...current, supportModel: id, supportModelContextLength: contextLength } : { ...current, codexModel: id, codexModelContextLength: contextLength })
   }
   async function refreshModels() {
-    if (!settings.apiKey.trim()) { setStatus('Enter an API key before loading models.'); setStatusKind('error'); return }
-    if (settings.provider === 'compatible' && !settings.baseUrl.trim()) { setStatus('Enter the compatible provider endpoint first.'); setStatusKind('error'); return }
+    const requestSettings = latestAiSettingsRef.current
+    if (!requestSettings.apiKey.trim()) { setStatus('Enter an API key before loading models.'); setStatusKind('error'); return }
+    if (requestSettings.provider === 'compatible' && !requestSettings.baseUrl.trim()) { setStatus('Enter the compatible provider endpoint first.'); setStatusKind('error'); return }
+    modelRefreshControllerRef.current?.abort()
+    const requestId = ++modelRefreshSequenceRef.current
+    const connectionKey = textModelConnectionKey(requestSettings)
+    const controller = new AbortController()
+    modelRefreshControllerRef.current = controller
+    const ownsRequest = () => requestId === modelRefreshSequenceRef.current && textModelConnectionKey(latestAiSettingsRef.current) === connectionKey
     setLoading(true); setStatus('Contacting the provider…'); setStatusKind('quiet')
     try {
-      const response = await fetch(providerModelEndpoint(settings), { headers: { Accept: 'application/json', Authorization: `Bearer ${settings.apiKey.trim()}` } })
+      const response = await fetch(providerModelEndpoint(requestSettings), { headers: { Accept: 'application/json', Authorization: `Bearer ${requestSettings.apiKey.trim()}` }, signal: controller.signal })
       const payload = await response.json().catch(() => ({})) as { data?: ProviderModel[]; message?: string; error?: { message?: string } }
       if (!response.ok) throw new Error(payload.error?.message || payload.message || `Provider returned ${response.status}.`)
       const nextModels = Array.isArray(payload.data) ? payload.data.filter((model) => typeof model.id === 'string' && model.id.length > 0) : []
+      if (!ownsRequest()) return
       changeAiSettings((current) => ({
         ...current,
         mainModelContextLength: nextModels.find((model) => model.id === current.mainModel)?.context_length ?? current.mainModelContextLength,
         supportModelContextLength: nextModels.find((model) => model.id === current.supportModel)?.context_length ?? current.supportModelContextLength,
         codexModelContextLength: nextModels.find((model) => model.id === current.codexModel)?.context_length ?? current.codexModelContextLength,
       }))
-      const cached = saveModelCatalog(settings, nextModels)
+      if (!ownsRequest()) return
+      const cached = saveModelCatalog(requestSettings, nextModels)
       setModels(nextModels)
       setStatus(nextModels.length ? (cached.persisted ? `${nextModels.length} models cached.` : `${nextModels.length} models loaded, but the browser could not persist the cache.`) : 'The provider returned no models.')
       setStatusKind(nextModels.length && cached.persisted ? 'success' : 'error')
     } catch (error) {
-      const cached = getCachedModelCatalog(settings)
+      if (!ownsRequest() || isAbortError(error)) return
+      const cached = getCachedModelCatalog(requestSettings)
       if (cached?.models.length) {
         setModels(cached.models)
         const reason = error instanceof Error ? error.message : 'Could not refresh the model list.'
@@ -315,12 +363,18 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
         setStatus(error instanceof Error ? error.message : 'Could not load the model list.')
       }
       setStatusKind('error')
-    } finally { setLoading(false) }
+    } finally {
+      if (requestId === modelRefreshSequenceRef.current) {
+        if (modelRefreshControllerRef.current === controller) modelRefreshControllerRef.current = null
+        setLoading(false)
+      }
+    }
   }
   function toggleFavorite(id: string) { changeAiSettings((current) => ({ ...current, favorites: current.favorites.includes(id) ? current.favorites.filter((favorite) => favorite !== id) : [...current.favorites, id] })) }
 
   async function resetFromDefaults() {
     if (!book || !window.confirm(`Replace the AI settings for “${book.title}” with the current defaults?`)) return
+    invalidateModelRefresh()
     try {
       const defaults = loadAiSettings()
       const copied = await copyDefaultAiSettingsToBook(book.id, defaults)
@@ -680,40 +734,120 @@ function SpeechSettingsPanel({ settings, scope, onChange }: { settings: AiSettin
   const [sttQuery, setSttQuery] = useState('')
   const [sttLoading, setSttLoading] = useState(false)
   const [sttMessage, setSttMessage] = useState('')
+  const latestSpeechRef = useRef(settings.speech)
+  const ttsLoadSequenceRef = useRef(0)
+  const ttsLoadControllerRef = useRef<AbortController | null>(null)
+  const sttLoadSequenceRef = useRef(0)
+  const sttLoadControllerRef = useRef<AbortController | null>(null)
+  latestSpeechRef.current = settings.speech
   const selected = models.find((model) => model.id === settings.speech.model)
   const selectedStt = sttModels.find((model) => model.id === settings.speech.transcriptionModel)
   const voices = selected?.voices ?? []
   const filtered = models.filter((model) => !query.trim() || `${model.id} ${model.name}`.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 80)
   const filteredStt = sttModels.filter((model) => !sttQuery.trim() || `${model.provider} ${model.modelId} ${model.name}`.toLowerCase().includes(sttQuery.trim().toLowerCase())).slice(0, 100)
 
+  function invalidateTtsLoad() {
+    ttsLoadSequenceRef.current += 1
+    ttsLoadControllerRef.current?.abort()
+    ttsLoadControllerRef.current = null
+    setLoading(false)
+  }
+
+  function invalidateSttLoad() {
+    sttLoadSequenceRef.current += 1
+    sttLoadControllerRef.current?.abort()
+    sttLoadControllerRef.current = null
+    setSttLoading(false)
+  }
+
   async function loadModels() {
+    const speechSnapshot = latestSpeechRef.current
+    ttsLoadControllerRef.current?.abort()
+    const requestId = ++ttsLoadSequenceRef.current
+    const connectionKey = ttsCatalogConnectionKey(speechSnapshot)
+    const controller = new AbortController()
+    ttsLoadControllerRef.current = controller
+    const ownsRequest = () => requestId === ttsLoadSequenceRef.current && ttsCatalogConnectionKey(latestSpeechRef.current) === connectionKey
     setLoading(true)
     setMessage('Loading NanoGPT audio models…')
     try {
-      const next = await fetchSpeechModels(settings.speech.apiKey)
+      const next = await fetchSpeechModels(speechSnapshot.apiKey, controller.signal)
+      if (!ownsRequest()) return
       setModels(next)
       setMessage(next.length ? `${next.length} text-to-speech models available.` : 'NanoGPT returned no text-to-speech models.')
     } catch (error) {
+      if (!ownsRequest() || isAbortError(error)) return
       setModels([])
       setMessage(error instanceof Error ? error.message : 'Could not load NanoGPT audio models.')
-    } finally { setLoading(false) }
+    } finally {
+      if (requestId === ttsLoadSequenceRef.current) {
+        if (ttsLoadControllerRef.current === controller) ttsLoadControllerRef.current = null
+        setLoading(false)
+      }
+    }
   }
 
   async function loadSttModels() {
+    const speechSnapshot = latestSpeechRef.current
+    sttLoadControllerRef.current?.abort()
+    const requestId = ++sttLoadSequenceRef.current
+    const connectionKey = sttCatalogConnectionKey(speechSnapshot)
+    const controller = new AbortController()
+    sttLoadControllerRef.current = controller
+    const ownsRequest = () => requestId === sttLoadSequenceRef.current && sttCatalogConnectionKey(latestSpeechRef.current) === connectionKey
     setSttLoading(true)
     setSttMessage('Loading transcription models…')
     try {
-      const next = await fetchTranscriptionModels(settings.speech)
+      const next = await fetchTranscriptionModels(speechSnapshot, controller.signal)
+      if (!ownsRequest()) return
       setSttModels(next)
       setSttMessage(next.length ? `${next.length} transcription models available across OpenAI and NanoGPT.` : 'No transcription models were returned.')
     } catch (error) {
+      if (!ownsRequest() || isAbortError(error)) return
       setSttModels([])
       setSttMessage(error instanceof Error ? error.message : 'Could not load transcription models.')
-    } finally { setSttLoading(false) }
+    } finally {
+      if (requestId === sttLoadSequenceRef.current) {
+        if (sttLoadControllerRef.current === controller) sttLoadControllerRef.current = null
+        setSttLoading(false)
+      }
+    }
   }
 
-  useEffect(() => { void loadModels(); void loadSttModels() }, [])
-  const updateSpeech = (patch: Partial<AiSettings['speech']>) => onChange({ ...settings.speech, ...patch })
+  useEffect(() => {
+    void loadModels()
+    void loadSttModels()
+    return () => {
+      ttsLoadSequenceRef.current += 1
+      ttsLoadControllerRef.current?.abort()
+      ttsLoadControllerRef.current = null
+      sttLoadSequenceRef.current += 1
+      sttLoadControllerRef.current?.abort()
+      sttLoadControllerRef.current = null
+    }
+  }, [])
+
+  function updateSpeech(patch: Partial<AiSettings['speech']>) {
+    const current = latestSpeechRef.current
+    const next = { ...current, ...patch }
+    const nanoKeyChanged = next.apiKey !== current.apiKey
+    const openAiKeyChanged = next.openaiApiKey !== current.openaiApiKey
+    latestSpeechRef.current = next
+    if (nanoKeyChanged) {
+      invalidateTtsLoad()
+      invalidateSttLoad()
+      setModels([])
+      setMessage('NanoGPT Speech credential changed. Reload the TTS model list.')
+      setSttModels([])
+      setSttMessage('Speech credentials changed. Reload the transcription model list.')
+    } else if (openAiKeyChanged) {
+      invalidateSttLoad()
+      setSttModels([])
+      setSttMessage('OpenAI Speech credential changed. Reload the transcription model list.')
+    }
+    onChange(next)
+  }
+
   const unavailableModel = models.length > 0 && !selected
   const unavailableVoice = Boolean(selected?.voices.length && settings.speech.voice && !selected.voices.includes(settings.speech.voice))
   const unavailableStt = sttModels.length > 0 && !selectedStt
