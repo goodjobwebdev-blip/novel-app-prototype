@@ -1,5 +1,6 @@
 import { defaultAiPrompts, loadAiSettings, previousDefaultAssistantPrompts, type AiSettings } from './ai-settings'
 import { getCachedModelCatalog } from './model-catalog'
+import { FAKE_PROVIDER_MODEL } from './fake-provider'
 import { KeyedAsyncQueue } from './keyed-async-queue'
 import { transitionProposalList } from './chat-proposal-transition'
 import { snapshotProposalListForFork } from './chat-fork-proposals'
@@ -367,6 +368,7 @@ export async function forkChat(source: ChatEntity, throughOrder: number): Promis
 }
 
 export async function fetchAvailableChatModels(settings: AiSettings): Promise<ChatModel[]> {
+  if (settings.provider === 'fake') return [{ ...FAKE_PROVIDER_MODEL }]
   if (!settings.apiKey.trim()) throw new Error('Add an API key in Book AI settings before loading chat models.')
   const cached = getCachedModelCatalog(settings)
   if (!cached) throw new Error('No cached model list. Open Book AI settings and use Reload model list first.')

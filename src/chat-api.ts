@@ -1,4 +1,5 @@
 import type { AiProvider } from './ai-settings'
+import { streamFakeProvider } from './fake-provider'
 
 export type ChatToolCall = {
   id: string
@@ -178,6 +179,21 @@ export async function streamChatCompletion(
   signal: AbortSignal,
   onResponse?: () => void,
 ): Promise<ChatCompletionResult> {
+  if (request.provider === 'fake') {
+    const result = await streamFakeProvider({
+      task: 'chat',
+      model: request.model,
+      messages: request.messages,
+      tools: request.tools,
+      thinking: request.thinking,
+    }, {
+      onResponse,
+      onContent: (content) => onChunk({ content }),
+      onThoughts: (thoughts) => onChunk({ thoughts }),
+    }, signal)
+    return { toolCalls: result.toolCalls, finishReason: result.finishReason }
+  }
+
   const body: Record<string, unknown> = {
     model: request.model,
     messages: cacheFriendlyMessages(request.messages),

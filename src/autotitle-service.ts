@@ -1,5 +1,5 @@
 import { generationContextDiagnostics, type ContextDiagnostics } from './context-service'
-import { fetchNanoGPTModelContextLength, streamNanoGPTCompletion } from './nanogpt'
+import { fetchTextProviderModelContextLength, streamTextProviderCompletion } from './text-provider'
 import type { AiSettings } from './ai-settings'
 import {
   getEntity,
@@ -153,8 +153,8 @@ function parseSuggestion(output: string) {
 }
 
 export async function prepareAutotitleRequest(bookId: string, targetId: string, settings: AiSettings): Promise<AutotitleRequest> {
-  if (settings.provider !== 'nanogpt') throw new Error('Dedicated autotitle currently supports NanoGPT only. Choose NanoGPT in Book AI settings.')
-  if (!settings.apiKey.trim()) throw new Error('Add your NanoGPT API key in Book AI settings before generating a title.')
+  if (settings.provider !== 'nanogpt' && settings.provider !== 'fake') throw new Error('Dedicated autotitle supports NanoGPT or Fake (testing). Choose one in Book AI settings.')
+  if (settings.provider === 'nanogpt' && !settings.apiKey.trim()) throw new Error('Add your NanoGPT API key in Book AI settings before generating a title.')
   const [bookEntity, targetEntity, entities] = await Promise.all([
     getEntity<ArcEntity>(bookId),
     getEntity<ArcEntity>(targetId),
@@ -172,7 +172,7 @@ export async function prepareAutotitleRequest(bookId: string, targetId: string, 
   const usingSupport = Boolean(settings.supportModel.trim())
   let modelContextLength = usingSupport ? settings.supportModelContextLength : settings.mainModelContextLength
   if (!modelContextLength) {
-    modelContextLength = await fetchNanoGPTModelContextLength(settings.apiKey.trim(), settings.baseUrl, model).catch(() => undefined)
+    modelContextLength = await fetchTextProviderModelContextLength({ provider: settings.provider, apiKey: settings.apiKey.trim(), baseUrl: settings.baseUrl, model }).catch(() => undefined)
   }
   const context = await contextForTarget(bookEntity as BookEntity, targetEntity, entities)
   const language = typeof bookEntity.language === 'string' ? bookEntity.language : ''
@@ -199,7 +199,9 @@ export async function prepareAutotitleRequest(bookId: string, targetId: string, 
 
 export async function generateAutotitleSuggestion(settings: AiSettings, request: AutotitleRequest, signal: AbortSignal) {
   let output = ''
-  await streamNanoGPTCompletion({
+  await streamTextProviderCompletion({
+    provider: settings.provider,
+    task: 'autotitle',
     apiKey: settings.apiKey.trim(),
     baseUrl: settings.baseUrl,
     model: request.model,

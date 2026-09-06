@@ -1,6 +1,6 @@
 import { PROMPT_COMPOSITION_SCHEMA_VERSION, clonePromptComposition, compositionsFromLegacyPrompts, legacyPromptMirror, normalizePromptCompositions, withSystemPrompt, type PromptCompositions, type PromptCompositionScope } from './prompt-composition'
 
-export type AiProvider = 'openrouter' | 'nanogpt' | 'openai' | 'compatible'
+export type AiProvider = 'openrouter' | 'nanogpt' | 'openai' | 'compatible' | 'fake'
 export type SpeechProvider = 'nanogpt'
 export type SpeechSettings = {
   provider: SpeechProvider
@@ -322,6 +322,11 @@ export function generationWordDelayMs(settings: Pick<AiSettings, 'generationWord
   return Number(normalizeGenerationWordDelay(settings.generationWordDelayMs))
 }
 
+export function textAiIsConfigured(settings: Pick<AiSettings, 'provider' | 'apiKey' | 'mainModel'>) {
+  if (settings.provider === 'fake') return settings.mainModel.trim() === 'fake/test'
+  return settings.provider === 'nanogpt' && Boolean(settings.apiKey.trim() && settings.mainModel.trim())
+}
+
 function normalizeSpeechSettings(value: unknown): SpeechSettings {
   const speech = value && typeof value === 'object' ? value as Partial<SpeechSettings> : {}
   const rawConcurrency = typeof speech.maxParallelRequests === 'number' || typeof speech.maxParallelRequests === 'string' ? String(speech.maxParallelRequests).trim() : '1'
@@ -356,6 +361,8 @@ export function normalizeAiSettings(value?: Partial<AiSettings>): AiSettings {
   return {
     ...initialAiSettings,
     ...value,
+    apiKey: value?.provider === 'fake' ? '' : typeof value?.apiKey === 'string' ? value.apiKey : initialAiSettings.apiKey,
+    baseUrl: value?.provider === 'fake' ? '' : typeof value?.baseUrl === 'string' ? value.baseUrl : initialAiSettings.baseUrl,
     responseLength: typeof value?.responseLength === 'string' ? value.responseLength : '',
     speech: normalizeSpeechSettings(value?.speech),
     promptCompositionVersion: PROMPT_COMPOSITION_SCHEMA_VERSION,

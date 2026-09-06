@@ -50,6 +50,7 @@ import { getChat, listChatMessages, saveChatContextProfile, type ChatEntity, typ
 import { CHAT_TOOL_DEFINITIONS, CHAT_WORKSPACE_INSTRUCTIONS, serializeChatModelInput } from './chat-request'
 import { renderLorePrompt, renderStoryPrompt } from './nanogpt'
 import { clearModelCatalog, getCachedModelCatalog, providerModelEndpoint, saveModelCatalog, type ProviderModel } from './model-catalog'
+import { FAKE_PROVIDER_MODEL, clearFakeProviderTrace, getFakeProviderTrace, subscribeFakeProviderTrace } from './fake-provider'
 import { KeyedAsyncQueue } from './keyed-async-queue'
 import { saveRequiredSettingsForLeave } from './settings-leave-policy'
 import { fetchSpeechModels, type SpeechModel } from './tts-service'
@@ -72,7 +73,7 @@ type RequestPreviewMessage = {
   reasoning?: string
 }
 
-const providerLabels: Record<AiProvider, string> = { openrouter: 'OpenRouter', nanogpt: 'nano-gpt.com', openai: 'OpenAI', compatible: 'OpenAI-compatible' }
+const providerLabels: Record<AiProvider, string> = { openrouter: 'OpenRouter', nanogpt: 'nano-gpt.com', openai: 'OpenAI', compatible: 'OpenAI-compatible', fake: 'Fake (testing)' }
 function formatContext(value?: number) {
   if (!value) return 'Context unknown'
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value % 1_000_000 ? 1 : 0)}m context`
@@ -81,6 +82,10 @@ function formatContext(value?: number) {
 
 function textModelConnectionKey(settings: Pick<AiSettings, 'provider' | 'baseUrl' | 'apiKey'>) {
   return `${settings.provider}\n${providerModelEndpoint(settings)}\n${settings.apiKey.trim()}`
+}
+
+function cachedTextModelCatalog(settings: Pick<AiSettings, 'provider' | 'baseUrl' | 'apiKey'>) {
+  return settings.provider === 'fake' ? { models: [FAKE_PROVIDER_MODEL] } : getCachedModelCatalog(settings)
 }
 
 function ttsCatalogConnectionKey(settings: AiSettings['speech']) {
@@ -120,6 +125,7 @@ type AiSettingsProps = {
 
 export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) {
   const [settings, setSettings] = useState<AiSettings>(initialAiSettings)
+  const [fakeTrace, setFakeTrace] = useState(() => getFakeProviderTrace())
   const [models, setModels] = useState<ProviderModel[]>([])
   const [promptTab, setPromptTab] = useState<keyof AiPrompts>('story')
   const [modelSearch, setModelSearch] = useState('')
@@ -151,6 +157,8 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   const isBookSettings = Boolean(book)
   onSavedRef.current = onSaved
 
+  useEffect(() => subscribeFakeProviderTrace(() => setFakeTrace(getFakeProviderTrace())), [])
+
   useEffect(() => () => {
     modelRefreshSequenceRef.current += 1
     modelRefreshControllerRef.current?.abort()
@@ -175,7 +183,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
       aiSavedRef.current = JSON.stringify(defaults)
       aiLoadedScopeRef.current = scope
       setSettings(defaults)
-      const cachedModels = getCachedModelCatalog(defaults)
+      const cachedModels = cachedTextModelCatalog(defaults)
       setModels(cachedModels?.models ?? [])
       setStatus(cachedModels ? `${cachedModels.models.length} cached models available. Reload the model list to refresh it.` : 'No cached model list yet. Use Reload model list to fetch it from the provider.')
       setStatusKind(cachedModels?.models.length ? 'success' : 'quiet')
@@ -194,7 +202,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
         aiSavedRef.current = JSON.stringify(bookSettings)
         aiLoadedScopeRef.current = scope
         setSettings(bookSettings)
-        const cachedModels = getCachedModelCatalog(bookSettings)
+        const cachedModels = cachedTextModelCatalog(bookSettings)
         setModels(cachedModels?.models ?? [])
         setStatus(cachedModels ? `${cachedModels.models.length} cached models available for “${book.title}”. Reload the model list to refresh it.` : 'No cached model list yet. Use Reload model list to fetch it from the provider.')
         setStatusKind(cachedModels?.models.length ? 'success' : 'quiet')
@@ -322,12 +330,12 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
     const current = latestAiSettingsRef.current
     if (current.provider === provider) return
     invalidateModelRefresh()
-    const baseUrl = provider === 'nanogpt' ? 'https://nano-gpt.com/api/v1' : provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : provider === 'openai' ? 'https://api.openai.com/v1' : current.baseUrl
-    const next = { ...current, provider, baseUrl, mainModel: '', mainModelContextLength: undefined, supportModel: '', supportModelContextLength: undefined, codexModel: '', codexModelContextLength: undefined }
+    const baseUrl = provider === 'nanogpt' ? 'https://nano-gpt.com/api/v1' : provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : provider === 'openai' ? 'https://api.openai.com/v1' : provider === 'fake' ? '' : current.baseUrl
+    const next = { ...current, provider, apiKey: provider === 'fake' ? '' : current.apiKey, baseUrl, mainModel: '', mainModelContextLength: undefined, supportModel: '', supportModelContextLength: undefined, codexModel: '', codexModelContextLength: undefined }
     clearModelCatalog(current)
     clearModelCatalog(next)
     changeAiSettings(() => next)
-    setModels([]); setStatus('Provider changed. Reload its model list when ready.'); setStatusKind('quiet')
+    setModels(provider === 'fake' ? [FAKE_PROVIDER_MODEL] : []); setStatus(provider === 'fake' ? 'Fake Test Model is available locally. Reload never contacts a network.' : 'Provider changed. Reload its model list when ready.'); setStatusKind(provider === 'fake' ? 'success' : 'quiet')
   }
   function selectModel(kind: 'main' | 'support' | 'codex', id: string) {
     const contextLength = models.find((model) => model.id === id)?.context_length
@@ -337,6 +345,19 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   }
   async function refreshModels() {
     const requestSettings = latestAiSettingsRef.current
+    if (requestSettings.provider === 'fake') {
+      invalidateModelRefresh()
+      setModels([FAKE_PROVIDER_MODEL])
+      changeAiSettings((current) => ({
+        ...current,
+        mainModelContextLength: current.mainModel === FAKE_PROVIDER_MODEL.id ? FAKE_PROVIDER_MODEL.context_length : undefined,
+        supportModelContextLength: current.supportModel === FAKE_PROVIDER_MODEL.id ? FAKE_PROVIDER_MODEL.context_length : undefined,
+        codexModelContextLength: current.codexModel === FAKE_PROVIDER_MODEL.id ? FAKE_PROVIDER_MODEL.context_length : undefined,
+      }))
+      setStatus('1 local testing model available. No network request was made.')
+      setStatusKind('success')
+      return
+    }
     if (!requestSettings.apiKey.trim()) { setStatus('Enter an API key before loading models.'); setStatusKind('error'); return }
     if (requestSettings.provider === 'compatible' && !requestSettings.baseUrl.trim()) { setStatus('Enter the compatible provider endpoint first.'); setStatusKind('error'); return }
     modelRefreshControllerRef.current?.abort()
@@ -398,7 +419,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
     latestAiSettingsRef.current = defaults
     setSettings(defaults)
     setSaveState('saving')
-    setModels(getCachedModelCatalog(defaults)?.models ?? [])
+    setModels(cachedTextModelCatalog(defaults)?.models ?? [])
 
     try {
       await aiSaveQueueRef.current.run(scope, async () => {
@@ -408,7 +429,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
         aiSavedRef.current = JSON.stringify(copied)
         setSettings(copied)
         setSaveState('saved')
-        setModels(getCachedModelCatalog(copied)?.models ?? [])
+        setModels(cachedTextModelCatalog(copied)?.models ?? [])
         setStatus(`Current defaults copied to “${book.title}”.`)
         setStatusKind('success')
         onSavedRef.current?.(copied)
@@ -570,10 +591,10 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
 
         <section className="settings-card provider-card">
           <div className="card-heading"><div><span>01</span><h2>Provider</h2></div><p>Connection details stay in this browser.</p></div>
-          <div className="provider-grid">{(Object.keys(providerLabels) as AiProvider[]).map((provider) => <button key={provider} className={settings.provider === provider ? 'selected' : ''} type="button" onClick={() => selectProvider(provider)}><i>{provider === 'nanogpt' ? 'N' : provider === 'openrouter' ? 'O' : provider === 'openai' ? 'AI' : '{ }'}</i><span><strong>{providerLabels[provider]}</strong><small>{provider === 'compatible' ? 'Custom endpoint' : 'Managed endpoint'}</small></span><b>{settings.provider === provider ? '✓' : ''}</b></button>)}</div>
+          <div className="provider-grid">{(Object.keys(providerLabels) as AiProvider[]).map((provider) => <button key={provider} className={settings.provider === provider ? 'selected' : ''} type="button" onClick={() => selectProvider(provider)}><i>{provider === 'fake' ? 'T' : provider === 'nanogpt' ? 'N' : provider === 'openrouter' ? 'O' : provider === 'openai' ? 'AI' : '{ }'}</i><span><strong>{providerLabels[provider]}</strong><small>{provider === 'compatible' ? 'Custom endpoint' : 'Managed endpoint'}</small></span><b>{settings.provider === provider ? '✓' : ''}</b></button>)}</div>
           <div className="connection-fields">
             {settings.provider === 'compatible' && <label><span>Endpoint URL</span><input value={settings.baseUrl} onChange={(event) => updateConnection('baseUrl', event.target.value)} placeholder="https://provider.example/v1" /></label>}
-            <label><span>API key</span><div className="input-action"><input
+            {settings.provider !== 'fake' && <label><span>API key</span><div className="input-action"><input
               type={showKey ? 'text' : 'password'}
               name="arc-provider-token"
               value={settings.apiKey}
@@ -586,11 +607,18 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
               data-form-type="other"
               data-lpignore="true"
               spellCheck={false}
-            /><button type="button" onClick={() => setShowKey((value) => !value)}>{showKey ? 'Hide' : 'Show'}</button></div></label>
+            /><button type="button" onClick={() => setShowKey((value) => !value)}>{showKey ? 'Hide' : 'Show'}</button></div></label>}
+            {settings.provider === 'fake' && <div className="status success" role="note"><i />Testing provider — responses, errors, reasoning, and tool calls are generated locally and deterministically. No text-AI network request is sent.</div>}
             <button className="reload-button" type="button" onClick={refreshModels} disabled={loading}><RefreshCw className={loading ? 'spinning' : ''} aria-hidden="true" />{loading ? 'Loading models…' : 'Reload model list'}</button>
           </div>
           <p className={`status ${statusKind}`} role="status"><i />{status}</p>
         </section>
+
+        {settings.provider === 'fake' && <section className="settings-card provider-card" aria-label="Fake provider request trace">
+          <div className="card-heading"><div><span>T</span><h2>Request trace</h2></div><p>Session only · last 20 Fake requests</p></div>
+          <div className="connection-fields"><button className="reload-button" type="button" onClick={clearFakeProviderTrace} disabled={!fakeTrace.length}>Clear trace</button></div>
+          <details><summary>{fakeTrace.length ? `${fakeTrace.length} request${fakeTrace.length === 1 ? '' : 's'}` : 'No Fake requests yet'}</summary><pre>{fakeTrace.length ? JSON.stringify(fakeTrace, null, 2) : 'Generate, summarize, autotitle, or chat with Fake (testing) to inspect the exact provider-boundary request.'}</pre></details>
+        </section>}
 
         <section className="settings-card models-card">
           <div className="card-heading"><div><span>02</span><h2>Models</h2></div><p>{isBookSettings ? 'Favorites are shared; model choices belong to this book.' : 'Main writes; Support handles summaries and autotitles.'}</p></div>
