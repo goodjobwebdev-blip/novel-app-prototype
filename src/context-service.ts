@@ -10,7 +10,22 @@ export type PreparedContextValues = {
   lastSceneTitle: string
   additionalContext: string
 }
-export type ContextDiagnostics = { modelId: string; modelContextTokens: number; requestTokens: number; responseReserveTokens: number; fits: boolean }
+export type ContextDiagnostics = {
+  modelId: string
+  modelContextTokens: number
+  modelContextKnown: boolean
+  configuredContextTokens?: number
+  effectiveContextTokens: number
+  usableInputTokens: number
+  requestTokens: number
+  responseReserveTokens: number
+  usageRatio: number
+  warning: boolean
+  fits: boolean
+  limitValid: boolean
+  limitError?: string
+  wasClamped: boolean
+}
 type BuildOptions = { bookId: string; type: GenerationContextType; currentSceneId?: string; currentSceneText?: string; currentDocumentId?: string; profile: GenerationContextProfile }
 type AdditionalContextSection = {
   text: string
@@ -167,15 +182,56 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
 }
 
 function modelContextLimit(modelId: string, catalogLimit?: number) {
-  if (Number.isFinite(catalogLimit) && Number(catalogLimit) >= 4_096) return Math.floor(Number(catalogLimit))
+  if (Number.isFinite(catalogLimit) && Number(catalogLimit) >= 4_096) return { tokens: Math.floor(Number(catalogLimit)), known: true }
   const explicit = [...modelId.toLowerCase().matchAll(/(?:^|[^\d.])(\d+(?:\.\d+)?)\s*([km])(?:[^a-z]|$)/g)]
     .map((match) => Number(match[1]) * (match[2] === 'm' ? 1_000_000 : 1_000)).filter((value) => Number.isFinite(value) && value >= 4_096).sort((a, b) => b - a)[0]
-  return explicit || 64_000
+  if (explicit) return { tokens: explicit, known: true }
+  return { tokens: 64_000, known: false }
 }
 
-export function generationContextDiagnostics(modelId: string, modelContextLength: number | undefined, systemPrompt: string, userMessage: string): ContextDiagnostics {
-  const modelContextTokens = modelContextLimit(modelId, modelContextLength)
-  const responseReserveTokens = Math.min(16_384, Math.max(2_048, Math.floor(modelContextTokens * .15)))
-  const requestTokens = tokenEstimate(`${systemPrompt}\n\n${userMessage}`) + 512
-  return { modelId, modelContextTokens, requestTokens, responseReserveTokens, fits: requestTokens + responseReserveTokens <= modelContextTokens }
+function configuredContextLimit(value: string | undefined) {
+  const input = String(value ?? '').trim().toLowerCase()
+  if (!input) return { valid: true as const, tokens: undefined }
+  const match = input.match(/^(\d+(?:\.\d+)?)\s*([km])?$/)
+  if (!match) return { valid: false as const, error: 'Enter a token count such as 32000, 32k, or 1m.' }
+  const multiplier = match[2] === 'm' ? 1_000_000 : match[2] === 'k' ? 1_000 : 1
+  const tokens = Math.floor(Number(match[1]) * multiplier)
+  if (!Number.isSafeInteger(tokens) || tokens < 4_096) return { valid: false as const, error: 'Context cap must be at least 4,096 tokens.' }
+  return { valid: true as const, tokens }
+}
+
+export function contextLimitInputError(value: string | undefined) {
+  const parsed = configuredContextLimit(value)
+  return parsed.valid ? '' : parsed.error
+}
+
+export function generationContextDiagnostics(modelId: string, modelContextLength: number | undefined, effectiveLimitInput: string | undefined, requestText: string): ContextDiagnostics {
+  const model = modelContextLimit(modelId, modelContextLength)
+  const configured = configuredContextLimit(effectiveLimitInput)
+  const configuredContextTokens = configured.valid ? configured.tokens : undefined
+  const effectiveContextTokens = configuredContextTokens === undefined
+    ? model.tokens
+    : model.known ? Math.min(configuredContextTokens, model.tokens) : configuredContextTokens
+  const responseReserveTokens = Math.min(16_384, Math.max(2_048, Math.floor(effectiveContextTokens * .15)))
+  const usableInputTokens = Math.max(0, effectiveContextTokens - responseReserveTokens)
+  const requestTokens = tokenEstimate(requestText) + 512
+  const usageRatio = usableInputTokens > 0 ? requestTokens / usableInputTokens : Number.POSITIVE_INFINITY
+  const limitValid = configured.valid
+  const fits = limitValid && requestTokens <= usableInputTokens
+  return {
+    modelId,
+    modelContextTokens: model.tokens,
+    modelContextKnown: model.known,
+    configuredContextTokens,
+    effectiveContextTokens,
+    usableInputTokens,
+    requestTokens,
+    responseReserveTokens,
+    usageRatio,
+    warning: limitValid && fits && usageRatio >= .85,
+    fits,
+    limitValid,
+    limitError: configured.valid ? undefined : configured.error,
+    wasClamped: Boolean(model.known && configuredContextTokens !== undefined && configuredContextTokens > model.tokens),
+  }
 }

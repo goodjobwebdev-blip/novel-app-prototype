@@ -44,12 +44,14 @@ import {
   type ChatModel,
   type ChatOutlineActionProposal,
 } from './chat-service'
-import { buildContextValues, generationContextDiagnostics } from './context-service'
+import { buildContextValues, contextLimitInputError, generationContextDiagnostics } from './context-service'
 import { bookTemplateValues, renderPromptTemplate, responseLengthMessage, type BookPromptValues } from './prompt-template'
-import { applyChatDocumentEdit, chatWorkspaceTools, createChatCodexEntry, executeChatWorkspaceTool, rejectChatCodexEntry, rejectChatDocumentEdit } from './chat-tools'
-import { applyChatEntityAction, chatEntityToolNames, chatEntityTools, executeChatEntityTool, rejectChatEntityAction } from './chat-entity-tools'
-import { applyChatOutlineAction, chatOutlineToolNames, chatOutlineTools, executeChatOutlineTool, rejectChatOutlineAction } from './chat-outline-tools'
+import { applyChatDocumentEdit, createChatCodexEntry, executeChatWorkspaceTool, rejectChatCodexEntry, rejectChatDocumentEdit } from './chat-tools'
+import { applyChatEntityAction, chatEntityToolNames, executeChatEntityTool, rejectChatEntityAction } from './chat-entity-tools'
+import { applyChatOutlineAction, chatOutlineToolNames, executeChatOutlineTool, rejectChatOutlineAction } from './chat-outline-tools'
+import { CHAT_TOOL_DEFINITIONS, CHAT_WORKSPACE_INSTRUCTIONS, serializeChatModelInput } from './chat-request'
 import './chat.css'
+import './context-limit-settings.css'
 
 type GenerationPhase = 'sending' | 'thinking' | 'using-tools' | 'writing' | 'stopping'
 
@@ -87,6 +89,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   const [modelStatus, setModelStatus] = useState('')
   const [promptOpen, setPromptOpen] = useState(false)
   const [promptDraft, setPromptDraft] = useState('')
+  const [limitDraft, setLimitDraft] = useState('')
   const [editingId, setEditingId] = useState('')
   const [editingValue, setEditingValue] = useState('')
   const [copiedMessageId, setCopiedMessageId] = useState('')
@@ -139,6 +142,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
         }
         setChat(loadedChat)
         setPromptDraft(loadedChat.systemPrompt)
+        setLimitDraft(loadedChat.effectiveContextLimit)
         setMessages(loadedMessages)
         setModelStatus('Loading models…')
         try {
@@ -208,6 +212,19 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       setChat(updated)
     } catch (error) {
       onToast(error instanceof Error ? error.message : 'Could not save the chat model.')
+    }
+  }
+
+  async function saveEffectiveContextLimit() {
+    if (!chat || limitDraft === chat.effectiveContextLimit) return
+    const error = contextLimitInputError(limitDraft)
+    if (error) { onToast(error); return }
+    try {
+      const updated = await updateChat(chat.id, { effectiveContextLimit: limitDraft })
+      setChat(updated)
+      setLimitDraft(updated.effectiveContextLimit)
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : 'Could not save the Chat context cap.')
     }
   }
 
@@ -286,9 +303,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       prepared.lastSceneText ? section(`Current scene${prepared.lastSceneTitle ? ` — ${prepared.lastSceneTitle}` : ''}`, prepared.lastSceneText) : '',
       prepared.additionalContext ? section('Additional context', prepared.additionalContext) : '',
     ].filter(Boolean)
-    const workspaceInstructions = `# Workspace tools
-
-You can inspect and propose edits to Scenes, Notes, and Codex entries in this book. You can propose creating Notes and Codex entries, renaming or deleting Notes/Codex entries, and changing a Codex category. For the outline, use read_outline before structural changes; you may propose creating, renaming, moving/reordering, or deleting Acts, Chapters, and Scenes, and a newly created Scene may include initial Markdown content. Mutating tools only create approval proposals: never claim an edit, creation, rename, move, reorder, category change, or deletion happened until the user approves the card in Chat. Outline deletion is allowed only when the target and every descendant Scene have empty content. Search/read tools are read-only and can run automatically. Use search_entities and read_entity when a document target is not already known. For localized document changes, prefer propose_document_edit with exact old_text copied from read_entity. Use propose_document_replacement only for whole-document rewrites.`
+    const workspaceInstructions = CHAT_WORKSPACE_INSTRUCTIONS
     const historyMessages = history.map((message): ChatCompletionMessage => {
       const editState = message.role === 'assistant' && message.documentEdits?.length
         ? `\n\n[Workspace edit proposals: ${message.documentEdits.map((proposal) => `${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
@@ -318,12 +333,16 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
       ...(contextSections.length ? [{ role: 'system' as const, content: `# Selected book context\n\n${contextSections.join('\n\n')}` }] : []),
       ...historyMessages,
     ]
-    const requestText = providerMessages.map((message) => `${message.role}: ${message.content ?? ''}${message.reasoning_content ? `\nreasoning: ${message.reasoning_content}` : ''}`).join('\n\n')
-    const diagnostics = generationContextDiagnostics(activeChat.model, activeChat.modelContextLength, systemPrompt, requestText)
-    if (!diagnostics.fits) {
-      onToast(`Context is too large for this model (~${diagnostics.requestTokens.toLocaleString()} request tokens plus response space). Reduce Chat context in Context Management or choose a larger model.`)
+    const diagnostics = generationContextDiagnostics(activeChat.model, activeChat.modelContextLength, activeChat.effectiveContextLimit, serializeChatModelInput(providerMessages))
+    if (!diagnostics.limitValid) {
+      onToast(diagnostics.limitError ?? 'The Chat context cap is invalid.')
       return
     }
+    if (!diagnostics.fits) {
+      onToast(`Context is too large: ~${diagnostics.requestTokens.toLocaleString()} input tokens for a ${diagnostics.usableInputTokens.toLocaleString()}-token usable Chat budget (${diagnostics.effectiveContextTokens.toLocaleString()} effective limit, ${diagnostics.responseReserveTokens.toLocaleString()} reserved for the response). Reduce Chat context, summarize older material, raise the cap, or choose a larger model.`)
+      return
+    }
+    if (diagnostics.warning) onToast(`Chat context is near the configured limit (${Math.round(diagnostics.usageRatio * 100)}%). Consider reducing selected context or raising the cap.`)
 
     const controller = new AbortController()
     abortRef.current = controller
@@ -413,6 +432,9 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
     try {
       const workingMessages = [...providerMessages]
       for (let round = 0; round < 8 && !controller.signal.aborted; round += 1) {
+        const roundDiagnostics = generationContextDiagnostics(activeChat.model, activeChat.modelContextLength, activeChat.effectiveContextLimit, serializeChatModelInput(workingMessages))
+        if (!roundDiagnostics.limitValid) throw new Error(roundDiagnostics.limitError ?? 'The Chat context cap is invalid.')
+        if (!roundDiagnostics.fits) throw new Error(`Chat context exceeded its usable budget after workspace tool results (~${roundDiagnostics.requestTokens.toLocaleString()} / ${roundDiagnostics.usableInputTokens.toLocaleString()} input tokens). Reduce context or raise the cap; Arc will not remove older turns automatically.`)
         activeRoundContent = ''
         activeRoundThoughts = ''
         activeRoundExtras = {}
@@ -425,7 +447,7 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
           model: activeChat.model,
           messages: workingMessages,
           thinking: activeChat.thinking,
-          tools: [...chatWorkspaceTools, ...chatEntityTools, ...chatOutlineTools],
+          tools: CHAT_TOOL_DEFINITIONS,
         }, (chunk) => {
           if (chunk.thoughts) {
             activeRoundThoughts += chunk.thoughts
@@ -771,6 +793,7 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
     <section className="chat-composer functional-chat-composer">
       <div className="chat-config-row">
         <ChatModelPicker value={chat.model} models={sortedModels} onChange={(modelId) => { void changeModel(modelId) }} />
+        <label className={`chat-context-limit ${contextLimitInputError(limitDraft) ? 'invalid' : ''}`}><span>Context cap</span><input value={limitDraft} onChange={(event) => setLimitDraft(event.target.value)} onBlur={() => { void saveEffectiveContextLimit() }} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} placeholder="Model max" inputMode="text" aria-label="Chat effective context cap" /><small>{contextLimitInputError(limitDraft) || 'Empty uses the model maximum. 32k / 1m supported.'}</small></label>
         <button className="chat-system-prompt-button" type="button" onClick={() => { setPromptDraft(chat.systemPrompt); setPromptOpen(true) }}><Bot aria-hidden="true" /><span>System prompt</span></button>
         {modelStatus && <small className="chat-model-status">{modelStatus}</small>}
       </div>

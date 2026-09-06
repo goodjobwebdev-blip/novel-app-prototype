@@ -18,6 +18,7 @@ export type ChatEntity = ArcEntity & {
   title: string
   model: string
   modelContextLength?: number
+  effectiveContextLimit: string
   systemPrompt: string
   thinking: boolean
   contextProfile: GenerationContextProfile
@@ -152,8 +153,14 @@ export async function getChat(chatId: string): Promise<ChatEntity | undefined> {
   const entity = await getEntity<ArcEntity>(chatId)
   if (entity?.type !== 'chat') return undefined
   const chat = entity as ChatEntity
-  if (!previousDefaultAssistantPrompts.some((prompt) => prompt === chat.systemPrompt)) return chat
-  const migrated: ChatEntity = { ...chat, systemPrompt: defaultAiPrompts.assistant }
+  const promptNeedsMigration = previousDefaultAssistantPrompts.some((prompt) => prompt === chat.systemPrompt)
+  const limitNeedsMigration = typeof chat.effectiveContextLimit !== 'string'
+  if (!promptNeedsMigration && !limitNeedsMigration) return chat
+  const migrated: ChatEntity = {
+    ...chat,
+    systemPrompt: promptNeedsMigration ? defaultAiPrompts.assistant : chat.systemPrompt,
+    effectiveContextLimit: limitNeedsMigration ? '' : chat.effectiveContextLimit,
+  }
   await putEntity(migrated)
   return migrated
 }
@@ -173,6 +180,7 @@ export async function createChat(bookId: string, title = 'New chat'): Promise<Ch
     title,
     model: settings.mainModel,
     modelContextLength: settings.mainModelContextLength,
+    effectiveContextLimit: settings.mainEffectiveContextLimit,
     systemPrompt: settings.prompts.assistant,
     thinking: false,
     contextProfile: profileForNewChat(contextSettings.profiles.chat),
@@ -184,7 +192,7 @@ export async function createChat(bookId: string, title = 'New chat'): Promise<Ch
   return chat
 }
 
-export async function updateChat(chatId: string, patch: Partial<Pick<ChatEntity, 'title' | 'model' | 'modelContextLength' | 'systemPrompt' | 'thinking' | 'contextProfile' | 'lastMessagePreview'>>): Promise<ChatEntity> {
+export async function updateChat(chatId: string, patch: Partial<Pick<ChatEntity, 'title' | 'model' | 'modelContextLength' | 'effectiveContextLimit' | 'systemPrompt' | 'thinking' | 'contextProfile' | 'lastMessagePreview'>>): Promise<ChatEntity> {
   const current = await getChat(chatId)
   if (!current) throw new Error('Chat is no longer available.')
   const next: ChatEntity = {

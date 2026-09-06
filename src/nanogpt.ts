@@ -190,18 +190,27 @@ function splitStoryPrompt(systemPrompt: string) {
   }
 }
 
-export async function streamNanoGPTCompletion(
-  request: NanoGPTGenerationRequest,
-  onChunk: (text: string) => void,
-  signal: AbortSignal,
-  lifecycle: NanoGPTStreamLifecycle = {},
-) {
+export function nanoGPTCompletionMessages(request: Pick<NanoGPTGenerationRequest, 'systemPrompt' | 'contextMessage' | 'userMessage'>) {
   const storyPrompt = splitStoryPrompt(request.systemPrompt)
   const messages = [{ role: 'system', content: storyPrompt?.systemPrompt ?? request.systemPrompt }]
   if (storyPrompt?.bookContext.trim()) messages.push({ role: 'user', content: storyPrompt.bookContext })
   if (request.contextMessage?.trim()) messages.push({ role: 'user', content: request.contextMessage })
   if (storyPrompt?.sceneContext.trim()) messages.push({ role: 'user', content: storyPrompt.sceneContext })
   if (request.userMessage?.trim()) messages.push({ role: 'user', content: request.userMessage })
+  return messages
+}
+
+export function nanoGPTRequestText(request: Pick<NanoGPTGenerationRequest, 'systemPrompt' | 'contextMessage' | 'userMessage'>) {
+  return JSON.stringify({ messages: nanoGPTCompletionMessages(request) })
+}
+
+export async function streamNanoGPTCompletion(
+  request: NanoGPTGenerationRequest,
+  onChunk: (text: string) => void,
+  signal: AbortSignal,
+  lifecycle: NanoGPTStreamLifecycle = {},
+) {
+  const messages = nanoGPTCompletionMessages(request)
 
   const response = await fetch(completionEndpoint(request.baseUrl), {
     method: 'POST',
