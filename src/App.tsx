@@ -49,6 +49,7 @@ import { getChat, listChatMessages, saveChatContextProfile, type ChatEntity, typ
 import { CHAT_TOOL_DEFINITIONS, CHAT_WORKSPACE_INSTRUCTIONS, serializeChatModelInput } from './chat-request'
 import { renderLorePrompt, renderStoryPrompt } from './nanogpt'
 import { clearModelCatalog, getCachedModelCatalog, providerModelEndpoint, saveModelCatalog, type ProviderModel } from './model-catalog'
+import { KeyedAsyncQueue } from './keyed-async-queue'
 import { fetchSpeechModels, type SpeechModel } from './tts-service'
 import { fetchTranscriptionModels, type SttModel } from './stt-service'
 import './response-length-settings.css'
@@ -134,7 +135,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   const latestAiSettingsRef = useRef(settings)
   const aiSaveTimerRef = useRef<number | null>(null)
   const aiSaveVersionRef = useRef(0)
-  const aiSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const aiSaveQueueRef = useRef(new KeyedAsyncQueue())
   const onSavedRef = useRef(onSaved)
   const contextSaveVersionRef = useRef(0)
   const contextSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
@@ -232,7 +233,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   }, [modelSearch, models, settings.favorites])
 
   function persistAiSettings(snapshot: AiSettings, scope: string, version: number) {
-    const pending = aiSaveQueueRef.current.catch(() => undefined).then(async () => {
+    const pending = aiSaveQueueRef.current.run(scope, async () => {
       const savedSettings = scope === 'defaults'
         ? saveAiSettings(snapshot)
         : await saveBookAiSettings(scope, snapshot)
@@ -244,7 +245,6 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
       setStatusKind('success')
       onSavedRef.current?.(savedSettings)
     })
-    aiSaveQueueRef.current = pending
     return pending.catch(() => {
       if (version !== aiSaveVersionRef.current || scope !== aiLoadedScopeRef.current) return
       setSaveState('error')
@@ -375,21 +375,35 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   async function resetFromDefaults() {
     if (!book || !window.confirm(`Replace the AI settings for “${book.title}” with the current defaults?`)) return
     invalidateModelRefresh()
+    const scope = book.id
+    const defaults = loadAiSettings()
+    if (aiSaveTimerRef.current !== null) window.clearTimeout(aiSaveTimerRef.current)
+    aiSaveTimerRef.current = null
+    const version = ++aiSaveVersionRef.current
+
+    // Reset becomes the newest local revision immediately, so any edit made while the
+    // queued reset is waiting starts from the defaults and is ordered after the reset.
+    latestAiSettingsRef.current = defaults
+    setSettings(defaults)
+    setSaveState('saving')
+    setModels(getCachedModelCatalog(defaults)?.models ?? [])
+
     try {
-      const defaults = loadAiSettings()
-      const copied = await copyDefaultAiSettingsToBook(book.id, defaults)
-      if (aiSaveTimerRef.current !== null) window.clearTimeout(aiSaveTimerRef.current)
-      aiSaveTimerRef.current = null
-      aiSaveVersionRef.current += 1
-      latestAiSettingsRef.current = copied
-      aiSavedRef.current = JSON.stringify(copied)
-      setSettings(copied)
-      setSaveState('saved')
-      setModels(getCachedModelCatalog(copied)?.models ?? [])
-      setStatus(`Current defaults copied to “${book.title}”.`)
-      setStatusKind('success')
-      onSaved?.(copied)
+      await aiSaveQueueRef.current.run(scope, async () => {
+        const copied = await copyDefaultAiSettingsToBook(scope, defaults)
+        if (version !== aiSaveVersionRef.current || scope !== aiLoadedScopeRef.current) return
+        latestAiSettingsRef.current = copied
+        aiSavedRef.current = JSON.stringify(copied)
+        setSettings(copied)
+        setSaveState('saved')
+        setModels(getCachedModelCatalog(copied)?.models ?? [])
+        setStatus(`Current defaults copied to “${book.title}”.`)
+        setStatusKind('success')
+        onSavedRef.current?.(copied)
+      })
     } catch {
+      if (version !== aiSaveVersionRef.current || scope !== aiLoadedScopeRef.current) return
+      setSaveState('error')
       setStatus('Defaults could not be copied to this book. Try again.')
       setStatusKind('error')
     }
