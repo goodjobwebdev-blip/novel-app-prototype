@@ -42,6 +42,7 @@ import {
 import AiSettingsScreen from './App'
 import { generationWordDelayMs, loadAiSettings, type AiSettings } from './ai-settings'
 import { createBufferedWordRenderer } from './buffered-word-renderer'
+import { applyIfStillCurrent } from './async-state-guard'
 import ExpandableTextInput from './ExpandableTextInput'
 import MarkdownEditor, { type CodexMentionClick, type MarkdownEditorHandle } from './MarkdownEditor'
 import { fetchNanoGPTModelContextLength, nanoGPTRequestText, renderLorePrompt, renderStoryPrompt, streamNanoGPTCompletion, type NanoGPTStreamMetadata } from './nanogpt'
@@ -654,11 +655,15 @@ export default function Workspace() {
 
   async function saveCodexTriggers() {
     if (activeDocument?.type !== 'codexEntry' || isCodexEntryArchived(activeDocument)) return
+    const sourceId = activeDocument.id
+    const triggerSnapshot = codexTriggerDraft.split(/\r?\n/)
     try {
-      const updated = await updateCodexAutoIncludeTriggers(activeDocument.id, codexTriggerDraft.split(/\r?\n/))
-      setActiveDocument(updated)
+      const updated = await updateCodexAutoIncludeTriggers(sourceId, triggerSnapshot)
       setCodexEntries((entries) => entries.map((entry) => entry.id === updated.id ? updated : entry))
-      setCodexTriggerDraft((updated.autoIncludeTriggers ?? []).join('\n'))
+      applyIfStillCurrent(sourceId, () => activeDocumentIdRef.current, () => {
+        setActiveDocument(updated)
+        setCodexTriggerDraft((updated.autoIncludeTriggers ?? []).join('\n'))
+      })
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Could not save Codex triggers.')
     }
