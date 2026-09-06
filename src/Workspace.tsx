@@ -40,7 +40,7 @@ import { createBufferedWordRenderer } from './buffered-word-renderer'
 import ExpandableTextInput from './ExpandableTextInput'
 import MarkdownEditor, { type MarkdownEditorHandle } from './MarkdownEditor'
 import { fetchNanoGPTModelContextLength, renderLorePrompt, renderStoryPrompt, streamNanoGPTCompletion, type NanoGPTStreamMetadata } from './nanogpt'
-import type { BookPromptValues } from './prompt-template'
+import { generationInstructionMessage, type BookPromptValues } from './prompt-template'
 import { buildContextValues, generationContextDiagnostics } from './context-service'
 import {
   PROTOTYPE_BOOK_ID,
@@ -743,11 +743,13 @@ export default function Workspace() {
             : { ...settings, mainModelContextLength: modelContextLength })
         }
         const instruction = isCodex ? lorePrompt : arcPrompt
+        const promptTemplate = isCodex ? settings.prompts.lore : settings.prompts.story
+        const promptBook = { ...toBookPromptValues(currentBook, seriesList), responseLength: settings.responseLength }
         const systemPrompt = isCodex
-          ? renderLorePrompt(settings.prompts.lore, { book: toBookPromptValues(currentBook, seriesList), entryTitle: activeDocument.title, entryCategory: activeDocument.category, entryContent: context.sceneText, sceneText: prepared.lastSceneText, additionalContext: prepared.additionalContext })
-          : renderStoryPrompt(settings.prompts.story, { book: toBookPromptValues(currentBook, seriesList), sceneText: context.sceneText, scenePov: scenePovRef.current || undefined, previousSceneText: prepared.previousSceneText, summaryContext: prepared.summaryContext, additionalContext: prepared.additionalContext })
-        const userMessage = `# Instruction\n\n${instruction.trim() || (isCodex ? 'Create a complete Codex entry.' : 'Continue the story.')}`
-        const selectedContextIsTemplated = /{{\s*additional_context\s*}}/.test(isCodex ? settings.prompts.lore : settings.prompts.story)
+          ? renderLorePrompt(settings.prompts.lore, { book: promptBook, entryTitle: activeDocument.title, entryCategory: activeDocument.category, entryContent: context.sceneText, sceneText: prepared.lastSceneText, additionalContext: prepared.additionalContext })
+          : renderStoryPrompt(settings.prompts.story, { book: promptBook, sceneText: context.sceneText, scenePov: scenePovRef.current || undefined, previousSceneText: prepared.previousSceneText, summaryContext: prepared.summaryContext, additionalContext: prepared.additionalContext })
+        const userMessage = generationInstructionMessage(promptTemplate, settings.responseLength, instruction.trim() || (isCodex ? 'Create a complete Codex entry.' : 'Continue the story.'))
+        const selectedContextIsTemplated = /{{\s*additional_context\s*}}/.test(promptTemplate)
         const contextMessage = !selectedContextIsTemplated && prepared.additionalContext.trim()
           ? `# Additional context\n\n${prepared.additionalContext}`
           : ''
