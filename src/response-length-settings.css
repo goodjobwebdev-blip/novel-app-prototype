@@ -1,0 +1,84 @@
+.response-length-setting {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.response-length-setting > label {
+  display: grid;
+  gap: 8px;
+}
+
+.response-length-setting > label > span {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.response-length-setting > label strong {
+  font-size: 0.95rem;
+}
+
+.response-length-setting > label em,
+.response-length-setting > small {
+  color: var(--muted, rgba(255, 255, 255, 0.58));
+  font-size: 0.78rem;
+  font-style: normal;
+  line-height: 1.45;
+}
+
+.response-length-setting textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 92px;
+  resize: vertical;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+  color: inherit;
+  padding: 11px 12px;
+  font: inherit;
+  line-height: 1.45;
+}
+
+.response-length-setting textarea:focus {
+  outline: 2px solid color-mix(in srgb, currentColor 22%, transparent);
+  outline-offset: 1px;
+}
+
+.response-length-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.response-length-presets button {
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+  color: inherit;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.response-length-presets button:hover,
+.response-length-presets button:focus-visible {
+  background: rgba(255, 255, 255, 0.085);
+}
+
+@media (max-width: 640px) {
+  .response-length-setting > label > span {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .response-length-presets button {
+    padding: 7px 10px;
+  }
+}

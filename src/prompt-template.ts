@@ -10,6 +10,7 @@ export type BookPromptValues = {
   pov: string
   tense: string
   language: string
+  responseLength?: string
 }
 
 export type PromptVariable = {
@@ -19,6 +20,7 @@ export type PromptVariable = {
 }
 
 const everyPrompt: PromptScope[] = ['story', 'summarize', 'titles', 'lore', 'assistant']
+export const RESPONSE_LENGTH_VARIABLE = 'response.length'
 
 export const promptVariables: PromptVariable[] = [
   { name: 'book.title', description: 'Current book title', scopes: everyPrompt },
@@ -30,6 +32,7 @@ export const promptVariables: PromptVariable[] = [
   { name: 'book.pov', description: 'Default point of view for the book', scopes: everyPrompt },
   { name: 'book.tense', description: 'Default narrative tense', scopes: everyPrompt },
   { name: 'book.language', description: 'Primary writing language', scopes: everyPrompt },
+  { name: RESPONSE_LENGTH_VARIABLE, description: 'Response-length guidance from AI settings', scopes: ['story', 'lore', 'assistant'] },
   { name: 'scene.text', description: 'Current Scene for Story; last-opened Scene for Lore entries', scopes: ['story', 'lore'] },
   { name: 'scene.pov', description: 'Scene-specific POV when one is set', scopes: ['story'] },
   { name: 'scene.previous_text', description: 'Previous Scene when the current Scene is empty', scopes: ['story'] },
@@ -54,7 +57,23 @@ export function bookTemplateValues(book: BookPromptValues): Record<string, strin
     'book.pov': book.pov,
     'book.tense': book.tense,
     'book.language': book.language,
+    [RESPONSE_LENGTH_VARIABLE]: book.responseLength ?? '',
   }
+}
+
+export function templateInterpolatesVariable(template: string, variableName: string) {
+  const escaped = variableName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`{{\\s*${escaped}\\s*}}`).test(template)
+}
+
+export function responseLengthMessage(template: string, responseLength: string) {
+  const guidance = responseLength.trim()
+  if (!guidance || templateInterpolatesVariable(template, RESPONSE_LENGTH_VARIABLE)) return ''
+  return `# Response length\n\n${guidance}`
+}
+
+export function generationInstructionMessage(template: string, responseLength: string, instruction: string) {
+  return [responseLengthMessage(template, responseLength), `# Instruction\n\n${instruction.trim()}`].filter(Boolean).join('\n\n')
 }
 
 export function renderPromptTemplate(template: string, values: Record<string, string>) {
