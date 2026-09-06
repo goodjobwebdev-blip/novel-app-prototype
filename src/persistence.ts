@@ -703,18 +703,21 @@ export async function renameEntity(id: string, title: string): Promise<ArcEntity
 
 export async function updateBookMetadata(id: string, metadata: BookMetadata): Promise<BookEntity> {
   const db = await database()
-  const entity = await db.table('entities').get(id) as BookEntity | undefined
-  if (!entity || entity.type !== 'book') throw new Error(`Cannot update missing book ${id}`)
-  const updated: BookEntity = {
-    ...entity,
-    ...metadata,
-    title: metadata.title.trim() || entity.title || 'Untitled Book',
-    seriesId: metadata.seriesId,
-    seriesOrder: metadata.seriesId ? metadata.seriesOrder.trim() : '',
-    updatedAt: Date.now(),
-  }
-  await db.table('entities').put(updated)
-  return updated
+  return db.transaction('rw', db.table('entities'), async () => {
+    const entity = await db.table('entities').get(id) as BookEntity | undefined
+    if (!entity || entity.type !== 'book') throw new Error(`Cannot update missing book ${id}`)
+    const patch = {
+      ...metadata,
+      title: metadata.title.trim() || entity.title || 'Untitled Book',
+      seriesId: metadata.seriesId,
+      seriesOrder: metadata.seriesId ? metadata.seriesOrder.trim() : '',
+      updatedAt: Date.now(),
+    }
+    await db.table('entities').update(id, patch)
+    const updated = await db.table('entities').get(id) as BookEntity | undefined
+    if (!updated || updated.type !== 'book') throw new Error(`Cannot update missing book ${id}`)
+    return updated
+  })
 }
 
 export async function moveStructuralEntity(id: string, direction: -1 | 1): Promise<void> {
