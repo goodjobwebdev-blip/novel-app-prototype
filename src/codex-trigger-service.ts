@@ -93,16 +93,19 @@ export function triggerMatchesText(text: string, trigger: string) {
 
 export function buildCodexMentionIndex(entities: ArcEntity[]): CodexMentionTerm[] {
   const byKey = new Map<string, CodexMentionTerm>()
-  entities.filter((entity): entity is CodexEntryEntity => entity.type === 'codexEntry' && !archived(entity)).forEach((entry) => {
-    entryTriggers(entry).forEach((trigger) => {
-      const key = triggerKey(trigger)
-      const existing = byKey.get(key) ?? { key, text: trigger, entries: [] }
-      if (!existing.entries.some((candidate) => candidate.id === entry.id)) {
-        existing.entries.push({ id: entry.id, title: entry.title, category: entry.category, trigger })
-      }
-      byKey.set(key, existing)
+  entities
+    .filter((entity): entity is CodexEntryEntity => entity.type === 'codexEntry')
+    .filter((entry) => !archived(entry))
+    .forEach((entry) => {
+      entryTriggers(entry).forEach((trigger) => {
+        const key = triggerKey(trigger)
+        const existing = byKey.get(key) ?? { key, text: trigger, entries: [] }
+        if (!existing.entries.some((candidate) => candidate.id === entry.id)) {
+          existing.entries.push({ id: entry.id, title: entry.title, category: entry.category, trigger })
+        }
+        byKey.set(key, existing)
+      })
     })
-  })
   return [...byKey.values()]
     .map((term) => ({ ...term, entries: [...term.entries].sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id)) }))
     .sort((a, b) => b.text.length - a.text.length || a.text.localeCompare(b.text))
