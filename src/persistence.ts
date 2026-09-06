@@ -600,93 +600,105 @@ export function isCodexEntryArchived(entity: ArcEntity | CodexEntryEntity | unde
 
 export async function archiveCodexEntry(id: string): Promise<CodexEntryEntity> {
   const db = await database()
-  const current = await db.table('entities').get(id) as CodexEntryEntity | undefined
-  if (!current || current.type !== 'codexEntry') throw new Error(`Cannot archive missing Codex entry ${id}`)
-  if (isCodexEntryArchived(current)) return current
-  const now = Date.now()
-  const sourceRevision = typeof current.sourceRevision === 'number' ? current.sourceRevision : current.updatedAt
-  const updated: CodexEntryEntity = { ...current, sourceRevision, archivedAt: now, updatedAt: now }
-  await db.transaction('rw', db.table('entities'), async () => {
-    await db.table('entities').put(updated)
+  return db.transaction('rw', db.table('entities'), async () => {
+    const current = await db.table('entities').get(id) as CodexEntryEntity | undefined
+    if (!current || current.type !== 'codexEntry') throw new Error(`Cannot archive missing Codex entry ${id}`)
+    if (isCodexEntryArchived(current)) return current
+    const now = Date.now()
+    const sourceRevision = typeof current.sourceRevision === 'number' ? current.sourceRevision : current.updatedAt
+    await db.table('entities').update(id, { sourceRevision, archivedAt: now, updatedAt: now })
     await touchAncestors(db, current.bookId, now)
+    const updated = await db.table('entities').get(id) as CodexEntryEntity | undefined
+    if (!updated || updated.type !== 'codexEntry') throw new Error(`Cannot archive missing Codex entry ${id}`)
+    return updated
   })
-  return updated
 }
 
 export async function restoreCodexEntry(id: string): Promise<CodexEntryEntity> {
   const db = await database()
-  const current = await db.table('entities').get(id) as CodexEntryEntity | undefined
-  if (!current || current.type !== 'codexEntry') throw new Error(`Cannot restore missing Codex entry ${id}`)
-  if (!isCodexEntryArchived(current)) return current
-  const now = Date.now()
-  const sourceRevision = typeof current.sourceRevision === 'number' ? current.sourceRevision : current.updatedAt
-  const { archivedAt: _archivedAt, ...active } = current
-  const updated: CodexEntryEntity = { ...active, sourceRevision, updatedAt: now }
-  await db.transaction('rw', db.table('entities'), async () => {
-    await db.table('entities').put(updated)
+  return db.transaction('rw', db.table('entities'), async () => {
+    const current = await db.table('entities').get(id) as CodexEntryEntity | undefined
+    if (!current || current.type !== 'codexEntry') throw new Error(`Cannot restore missing Codex entry ${id}`)
+    if (!isCodexEntryArchived(current)) return current
+    const now = Date.now()
+    const sourceRevision = typeof current.sourceRevision === 'number' ? current.sourceRevision : current.updatedAt
+    await db.table('entities').where('id').equals(id).modify((entity: CodexEntryEntity) => {
+      delete entity.archivedAt
+      entity.sourceRevision = sourceRevision
+      entity.updatedAt = now
+    })
     await touchAncestors(db, current.bookId, now)
+    const updated = await db.table('entities').get(id) as CodexEntryEntity | undefined
+    if (!updated || updated.type !== 'codexEntry') throw new Error(`Cannot restore missing Codex entry ${id}`)
+    return updated
   })
-  return updated
 }
 
 export async function updateCodexCategory(id: string, category: string): Promise<CodexEntryEntity> {
   const db = await database()
-  const current = await db.table('entities').get(id) as CodexEntryEntity | undefined
-  if (!current || current.type !== 'codexEntry') throw new Error(`Cannot update missing Codex entry ${id}`)
-  const now = Date.now()
-  const updated: CodexEntryEntity = { ...current, category: category.trim() || 'Other', sourceRevision: now, updatedAt: now }
-  await db.transaction('rw', db.table('entities'), async () => {
-    await db.table('entities').put(updated)
+  return db.transaction('rw', db.table('entities'), async () => {
+    const current = await db.table('entities').get(id) as CodexEntryEntity | undefined
+    if (!current || current.type !== 'codexEntry') throw new Error(`Cannot update missing Codex entry ${id}`)
+    const now = Date.now()
+    await db.table('entities').update(id, { category: category.trim() || 'Other', sourceRevision: now, updatedAt: now })
     await touchAncestors(db, current.bookId, now)
+    const updated = await db.table('entities').get(id) as CodexEntryEntity | undefined
+    if (!updated || updated.type !== 'codexEntry') throw new Error(`Cannot update missing Codex entry ${id}`)
+    return updated
   })
-  return updated
 }
 
 export async function updateCodexSummaryPreference(id: string, preferSummaryForContext: boolean): Promise<CodexEntryEntity> {
   const db = await database()
-  const current = await db.table('entities').get(id) as CodexEntryEntity | undefined
-  if (!current || current.type !== 'codexEntry') throw new Error(`Cannot update missing Codex entry ${id}`)
-  const now = Date.now()
-  const sourceRevision = typeof current.sourceRevision === 'number' ? current.sourceRevision : current.updatedAt
-  const updated: CodexEntryEntity = { ...current, sourceRevision, preferSummaryForContext, updatedAt: now }
-  await db.transaction('rw', db.table('entities'), async () => {
-    await db.table('entities').put(updated)
+  return db.transaction('rw', db.table('entities'), async () => {
+    const current = await db.table('entities').get(id) as CodexEntryEntity | undefined
+    if (!current || current.type !== 'codexEntry') throw new Error(`Cannot update missing Codex entry ${id}`)
+    const now = Date.now()
+    const sourceRevision = typeof current.sourceRevision === 'number' ? current.sourceRevision : current.updatedAt
+    await db.table('entities').update(id, { sourceRevision, preferSummaryForContext, updatedAt: now })
     await touchAncestors(db, current.bookId, now)
+    const updated = await db.table('entities').get(id) as CodexEntryEntity | undefined
+    if (!updated || updated.type !== 'codexEntry') throw new Error(`Cannot update missing Codex entry ${id}`)
+    return updated
   })
-  return updated
 }
 
 export async function updateCodexAutoIncludeTriggers(id: string, triggers: string[]): Promise<CodexEntryEntity> {
   const db = await database()
-  const current = await db.table('entities').get(id) as CodexEntryEntity | undefined
-  if (!current || current.type !== 'codexEntry') throw new Error(`Cannot update missing Codex entry ${id}`)
-  if (isCodexEntryArchived(current)) throw new Error('Restore this archived Codex entry before editing automatic triggers.')
-  const now = Date.now()
-  const sourceRevision = typeof current.sourceRevision === 'number' ? current.sourceRevision : current.updatedAt
-  const updated: CodexEntryEntity = { ...current, sourceRevision, autoIncludeTriggers: normalizeCodexTriggerList(triggers), updatedAt: now }
-  await db.transaction('rw', db.table('entities'), async () => {
-    await db.table('entities').put(updated)
+  return db.transaction('rw', db.table('entities'), async () => {
+    const current = await db.table('entities').get(id) as CodexEntryEntity | undefined
+    if (!current || current.type !== 'codexEntry') throw new Error(`Cannot update missing Codex entry ${id}`)
+    if (isCodexEntryArchived(current)) throw new Error('Restore this archived Codex entry before editing automatic triggers.')
+    const now = Date.now()
+    const sourceRevision = typeof current.sourceRevision === 'number' ? current.sourceRevision : current.updatedAt
+    await db.table('entities').update(id, { sourceRevision, autoIncludeTriggers: normalizeCodexTriggerList(triggers), updatedAt: now })
     await touchAncestors(db, current.bookId, now)
+    const updated = await db.table('entities').get(id) as CodexEntryEntity | undefined
+    if (!updated || updated.type !== 'codexEntry') throw new Error(`Cannot update missing Codex entry ${id}`)
+    return updated
   })
-  return updated
 }
 
 export async function renameEntity(id: string, title: string): Promise<ArcEntity> {
   const db = await database()
-  const entity = await db.table('entities').get(id) as ArcEntity | undefined
-  if (!entity) throw new Error(`Cannot rename missing entity ${id}`)
-  const now = Date.now()
-  const updated = { ...entity, title: title.trim() || entity.title || 'Untitled', updatedAt: now, ...(entity.type === 'codexEntry' ? { sourceRevision: now } : {}) }
-  await db.transaction('rw', db.table('entities'), async () => {
-    await db.table('entities').put(updated)
+  return db.transaction('rw', db.table('entities'), async () => {
+    const entity = await db.table('entities').get(id) as ArcEntity | undefined
+    if (!entity) throw new Error(`Cannot rename missing entity ${id}`)
+    const now = Date.now()
+    const nextTitle = title.trim() || entity.title || 'Untitled'
+    const patch: Record<string, unknown> = { title: nextTitle, updatedAt: now }
+    if (entity.type === 'codexEntry') patch.sourceRevision = now
+    await db.table('entities').update(id, patch)
     if (['act', 'chapter', 'scene', 'codexEntry'].includes(entity.type)) {
       const summary = await db.table('entities').get(summaryId(entity.id)) as SummaryEntity | undefined
-      if (summary?.type === 'summary') await db.table('entities').put({ ...summary, title: `${updated.title} summary`, updatedAt: now })
+      if (summary?.type === 'summary') await db.table('entities').update(summary.id, { title: `${nextTitle} summary`, updatedAt: now })
     }
-    if (['act', 'chapter', 'scene'].includes(entity.type)) await touchAncestors(db, entity.parentId, updated.updatedAt)
-    else if (entity.bookId) await touchAncestors(db, entity.bookId, updated.updatedAt)
+    if (['act', 'chapter', 'scene'].includes(entity.type)) await touchAncestors(db, entity.parentId, now)
+    else if (entity.bookId) await touchAncestors(db, entity.bookId, now)
+    const updated = await db.table('entities').get(id) as ArcEntity | undefined
+    if (!updated) throw new Error(`Cannot rename missing entity ${id}`)
+    return updated
   })
-  return updated
 }
 
 export async function updateBookMetadata(id: string, metadata: BookMetadata): Promise<BookEntity> {
@@ -718,10 +730,8 @@ export async function moveStructuralEntity(id: string, direction: -1 | 1): Promi
     if (index < 0 || targetIndex < 0 || targetIndex >= siblings.length) return
     const target = siblings[targetIndex]
     const now = Date.now()
-    await db.table('entities').bulkPut([
-      { ...entity, order: target.order, updatedAt: now },
-      { ...target, order: entity.order, updatedAt: now },
-    ])
+    await db.table('entities').update(entity.id, { order: target.order, updatedAt: now })
+    await db.table('entities').update(target.id, { order: entity.order, updatedAt: now })
     await touchAncestors(db, entity.parentId, now)
   })
 }
@@ -755,16 +765,21 @@ export async function placeStructuralEntity(id: string, targetParentId: string, 
       if (targetIndex < 0) throw new Error('The requested before_id is no longer a sibling in the target parent.')
     }
     const destination = [...targetSiblings]
-    destination.splice(targetIndex, 0, { ...entity, parentId: targetParentId })
+    destination.splice(targetIndex, 0, entity)
     const now = Date.now()
-    const updates: StructuralEntity[] = destination.map((candidate, index) => ({ ...candidate, parentId: targetParentId, order: index, updatedAt: now }))
-    if (sourceParentId !== targetParentId) {
-      updates.push(...sourceSiblings.map((candidate, index) => ({ ...candidate, order: index, updatedAt: now })))
+    for (const [index, candidate] of destination.entries()) {
+      await db.table('entities').update(candidate.id, { parentId: targetParentId, order: index, updatedAt: now })
     }
-    await db.table('entities').bulkPut(updates)
+    if (sourceParentId !== targetParentId) {
+      for (const [index, candidate] of sourceSiblings.entries()) {
+        await db.table('entities').update(candidate.id, { order: index, updatedAt: now })
+      }
+    }
     await touchAncestors(db, sourceParentId, now)
     if (targetParentId !== sourceParentId) await touchAncestors(db, targetParentId, now)
-    return updates.find((candidate) => candidate.id === entity.id)!
+    const updated = await db.table('entities').get(id) as StructuralEntity | undefined
+    if (!updated || !['act', 'chapter', 'scene'].includes(updated.type)) throw new Error(`Cannot move missing structural entity ${id}`)
+    return updated
   })
 }
 
@@ -817,13 +832,16 @@ export async function saveDocumentContent(entityId: string, content: string) {
     const current = await db.table('entities').get(entityId) as ArcEntity | undefined
     if (!current) throw new Error(`Cannot save missing entity ${entityId}`)
     const now = Date.now()
-    const updated = { ...current, content, updatedAt: now, ...(current.type === 'codexEntry' ? { sourceRevision: now } : {}) }
-    await db.table('entities').put(updated)
+    const patch: Record<string, unknown> = { content, updatedAt: now }
+    if (current.type === 'codexEntry') patch.sourceRevision = now
+    await db.table('entities').update(entityId, patch)
     if (current.type === 'scene') await touchAncestors(db, current.parentId, now)
     if (current.bookId) {
       const book = await db.table('entities').get(current.bookId) as ArcEntity | undefined
-      if (book) await db.table('entities').put({ ...book, updatedAt: now })
+      if (book) await db.table('entities').update(book.id, { updatedAt: now })
     }
+    const updated = await db.table('entities').get(entityId) as ArcEntity | undefined
+    if (!updated) throw new Error(`Cannot save missing entity ${entityId}`)
     return updated
   })
 }
