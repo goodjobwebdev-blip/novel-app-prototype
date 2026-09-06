@@ -1813,7 +1813,19 @@ function TtsStatusBar() {
               : tts.status === 'stopped' ? 'Stopped'
                 : tts.status === 'complete' ? 'Complete'
                 : 'Failed'
-  return <section className={`tts-status ${tts.status}`} aria-live="polite"><Volume2 aria-hidden="true" /><div className="tts-status-copy"><strong>{tts.label || 'Read aloud'}</strong><small>{label}{tts.chunkCount ? ` · ${Math.max(1, tts.chunkIndex || 1)}/${tts.chunkCount}` : ''}{tts.error ? ` · ${tts.error}` : ''}</small></div><div className="tts-status-actions">{tts.status === 'playing' && <button type="button" onClick={pauseTtsSession} aria-label="Pause audio"><Pause aria-hidden="true" /></button>}{tts.status === 'paused' && <button type="button" onClick={() => { void resumeTtsSession() }} aria-label="Resume audio"><Play aria-hidden="true" /></button>}{!['complete','failed','stopped'].includes(tts.status) && <button type="button" onClick={stopTtsSession} aria-label="Stop audio"><Square aria-hidden="true" /></button>}{['complete','failed','stopped'].includes(tts.status) && <button type="button" onClick={dismissTtsState} aria-label="Dismiss audio status"><X aria-hidden="true" /></button>}</div></section>
+  return <section className={`tts-status ${tts.status}`} aria-live="polite">
+    <Volume2 aria-hidden="true" />
+    <div className="tts-status-copy">
+      <strong>{tts.label || 'Read aloud'}</strong>
+      <small>{label}{tts.chunkCount ? ` · ${Math.max(1, tts.chunkIndex || 1)}/${tts.chunkCount}` : ''}{tts.error ? ` · ${tts.error}` : ''}</small>
+    </div>
+    <div className="tts-status-actions">
+      {tts.status === 'playing' && <button className="tts-playback-toggle" type="button" onClick={pauseTtsSession} aria-label="Pause audio" title="Pause"><Pause aria-hidden="true" /></button>}
+      {tts.status === 'paused' && <button className="tts-playback-toggle" type="button" onClick={() => { void resumeTtsSession() }} aria-label="Resume audio" title="Resume"><Play aria-hidden="true" fill="currentColor" /></button>}
+      {!['complete','failed','stopped'].includes(tts.status) && <button className="tts-stop" type="button" onClick={stopTtsSession} aria-label="Stop audio" title="Stop"><Square aria-hidden="true" fill="currentColor" /></button>}
+      {['complete','failed','stopped'].includes(tts.status) && <button type="button" onClick={dismissTtsState} aria-label="Dismiss audio status" title="Dismiss"><X aria-hidden="true" /></button>}
+    </div>
+  </section>
 }
 
 function formatGenerationTime(seconds: number) {
