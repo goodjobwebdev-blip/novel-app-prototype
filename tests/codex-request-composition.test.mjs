@@ -94,9 +94,11 @@ test('response guidance is template-owned and Assistant roles are never rewritte
 
 test('legacy shared response length migrates to Story only and Codex defaults empty', () => {
   const settings = readFileSync(new URL('../src/ai-settings.ts', import.meta.url), 'utf8')
-  assert.match(settings, /story: typeof responseLengthsInput\?\.story === 'string' \? responseLengthsInput\.story : legacyStoryResponseLength/)
-  assert.match(settings, /codex: typeof responseLengthsInput\?\.codex === 'string' \? responseLengthsInput\.codex : ''/)
-  assert.match(settings, /summary: typeof responseLengthsInput\?\.summary === 'string' \? responseLengthsInput\.summary : ''/)
+  const responseLength = readFileSync(new URL('../src/response-length.ts', import.meta.url), 'utf8')
+  assert.match(settings, /normalizeResponseLengths\(value\?\.responseLengths, value\?\.responseLength\)/)
+  assert.match(responseLength, /story: typeof input\?\.story === 'string' \? input\.story : typeof legacySharedValue === 'string' \? legacySharedValue : ''/)
+  assert.match(responseLength, /codex: typeof input\?\.codex === 'string' \? input\.codex : ''/)
+  assert.match(responseLength, /summary: typeof input\?\.summary === 'string' \? input\.summary : ''/)
   assert.match(settings, /lore: clonePromptComposition\(defaultCodexPromptComposition\)/)
 })
 

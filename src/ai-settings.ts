@@ -3,6 +3,10 @@ import { defaultStoryPromptComposition } from './story-request'
 import { defaultChatPromptComposition } from './chat-default-composition'
 import { defaultCodexPromptComposition } from './codex-request'
 import { defaultSummaryPromptComposition } from './summary-request'
+import { EMPTY_RESPONSE_LENGTHS, normalizeResponseLengths, type ResponseLengthSettings } from './response-length'
+
+export { CODEX_RESPONSE_LENGTH_PRESETS, STORY_RESPONSE_LENGTH_PRESETS, SUMMARY_RESPONSE_LENGTH_PRESETS } from './response-length'
+export type { ResponseLengthSettings } from './response-length'
 
 export type AiProvider = 'openrouter' | 'nanogpt' | 'openai' | 'compatible' | 'fake'
 export type SpeechProvider = 'nanogpt'
@@ -39,12 +43,6 @@ export type AiPrompts = {
   assistant: string
 }
 
-export type ResponseLengthSettings = {
-  story: string
-  codex: string
-  summary: string
-}
-
 export type AiSettings = {
   provider: AiProvider
   apiKey: string
@@ -72,26 +70,6 @@ export type BookAiSettings = Omit<AiSettings, 'favorites' | 'prompts'> & { promp
 export const AI_SETTINGS_STORAGE_KEY = 'arc-ai-defaults-v1'
 export const DEFAULT_GENERATION_WORD_DELAY_MS = 40
 export const MAX_GENERATION_WORD_DELAY_MS = 2000
-
-export const STORY_RESPONSE_LENGTH_PRESETS = [
-  { label: 'One paragraph', value: 'Write approximately one substantial paragraph, stopping at a natural beat rather than completing the whole scene.' },
-  { label: '2–3 paragraphs', value: 'Write 2–3 substantial paragraphs, developing the current beat and stopping at a natural transition.' },
-  { label: 'Half scene', value: 'Write roughly half of a typical scene continuation. Develop the current situation substantially, but do not rush to a full resolution.' },
-  { label: 'Finish scene', value: 'Continue with a full scene-sized passage and bring the current scene to a natural ending when the existing momentum supports it.' },
-  { label: '≤300 words', value: 'Keep the response concise and do not exceed 300 words.' },
-] as const
-
-export const CODEX_RESPONSE_LENGTH_PRESETS = [
-  { label: 'Brief', value: 'Write one focused paragraph or a similarly compact addition appropriate to the requested lore.' },
-  { label: 'Standard', value: 'Write several focused paragraphs, enough to develop the requested Codex material without padding.' },
-  { label: 'Detailed', value: 'Develop the requested Codex material comprehensively while remaining relevant and avoiding filler.' },
-] as const
-
-export const SUMMARY_RESPONSE_LENGTH_PRESETS = [
-  { label: 'Compact', value: 'Retain only the most important established facts and unresolved threads.' },
-  { label: 'Standard', value: 'Preserve the important events, decisions, relationships, causal links, and unresolved information useful later.' },
-  { label: 'Detailed', value: 'Retain substantial concrete detail that may matter for future continuity while remaining a summary rather than a rewrite.' },
-] as const
 
 export const previousDefaultAssistantPrompt = `You are a thoughtful writing assistant for {{book.title}}.
 
@@ -328,7 +306,7 @@ export const initialAiSettings: AiSettings = {
   codexModel: '',
   codexEffectiveContextLimit: '',
   generationWordDelayMs: String(DEFAULT_GENERATION_WORD_DELAY_MS),
-  responseLengths: { story: '', codex: '', summary: '' },
+  responseLengths: { ...EMPTY_RESPONSE_LENGTHS },
   speech: initialSpeechSettings,
   favorites: [],
   promptCompositionVersion: PROMPT_COMPOSITION_SCHEMA_VERSION,
@@ -435,13 +413,7 @@ export function normalizeAiSettings(value?: StoredAiSettings): AiSettings {
       ? clonePromptComposition(defaultSummaryPromptComposition)
       : { systemPrompt: storedPrompts!.summarize!, predefinedMessages: [] }
     : promptCompositions.summarize
-  const responseLengthsInput = value?.responseLengths && typeof value.responseLengths === 'object' ? value.responseLengths : undefined
-  const legacyStoryResponseLength = typeof value?.responseLength === 'string' ? value.responseLength : ''
-  const responseLengths: ResponseLengthSettings = {
-    story: typeof responseLengthsInput?.story === 'string' ? responseLengthsInput.story : legacyStoryResponseLength,
-    codex: typeof responseLengthsInput?.codex === 'string' ? responseLengthsInput.codex : '',
-    summary: typeof responseLengthsInput?.summary === 'string' ? responseLengthsInput.summary : '',
-  }
+  const responseLengths = normalizeResponseLengths(value?.responseLengths, value?.responseLength)
   const promptMirror = legacyPromptMirror(promptCompositions) as AiPrompts
   const { responseLength: _legacyResponseLength, ...storedValue } = value ?? {}
   return {
