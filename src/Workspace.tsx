@@ -47,6 +47,7 @@ import { KeyedAsyncQueue } from './keyed-async-queue'
 import { runDeletionSaveBarrier } from './deletion-save-barrier'
 import { navigateAfterRequiredSave, saveRequiredBeforeNavigation } from './navigation-save-guard'
 import { canUnmountEditor } from './editor-unmount-guard'
+import { summaryGenerationOwnsUi, type SummaryGenerationOwner } from './summary-generation-owner'
 import ExpandableTextInput from './ExpandableTextInput'
 import MarkdownEditor, { type CodexMentionClick, type MarkdownEditorHandle } from './MarkdownEditor'
 import { fetchNanoGPTModelContextLength, nanoGPTRequestText, renderLorePrompt, renderStoryPrompt, streamNanoGPTCompletion, type NanoGPTStreamMetadata } from './nanogpt'
@@ -124,6 +125,7 @@ type ToastMessage = { id: number; message: string }
 type AutotitleUiState = { targetId: string; targetType: AutotitleTargetType; targetTitle: string; status: 'loading' | 'ready' | 'error'; suggestion?: string; error?: string; request?: AutotitleRequest }
 type LoreMentionPreview = { entryId: string; title: string; category: string; content: string; source: 'summary' | 'excerpt' }
 type LoreMentionPopupState = { id: number; term: CodexMentionTerm; anchor: CodexMentionClick['rect']; selectedId?: string; loading?: boolean; preview?: LoreMentionPreview; error?: string }
+type ActiveSummaryGenerationOwner = SummaryGenerationOwner & { controller: AbortController }
 type GenerationRequestSnapshot = {
   baseUrl: string
   model: string
@@ -221,6 +223,12 @@ export default function Workspace() {
   const autotitleAbortRef = useRef<AbortController | null>(null)
   const generationStartedAtRef = useRef(0)
   const latestGenerationRequestRef = useRef<GenerationRequestSnapshot | null>(null)
+  const summaryGenerationSequenceRef = useRef(0)
+  const summaryGenerationOwnerRef = useRef<ActiveSummaryGenerationOwner | null>(null)
+  const currentBookIdRef = useRef<string | null>(currentBook?.id ?? null)
+  const screenRef = useRef<Screen>(screen)
+  currentBookIdRef.current = currentBook?.id ?? null
+  screenRef.current = screen
   const codexMentionIndex = useMemo(() => buildCodexMentionIndex(codexEntries), [codexEntries])
 
   useEffect(() => {
@@ -512,6 +520,10 @@ export default function Workspace() {
   }
 
   async function openBook(bookId: string, preferredSceneId?: string) {
+    if (!canUnmountEditor(Boolean(generationAbortRef.current))) {
+      showToast('Stop generation before switching books.')
+      return
+    }
     if (!await saveRequiredBeforeNavigation(Boolean(activeDocumentIdRef.current && changedSinceSnapshotRef.current), () => flushDocument('navigation', true))) {
       showToast('Could not save the current document. Fix the save problem before switching books.')
       return
@@ -1217,50 +1229,91 @@ export default function Workspace() {
   }
 
   async function runSummaryGeneration() {
-    if (generationAbortRef.current || !currentBook || activeDocument?.type !== 'summary') return
-    if (changedSinceSnapshotRef.current) await flushDocument('manual', true)
+    if (generationAbortRef.current || summaryGenerationOwnerRef.current || !currentBook || activeDocument?.type !== 'summary') return
 
-    const summary = await getEntity<SummaryEntity>(activeDocument.id)
-    if (!summary || summary.type !== 'summary') {
-      showToast('This summary is no longer available.')
-      return
-    }
-
-    let settings: AiSettings
-    try {
-      const defaults = loadAiSettings()
-      settings = await getBookAiSettings(currentBook.id, defaults.favorites)
-    } catch {
-      showToast('This book’s AI settings could not be loaded.')
-      return
-    }
-    if (settings.provider !== 'nanogpt' || !settings.apiKey.trim() || !settings.supportModel.trim()) {
-      showToast('Choose NanoGPT and a Support model in Book settings before summarizing.')
-      return
-    }
-
-    const source = await buildSummarySource(summary.sourceEntityId)
-    if (source.source.type === 'codexEntry' && isCodexEntryArchived(source.source)) {
-      showToast('Restore this Codex entry before updating its summary.')
-      return
-    }
+    const book = currentBook
+    const startingSummary = activeDocument
     const controller = new AbortController()
+    const owner: ActiveSummaryGenerationOwner = {
+      requestId: ++summaryGenerationSequenceRef.current,
+      bookId: book.id,
+      summaryId: startingSummary.id,
+      controller,
+    }
+
+    // Reserve generation/navigation ownership synchronously, before any save/settings/source await.
+    summaryGenerationOwnerRef.current = owner
     generationAbortRef.current = controller
-    startGenerationActivity({
-      task: 'Summary',
-      action: 'Summarize',
-      targetTitle: source.source.title,
-      requestedModel: settings.supportModel,
-      provider: 'NanoGPT',
-    })
-    let generated = ''
+    generationStartedAtRef.current = Date.now()
+    setGenerationElapsedSeconds(0)
+    setGenerationPhase('sending')
+    setGenerationDetails(null)
+    setGenerationDetailsOpen(false)
+    setGenerationActive(true)
+
     let status: 'complete' | 'cancelled' | 'error' = 'complete'
+    const cancelledDuringPreflight = () => {
+      if (!controller.signal.aborted) return false
+      status = 'cancelled'
+      return true
+    }
+
     try {
+      if (changedSinceSnapshotRef.current) {
+        await flushDocument('manual', true)
+        if (cancelledDuringPreflight()) return
+      }
+
+      const summary = await getEntity<SummaryEntity>(owner.summaryId)
+      if (cancelledDuringPreflight()) return
+      if (!summary || summary.type !== 'summary') {
+        status = 'error'
+        showToast('This summary is no longer available.')
+        return
+      }
+
+      let settings: AiSettings
+      try {
+        const defaults = loadAiSettings()
+        settings = await getBookAiSettings(owner.bookId, defaults.favorites)
+      } catch {
+        if (cancelledDuringPreflight()) return
+        status = 'error'
+        showToast('This book’s AI settings could not be loaded.')
+        return
+      }
+      if (cancelledDuringPreflight()) return
+      if (settings.provider !== 'nanogpt' || !settings.apiKey.trim() || !settings.supportModel.trim()) {
+        status = 'error'
+        showToast('Choose NanoGPT and a Support model in Book settings before summarizing.')
+        return
+      }
+
+      const source = await buildSummarySource(summary.sourceEntityId)
+      if (cancelledDuringPreflight()) return
+      if (source.source.type === 'codexEntry' && isCodexEntryArchived(source.source)) {
+        status = 'error'
+        showToast('Restore this Codex entry before updating its summary.')
+        return
+      }
+
+      setGenerationDetails({
+        task: 'Summary',
+        action: 'Summarize',
+        targetTitle: source.source.title,
+        requestedModel: settings.supportModel,
+        provider: 'NanoGPT',
+        startedAt: generationStartedAtRef.current,
+        status: 'sending',
+        thoughts: '',
+      })
+
+      let generated = ''
       await streamNanoGPTCompletion({
         apiKey: settings.apiKey.trim(),
         baseUrl: settings.baseUrl,
         model: settings.supportModel,
-        systemPrompt: renderSummaryPrompt(settings.prompts.summarize, summary.sourceType, summary.content, toBookPromptValues(currentBook, seriesList)),
+        systemPrompt: renderSummaryPrompt(settings.prompts.summarize, summary.sourceType, summary.content, toBookPromptValues(book, seriesList)),
         userMessage: `${summary.content.trim() ? `# Existing summary\n\n${summary.content.trim()}\n\n` : ''}# Source material\n\n${source.content}\n\nReturn only the updated summary as Markdown.`,
       }, (chunk) => {
         if (!controller.signal.aborted) setGenerationActivityPhase('writing')
@@ -1272,23 +1325,41 @@ export default function Workspace() {
         onThoughts: appendGenerationThoughts,
         onMetadata: updateGenerationMetadata,
       })
+      if (controller.signal.aborted) {
+        status = 'cancelled'
+        return
+      }
+
       await createSnapshot(summary.id, 'generation', summary.content)
+      if (controller.signal.aborted) {
+        status = 'cancelled'
+        return
+      }
       const saved = await saveSummaryContent(summary.id, generated, source.sourceRevision)
-      activeDocumentIdRef.current = saved.id
-      setActiveDocument(saved)
-      storyRef.current = saved.content
-      setStoryMarkdown(saved.content)
-      changedSinceSnapshotRef.current = false
-      setEditorRevision((revision) => revision + 1)
-      setSummaryStates(await getSummaryStateMap(currentBook.id))
-      setSaveState('saved')
+      const nextSummaryStates = await getSummaryStateMap(owner.bookId)
+
+      // Persistence is safely scoped to the captured Summary. Active UI is mutated only
+      // if the exact request still owns the same Book/Summary/editor screen.
+      if (summaryGenerationOwnsUi(owner, summaryGenerationOwnerRef.current, {
+        bookId: currentBookIdRef.current,
+        documentId: activeDocumentIdRef.current,
+        screen: screenRef.current,
+      })) {
+        activeDocumentIdRef.current = saved.id
+        setActiveDocument(saved)
+        storyRef.current = saved.content
+        setStoryMarkdown(saved.content)
+        changedSinceSnapshotRef.current = false
+        setEditorRevision((revision) => revision + 1)
+        setSummaryStates(nextSummaryStates)
+        setSaveState('saved')
+      }
     } catch (error) {
       status = controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError') ? 'cancelled' : 'error'
-      if (!controller.signal.aborted && !(error instanceof DOMException && error.name === 'AbortError')) {
-        showToast(error instanceof Error ? error.message : 'Summary generation stopped unexpectedly.')
-      }
+      if (status === 'error') showToast(error instanceof Error ? error.message : 'Summary generation stopped unexpectedly.')
     } finally {
-      generationAbortRef.current = null
+      if (summaryGenerationOwnerRef.current?.requestId === owner.requestId) summaryGenerationOwnerRef.current = null
+      if (generationAbortRef.current === controller) generationAbortRef.current = null
       finishGenerationActivity(status)
     }
   }
