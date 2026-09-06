@@ -1,4 +1,5 @@
 import type { ChatToolCall, ChatToolDefinition } from './chat-api'
+import { loadProposalTargetOrMarkStale } from './chat-proposal-target'
 import {
   updateChatMessage,
   type ChatEntityActionProposal,
@@ -311,7 +312,10 @@ export async function applyChatEntityAction(messageId: string, proposalId: strin
 
   const entity = proposal.entityType === 'book'
     ? await getEntity<ArcEntity>(proposal.entityId ?? '')
-    : await manageableEntity(message.bookId, proposal.entityId ?? '')
+    : await loadProposalTargetOrMarkStale(
+        () => manageableEntity(message.bookId, proposal.entityId ?? ''),
+        () => setActionStatus(message, proposal.id, { status: 'stale' }),
+      )
   if (!entity || (proposal.entityType === 'book' ? entity.type !== 'book' || entity.id !== message.bookId : false)) {
     await setActionStatus(message, proposal.id, { status: 'stale' })
     throw new Error('The proposed item is no longer available in this book.')

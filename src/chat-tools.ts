@@ -1,5 +1,6 @@
 import type { ChatToolCall, ChatToolDefinition } from './chat-api'
 import { isActiveCodexTitleDuplicate } from './chat-codex-duplicate'
+import { loadProposalTargetOrMarkStale } from './chat-proposal-target'
 import {
   updateChatMessage,
   type ChatCodexCreationProposal,
@@ -326,7 +327,10 @@ async function setProposalStatus(message: ChatMessageEntity, proposalId: string,
 export async function applyChatDocumentEdit(messageId: string, proposalId: string) {
   const { message, proposal } = await messageWithProposal(messageId, proposalId)
   if (proposal.status !== 'proposed') throw new Error(`This proposal is already ${proposal.status}.`)
-  const entity = await editableEntity(message.bookId, proposal.entityId)
+  const entity = await loadProposalTargetOrMarkStale(
+    () => editableEntity(message.bookId, proposal.entityId),
+    () => setProposalStatus(message, proposal.id, 'stale'),
+  )
   if (entity.updatedAt !== proposal.expectedUpdatedAt) {
     await setProposalStatus(message, proposal.id, 'stale')
     throw new Error('This document changed after the proposal was created. Ask the chat to read it again and prepare a new edit.')
