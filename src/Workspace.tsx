@@ -78,6 +78,7 @@ import {
   saveSummaryContent,
   updateBookMetadata,
   updateCodexCategory,
+  updateCodexAutoIncludeTriggers,
   updateCodexSummaryPreference,
   type ArcEntity,
   type BookEntity,
@@ -101,6 +102,7 @@ import './codex-archive.css'
 import './codex-summary.css'
 import './autotitle.css'
 import './tts.css'
+import './codex-triggers.css'
 
 type Screen = 'home' | 'editor' | 'chat' | 'settings'
 type RightTab = 'book' | 'outline' | 'notes' | 'codex' | 'chat'
@@ -163,6 +165,7 @@ export default function Workspace() {
   const [storyMarkdown, setStoryMarkdown] = useState(initialStoryMarkdown)
   const [arcPrompt, setArcPrompt] = useState('')
   const [lorePrompt, setLorePrompt] = useState('')
+  const [codexTriggerDraft, setCodexTriggerDraft] = useState('')
   const [chatEdit, setChatEdit] = useState(false)
   const [aiReady, setAiReady] = useState(false)
   const [saveState, setSaveState] = useState<SaveState>('loading')
@@ -204,6 +207,7 @@ export default function Workspace() {
     setArcPrompt('')
     setLorePrompt('')
     setLastGeneratedPassage('')
+    setCodexTriggerDraft(activeDocument?.type === 'codexEntry' ? (activeDocument.autoIncludeTriggers ?? []).join('\n') : '')
   }, [activeDocument?.id])
 
   useEffect(() => {
@@ -637,6 +641,18 @@ export default function Workspace() {
     const updated = await updateCodexCategory(activeDocument.id, category)
     setActiveDocument(updated)
     await reloadBookContent(currentBook.id)
+  }
+
+  async function saveCodexTriggers() {
+    if (activeDocument?.type !== 'codexEntry' || isCodexEntryArchived(activeDocument)) return
+    try {
+      const updated = await updateCodexAutoIncludeTriggers(activeDocument.id, codexTriggerDraft.split(/\r?\n/))
+      setActiveDocument(updated)
+      setCodexEntries((entries) => entries.map((entry) => entry.id === updated.id ? updated : entry))
+      setCodexTriggerDraft((updated.autoIncludeTriggers ?? []).join('\n'))
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not save Codex triggers.')
+    }
   }
 
   async function changeCodexSummaryPreference(prefer: boolean) {
@@ -1241,7 +1257,7 @@ export default function Workspace() {
       {screen === 'editor' ? <article className="story-editor">
         <small className="page-number">{pageLabel}</small><p className="document-path">{documentPath || 'No document selected'}</p>
         {(activeDocument?.type === 'note' || activeDocument?.type === 'codexEntry') && <div className={`document-titlebar ${activeCodexArchived ? 'archived' : ''}`}><div><small>{activeDocument.type === 'note' ? 'Note' : activeCodexArchived ? `Archived · ${activeDocument.category}` : activeDocument.category}</small><h1>{activeDocument.title}</h1></div><div className="document-title-actions">{(activeDocument.type === 'note' || !activeCodexArchived) && <button className="autotitle-trigger" type="button" onClick={() => { void startAutotitle(activeDocument) }} aria-label={`Autotitle ${activeDocument.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></button>}{activeDocument.type === 'codexEntry' && <SummaryIcon state={summaryStates[activeDocument.id] ?? 'missing'} kind="codex" onOpen={() => { void openSummary(activeDocument) }} />}{activeDocument.type === 'codexEntry' && activeCodexArchived ? <button type="button" onClick={() => { void restoreCodex(activeDocument) }}><ArchiveRestore aria-hidden="true" /> Restore</button> : <button type="button" onClick={() => { void renameContentEntity(activeDocument) }}><Pencil aria-hidden="true" /> Rename</button>}</div></div>}
-        {activeDocument?.type === 'codexEntry' && <div className={`document-metadata ${activeCodexArchived ? 'archived' : ''}`}><label><span>Category</span><select disabled={activeCodexArchived} value={activeDocument.category} onChange={(event) => { void changeCodexCategory(event.target.value) }}><option>Character</option><option>Place</option><option>Object</option><option>Event</option><option>Group</option><option>Other</option></select></label>{!activeCodexArchived && <label className="codex-summary-preference"><input type="checkbox" checked={activeDocument.preferSummaryForContext === true} onChange={(event) => { void changeCodexSummaryPreference(event.target.checked) }} /><span><strong>Prefer summary for AI context</strong><small>{codexSummaryPolicyText(activeDocument, summaryStates[activeDocument.id] ?? 'missing')}</small></span></label>}{activeCodexArchived && <p className="archived-document-note"><Archive aria-hidden="true" /><span><strong>Archived lore</strong><small>Readable here, but excluded from AI context, Chat discovery, and normal Codex search until restored.</small></span></p>}</div>}
+        {activeDocument?.type === 'codexEntry' && <div className={`document-metadata ${activeCodexArchived ? 'archived' : ''}`}><label><span>Category</span><select disabled={activeCodexArchived} value={activeDocument.category} onChange={(event) => { void changeCodexCategory(event.target.value) }}><option>Character</option><option>Place</option><option>Object</option><option>Event</option><option>Group</option><option>Other</option></select></label>{!activeCodexArchived && <label className="codex-summary-preference"><input type="checkbox" checked={activeDocument.preferSummaryForContext === true} onChange={(event) => { void changeCodexSummaryPreference(event.target.checked) }} /><span><strong>Prefer summary for AI context</strong><small>{codexSummaryPolicyText(activeDocument, summaryStates[activeDocument.id] ?? 'missing')}</small></span></label>}{!activeCodexArchived && <label className="codex-trigger-editor"><span><strong>Auto include when text contains</strong></span><textarea value={codexTriggerDraft} onChange={(event) => setCodexTriggerDraft(event.target.value)} onBlur={() => { void saveCodexTriggers() }} placeholder="One literal trigger per line" /><small>One name, alias, phrase, or #tag per line. New entries start with their title; removing it keeps it removed, and renaming the entry does not rewrite triggers.</small></label>}{activeCodexArchived && <p className="archived-document-note"><Archive aria-hidden="true" /><span><strong>Archived lore</strong><small>Readable here, but excluded from AI context, Chat discovery, and normal Codex search until restored.</small></span></p>}</div>}
         {activeDocument?.type === 'summary' && summaryContextIndicator && <div className="summary-context-indicator">{summaryContextIndicator}</div>}
         {activeDocument ? <MarkdownEditor key={`${activeDocument.id}-${editorRevision}`} ref={editorRef} value={storyMarkdown} onChange={handleStoryChange} ariaLabel={`${activeDocument.title} Markdown editor`} readOnly={activeCodexArchived || activeSummarySourceArchived} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No document selected</strong><p>Choose a Scene, Note, Codex entry, or Summary from the book workspace.</p><button type="button" onClick={() => setRightOpen(true)}>Open Book Workspace</button></div>}
       </article> : currentBook ? <ChatView bookId={currentBook.id} chatId={activeChatId} bookPromptValues={toBookPromptValues(currentBook, seriesList)} currentSceneId={activeSceneId} onChatChange={openChat} onToast={showToast} /> : <section className="conversation chat-empty"><MessageCircle aria-hidden="true" /><p>Open a book before starting a chat.</p></section>}
