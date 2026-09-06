@@ -19,13 +19,14 @@ jobs:
         run: |
           python .github/scripts/issue87_v2.py
           python .github/scripts/issue87_testfix.py
+          python .github/scripts/issue87_buildfix.py
       - run: npm install --no-package-lock
       - name: Regression tests
         run: node --test tests/*.test.mjs
       - run: npm run build
       - name: Commit validated source
         run: |
-          rm -f .github/scripts/issue87_v2.py .github/scripts/issue87_testfix.py .github/workflows/issue-87-request-composition-v2.yml
+          rm -f .github/scripts/issue87_v2.py .github/scripts/issue87_testfix.py .github/scripts/issue87_buildfix.py .github/workflows/issue-87-request-composition-v2.yml
           git add -A
           if git diff --cached --quiet; then exit 0; fi
           git config user.name goodjobwebdev-blip
