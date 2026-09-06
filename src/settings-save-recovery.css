@@ -1,0 +1,74 @@
+.settings-save-recovery {
+  position: sticky;
+  top: 12px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 12px 0 18px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  background: rgba(22, 18, 24, 0.96);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
+}
+
+.settings-save-recovery > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.settings-save-recovery strong {
+  font-size: 0.92rem;
+}
+
+.settings-save-recovery span {
+  color: var(--muted, rgba(255, 255, 255, 0.62));
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.settings-save-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-save-recovery button {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  color: inherit;
+  padding: 8px 11px;
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.settings-save-recovery button.primary {
+  background: rgba(255, 255, 255, 0.12);
+  font-weight: 700;
+}
+
+.settings-save-recovery button:hover,
+.settings-save-recovery button:focus-visible {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.settings-save-recovery button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+@media (max-width: 640px) {
+  .settings-save-recovery {
+    position: static;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .settings-save-recovery-actions button {
+    flex: 1 1 auto;
+  }
+}
