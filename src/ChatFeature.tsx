@@ -23,6 +23,7 @@ import {
 import { streamChatCompletion, type ChatCompletionMessage } from './chat-api'
 import ExpandableTextInput from './ExpandableTextInput'
 import { applyIfStillCurrent } from './async-state-guard'
+import { chatHistoryPrefixMatches } from './chat-history-guard'
 import {
   createChat,
   createChatMessage,
@@ -365,6 +366,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     startedAtRef.current = Date.now()
     setElapsed(0)
     setGenerating(true)
+    setEditingId('')
     setPhase('sending')
     setStreamedContent('')
     setStreamedThoughts('')
@@ -373,11 +375,20 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     setFollowOutput(true)
     let completed = false
     let unexpectedFailure = false
+    let historyInvalidated = false
     let activeRoundContent = ''
     let activeRoundThoughts = ''
     let activeRoundExtras: Pick<ChatMessageEntity, 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions'> = {}
     let activeRoundPersisted = false
     let activeRoundStartedAt = Date.now()
+
+    async function ensureSourceHistoryStillCurrent() {
+      const durableHistory = await listChatMessages(activeChat.bookId, activeChat.id)
+      if (chatHistoryPrefixMatches(history, durableHistory)) return
+      historyInvalidated = true
+      controller.abort()
+      throw new Error('Chat history changed while this response was generating. The streamed reply was not saved.')
+    }
 
     async function persistAssistantRound(
       roundContent: string,
@@ -386,6 +397,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       status: ChatMessageStatus = 'complete',
     ) {
       const hasWorkspaceProposal = Boolean(extras.documentEdits?.length || extras.codexCreations?.length || extras.outlineActions?.length || extras.entityActions?.length)
+      if (roundContent || roundThoughts || hasWorkspaceProposal) await ensureSourceHistoryStillCurrent()
       if (!roundContent && !roundThoughts && !hasWorkspaceProposal) return null
       return createChatMessage(activeChat, 'assistant', roundContent, {
         thoughts: roundThoughts || undefined,
@@ -543,13 +555,15 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       if (!completed && !controller.signal.aborted) throw new Error('The assistant used too many workspace tool steps. Ask it to make a smaller edit.')
     } catch (error) {
       const aborted = controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')
-      if (!aborted) {
+      if (historyInvalidated) {
+        onToast(error instanceof Error ? error.message : 'Chat history changed while this response was generating. The streamed reply was not saved.')
+      } else if (!aborted) {
         unexpectedFailure = true
         onToast(error instanceof Error ? error.message : 'Chat generation stopped unexpectedly.')
       }
     } finally {
       const stopped = controller.signal.aborted
-      if (!activeRoundPersisted && (stopped || unexpectedFailure)) {
+      if (!historyInvalidated && !activeRoundPersisted && (stopped || unexpectedFailure)) {
         try {
           await persistInterruptedRound(stopped ? 'stopped' : 'failed')
         } catch {
@@ -596,6 +610,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   }
 
   async function deleteFrom(message: ChatMessageEntity) {
+    if (generating) { onToast('Stop the current response before deleting Chat history.'); return }
     if (!chat || !window.confirm('Delete this message and everything after it in this chat?')) return
     try {
       await deleteMessageAndFollowing(bookId, chat.id, message.order)
@@ -606,11 +621,13 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   }
 
   function beginEdit(message: ChatMessageEntity) {
+    if (generating) { onToast('Stop the current response before editing Chat history.'); return }
     setEditingId(message.id)
     setEditingValue(message.content)
   }
 
   async function saveEdit(message: ChatMessageEntity, regenerate: boolean) {
+    if (generating) { onToast('Stop the current response before saving a Chat history edit.'); return }
     if (!chat || !editingValue.trim()) return
     try {
       const updated = await updateChatMessage(message.id, { content: editingValue.trim() })
@@ -802,11 +819,11 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
               {message.outlineActions?.length ? <div className="chat-document-edits">{message.outlineActions.map((proposal) => <OutlineActionCard key={proposal.id} proposal={proposal} onApply={() => { void applyOutlineProposal(message, proposal) }} onReject={() => { void rejectOutlineProposal(message, proposal) }} />)}</div> : null}
               {message.entityActions?.length ? <div className="chat-document-edits">{message.entityActions.map((proposal) => <EntityActionCard key={proposal.id} proposal={proposal} onApply={() => { void applyEntityProposal(message, proposal) }} onReject={() => { void rejectEntityProposal(message, proposal) }} />)}</div> : null}
               {message.status && message.status !== 'complete' && <small className="chat-message-status">{message.status === 'failed' ? 'Interrupted' : 'Stopped'}</small>}
-              <div className="message-tools"><button type="button" onClick={() => { void copyMessage(message) }}>{copiedMessageId === message.id ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />} {copiedMessageId === message.id ? 'Copied' : 'Copy'}</button><button type="button" onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" onClick={() => { void fork(message) }}><GitFork aria-hidden="true" /> Fork</button><button type="button" onClick={() => { void readAloud(message) }}><Volume2 aria-hidden="true" /> Read aloud</button><button type="button" onClick={() => { void regenerate(message) }}><RefreshCw aria-hidden="true" /> Regenerate</button><button type="button" onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
+              <div className="message-tools"><button type="button" onClick={() => { void copyMessage(message) }}>{copiedMessageId === message.id ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />} {copiedMessageId === message.id ? 'Copied' : 'Copy'}</button><button type="button" disabled={generating} title={generating ? 'Stop the current response before editing history' : undefined} onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" onClick={() => { void fork(message) }}><GitFork aria-hidden="true" /> Fork</button><button type="button" onClick={() => { void readAloud(message) }}><Volume2 aria-hidden="true" /> Read aloud</button><button type="button" onClick={() => { void regenerate(message) }}><RefreshCw aria-hidden="true" /> Regenerate</button><button type="button" disabled={generating} title={generating ? 'Stop the current response before deleting history' : undefined} onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
             </>}
           </div> : editingId === message.id ? <InlineMessageEdit value={editingValue} onChange={setEditingValue} onCancel={() => setEditingId('')} onSave={() => { void saveEdit(message, false) }} onSaveAndRegenerate={() => { void saveEdit(message, true) }} /> : <>
             <div className="bubble chat-markdown-bubble"><MarkdownMessage content={message.content} /></div>
-            <div className="message-tools"><button type="button" onClick={() => { void copyMessage(message) }}>{copiedMessageId === message.id ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />} {copiedMessageId === message.id ? 'Copied' : 'Copy'}</button><button type="button" onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
+            <div className="message-tools"><button type="button" onClick={() => { void copyMessage(message) }}>{copiedMessageId === message.id ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />} {copiedMessageId === message.id ? 'Copied' : 'Copy'}</button><button type="button" disabled={generating} title={generating ? 'Stop the current response before editing history' : undefined} onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" disabled={generating} title={generating ? 'Stop the current response before deleting history' : undefined} onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
           </>}
         </article>)}
         {generating && <article className="message bot no-thumb streaming"><div className="chat-message-stack chat-live-generation">
