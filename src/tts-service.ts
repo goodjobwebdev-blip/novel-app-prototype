@@ -8,7 +8,7 @@ export type SpeechModel = {
   maxChars?: number
 }
 
-export type TtsStatus = 'idle' | 'preparing' | 'generating' | 'playing' | 'paused' | 'waiting' | 'stopping' | 'complete' | 'failed'
+export type TtsStatus = 'idle' | 'preparing' | 'generating' | 'playing' | 'paused' | 'waiting' | 'stopping' | 'stopped' | 'complete' | 'failed'
 export type TtsState = {
   status: TtsStatus
   label: string
@@ -33,6 +33,10 @@ function emit(next: TtsState) {
 }
 
 export function getTtsState() { return state }
+export function dismissTtsState() {
+  if (activeController || activeAudio) return
+  emit({ status: 'idle', label: '', chunkIndex: 0, chunkCount: 0 })
+}
 export function subscribeTtsState(listener: (value: TtsState) => void) {
   if (typeof window === 'undefined') return () => undefined
   const handler = (event: Event) => listener((event as CustomEvent<TtsState>).detail)
@@ -240,7 +244,7 @@ export function stopTtsSession() {
     activeAudio = null
   }
   cleanupObjectUrls()
-  emit({ status: 'idle', label: '', chunkIndex: 0, chunkCount: 0 })
+  emit({ ...state, status: 'stopped' })
 }
 
 export function pauseTtsSession() {

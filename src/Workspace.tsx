@@ -94,7 +94,7 @@ import {
 } from './persistence'
 import { buildSummarySource, getSummaryStateMap, renderSummaryPrompt, type SummaryState } from './summary-service'
 import { generateAutotitleSuggestion, prepareAutotitleRequest, type AutotitleEntity, type AutotitleRequest, type AutotitleTargetType } from './autotitle-service'
-import { estimateSpeechRequest, fetchSpeechModels, getTtsState, pauseTtsSession, resumeTtsSession, startTtsSession, stopTtsSession, subscribeTtsState, type TtsState } from './tts-service'
+import { dismissTtsState, estimateSpeechRequest, fetchSpeechModels, getTtsState, pauseTtsSession, resumeTtsSession, startTtsSession, stopTtsSession, subscribeTtsState, type TtsState } from './tts-service'
 import { ChatSidebar, ChatView } from './ChatFeature'
 import './generation-controls.css'
 import './codex-archive.css'
@@ -1269,9 +1269,10 @@ function TtsStatusBar() {
         : tts.status === 'paused' ? 'Paused'
           : tts.status === 'waiting' ? 'Waiting for next audio…'
             : tts.status === 'stopping' ? 'Stopping'
-              : tts.status === 'complete' ? 'Complete'
+              : tts.status === 'stopped' ? 'Stopped'
+                : tts.status === 'complete' ? 'Complete'
                 : 'Failed'
-  return <section className={`tts-status ${tts.status}`} aria-live="polite"><Volume2 aria-hidden="true" /><div className="tts-status-copy"><strong>{tts.label || 'Read aloud'}</strong><small>{label}{tts.chunkCount ? ` · ${Math.max(1, tts.chunkIndex || 1)}/${tts.chunkCount}` : ''}{tts.error ? ` · ${tts.error}` : ''}</small></div><div className="tts-status-actions">{tts.status === 'playing' && <button type="button" onClick={pauseTtsSession} aria-label="Pause audio"><Pause aria-hidden="true" /></button>}{tts.status === 'paused' && <button type="button" onClick={() => { void resumeTtsSession() }} aria-label="Resume audio"><Play aria-hidden="true" /></button>}{!['complete','failed'].includes(tts.status) && <button type="button" onClick={stopTtsSession} aria-label="Stop audio"><Square aria-hidden="true" /></button>}</div></section>
+  return <section className={`tts-status ${tts.status}`} aria-live="polite"><Volume2 aria-hidden="true" /><div className="tts-status-copy"><strong>{tts.label || 'Read aloud'}</strong><small>{label}{tts.chunkCount ? ` · ${Math.max(1, tts.chunkIndex || 1)}/${tts.chunkCount}` : ''}{tts.error ? ` · ${tts.error}` : ''}</small></div><div className="tts-status-actions">{tts.status === 'playing' && <button type="button" onClick={pauseTtsSession} aria-label="Pause audio"><Pause aria-hidden="true" /></button>}{tts.status === 'paused' && <button type="button" onClick={() => { void resumeTtsSession() }} aria-label="Resume audio"><Play aria-hidden="true" /></button>}{!['complete','failed','stopped'].includes(tts.status) && <button type="button" onClick={stopTtsSession} aria-label="Stop audio"><Square aria-hidden="true" /></button>}{['complete','failed','stopped'].includes(tts.status) && <button type="button" onClick={dismissTtsState} aria-label="Dismiss audio status"><X aria-hidden="true" /></button>}</div></section>
 }
 
 function formatGenerationTime(seconds: number) {
