@@ -3,7 +3,7 @@ from pathlib import Path
 path = Path('src/Workspace.tsx')
 text = path.read_text()
 
-anchor = "import { navigateAfterRequiredSave } from './navigation-save-guard'\n"
+anchor = "import { navigateAfterRequiredSave, saveRequiredBeforeNavigation } from './navigation-save-guard'\n"
 if anchor not in text:
     raise SystemExit('navigation guard import anchor not found')
 text = text.replace(anchor, anchor + "import { canUnmountEditor } from './editor-unmount-guard'\n", 1)
