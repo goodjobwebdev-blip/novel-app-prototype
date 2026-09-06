@@ -39,7 +39,7 @@ import { generationWordDelayMs, loadAiSettings, type AiSettings } from './ai-set
 import { createBufferedWordRenderer } from './buffered-word-renderer'
 import ExpandableTextInput from './ExpandableTextInput'
 import MarkdownEditor, { type MarkdownEditorHandle } from './MarkdownEditor'
-import { fetchNanoGPTModelContextLength, renderLorePrompt, renderStoryPrompt, streamNanoGPTCompletion, type NanoGPTStreamMetadata } from './nanogpt'
+import { fetchNanoGPTModelContextLength, nanoGPTRequestText, renderLorePrompt, renderStoryPrompt, streamNanoGPTCompletion, type NanoGPTStreamMetadata } from './nanogpt'
 import { generationInstructionMessage, type BookPromptValues } from './prompt-template'
 import { buildContextValues, generationContextDiagnostics } from './context-service'
 import {
@@ -753,11 +753,21 @@ export default function Workspace() {
         const contextMessage = !selectedContextIsTemplated && prepared.additionalContext.trim()
           ? `# Additional context\n\n${prepared.additionalContext}`
           : ''
-        const diagnostics = generationContextDiagnostics(selectedModel, modelContextLength, systemPrompt, `${contextMessage}\n\n${userMessage}`)
+        const effectiveLimit = isCodex && settings.codexModel.trim() ? settings.codexEffectiveContextLimit : settings.mainEffectiveContextLimit
+        const requestText = nanoGPTRequestText({ systemPrompt, contextMessage, userMessage })
+        const diagnostics = generationContextDiagnostics(selectedModel, modelContextLength, effectiveLimit, requestText)
+        if (!diagnostics.limitValid) {
+          editor.finishGeneration('error')
+          showToast(diagnostics.limitError ?? 'The effective context cap is invalid. Check Book AI settings.')
+          return
+        }
         if (!diagnostics.fits) {
           editor.finishGeneration('error')
-          showToast(`Context is too large: ~${diagnostics.requestTokens.toLocaleString()} tokens plus response space for a ${diagnostics.modelContextTokens.toLocaleString()}-token model. Reduce context or choose a larger model.`)
+          showToast(`Context is too large: ~${diagnostics.requestTokens.toLocaleString()} input tokens for a ${diagnostics.usableInputTokens.toLocaleString()}-token usable budget (${diagnostics.effectiveContextTokens.toLocaleString()} effective limit, ${diagnostics.responseReserveTokens.toLocaleString()} reserved for the response). Deselect context, summarize older material, raise the cap, or choose a larger model.`)
           return
+        }
+        if (diagnostics.warning) {
+          showToast(`Context is near the configured limit (${Math.round(diagnostics.usageRatio * 100)}%). Consider summarizing older material, deselecting full-text context, or raising the cap before adding more context.`)
         }
         requestSnapshot = {
           baseUrl: settings.baseUrl,

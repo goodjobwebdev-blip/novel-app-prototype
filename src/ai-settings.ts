@@ -14,10 +14,12 @@ export type AiSettings = {
   baseUrl: string
   mainModel: string
   mainModelContextLength?: number
+  mainEffectiveContextLimit: string
   supportModel: string
   supportModelContextLength?: number
   codexModel: string
   codexModelContextLength?: number
+  codexEffectiveContextLimit: string
   generationWordDelayMs: string
   responseLength: string
   favorites: string[]
@@ -268,8 +270,10 @@ export const initialAiSettings: AiSettings = {
   apiKey: '',
   baseUrl: 'https://nano-gpt.com/api/v1',
   mainModel: '',
+  mainEffectiveContextLimit: '',
   supportModel: '',
   codexModel: '',
+  codexEffectiveContextLimit: '',
   generationWordDelayMs: String(DEFAULT_GENERATION_WORD_DELAY_MS),
   responseLength: '',
   favorites: [],
@@ -299,6 +303,8 @@ export function normalizeAiSettings(value?: Partial<AiSettings>): AiSettings {
     ...initialAiSettings,
     ...value,
     responseLength: typeof value?.responseLength === 'string' ? value.responseLength : '',
+    mainEffectiveContextLimit: typeof value?.mainEffectiveContextLimit === 'string' ? value.mainEffectiveContextLimit : '',
+    codexEffectiveContextLimit: typeof value?.codexEffectiveContextLimit === 'string' ? value.codexEffectiveContextLimit : '',
     prompts,
     favorites: Array.isArray(value?.favorites) ? [...value.favorites] : [],
     generationWordDelayMs: normalizeGenerationWordDelay(value?.generationWordDelayMs),

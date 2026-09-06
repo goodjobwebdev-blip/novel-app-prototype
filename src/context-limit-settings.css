@@ -1,0 +1,16 @@
+.context-limit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,.08); }
+.context-limit-grid label { display: grid; gap: 8px; }
+.context-limit-grid label > span { display: flex; justify-content: space-between; gap: 10px; }
+.context-limit-grid em, .context-limit-grid small { color: var(--muted, rgba(255,255,255,.58)); font-size: .78rem; font-style: normal; line-height: 1.4; }
+.context-limit-grid input { box-sizing: border-box; width: 100%; }
+.context-limit-grid label.invalid input, .chat-context-limit.invalid input { border-color: currentColor; }
+.context-limit-grid label.invalid small, .chat-context-limit.invalid small { font-weight: 650; }
+.context-budget { display: grid; gap: 5px; margin-bottom: 14px; padding: 12px 14px; border: 1px solid rgba(255,255,255,.1); border-radius: 12px; background: rgba(255,255,255,.035); }
+.context-budget span, .context-budget small { color: var(--muted, rgba(255,255,255,.62)); line-height: 1.4; }
+.context-budget.warning { border-style: dashed; }
+.context-budget.over { border-width: 2px; }
+.chat-context-limit { display: grid; gap: 2px; min-width: 150px; }
+.chat-context-limit > span { font-size: .68rem; opacity: .68; }
+.chat-context-limit input { width: 140px; min-height: 34px; border-radius: 10px; padding: 5px 8px; }
+.chat-context-limit small { max-width: 220px; font-size: .65rem; opacity: .7; }
+@media (max-width: 700px) { .context-limit-grid { grid-template-columns: 1fr; } .chat-context-limit { min-width: 0; } .chat-context-limit input { width: 118px; } .chat-context-limit small { display: none; } }

@@ -40,11 +40,13 @@ import {
   type GenerationContextType,
 } from './persistence'
 import { bookTemplateValues, generationInstructionMessage, promptVariables, renderPromptTemplate, responseLengthMessage, type BookPromptValues } from './prompt-template'
-import { buildContextValues, type PreparedContextValues } from './context-service'
+import { buildContextValues, contextLimitInputError, generationContextDiagnostics, type PreparedContextValues } from './context-service'
 import { getChat, listChatMessages, saveChatContextProfile, type ChatEntity, type ChatMessageEntity } from './chat-service'
+import { CHAT_TOOL_DEFINITIONS, CHAT_WORKSPACE_INSTRUCTIONS, serializeChatModelInput } from './chat-request'
 import { renderLorePrompt, renderStoryPrompt } from './nanogpt'
 import { clearModelCatalog, getCachedModelCatalog, providerModelEndpoint, saveModelCatalog, type ProviderModel } from './model-catalog'
 import './response-length-settings.css'
+import './context-limit-settings.css'
 type SettingsTab = 'ai' | 'context' | 'appearance' | 'speech' | 'images'
 type SaveState = 'loading' | 'saved' | 'saving' | 'error'
 type RequestPreviewMessage = {
@@ -57,10 +59,6 @@ type RequestPreviewMessage = {
 }
 
 const providerLabels: Record<AiProvider, string> = { openrouter: 'OpenRouter', nanogpt: 'nano-gpt.com', openai: 'OpenAI', compatible: 'OpenAI-compatible' }
-const chatWorkspaceInstructions = `# Workspace tools
-
-You can inspect and propose edits to Scenes, Notes, and Codex entries in this book. You can also propose creating a new Codex/lore entry. For the outline, use read_outline before structural changes; you may propose creating, renaming, moving/reordering, or deleting Acts, Chapters, and Scenes. Mutating tools only create approval proposals: never claim an edit, creation, rename, move, reorder, or deletion happened until the user approves the card in Chat. Outline deletion is allowed only when the target and every descendant Scene have empty content. Search/read tools are read-only and can run automatically. Use search_entities and read_entity when a document target is not already known. For localized document changes, prefer propose_document_edit with exact old_text copied from read_entity. Use propose_document_replacement only for whole-document rewrites.`
-
 function formatContext(value?: number) {
   if (!value) return 'Context unknown'
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value % 1_000_000 ? 1 : 0)}m context`
@@ -77,7 +75,10 @@ function chatHistoryContent(message: ChatMessageEntity) {
   const outlineState = message.role === 'assistant' && message.outlineActions?.length
     ? `\n\n[Outline proposals: ${message.outlineActions.map((proposal) => `${proposal.action} ${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
     : ''
-  return `${message.content}${editState}${creationState}${outlineState}`
+  const entityActionState = message.role === 'assistant' && message.entityActions?.length
+    ? `\n\n[Note/Codex proposals: ${message.entityActions.map((proposal) => `${proposal.action} ${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
+    : ''
+  return `${message.content}${editState}${creationState}${outlineState}${entityActionState}`
 }
 
 type AiSettingsProps = {
@@ -440,6 +441,10 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
             <input type="text" inputMode="numeric" pattern="[0-9]*" value={settings.generationWordDelayMs} onChange={(event) => update('generationWordDelayMs', event.target.value)} aria-describedby="generation-speed-help" spellCheck={false} />
             <small id="generation-speed-help">40 ms is the default. Use a lower value for faster writing or a higher value for slower writing (1–2000).</small>
           </label>
+          <div className="context-limit-grid">
+            <label className={contextLimitInputError(settings.mainEffectiveContextLimit) ? 'invalid' : ''}><span><strong>Story / Main context cap</strong><em>Effective input window</em></span><input type="text" value={settings.mainEffectiveContextLimit} onChange={(event) => update('mainEffectiveContextLimit', event.target.value)} placeholder="Model maximum" spellCheck={false} /><small>{contextLimitInputError(settings.mainEffectiveContextLimit) || 'Optional. Accepts tokens such as 32000, 32k, or 1m. The model hard maximum still wins.'}</small></label>
+            <label className={contextLimitInputError(settings.codexEffectiveContextLimit) ? 'invalid' : ''}><span><strong>Codex model context cap</strong><em>Used when a Codex model is set</em></span><input type="text" value={settings.codexEffectiveContextLimit} onChange={(event) => update('codexEffectiveContextLimit', event.target.value)} placeholder="Model maximum" spellCheck={false} /><small>{contextLimitInputError(settings.codexEffectiveContextLimit) || (settings.codexModel.trim() ? 'Optional cap for the selected Codex model.' : 'Codex currently falls back to Main, so the Story / Main cap applies.')}</small></label>
+          </div>
           <div className="response-length-setting">
             <label htmlFor="response-length"><span><strong>Response length</strong><em>Story, Codex, and Chat</em></span><textarea id="response-length" value={settings.responseLength} onChange={(event) => update('responseLength', event.target.value)} placeholder="Leave empty to let the model decide." /></label>
             <div className="response-length-presets" aria-label="Response length presets">{RESPONSE_LENGTH_PRESETS.map((preset) => <button type="button" key={preset.label} onClick={() => update('responseLength', preset.value)}>{preset.label}</button>)}</div>
@@ -565,7 +570,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
   if (preview && type === 'chat' && previewChat) {
     const systemPrompt = renderPromptTemplate(previewChat.systemPrompt, bookTemplateValues(metadata))
     requestMessages.push({ key: 'chat-system', role: 'system', title: 'Chat system prompt', detail: 'SYSTEM', content: systemPrompt })
-    requestMessages.push({ key: 'chat-workspace', role: 'system', title: 'Workspace instructions', detail: 'SYSTEM', content: chatWorkspaceInstructions })
+    requestMessages.push({ key: 'chat-workspace', role: 'system', title: 'Workspace instructions', detail: 'SYSTEM', content: CHAT_WORKSPACE_INSTRUCTIONS })
     const contextSections = [
       preview.lastSceneText ? `# Current scene${preview.lastSceneTitle ? ` — ${preview.lastSceneTitle}` : ''}\n\n${preview.lastSceneText.trim()}` : '',
       preview.additionalContext ? `# Additional context\n\n${preview.additionalContext.trim()}` : '',
@@ -596,6 +601,16 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
 
   const exactPreview = requestMessages.map((message) => `${message.role.toUpperCase()}:\n\n${message.content || '[empty]'}${message.reasoning ? `\n\nreasoning:\n${message.reasoning}` : ''}`).join('\n\n---\n\n')
   const selectedModel = type === 'codex' ? settings.codexModel.trim() || settings.mainModel.trim() : type === 'chat' ? previewChat?.model.trim() : settings.mainModel.trim()
+  const selectedModelContextLength = type === 'codex'
+    ? (settings.codexModel.trim() ? settings.codexModelContextLength : settings.mainModelContextLength)
+    : type === 'chat' ? previewChat?.modelContextLength : settings.mainModelContextLength
+  const effectiveLimitInput = type === 'codex'
+    ? (settings.codexModel.trim() ? settings.codexEffectiveContextLimit : settings.mainEffectiveContextLimit)
+    : type === 'chat' ? previewChat?.effectiveContextLimit ?? '' : settings.mainEffectiveContextLimit
+  const diagnosticMessages = requestMessages.map((message) => ({ role: message.role, content: message.content || null, ...(message.reasoning ? { reasoning_content: message.reasoning } : {}) }))
+  const diagnostics = selectedModel && requestMessages.length
+    ? generationContextDiagnostics(selectedModel, selectedModelContextLength, effectiveLimitInput, type === 'chat' ? serializeChatModelInput(diagnosticMessages) : JSON.stringify({ messages: diagnosticMessages }))
+    : null
 
   return <section className="context-defaults-settings">
     <header className="page-heading"><div><p>{typeLabel} generation</p><h1 id="page-title">Context Management</h1><span>Saved independently for {typeLabel.toLowerCase()} generation in “{bookTitle}”.</span></div><div className={`save-state ${saved ? 'saved' : ''}`}><i />{saved ? 'Saved' : 'Saving…'}</div></header>
@@ -611,6 +626,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
     <section className="settings-card context-preview-card"><div className="card-heading"><div><span>03</span><h2>Request preview</h2></div><p>{selectedModel ? `Model: ${selectedModel}. ` : ''}Rendered message stack for the current {typeLabel.toLowerCase()} request.</p></div>
       {type !== 'chat' && <p className="context-preview-empty">The generation instruction below shows the fallback used when the generation drawer is empty. Custom drawer text replaces it when you generate.</p>}
       {previewError ? <p className="context-preview-error" role="alert">{previewError}</p> : preview ? <>
+        {diagnostics && <div className={`context-budget ${!diagnostics.limitValid || !diagnostics.fits ? 'over' : diagnostics.warning ? 'warning' : ''}`}><strong>{diagnostics.limitValid ? `${diagnostics.requestTokens.toLocaleString()} estimated input tokens · ${Math.round(diagnostics.usageRatio * 100)}% of usable budget` : 'Invalid effective context cap'}</strong><span>Effective limit: {diagnostics.effectiveContextTokens.toLocaleString()} · Response reserve: {diagnostics.responseReserveTokens.toLocaleString()} · {diagnostics.modelContextKnown ? `Model hard window: ${diagnostics.modelContextTokens.toLocaleString()}` : `Model window estimate: ${diagnostics.modelContextTokens.toLocaleString()}`}</span>{diagnostics.wasClamped && <small>Your configured cap is above the model hard maximum, so Arc uses the model maximum.</small>}{diagnostics.limitError && <small>{diagnostics.limitError}</small>}{diagnostics.warning && diagnostics.fits && <small>Near the limit. Consider summaries, deselecting full-text context, or raising the cap.</small>}{!diagnostics.fits && diagnostics.limitValid && <small>Over the usable budget. Generation will be refused; Arc will not trim or replace context automatically.</small>}</div>}
         <div className="context-preview-rendered">{requestMessages.map((message) => <section key={message.key}><header><h3>{message.title}</h3><span>{message.detail}</span></header>{message.content ? <div className="context-preview-copy">{message.content}</div> : <p className="context-preview-empty">This message is empty.</p>}{message.reasoning && <div className="context-preview-copy"><strong>Reasoning</strong>\n\n{message.reasoning}</div>}</section>)}</div>
         <details className="context-preview-raw"><summary>View message stack</summary><pre>{exactPreview || '[No messages would be sent yet.]'}</pre></details>
       </> : <p className="context-preview-empty">Preparing preview…</p>}
