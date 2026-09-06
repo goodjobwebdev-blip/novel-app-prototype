@@ -1,0 +1,34 @@
+name: Fix issue 127
+
+on:
+  push:
+    branches:
+      - fix/issue-127-block-navigation-on-save-failure
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/issue-127-block-navigation-on-save-failure
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Apply fix
+        run: python .github/scripts/issue127.py
+      - run: npm install --no-package-lock
+      - run: node --test tests/navigation-save-guard.test.mjs tests/deletion-save-barrier.test.mjs tests/persistence-delete-write-guard.test.mjs tests/keyed-async-queue.test.mjs tests/async-state-guard.test.mjs tests/chat-selection-guard.test.mjs tests/tts-service-*.test.mjs
+      - run: npm run build
+      - name: Commit validated fix
+        run: |
+          rm .github/scripts/issue127.py .github/workflows/fix-issue-127.yml
+          git config user.name "goodjobwebdev-blip"
+          git config user.email "goodjob.webdev@gmail.com"
+          git add -A
+          git commit -m "Block document navigation after failed saves"
+          git push origin HEAD:fix/issue-127-block-navigation-on-save-failure
