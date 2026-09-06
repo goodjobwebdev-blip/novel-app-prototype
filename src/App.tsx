@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import {
   initialAiSettings,
+  defaultPromptCompositions,
   loadAiSettings,
   CODEX_RESPONSE_LENGTH_PRESETS,
   STORY_RESPONSE_LENGTH_PRESETS,
@@ -51,6 +52,7 @@ import {
 } from './persistence'
 import { bookTemplateValues, promptTemplateDiagnostics, promptVariables, renderPromptTemplate, type BookPromptValues } from './prompt-template'
 import PromptTemplateEditor, { type PromptTemplateEditorHandle } from './PromptTemplateEditor'
+import PromptPresetControls from './PromptPresetControls'
 import { makePredefinedMessage, likelyReusablePrefix, normalizedRequestDiagnosticText, type NormalizedAssembledRequest, type PredefinedMessage, type PromptCompositionScope } from './prompt-composition'
 import { assembleStoryGenerationRequest, STORY_CONTINUE_FALLBACK } from './story-request'
 import { assembleCodexGenerationRequest, CODEX_CONTINUE_FALLBACK } from './codex-request'
@@ -72,6 +74,7 @@ import './codex-summary.css'
 import './tts.css'
 import './codex-triggers.css'
 import './settings-save-recovery.css'
+import type { PromptPresetScope } from './prompt-presets'
 type SettingsTab = 'ai' | 'context' | 'appearance' | 'speech' | 'images'
 type SaveState = 'loading' | 'saved' | 'saving' | 'error'
 type RequestPreviewMessage = {
@@ -87,6 +90,7 @@ type RequestPreviewMessage = {
 }
 
 const providerLabels: Record<AiProvider, string> = { openrouter: 'OpenRouter', nanogpt: 'nano-gpt.com', openai: 'OpenAI', compatible: 'OpenAI-compatible', fake: 'Fake (testing)' }
+const promptPresetScope: Record<keyof AiPrompts, PromptPresetScope> = { story: 'story', assistant: 'chat', lore: 'codex', summarize: 'summary' }
 function formatContext(value?: number) {
   if (!value) return 'Context unknown'
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value % 1_000_000 ? 1 : 0)}m context`
@@ -690,7 +694,13 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
 
         <section className="settings-card prompts-card">
           <div className="card-heading"><div><span>03</span><h2>Request composition</h2></div><p>System prompt, ordered predefined messages, then Arc’s current instruction.</p></div>
-          <div className="prompt-tabs" role="tablist">{([['story', 'Story'], ['summarize', 'Summarize'], ['lore', 'Lore entries'], ['assistant', 'Assistant']] as const).map(([key, label]) => <button key={key} className={promptTab === key ? 'active' : ''} type="button" onClick={() => setPromptTab(key)}>{label}</button>)}</div>
+          <div className="prompt-tabs" role="tablist">{([['story', 'Story'], ['assistant', 'Chat'], ['lore', 'Codex'], ['summarize', 'Summary']] as const).map(([key, label]) => <button key={key} className={promptTab === key ? 'active' : ''} type="button" onClick={() => setPromptTab(key)}>{label}</button>)}</div>
+          <PromptPresetControls
+            scope={promptPresetScope[promptTab]}
+            composition={settings.promptCompositions[promptTab]}
+            arcDefault={defaultPromptCompositions[promptTab]}
+            onApply={(composition) => changeAiSettings((current) => withPromptComposition(current, promptTab, composition))}
+          />
           {responseLengthScope && <div className="response-length-setting">
             <label htmlFor={`${responseLengthScope}-response-length`}><span><strong>Response length</strong><em>{promptTab === 'story' ? 'Story' : promptTab === 'lore' ? 'Codex' : 'Summary'}</em></span><textarea id={`${responseLengthScope}-response-length`} value={activeResponseLength} onChange={(event) => changeAiSettings((current) => ({ ...current, responseLengths: { ...current.responseLengths, [responseLengthScope]: event.target.value } }))} placeholder="Leave empty to let the model decide." /></label>
             <div className="response-length-presets" aria-label={`${responseLengthScope} response length presets`}>{activeResponseLengthPresets.map((preset) => <button type="button" key={preset.label} onClick={() => changeAiSettings((current) => ({ ...current, responseLengths: { ...current.responseLengths, [responseLengthScope]: preset.value } }))}>{preset.label}</button>)}</div>
