@@ -1,4 +1,10 @@
-import { canonicalVariableName, renderCompositionTemplate, type VariableStability } from './prompt-composition'
+import {
+  canonicalVariableName,
+  renderCompositionTemplate,
+  validatePromptTemplate,
+  type PromptTemplateDiagnostic,
+  type VariableStability,
+} from './prompt-composition'
 
 export type PromptScope = 'story' | 'summarize' | 'lore' | 'assistant'
 
@@ -86,6 +92,23 @@ export function generationInstructionMessage(template: string, responseLength: s
 
 export function renderPromptTemplate(template: string, values: Record<string, string>) {
   return renderCompositionTemplate(template, values).content
+}
+
+export function promptTemplateDiagnostics(
+  template: string,
+  scope: PromptScope,
+  values?: Record<string, string>,
+): PromptTemplateDiagnostic[] {
+  return validatePromptTemplate({ template, variables: promptVariables, scope, values })
+}
+
+export function promptTemplateError(template: string, scope: PromptScope) {
+  return promptTemplateDiagnostics(template, scope).find((diagnostic) => diagnostic.severity === 'error')
+}
+
+export function assertPromptTemplateValid(template: string, scope: PromptScope) {
+  const diagnostic = promptTemplateError(template, scope)
+  if (diagnostic) throw new Error(`Fix the invalid ${scope} prompt in Book AI settings: ${diagnostic.message}`)
 }
 
 export function promptVariableStability(name: string) {

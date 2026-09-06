@@ -44,7 +44,8 @@ import {
   type BookContextSettings,
   type GenerationContextType,
 } from './persistence'
-import { bookTemplateValues, generationInstructionMessage, promptVariables, renderPromptTemplate, responseLengthMessage, type BookPromptValues } from './prompt-template'
+import { bookTemplateValues, generationInstructionMessage, promptTemplateDiagnostics, promptVariables, renderPromptTemplate, responseLengthMessage, type BookPromptValues } from './prompt-template'
+import PromptTemplateEditor, { type PromptTemplateEditorHandle } from './PromptTemplateEditor'
 import { buildContextValues, contextLimitInputError, generationContextDiagnostics, type PreparedContextValues } from './context-service'
 import { getChat, listChatMessages, saveChatContextProfile, type ChatEntity, type ChatMessageEntity } from './chat-service'
 import { CHAT_TOOL_DEFINITIONS, CHAT_WORKSPACE_INSTRUCTIONS, serializeChatModelInput } from './chat-request'
@@ -128,6 +129,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   const [fakeTrace, setFakeTrace] = useState(() => getFakeProviderTrace())
   const [models, setModels] = useState<ProviderModel[]>([])
   const [promptTab, setPromptTab] = useState<keyof AiPrompts>('story')
+  const [promptVariableQuery, setPromptVariableQuery] = useState('')
   const [modelSearch, setModelSearch] = useState('')
   const [showKey, setShowKey] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -154,6 +156,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   const leaveSavingRef = useRef(false)
   const modelRefreshSequenceRef = useRef(0)
   const modelRefreshControllerRef = useRef<AbortController | null>(null)
+  const promptEditorRef = useRef<PromptTemplateEditorHandle | null>(null)
   const isBookSettings = Boolean(book)
   onSavedRef.current = onSaved
 
@@ -566,6 +569,18 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
     destination()
   }
 
+  const activePrompt = settings.promptCompositions[promptTab].systemPrompt
+  const promptPreviewValues = book?.promptValues
+    ? bookTemplateValues({ ...book.promptValues, responseLength: settings.responseLength })
+    : undefined
+  const activePromptDiagnostics = promptTemplateDiagnostics(activePrompt, promptTab, promptPreviewValues)
+  const activePromptErrors = activePromptDiagnostics.filter((diagnostic) => diagnostic.severity === 'error')
+  const activePromptWarnings = activePromptDiagnostics.filter((diagnostic) => diagnostic.severity === 'warning')
+  const normalizedVariableQuery = promptVariableQuery.trim().toLowerCase()
+  const availablePromptVariables = promptVariables.filter((variable) => variable.scopes.includes(promptTab))
+    .filter((variable) => !normalizedVariableQuery || `${variable.name} ${variable.description}`.toLowerCase().includes(normalizedVariableQuery))
+  const localPromptPreview = activePromptErrors.length ? '' : renderPromptTemplate(activePrompt, promptPreviewValues ?? {})
+
   return (
     <main className="app-shell">
       <aside className="settings-rail" aria-label={`${isBookSettings ? 'Book' : 'Default'} settings navigation`}>
@@ -643,11 +658,41 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
         <section className="settings-card prompts-card">
           <div className="card-heading"><div><span>03</span><h2>System prompts</h2></div></div>
           <div className="prompt-tabs" role="tablist">{([['story', 'Story'], ['summarize', 'Summarize'], ['lore', 'Lore entries'], ['assistant', 'Assistant']] as const).map(([key, label]) => <button key={key} className={promptTab === key ? 'active' : ''} type="button" onClick={() => setPromptTab(key)}>{label}</button>)}</div>
-          <textarea className="prompt-editor" value={settings.promptCompositions[promptTab].systemPrompt} onChange={(event) => changeAiSettings((current) => withPromptSystemPrompt(current, promptTab, event.target.value))} spellCheck={false} />
+          <PromptTemplateEditor
+            ref={promptEditorRef}
+            value={settings.promptCompositions[promptTab].systemPrompt}
+            diagnostics={activePromptDiagnostics}
+            ariaLabel={`${promptTab} system prompt template`}
+            onChange={(value) => changeAiSettings((current) => withPromptSystemPrompt(current, promptTab, value))}
+          />
+          <div className={`prompt-validation-summary ${activePromptErrors.length ? 'invalid' : activePromptWarnings.length ? 'warning' : 'valid'}`} role="status">
+            <strong>{activePromptErrors.length
+              ? `${activePromptErrors.length} template error${activePromptErrors.length === 1 ? '' : 's'} — generation is blocked`
+              : activePromptWarnings.length
+                ? `${activePromptWarnings.length} preview warning${activePromptWarnings.length === 1 ? '' : 's'}`
+                : 'Template is valid'}</strong>
+            {activePromptDiagnostics.length > 0 && <ul>{activePromptDiagnostics.map((diagnostic, index) => <li key={`${diagnostic.code}-${diagnostic.from}-${index}`}><b>{diagnostic.severity === 'error' ? 'Error' : 'Warning'}:</b> {diagnostic.message}</li>)}</ul>}
+          </div>
+          <details className="prompt-local-preview">
+            <summary>Rendered preview</summary>
+            {activePromptErrors.length
+              ? <p role="alert">Fix the template errors above to render this prompt.</p>
+              : <pre>{localPromptPreview || '[This prompt renders as empty with the current preview values.]'}</pre>}
+          </details>
           <details className="prompt-reference">
             <summary><CircleHelp aria-hidden="true" /><span>Variables & syntax</span></summary>
             <div className="prompt-syntax"><span>Insert a value</span><code>{'{{book.title}}'}</code><span>Include a block only when a value exists</span><code>{'{% if book.genre %}Genre: {{book.genre}}{% endif %}'}</code></div>
-            <div className="prompt-variable-list">{promptVariables.filter((variable) => variable.scopes.includes(promptTab)).map((variable) => <div key={variable.name}><code>{`{{${variable.name}}}`}</code><span>{variable.description}</span></div>)}</div>
+            <label className="prompt-variable-search"><span>Search variables</span><input type="search" value={promptVariableQuery} onChange={(event) => setPromptVariableQuery(event.target.value)} placeholder={`Search ${promptTab} variables`} /></label>
+            <div className="prompt-variable-list">{availablePromptVariables.map((variable) => {
+              const previewName = variable.aliasFor ?? variable.name
+              const previewValue = promptPreviewValues?.[previewName]
+              const hasPreviewValue = Boolean(promptPreviewValues && Object.prototype.hasOwnProperty.call(promptPreviewValues, previewName))
+              return <div key={variable.name}>
+                <button type="button" onClick={() => promptEditorRef.current?.insert(`{{${variable.name}}}`)}><code>{`{{${variable.name}}}`}</code></button>
+                <span>{variable.description}{promptPreviewValues && <small>{hasPreviewValue ? (previewValue?.trim() ? 'Available in current preview' : 'Empty in current preview') : 'Resolved at generation time'}</small>}</span>
+                <button type="button" className="insert-condition" onClick={() => promptEditorRef.current?.insert(`{% if ${variable.name} %}\n{{${variable.name}}}\n{% endif %}`)}>Insert if block</button>
+              </div>
+            })}{!availablePromptVariables.length && <p>No variables match that search.</p>}</div>
           </details>
           <div className="prompt-footer"><button type="button" onClick={() => changeAiSettings((current) => resetPromptComposition(current, promptTab))}>Reset prompt composition</button></div>
         </section>
@@ -733,6 +778,10 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
   const currentDocument = sources.find((item) => item.id === currentDocumentId)
   const metadata: BookPromptValues = { ...(bookPromptValues ?? { title: bookTitle, series: '', seriesOrder: '', overview: '', genre: '', style: '', pov: '', tense: '', language: '' }), responseLength: settings.responseLength }
   const typeLabel = type === 'scene' ? 'Story' : type === 'codex' ? 'Codex' : 'Chat'
+  const previewPromptScope = type === 'scene' ? 'story' : type === 'codex' ? 'lore' : 'assistant'
+  const previewPromptTemplate = type === 'chat' ? previewChat?.systemPrompt ?? '' : settings.prompts[previewPromptScope]
+  const previewPromptDiagnostics = promptTemplateDiagnostics(previewPromptTemplate, previewPromptScope, bookTemplateValues(metadata))
+  const previewPromptErrors = previewPromptDiagnostics.filter((diagnostic) => diagnostic.severity === 'error')
   const requestMessages: RequestPreviewMessage[] = []
 
   if (preview && type === 'scene') {
@@ -808,7 +857,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
     ? (settings.codexModel.trim() ? settings.codexEffectiveContextLimit : settings.mainEffectiveContextLimit)
     : type === 'chat' ? previewChat?.effectiveContextLimit ?? '' : settings.mainEffectiveContextLimit
   const diagnosticMessages = requestMessages.map((message) => ({ role: message.role, content: message.content || null, ...(message.reasoning ? { reasoning_content: message.reasoning } : {}) }))
-  const diagnostics = selectedModel && requestMessages.length
+  const diagnostics = selectedModel && requestMessages.length && !previewPromptErrors.length
     ? generationContextDiagnostics(selectedModel, selectedModelContextLength, effectiveLimitInput, type === 'chat' ? serializeChatModelInput(diagnosticMessages) : JSON.stringify({ messages: diagnosticMessages }))
     : null
 
@@ -828,6 +877,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
     <section className="settings-card context-preview-card"><div className="card-heading"><div><span>03</span><h2>Request preview</h2></div><p>{selectedModel ? `Model: ${selectedModel}. ` : ''}Rendered message stack for the current {typeLabel.toLowerCase()} request.</p></div>
       {type !== 'chat' && <p className="context-preview-empty">The generation instruction below shows the fallback used when the generation drawer is empty. Custom drawer text replaces it when you generate.</p>}
       {previewError ? <p className="context-preview-error" role="alert">{previewError}</p> : preview ? <>
+        {previewPromptErrors.length > 0 && <div className="context-preview-error" role="alert"><strong>Request blocked by an invalid {previewPromptScope} prompt.</strong><ul>{previewPromptErrors.map((diagnostic, index) => <li key={`${diagnostic.code}-${diagnostic.from}-${index}`}>{diagnostic.message}</li>)}</ul></div>}
         {diagnostics && <div className={`context-budget ${!diagnostics.limitValid || !diagnostics.fits ? 'over' : diagnostics.warning ? 'warning' : ''}`}><strong>{diagnostics.limitValid ? `${diagnostics.requestTokens.toLocaleString()} estimated input tokens · ${Math.round(diagnostics.usageRatio * 100)}% of usable budget` : 'Invalid effective context cap'}</strong><span>Effective limit: {diagnostics.effectiveContextTokens.toLocaleString()} · Response reserve: {diagnostics.responseReserveTokens.toLocaleString()} · {diagnostics.modelContextKnown ? `Model hard window: ${diagnostics.modelContextTokens.toLocaleString()}` : `Model window estimate: ${diagnostics.modelContextTokens.toLocaleString()}`}</span>{diagnostics.wasClamped && <small>Your configured cap is above the model hard maximum, so Arc uses the model maximum.</small>}{diagnostics.limitError && <small>{diagnostics.limitError}</small>}{diagnostics.warning && diagnostics.fits && <small>Near the limit. Consider summaries, deselecting full-text context, or raising the cap.</small>}{!diagnostics.fits && diagnostics.limitValid && <small>Over the usable budget. Generation will be refused; Arc will not trim or replace context automatically.</small>}</div>}
         {preview.automaticCodex.length > 0 && <div className="automatic-codex-preview"><strong>Automatic Codex</strong>{preview.automaticCodex.map((item) => <article key={item.entryId} className={item.source === 'dependency' ? 'dependency-cascade' : 'trigger-match'}><header><b>{item.title}</b><small>{item.source === 'dependency' ? 'Dependency cascade' : 'Direct trigger'} · {item.representation === 'Summary' ? 'Summary' : 'Full entry'}{item.fallbackReason ? ` · ${item.fallbackReason}` : ''}</small></header>{item.source === 'dependency' ? <p>Dependency path: {(item.dependencyPath ?? []).map((step) => step.title).join(' → ')}</p> : <ul>{item.matches.map((match, index) => <li key={`${item.entryId}-${match.sceneId}-${match.trigger}-${index}`}><code>{match.trigger}</code> · {match.sceneTitle}</li>)}</ul>}</article>)}</div>}
         {preview.codexRepresentations.length > 0 && <div className="codex-context-representations"><strong>Codex context representation</strong>{preview.codexRepresentations.map((item) => <span key={item.entryId}><b>{item.title}</b><em>{item.representation}{item.fallbackReason ? ` · ${item.fallbackReason}` : ''}</em></span>)}</div>}

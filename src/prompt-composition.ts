@@ -57,10 +57,37 @@ export type RenderedTemplate = {
   referencedVariables: string[]
 }
 
+export type PromptTemplateToken = {
+  type: 'text' | 'variable' | 'if' | 'endif'
+  from: number
+  to: number
+  raw: string
+  variable?: string
+}
+
+export type PromptTemplateDiagnostic = {
+  severity: 'error' | 'warning'
+  code: string
+  message: string
+  from: number
+  to: number
+  variable?: string
+  suggestion?: string
+}
+
+export type ParsedPromptTemplate = {
+  tokens: PromptTemplateToken[]
+  diagnostics: PromptTemplateDiagnostic[]
+}
+
+export type PromptTemplateVariableDefinition = {
+  name: string
+  scopes: string[]
+}
+
 export type ProviderRoleSupport = Partial<Record<ProviderMessageRole, boolean>>
 
-const VARIABLE_PATTERN = /{{\s*([\w.]+)\s*}}/g
-const CONDITIONAL_PATTERN = /{%\s*if\s+([\w.]+)\s*%}([\s\S]*?){%\s*endif\s*%}/g
+const VARIABLE_EXPRESSION = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/
 const LEGACY_ALIASES: Record<string, string> = {
   'scene.summary_context': 'story.so_far',
   additional_context: 'context.additional',
@@ -148,18 +175,193 @@ export function canonicalVariableName(name: string) {
   return LEGACY_ALIASES[name] ?? name
 }
 
+function syntaxDiagnostic(code: string, message: string, from: number, to: number): PromptTemplateDiagnostic {
+  return { severity: 'error', code, message, from, to: Math.max(from + 1, to) }
+}
+
+/** Tokenize Arc's deliberately small template language and report structural errors. */
+export function parsePromptTemplate(template: string): ParsedPromptTemplate {
+  const tokens: PromptTemplateToken[] = []
+  const diagnostics: PromptTemplateDiagnostic[] = []
+  const conditionStack: PromptTemplateToken[] = []
+  let cursor = 0
+
+  const pushText = (from: number, to: number) => {
+    if (to > from) tokens.push({ type: 'text', from, to, raw: template.slice(from, to) })
+  }
+
+  while (cursor < template.length) {
+    const candidates = [
+      { index: template.indexOf('{{', cursor), kind: 'variable' as const },
+      { index: template.indexOf('{%', cursor), kind: 'control' as const },
+      { index: template.indexOf('}}', cursor), kind: 'variable-close' as const },
+      { index: template.indexOf('%}', cursor), kind: 'control-close' as const },
+    ].filter((candidate) => candidate.index >= 0).sort((left, right) => left.index - right.index)
+    const next = candidates[0]
+    if (!next) {
+      pushText(cursor, template.length)
+      break
+    }
+
+    pushText(cursor, next.index)
+    if (next.kind === 'variable-close' || next.kind === 'control-close') {
+      diagnostics.push(syntaxDiagnostic(
+        next.kind === 'variable-close' ? 'unexpected-variable-close' : 'unexpected-control-close',
+        `Unexpected ${next.kind === 'variable-close' ? '}}' : '%}'} closing delimiter.`,
+        next.index,
+        next.index + 2,
+      ))
+      pushText(next.index, next.index + 2)
+      cursor = next.index + 2
+      continue
+    }
+
+    const close = next.kind === 'variable' ? '}}' : '%}'
+    const closeIndex = template.indexOf(close, next.index + 2)
+    if (closeIndex < 0) {
+      diagnostics.push(syntaxDiagnostic(
+        next.kind === 'variable' ? 'unclosed-variable' : 'unclosed-control',
+        `Unclosed ${next.kind === 'variable' ? '{{ variable' : '{% control'} delimiter.`,
+        next.index,
+        template.length,
+      ))
+      pushText(next.index, template.length)
+      break
+    }
+
+    const to = closeIndex + 2
+    const raw = template.slice(next.index, to)
+    const expression = template.slice(next.index + 2, closeIndex).trim()
+    if (next.kind === 'variable') {
+      const token: PromptTemplateToken = { type: 'variable', from: next.index, to, raw, variable: expression }
+      tokens.push(token)
+      if (!VARIABLE_EXPRESSION.test(expression)) {
+        diagnostics.push({
+          ...syntaxDiagnostic('malformed-variable', expression ? `Malformed variable expression “${expression}”.` : 'Variable name cannot be empty.', next.index, to),
+          ...(expression ? { variable: expression } : {}),
+        })
+      }
+    } else if (expression === 'endif') {
+      const token: PromptTemplateToken = { type: 'endif', from: next.index, to, raw }
+      tokens.push(token)
+      if (!conditionStack.length) {
+        diagnostics.push(syntaxDiagnostic('unexpected-endif', 'Unexpected {% endif %}; there is no open conditional block.', next.index, to))
+      } else {
+        conditionStack.pop()
+      }
+    } else {
+      const match = expression.match(/^if\s+(.+)$/)
+      if (!match) {
+        tokens.push({ type: 'text', from: next.index, to, raw })
+        diagnostics.push(syntaxDiagnostic('unsupported-control', `Unsupported template tag “${raw}”. Arc supports only {% if variable %} and {% endif %}.`, next.index, to))
+      } else {
+        const variable = match[1].trim()
+        const token: PromptTemplateToken = { type: 'if', from: next.index, to, raw, variable }
+        tokens.push(token)
+        if (!VARIABLE_EXPRESSION.test(variable)) {
+          diagnostics.push({
+            ...syntaxDiagnostic('malformed-condition', variable ? `Malformed conditional variable “${variable}”.` : 'Conditional variable cannot be empty.', next.index, to),
+            ...(variable ? { variable } : {}),
+          })
+        }
+        if (conditionStack.length) {
+          diagnostics.push(syntaxDiagnostic('nested-condition', 'Nested conditional blocks are not supported.', next.index, to))
+        }
+        conditionStack.push(token)
+      }
+    }
+    cursor = to
+  }
+
+  for (const token of conditionStack) {
+    diagnostics.push(syntaxDiagnostic('unclosed-condition', `Conditional for “${token.variable ?? ''}” is missing {% endif %}.`, token.from, token.to))
+  }
+  return { tokens, diagnostics }
+}
+
+function editDistance(left: string, right: string) {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index)
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex]
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1] + 1,
+        previous[rightIndex] + 1,
+        previous[rightIndex - 1] + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
+      )
+    }
+    previous.splice(0, previous.length, ...current)
+  }
+  return previous[right.length]
+}
+
+function nearestVariable(name: string, variables: PromptTemplateVariableDefinition[]) {
+  const ranked = variables.map((variable) => ({ candidate: variable.name, distance: editDistance(name, variable.name) }))
+    .sort((left, right) => left.distance - right.distance || left.candidate.localeCompare(right.candidate))
+  const nearest = ranked[0]
+  return nearest && nearest.distance <= Math.max(2, Math.floor(name.length / 3)) ? nearest.candidate : undefined
+}
+
+/** Add catalog, scope, and current-value diagnostics to the shared syntax parse. */
+export function validatePromptTemplate(input: {
+  template: string
+  variables: PromptTemplateVariableDefinition[]
+  scope: string
+  values?: Record<string, string>
+}): PromptTemplateDiagnostic[] {
+  const parsed = parsePromptTemplate(input.template)
+  const diagnostics = [...parsed.diagnostics]
+  const normalizedValues = input.values ? withLegacyVariableAliases(input.values) : undefined
+
+  for (const token of parsed.tokens) {
+    if ((token.type !== 'variable' && token.type !== 'if') || !token.variable || !VARIABLE_EXPRESSION.test(token.variable)) continue
+    const variable = input.variables.find((candidate) => candidate.name === token.variable)
+    if (!variable) {
+      const suggestion = nearestVariable(token.variable, input.variables)
+      diagnostics.push({
+        severity: 'error',
+        code: 'unknown-variable',
+        message: `Unknown variable “${token.variable}”.${suggestion ? ` Did you mean {{${suggestion}}}?` : ''}`,
+        from: token.from,
+        to: token.to,
+        variable: token.variable,
+        ...(suggestion ? { suggestion } : {}),
+      })
+      continue
+    }
+    if (!variable.scopes.includes(input.scope)) {
+      diagnostics.push({
+        severity: 'error',
+        code: 'out-of-scope-variable',
+        message: `{{${token.variable}}} is not available in ${input.scope} prompts.`,
+        from: token.from,
+        to: token.to,
+        variable: token.variable,
+      })
+      continue
+    }
+    const canonical = canonicalVariableName(token.variable)
+    if (normalizedValues && Object.prototype.hasOwnProperty.call(normalizedValues, canonical) && !normalizedValues[canonical]?.trim()) {
+      diagnostics.push({
+        severity: 'warning',
+        code: 'empty-preview-value',
+        message: `{{${token.variable}}} is empty in the current preview.`,
+        from: token.from,
+        to: token.to,
+        variable: token.variable,
+      })
+    }
+  }
+  return diagnostics.sort((left, right) => left.from - right.from || (left.severity === 'error' ? -1 : 1))
+}
+
 export function referencedVariables(template: string) {
   const names: string[] = []
   const seen = new Set<string>()
-  for (const pattern of [CONDITIONAL_PATTERN, VARIABLE_PATTERN]) {
-    pattern.lastIndex = 0
-    let match: RegExpExecArray | null
-    while ((match = pattern.exec(template))) {
-      const name = match[1]
-      if (!seen.has(name)) {
-        seen.add(name)
-        names.push(name)
-      }
+  for (const token of parsePromptTemplate(template).tokens) {
+    if ((token.type === 'variable' || token.type === 'if') && token.variable && VARIABLE_EXPRESSION.test(token.variable) && !seen.has(token.variable)) {
+      seen.add(token.variable)
+      names.push(token.variable)
     }
   }
   return names
@@ -178,15 +380,22 @@ export function withLegacyVariableAliases(values: Record<string, string>) {
 
 export function renderCompositionTemplate(template: string, values: Record<string, string>): RenderedTemplate {
   const normalizedValues = withLegacyVariableAliases(values)
+  const parsed = parsePromptTemplate(template)
   const references = referencedVariables(template)
-  const conditional = new RegExp(CONDITIONAL_PATTERN.source, 'g')
-  const variable = new RegExp(VARIABLE_PATTERN.source, 'g')
-  const content = template
-    .replace(conditional, (_match, key: string, body: string) => normalizedValues[key]?.trim() ? body : '')
-    .replace(variable, (_match, key: string) => normalizedValues[key] ?? '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
-  return { content, referencedVariables: references }
+  const included: boolean[] = []
+  let content = ''
+  for (const token of parsed.tokens) {
+    if (token.type === 'if') {
+      included.push(Boolean(token.variable && normalizedValues[token.variable]?.trim()))
+    } else if (token.type === 'endif') {
+      included.pop()
+    } else if (included.every(Boolean)) {
+      content += token.type === 'variable' && token.variable && VARIABLE_EXPRESSION.test(token.variable)
+        ? normalizedValues[token.variable] ?? ''
+        : token.raw
+    }
+  }
+  return { content: content.replace(/\n{3,}/g, '\n\n').trim(), referencedVariables: references }
 }
 
 export function dedupeAdditionalSources(automatic: DynamicContextSource[], additional: DynamicContextSource[]) {

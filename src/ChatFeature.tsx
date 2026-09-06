@@ -61,7 +61,7 @@ import {
   type ChatOutlineActionProposal,
 } from './chat-service'
 import { buildContextValues, contextLimitInputError, generationContextDiagnostics } from './context-service'
-import { bookTemplateValues, renderPromptTemplate, responseLengthMessage, type BookPromptValues } from './prompt-template'
+import { assertPromptTemplateValid, bookTemplateValues, renderPromptTemplate, responseLengthMessage, type BookPromptValues } from './prompt-template'
 import { applyChatDocumentEdit, createChatCodexEntry, executeChatWorkspaceTool, rejectChatCodexEntry, rejectChatDocumentEdit } from './chat-tools'
 import { applyChatEntityAction, chatEntityToolNames, executeChatEntityTool, rejectChatEntityAction } from './chat-entity-tools'
 import { applyChatOutlineAction, chatOutlineToolNames, executeChatOutlineTool, rejectChatOutlineAction } from './chat-outline-tools'
@@ -396,6 +396,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   ) {
     const { settings, context } = prepared
     const promptValues = { ...bookPromptValues, responseLength: settings.responseLength }
+    assertPromptTemplateValid(activeChat.systemPrompt, 'assistant')
     const systemPrompt = renderPromptTemplate(activeChat.systemPrompt, bookTemplateValues(promptValues))
     const contextSections = [
       context.lastSceneText ? section(`Current scene${context.lastSceneTitle ? ` — ${context.lastSceneTitle}` : ''}`, context.lastSceneText) : '',

@@ -53,7 +53,7 @@ import ExpandableTextInput from './ExpandableTextInput'
 import MarkdownEditor, { type CodexMentionClick, type MarkdownEditorHandle } from './MarkdownEditor'
 import { renderLorePrompt, renderStoryPrompt, type NanoGPTStreamMetadata } from './nanogpt'
 import { fetchTextProviderModelContextLength, streamTextProviderCompletion, textProviderRequestText } from './text-provider'
-import { generationInstructionMessage, type BookPromptValues } from './prompt-template'
+import { assertPromptTemplateValid, generationInstructionMessage, type BookPromptValues } from './prompt-template'
 import { buildContextValues, generationContextDiagnostics } from './context-service'
 import {
   PROTOTYPE_BOOK_ID,
@@ -1223,6 +1223,12 @@ export default function Workspace() {
       showToast('Choose a Main model in Book settings before generating.')
       return
     }
+    try {
+      assertPromptTemplateValid(isCodex ? settings.prompts.lore : settings.prompts.story, isCodex ? 'lore' : 'story')
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Fix the invalid prompt in Book AI settings before generating.')
+      return
+    }
 
     const previousRequest = latestGenerationRequestRef.current
     if (mode === 'regenerate' && !previousRequest) {
@@ -1439,6 +1445,13 @@ export default function Workspace() {
       if ((settings.provider !== 'nanogpt' && settings.provider !== 'fake') || (settings.provider === 'nanogpt' && !settings.apiKey.trim()) || !settings.supportModel.trim()) {
         status = 'error'
         showToast('Choose NanoGPT or Fake (testing) and a Support model in Book settings before summarizing.')
+        return
+      }
+      try {
+        assertPromptTemplateValid(settings.prompts.summarize, 'summarize')
+      } catch (error) {
+        status = 'error'
+        showToast(error instanceof Error ? error.message : 'Fix the invalid summarize prompt in Book AI settings.')
         return
       }
 

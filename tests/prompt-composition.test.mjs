@@ -10,9 +10,12 @@ import {
   normalizeAppManagedPart,
   normalizePromptComposition,
   normalizedRequestDiagnosticText,
+  parsePromptTemplate,
   providerCompatibilityError,
   providerMessagesFromNormalized,
+  referencedVariables,
   renderCompositionTemplate,
+  validatePromptTemplate,
 } from '../src/prompt-composition.ts'
 
 const promptTemplateSource = readFileSync(new URL('../src/prompt-template.ts', import.meta.url), 'utf8')
@@ -44,6 +47,46 @@ test('legacy aliases render canonical values without rewriting authored template
     'story.so_far': 'Earlier story', 'context.additional': 'Manual lore',
   }).content, 'Earlier story / Manual lore')
   assert.match(promptTemplateSource, /renderCompositionTemplate\(template, values\)\.content/)
+})
+
+test('shared parser renders supported conditionals and extracts variables in authored order', () => {
+  const template = 'Hello {{book.title}}\n{% if book.genre %}Genre: {{book.genre}}{% endif %}'
+  assert.deepEqual(referencedVariables(template), ['book.title', 'book.genre'])
+  assert.equal(renderCompositionTemplate(template, { 'book.title': 'Arc', 'book.genre': 'Fantasy' }).content, 'Hello Arc\nGenre: Fantasy')
+  assert.equal(renderCompositionTemplate(template, { 'book.title': 'Arc', 'book.genre': '' }).content, 'Hello Arc')
+  assert.deepEqual(parsePromptTemplate(template).diagnostics, [])
+})
+
+test('parser reports broken delimiters, control tags, condition structure, and nesting', () => {
+  const cases = [
+    ['Hello {{book.title', 'unclosed-variable'],
+    ['Hello }}', 'unexpected-variable-close'],
+    ['{% for book.title %}x{% endif %}', 'unsupported-control'],
+    ['{% endif %}', 'unexpected-endif'],
+    ['{% if book.title %}x', 'unclosed-condition'],
+    ['{% if book.title %}{% if book.genre %}x{% endif %}{% endif %}', 'nested-condition'],
+  ]
+  for (const [template, code] of cases) {
+    assert.ok(parsePromptTemplate(template).diagnostics.some((diagnostic) => diagnostic.code === code), `${template} should report ${code}`)
+  }
+})
+
+test('scope-aware diagnostics identify typos, unavailable variables, and empty preview values', () => {
+  const variables = [
+    { name: 'book.overview', scopes: ['story', 'summarize'] },
+    { name: 'book.genre', scopes: ['story', 'summarize'] },
+    { name: 'scene.pov', scopes: ['story'] },
+    { name: 'response.length', scopes: ['story', 'assistant'] },
+  ]
+  const diagnostics = (template, scope, values) => validatePromptTemplate({ template, variables, scope, values })
+  const typo = diagnostics('{{book.overveiw}}', 'story')
+  assert.equal(typo[0].code, 'unknown-variable')
+  assert.equal(typo[0].suggestion, 'book.overview')
+  assert.match(typo[0].message, /Did you mean \{\{book\.overview\}\}/)
+
+  assert.equal(diagnostics('{{scene.pov}}', 'summarize')[0].code, 'out-of-scope-variable')
+  assert.equal(diagnostics('{{book.genre}}', 'story', { 'book.genre': '' })[0].severity, 'warning')
+  assert.deepEqual(diagnostics('{{response.length}}', 'assistant', { 'response.length': 'Brief' }), [])
 })
 
 test('automatic sources dedupe Additional by stable source identity, not rendered text or representation', () => {

@@ -1,0 +1,29 @@
+.prompt-template-editor {
+  min-height: 230px;
+  overflow: hidden;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #0b0c0b;
+  color: #cbc5b9;
+  font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.prompt-template-editor:focus-within {
+  border-color: rgba(198, 168, 107, .45);
+  box-shadow: 0 0 0 3px rgba(198, 168, 107, .07);
+}
+
+.prompt-template-editor .cm-editor,
+.prompt-template-editor .cm-scroller { min-height: 230px; }
+.prompt-template-editor .cm-content { padding: 13px; }
+.prompt-template-editor .cm-prompt-variable { color: #a9c8eb; background: rgba(105, 155, 206, .09); border-radius: 3px; }
+.prompt-template-editor .cm-prompt-control { color: var(--accent-bright); background: rgba(198, 168, 107, .09); border-radius: 3px; }
+.prompt-template-editor .cm-prompt-error { text-decoration: underline wavy var(--danger) 1.5px; text-underline-offset: 3px; background: rgba(225, 142, 135, .08); }
+.prompt-template-editor .cm-prompt-warning { text-decoration: underline dotted #d8b96f 1.5px; text-underline-offset: 3px; }
+
+@media (max-width: 430px) {
+  .prompt-template-editor,
+  .prompt-template-editor .cm-editor,
+  .prompt-template-editor .cm-scroller { min-height: 280px; }
+}
