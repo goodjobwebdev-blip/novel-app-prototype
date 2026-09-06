@@ -339,17 +339,20 @@ export default function Workspace() {
     }
     setSaveState('saving')
     try {
+      const contentSnapshot = storyRef.current
       const current = await getEntity<EditableEntity>(documentId)
       if (!current) throw new Error(`Cannot save missing document ${documentId}`)
       const savedDocument = current.type === 'summary'
-        ? await saveSummaryContent(current.id, storyRef.current, (await buildSummarySource(current.sourceEntityId)).sourceRevision)
-        : await saveDocumentContent(documentId, storyRef.current) as EditableEntity
+        ? await saveSummaryContent(current.id, contentSnapshot, (await buildSummarySource(current.sourceEntityId)).sourceRevision)
+        : await saveDocumentContent(documentId, contentSnapshot) as EditableEntity
       if (snapshot && changedSinceSnapshotRef.current) {
-        await createSnapshot(documentId, reason, storyRef.current)
+        await createSnapshot(documentId, reason, contentSnapshot)
         changedSinceSnapshotRef.current = false
       }
       const editedAt = Date.now()
-      setActiveDocument(savedDocument)
+      if (activeDocumentIdRef.current === documentId) {
+        setActiveDocument(savedDocument)
+      }
       if (savedDocument.type === 'note') setNotes((items) => items.map((item) => item.id === savedDocument.id ? savedDocument : item))
       if (savedDocument.type === 'codexEntry') setCodexEntries((items) => items.map((item) => item.id === savedDocument.id ? savedDocument : item))
       setCurrentBook((book) => book && book.id === savedDocument.bookId ? { ...book, updatedAt: editedAt } : book)
