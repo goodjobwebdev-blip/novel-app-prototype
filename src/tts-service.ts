@@ -19,7 +19,7 @@ export type TtsState = {
 
 const TTS_EVENT = 'arc-tts-state'
 const TTS_BASE = 'https://nano-gpt.com/api'
-const AUDIO_MODELS_URL = 'https://nano-gpt.com/api/v1/audio-models?detailed=true&type=text-to-speech'
+const AUDIO_MODELS_URL = 'https://nano-gpt.com/api/v1/audio-models?detailed=true&type=tts'
 
 let state: TtsState = { status: 'idle', label: '', chunkIndex: 0, chunkCount: 0 }
 let sessionId = 0
