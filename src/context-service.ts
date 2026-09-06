@@ -1,8 +1,9 @@
-import { getBookContextSettings, isCodexEntryArchived, listEntitiesByBook, type ArcEntity, type CodexEntryEntity, type GenerationContextProfile, type GenerationContextType, type StructuralEntity, type SummaryEntity } from './persistence'
+import { getBookContextSettings, isCodexEntryArchived, listCodexDependencies, listEntitiesByBook, type ArcEntity, type CodexEntryEntity, type GenerationContextProfile, type GenerationContextType, type StructuralEntity, type SummaryEntity } from './persistence'
 import { automaticCodexMatches, type CodexTriggerSceneMatch } from './codex-trigger-service'
+import { cascadeAutomaticCodexDependencies } from './codex-dependency-cascade'
 import { codexContextRepresentation, type CodexContextRepresentation } from './summary-service'
 
-export type PreparedAutomaticCodex = { entryId: string; title: string; category: string; representation: 'Full entry' | 'Summary'; fallbackReason?: string; matches: CodexTriggerSceneMatch[] }
+export type PreparedAutomaticCodex = { entryId: string; title: string; category: string; representation: 'Full entry' | 'Summary'; fallbackReason?: string; source: 'trigger' | 'dependency'; matches: CodexTriggerSceneMatch[]; dependencyPath?: Array<{ entryId: string; title: string }> }
 
 export type PreparedContextValues = {
   currentSceneText: string
@@ -111,7 +112,7 @@ function additionalContextOrder(a: AdditionalContextSection, b: AdditionalContex
 }
 
 export async function buildContextValues(options: BuildOptions): Promise<PreparedContextValues> {
-  const [entities, contextSettings] = await Promise.all([listEntitiesByBook(options.bookId), getBookContextSettings(options.bookId)])
+  const [entities, contextSettings, dependencyEdges] = await Promise.all([listEntitiesByBook(options.bookId), getBookContextSettings(options.bookId), listCodexDependencies(options.bookId)])
   const outline = orderedOutline(options.bookId, entities)
   const scenes = outline.filter((item) => item.type === 'scene')
   const anchorSceneId = options.currentSceneId || contextSettings.lastOpenedSceneId || undefined
@@ -174,17 +175,30 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
     previousSceneCount: options.previousScenesForCodexTriggers ?? contextSettings.previousScenesForCodexTriggers,
     excludeEntryId: options.type === 'codex' ? options.currentDocumentId : undefined,
   }) : []
-  const automaticIds = new Set(automaticMatches.map((match) => match.entry.id))
-  const automaticRepresentations = automaticMatches.map((match) => codexContextRepresentation(match.entry, entities))
-  const automaticCodex: PreparedAutomaticCodex[] = automaticMatches.map((match) => {
-    const representation = automaticRepresentations.find((candidate) => candidate.entryId === match.entry.id)!
-    return { entryId: match.entry.id, title: match.entry.title, category: match.entry.category, representation: representation.representation, fallbackReason: representation.fallbackReason, matches: match.matches }
+  const allCodexEntries = entities.filter((item): item is CodexEntryEntity => item.type === 'codexEntry')
+  const cascadedDependencies = cascadeAutomaticCodexDependencies(
+    automaticMatches.map((match) => match.entry),
+    allCodexEntries,
+    dependencyEdges,
+    options.type === 'codex' ? options.currentDocumentId : undefined,
+  )
+  const automaticEntries = [
+    ...automaticMatches.map((match) => ({ entry: match.entry, source: 'trigger' as const, matches: match.matches, pathIds: [match.entry.id] })),
+    ...cascadedDependencies.map((item) => ({ entry: item.entry, source: 'dependency' as const, matches: [] as CodexTriggerSceneMatch[], pathIds: item.pathIds })),
+  ]
+  const automaticIds = new Set(automaticEntries.map((item) => item.entry.id))
+  const automaticRepresentations = automaticEntries.map((item) => codexContextRepresentation(item.entry, entities))
+  const codexById = new Map(allCodexEntries.map((entry) => [entry.id, entry]))
+  const automaticCodex: PreparedAutomaticCodex[] = automaticEntries.map((item) => {
+    const representation = automaticRepresentations.find((candidate) => candidate.entryId === item.entry.id)!
+    const dependencyPath = item.source === 'dependency'
+      ? item.pathIds.map((entryId) => codexById.get(entryId)).filter((entry): entry is CodexEntryEntity => Boolean(entry)).map((entry) => ({ entryId: entry.id, title: entry.title }))
+      : undefined
+    return { entryId: item.entry.id, title: item.entry.title, category: item.entry.category, representation: representation.representation, fallbackReason: representation.fallbackReason, source: item.source, matches: item.matches, dependencyPath }
   })
-  const automaticText = automaticMatches.map((match) => {
-    const representation = automaticRepresentations.find((candidate) => candidate.entryId === match.entry.id)!
-    return `### ${match.entry.category}: ${match.entry.title}
-
-${representation.content}`
+  const automaticText = automaticEntries.map((item) => {
+    const representation = automaticRepresentations.find((candidate) => candidate.entryId === item.entry.id)!
+    return `### ${item.entry.category}: ${item.entry.title}\n\n${representation.content}`
   }).join('\n\n')
   const automaticSection = automaticText ? section('Automatic Codex', automaticText) : ''
 

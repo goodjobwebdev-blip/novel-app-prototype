@@ -1282,11 +1282,13 @@ export default function Workspace() {
         }
         if (!diagnostics.fits) {
           editor.finishGeneration('error')
-          showToast(`Context is too large: ~${diagnostics.requestTokens.toLocaleString()} input tokens for a ${diagnostics.usableInputTokens.toLocaleString()}-token usable budget (${diagnostics.effectiveContextTokens.toLocaleString()} effective limit, ${diagnostics.responseReserveTokens.toLocaleString()} reserved for the response). Deselect context, summarize older material, raise the cap, or choose a larger model.`)
+          const dependencyTitles = prepared.automaticCodex.filter((item) => item.source === 'dependency').map((item) => item.title)
+          showToast(`Context is too large: ~${diagnostics.requestTokens.toLocaleString()} input tokens for a ${diagnostics.usableInputTokens.toLocaleString()}-token usable budget (${diagnostics.effectiveContextTokens.toLocaleString()} effective limit, ${diagnostics.responseReserveTokens.toLocaleString()} reserved for the response). Deselect context, summarize older material, raise the cap, or choose a larger model.${dependencyTitles.length ? ` Dependency cascade includes: ${dependencyTitles.join(', ')}.` : ''}`)
           return
         }
         if (diagnostics.warning) {
-          showToast(`Context is near the configured limit (${Math.round(diagnostics.usageRatio * 100)}%). Consider summarizing older material, deselecting full-text context, or raising the cap before adding more context.`)
+          const dependencyTitles = prepared.automaticCodex.filter((item) => item.source === 'dependency').map((item) => item.title)
+          showToast(`Context is near the configured limit (${Math.round(diagnostics.usageRatio * 100)}%). Consider summarizing older material, deselecting full-text context, or raising the cap before adding more context.${dependencyTitles.length ? ` Dependency cascade includes: ${dependencyTitles.join(', ')}.` : ''}`)
         }
         requestSnapshot = {
           baseUrl: settings.baseUrl,
