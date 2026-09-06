@@ -1,4 +1,4 @@
-import { listEntitiesByBook, type ArcEntity, type GenerationContextProfile, type GenerationContextType, type StructuralEntity, type SummaryEntity } from './persistence'
+import { isCodexEntryArchived, listEntitiesByBook, type ArcEntity, type GenerationContextProfile, type GenerationContextType, type StructuralEntity, type SummaryEntity } from './persistence'
 
 export type PreparedContextValues = {
   currentSceneText: string
@@ -159,7 +159,7 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
       typeRank: 2,
       outlineIndex: Number.MAX_SAFE_INTEGER,
     }))
-  const codex: AdditionalContextSection[] = entities.filter((item) => item.type === 'codexEntry' && item.id !== options.currentDocumentId && options.profile.codexEntryIds.includes(item.id))
+  const codex: AdditionalContextSection[] = entities.filter((item) => item.type === 'codexEntry' && !isCodexEntryArchived(item) && item.id !== options.currentDocumentId && options.profile.codexEntryIds.includes(item.id))
     .map((item) => ({
       text: section(`Codex — ${String(item.category ?? 'Other')}: ${item.title ?? 'Untitled'}`, String(item.content ?? '').trim() || '_No description provided._'),
       id: item.id,
