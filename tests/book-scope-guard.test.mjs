@@ -29,7 +29,7 @@ test('Workspace enforces stale refresh, load ownership, and latest openBook inte
   const reloadBlock = source.slice(reloadStart, reloadEnd)
   assert.match(reloadBlock, /bookRefreshIntentRef\.current\.begin\(\)/)
   assert.match(reloadBlock, /bookScopeMatches\(bookId, currentBookIdRef\.current\)/)
-  assert.ok(reloadBlock.indexOf('bookScopeMatches(bookId, currentBookIdRef.current)') < reloadBlock.indexOf('setOutlineEntities('))
+  assert.ok(reloadBlock.indexOf('bookScopeMatches(bookId, currentBookIdRef.current)') < reloadBlock.indexOf('applyBookContent(content)'))
 
   const loadStart = source.indexOf('  async function loadDocument(')
   const loadEnd = source.indexOf('\n  async function loadScene(', loadStart)
