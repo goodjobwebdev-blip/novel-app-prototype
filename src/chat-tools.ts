@@ -1,4 +1,5 @@
 import type { ChatToolCall, ChatToolDefinition } from './chat-api'
+import { isActiveCodexTitleDuplicate } from './chat-codex-duplicate'
 import {
   updateChatMessage,
   type ChatCodexCreationProposal,
@@ -131,10 +132,6 @@ function makeProposalId(prefix = 'chat-edit') {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
-function normalizedTitle(title: string) {
-  return title.trim().replace(/\s+/g, ' ').toLocaleLowerCase()
-}
-
 function toolResult(value: unknown) {
   return JSON.stringify(value)
 }
@@ -243,7 +240,7 @@ export async function executeChatWorkspaceTool(bookId: string, call: ChatToolCal
       const content = typeof args.content === 'string' ? args.content : ''
       if (!title) return { content: toolResult({ ok: false, error: 'Codex title cannot be empty.' }) }
       const existing = (await listEntitiesByBook(bookId, 'codexEntry'))
-        .filter((entity) => !isCodexEntryArchived(entity) && normalizedTitle(String(entity.title ?? '')) === normalizedTitle(title))
+        .filter((entity) => isActiveCodexTitleDuplicate(entity, title))
       if (existing.length) {
         return { content: toolResult({ ok: false, error: 'A Codex entry with this title already exists. Read or edit the existing entry instead of creating a duplicate.', existing: existing.map((entity) => ({ id: entity.id, title: titleFor(entity), category: String(entity.category ?? 'Other') })) }) }
       }
@@ -381,7 +378,7 @@ export async function createChatCodexEntry(messageId: string, proposalId: string
   if (proposal.status !== 'proposed') throw new Error(`This Codex proposal is already ${proposal.status}.`)
 
   const duplicates = (await listEntitiesByBook(message.bookId, 'codexEntry'))
-    .filter((entity) => normalizedTitle(String(entity.title ?? '')) === normalizedTitle(proposal.title))
+    .filter((entity) => isActiveCodexTitleDuplicate(entity, proposal.title))
   if (duplicates.length) {
     await setCodexCreationStatus(message, proposal.id, { status: 'duplicate', entityId: duplicates[0].id })
     throw new Error('A Codex entry with this title now exists. The proposal was not created again.')
