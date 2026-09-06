@@ -3,6 +3,7 @@ import { fetchNanoGPTModelContextLength, streamNanoGPTCompletion } from './nanog
 import type { AiSettings } from './ai-settings'
 import {
   getEntity,
+  isCodexEntryArchived,
   listEntitiesByBook,
   type ArcEntity,
   type BookEntity,
@@ -162,6 +163,9 @@ export async function prepareAutotitleRequest(bookId: string, targetId: string, 
   if (!bookEntity || bookEntity.type !== 'book') throw new Error('The current book is no longer available.')
   if (!isSupported(targetEntity) || (targetEntity.type !== 'book' && targetEntity.bookId !== bookId) || (targetEntity.type === 'book' && targetEntity.id !== bookId)) {
     throw new Error('That item cannot be autotitled in this book.')
+  }
+  if (targetEntity.type === 'codexEntry' && isCodexEntryArchived(targetEntity)) {
+    throw new Error('Restore this archived Codex entry before generating a title.')
   }
   const model = settings.supportModel.trim() || settings.mainModel.trim()
   if (!model) throw new Error('Choose a Support or Main model in Book AI settings before generating a title.')
