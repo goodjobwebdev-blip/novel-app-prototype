@@ -43,6 +43,7 @@ import AiSettingsScreen from './App'
 import { generationWordDelayMs, loadAiSettings, type AiSettings } from './ai-settings'
 import { createBufferedWordRenderer } from './buffered-word-renderer'
 import { applyIfStillCurrent } from './async-state-guard'
+import { navigateAfterRequiredSave } from './navigation-save-guard'
 import ExpandableTextInput from './ExpandableTextInput'
 import MarkdownEditor, { type CodexMentionClick, type MarkdownEditorHandle } from './MarkdownEditor'
 import { fetchNanoGPTModelContextLength, nanoGPTRequestText, renderLorePrompt, renderStoryPrompt, streamNanoGPTCompletion, type NanoGPTStreamMetadata } from './nanogpt'
@@ -329,9 +330,9 @@ export default function Workspace() {
     return () => { cancelled = true }
   }, [])
 
-  async function flushDocument(reason: SnapshotReason = 'autosave', snapshot = false) {
+  async function flushDocument(reason: SnapshotReason = 'autosave', snapshot = false): Promise<boolean> {
     const documentId = activeDocumentIdRef.current
-    if (!storageReadyRef.current || !documentId) return
+    if (!storageReadyRef.current || !documentId) return false
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
@@ -355,9 +356,11 @@ export default function Workspace() {
       setBookList((books) => books.map((book) => book.id === savedDocument.bookId ? { ...book, updatedAt: editedAt } : book))
       if (savedDocument.bookId) setSummaryStates(await getSummaryStateMap(savedDocument.bookId))
       setSaveState('saved')
+      return true
     } catch (error) {
       console.error('Failed to persist document', error)
       setSaveState('error')
+      return false
     }
   }
 
@@ -720,12 +723,18 @@ export default function Workspace() {
     setRightOpen(false)
   }
 
-  function openChat(chatId: string) {
-    if (screen === 'editor' && changedSinceSnapshotRef.current) void flushDocument('navigation', true)
-    setActiveChatId(chatId)
-    setChatPanel('list')
-    setScreen('chat')
-    setRightOpen(false)
+  async function openChat(chatId: string) {
+    const opened = await navigateAfterRequiredSave(
+      screen === 'editor' && changedSinceSnapshotRef.current,
+      () => flushDocument('navigation', true),
+      () => {
+        setActiveChatId(chatId)
+        setChatPanel('list')
+        setScreen('chat')
+        setRightOpen(false)
+      },
+    )
+    if (!opened) showToast('Could not save the current document. Chat was not opened because its context could be stale.')
   }
 
   function showToast(message: string) {
