@@ -715,9 +715,10 @@ export default function Workspace() {
 
   async function changeCodexCategory(category: string) {
     if (activeDocument?.type !== 'codexEntry' || !currentBook || isCodexEntryArchived(activeDocument)) return
-    const updated = await updateCodexCategory(activeDocument.id, category)
-    setActiveDocument(updated)
-    await reloadBookContent(currentBook.id)
+    const sourceId = activeDocument.id
+    const updated = await updateCodexCategory(sourceId, category)
+    setCodexEntries((items) => items.map((item) => item.id === updated.id ? updated : item))
+    applyIfStillCurrent(sourceId, () => activeDocumentIdRef.current, () => setActiveDocument(updated))
   }
 
   async function saveCodexTriggers() {
@@ -738,9 +739,10 @@ export default function Workspace() {
 
   async function changeCodexSummaryPreference(prefer: boolean) {
     if (activeDocument?.type !== 'codexEntry' || !currentBook || isCodexEntryArchived(activeDocument)) return
-    const updated = await updateCodexSummaryPreference(activeDocument.id, prefer)
-    setActiveDocument(updated)
+    const sourceId = activeDocument.id
+    const updated = await updateCodexSummaryPreference(sourceId, prefer)
     setCodexEntries((items) => items.map((item) => item.id === updated.id ? updated : item))
+    applyIfStillCurrent(sourceId, () => activeDocumentIdRef.current, () => setActiveDocument(updated))
   }
 
   async function archiveCodex(entity: CodexEntryEntity) {
