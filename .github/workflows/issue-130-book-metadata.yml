@@ -16,14 +16,16 @@ jobs:
         with:
           node-version: 24
       - name: Apply issue 130 fix
-        run: python .github/scripts/issue130.py
+        run: |
+          python .github/scripts/issue130.py
+          python .github/scripts/issue130_testfix.py
       - run: npm install --no-package-lock
       - name: Regression tests
         run: node --test tests/*.test.mjs
       - run: npm run build
       - name: Commit validated source
         run: |
-          rm -f .github/scripts/issue130.py .github/workflows/issue-130-book-metadata.yml
+          rm -f .github/scripts/issue130.py .github/scripts/issue130_testfix.py .github/workflows/issue-130-book-metadata.yml
           git add -A
           if git diff --cached --quiet; then exit 0; fi
           git config user.name goodjobwebdev-blip
