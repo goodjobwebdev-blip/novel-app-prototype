@@ -32,7 +32,7 @@ test('AI settings expose one local Fake model without API key or endpoint fields
 
 test('Story, Codex, and Summary use the shared text provider boundary and diagnostics serialize that same message representation', () => {
   assert.match(workspace, /fetchTextProviderModelContextLength/)
-  assert.match(workspace, /const requestText = textProviderRequestText\(\{ systemPrompt, contextMessage, userMessage \}\)/)
+  assert.match(workspace, /const normalizedRequestText = textProviderRequestText\(\{ systemPrompt, contextMessage, userMessage, messages \}\)/)
   assert.match(workspace, /streamTextProviderCompletion\(\{[\s\S]*task: isCodex \? 'codex' : 'story'/)
   assert.match(workspace, /streamTextProviderCompletion\(\{[\s\S]*task: 'summary'/)
   assert.match(textProvider, /return JSON\.stringify\(\{ messages: textProviderMessages\(request\) \}\)/)

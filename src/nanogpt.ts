@@ -10,15 +10,6 @@ export type StoryPromptValues = {
   additionalContext?: string
 }
 
-export type LorePromptValues = {
-  book: BookPromptValues
-  entryTitle: string
-  entryCategory: string
-  entryContent: string
-  sceneText?: string
-  additionalContext?: string
-}
-
 export type NanoGPTGenerationRequest = {
   apiKey: string
   baseUrl: string
@@ -87,17 +78,6 @@ export function renderStoryPrompt(template: string, values: StoryPromptValues) {
   const rendered = renderPromptTemplate(template, templateValues(values))
   if (storyTemplateEmbedsContext(template)) return rendered
   return `${rendered}${STORY_BOOK_CONTEXT_SEPARATOR}${storyBookContext(values)}${STORY_SCENE_CONTEXT_SEPARATOR}${storySceneContext(values)}`
-}
-
-export function renderLorePrompt(template: string, values: LorePromptValues) {
-  return renderPromptTemplate(template, {
-    ...bookTemplateValues(values.book),
-    'entry.title': values.entryTitle,
-    'entry.category': values.entryCategory,
-    'entry.content': values.entryContent,
-    'scene.text': values.sceneText ?? '',
-    'additional_context': values.additionalContext ?? '',
-  })
 }
 
 function completionEndpoint(baseUrl: string) {

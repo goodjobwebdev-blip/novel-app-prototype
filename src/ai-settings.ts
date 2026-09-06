@@ -1,6 +1,7 @@
 import { PROMPT_COMPOSITION_SCHEMA_VERSION, clonePromptComposition, compositionsFromLegacyPrompts, legacyPromptMirror, normalizePromptCompositions, withSystemPrompt, type PromptComposition, type PromptCompositions, type PromptCompositionScope } from './prompt-composition'
 import { defaultStoryPromptComposition } from './story-request'
 import { defaultChatPromptComposition } from './chat-default-composition'
+import { defaultCodexPromptComposition } from './codex-request'
 
 export type AiProvider = 'openrouter' | 'nanogpt' | 'openai' | 'compatible' | 'fake'
 export type SpeechProvider = 'nanogpt'
@@ -37,6 +38,12 @@ export type AiPrompts = {
   assistant: string
 }
 
+export type ResponseLengthSettings = {
+  story: string
+  codex: string
+  summary: string
+}
+
 export type AiSettings = {
   provider: AiProvider
   apiKey: string
@@ -50,7 +57,7 @@ export type AiSettings = {
   codexModelContextLength?: number
   codexEffectiveContextLimit: string
   generationWordDelayMs: string
-  responseLength: string
+  responseLengths: ResponseLengthSettings
   speech: SpeechSettings
   favorites: string[]
   promptCompositionVersion: number
@@ -65,12 +72,24 @@ export const AI_SETTINGS_STORAGE_KEY = 'arc-ai-defaults-v1'
 export const DEFAULT_GENERATION_WORD_DELAY_MS = 40
 export const MAX_GENERATION_WORD_DELAY_MS = 2000
 
-export const RESPONSE_LENGTH_PRESETS = [
+export const STORY_RESPONSE_LENGTH_PRESETS = [
   { label: 'One paragraph', value: 'Write approximately one substantial paragraph, stopping at a natural beat rather than completing the whole scene.' },
   { label: '2–3 paragraphs', value: 'Write 2–3 substantial paragraphs, developing the current beat and stopping at a natural transition.' },
   { label: 'Half scene', value: 'Write roughly half of a typical scene continuation. Develop the current situation substantially, but do not rush to a full resolution.' },
   { label: 'Finish scene', value: 'Continue with a full scene-sized passage and bring the current scene to a natural ending when the existing momentum supports it.' },
   { label: '≤300 words', value: 'Keep the response concise and do not exceed 300 words.' },
+] as const
+
+export const CODEX_RESPONSE_LENGTH_PRESETS = [
+  { label: 'Brief', value: 'Write one focused paragraph or a similarly compact addition appropriate to the requested lore.' },
+  { label: 'Standard', value: 'Write several focused paragraphs, enough to develop the requested Codex material without padding.' },
+  { label: 'Detailed', value: 'Develop the requested Codex material comprehensively while remaining relevant and avoiding filler.' },
+] as const
+
+export const SUMMARY_RESPONSE_LENGTH_PRESETS = [
+  { label: 'Compact', value: 'Retain only the most important established facts and unresolved threads.' },
+  { label: 'Standard', value: 'Preserve the important events, decisions, relationships, causal links, and unresolved information useful later.' },
+  { label: 'Detailed', value: 'Retain substantial concrete detail that may matter for future continuity while remaining a summary rather than a rewrite.' },
 ] as const
 
 export const previousDefaultAssistantPrompt = `You are a thoughtful writing assistant for {{book.title}}.
@@ -293,6 +312,7 @@ Return only the final Markdown body. Do not repeat the entry title as a top-leve
 export const defaultPromptCompositions: PromptCompositions = {
   ...compositionsFromLegacyPrompts(defaultAiPrompts),
   story: clonePromptComposition(defaultStoryPromptComposition),
+  lore: clonePromptComposition(defaultCodexPromptComposition),
   assistant: clonePromptComposition(defaultChatPromptComposition),
 }
 
@@ -306,12 +326,12 @@ export const initialAiSettings: AiSettings = {
   codexModel: '',
   codexEffectiveContextLimit: '',
   generationWordDelayMs: String(DEFAULT_GENERATION_WORD_DELAY_MS),
-  responseLength: '',
+  responseLengths: { story: '', codex: '', summary: '' },
   speech: initialSpeechSettings,
   favorites: [],
   promptCompositionVersion: PROMPT_COMPOSITION_SCHEMA_VERSION,
   promptCompositions: defaultPromptCompositions,
-  prompts: defaultAiPrompts,
+  prompts: legacyPromptMirror(defaultPromptCompositions) as AiPrompts,
 }
 
 function normalizeGenerationWordDelay(value: unknown) {
@@ -351,7 +371,9 @@ function normalizeSpeechSettings(value: unknown): SpeechSettings {
   }
 }
 
-export function normalizeAiSettings(value?: Partial<AiSettings>): AiSettings {
+type StoredAiSettings = Partial<AiSettings> & { responseLength?: unknown }
+
+export function normalizeAiSettings(value?: StoredAiSettings): AiSettings {
   const storedPrompts = value?.prompts as (Partial<AiPrompts> & { titles?: string }) | undefined
   const prompts: AiPrompts = {
     story: storedPrompts?.story ?? defaultAiPrompts.story,
@@ -387,14 +409,32 @@ export function normalizeAiSettings(value?: Partial<AiSettings>): AiSettings {
     ? storedAssistantPromptWasHistoricalDefault || storedAssistantCompositionWasHistoricalDefault
       ? clonePromptComposition(defaultChatPromptComposition)
       : { systemPrompt: storedPrompts!.assistant!, predefinedMessages: [] }
-    : promptCompositions.assistant
+      : promptCompositions.assistant
+  const storedLoreComposition = value?.promptCompositions?.lore
+  const storedLoreCompositionWasHistoricalDefault = Boolean(storedLoreComposition
+    && storedLoreComposition.predefinedMessages?.length === 0
+    && storedLoreComposition.systemPrompt === defaultAiPrompts.lore)
+  const storedLorePromptWasHistoricalDefault = !storedPrompts?.lore || storedPrompts.lore === defaultAiPrompts.lore
+  promptCompositions.lore = !storedLoreComposition || storedLoreCompositionWasHistoricalDefault
+    ? storedLorePromptWasHistoricalDefault || storedLoreCompositionWasHistoricalDefault
+      ? clonePromptComposition(defaultCodexPromptComposition)
+      : { systemPrompt: storedPrompts!.lore!, predefinedMessages: [] }
+    : promptCompositions.lore
+  const responseLengthsInput = value?.responseLengths && typeof value.responseLengths === 'object' ? value.responseLengths : undefined
+  const legacyStoryResponseLength = typeof value?.responseLength === 'string' ? value.responseLength : ''
+  const responseLengths: ResponseLengthSettings = {
+    story: typeof responseLengthsInput?.story === 'string' ? responseLengthsInput.story : legacyStoryResponseLength,
+    codex: typeof responseLengthsInput?.codex === 'string' ? responseLengthsInput.codex : '',
+    summary: typeof responseLengthsInput?.summary === 'string' ? responseLengthsInput.summary : '',
+  }
   const promptMirror = legacyPromptMirror(promptCompositions) as AiPrompts
+  const { responseLength: _legacyResponseLength, ...storedValue } = value ?? {}
   return {
     ...initialAiSettings,
-    ...value,
+    ...storedValue,
     apiKey: value?.provider === 'fake' ? '' : typeof value?.apiKey === 'string' ? value.apiKey : initialAiSettings.apiKey,
     baseUrl: value?.provider === 'fake' ? '' : typeof value?.baseUrl === 'string' ? value.baseUrl : initialAiSettings.baseUrl,
-    responseLength: typeof value?.responseLength === 'string' ? value.responseLength : '',
+    responseLengths,
     speech: normalizeSpeechSettings(value?.speech),
     promptCompositionVersion: PROMPT_COMPOSITION_SCHEMA_VERSION,
     promptCompositions,

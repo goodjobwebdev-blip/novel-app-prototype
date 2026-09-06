@@ -20,7 +20,9 @@ import {
 import {
   initialAiSettings,
   loadAiSettings,
-  RESPONSE_LENGTH_PRESETS,
+  CODEX_RESPONSE_LENGTH_PRESETS,
+  STORY_RESPONSE_LENGTH_PRESETS,
+  SUMMARY_RESPONSE_LENGTH_PRESETS,
   saveAiSettings,
   saveGlobalFavorites,
   resetPromptComposition,
@@ -46,14 +48,14 @@ import {
   type BookContextSettings,
   type GenerationContextType,
 } from './persistence'
-import { bookTemplateValues, generationInstructionMessage, promptTemplateDiagnostics, promptVariables, renderPromptTemplate, type BookPromptValues } from './prompt-template'
+import { bookTemplateValues, promptTemplateDiagnostics, promptVariables, renderPromptTemplate, type BookPromptValues } from './prompt-template'
 import PromptTemplateEditor, { type PromptTemplateEditorHandle } from './PromptTemplateEditor'
-import { makePredefinedMessage, likelyReusablePrefix, type NormalizedAssembledRequest, type PredefinedMessage } from './prompt-composition'
+import { makePredefinedMessage, likelyReusablePrefix, type NormalizedAssembledRequest, type PredefinedMessage, type PromptCompositionScope } from './prompt-composition'
 import { assembleStoryGenerationRequest, STORY_CONTINUE_FALLBACK } from './story-request'
+import { assembleCodexGenerationRequest, CODEX_CONTINUE_FALLBACK } from './codex-request'
 import { buildContextValues, contextLimitInputError, generationContextDiagnostics, type PreparedContextValues } from './context-service'
 import { getChat, listChatMessages, saveChatContextProfile, type ChatEntity, type ChatMessageEntity } from './chat-service'
 import { assembleChatGenerationRequest, serializeChatModelInput } from './chat-request'
-import { renderLorePrompt } from './nanogpt'
 import { clearModelCatalog, getCachedModelCatalog, providerModelEndpoint, saveModelCatalog, type ProviderModel } from './model-catalog'
 import { FAKE_PROVIDER_MODEL, clearFakeProviderTrace, getFakeProviderTrace, subscribeFakeProviderTrace } from './fake-provider'
 import { KeyedAsyncQueue } from './keyed-async-queue'
@@ -561,8 +563,13 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   }
 
   const activePrompt = settings.promptCompositions[promptTab].systemPrompt
+  const responseLengthScope = promptTab === 'lore' ? 'codex' : promptTab === 'summarize' ? 'summary' : promptTab === 'story' ? 'story' : null
+  const activeResponseLength = responseLengthScope ? settings.responseLengths[responseLengthScope] : ''
+  const activeResponseLengthPresets = responseLengthScope === 'story'
+    ? STORY_RESPONSE_LENGTH_PRESETS
+    : responseLengthScope === 'codex' ? CODEX_RESPONSE_LENGTH_PRESETS : SUMMARY_RESPONSE_LENGTH_PRESETS
   const promptPreviewValues = book?.promptValues
-    ? bookTemplateValues({ ...book.promptValues, responseLength: settings.responseLength })
+    ? bookTemplateValues({ ...book.promptValues, responseLength: activeResponseLength })
     : undefined
   const activePromptDiagnostics = promptTemplateDiagnostics(activePrompt, promptTab, promptPreviewValues)
   const compositionPromptDiagnostics = [activePrompt, ...settings.promptCompositions[promptTab].predefinedMessages.filter((message) => message.enabled).map((message) => message.template)]
@@ -640,17 +647,17 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
             <label className={contextLimitInputError(settings.mainEffectiveContextLimit) ? 'invalid' : ''}><span><strong>Story / Main context cap</strong><em>Effective input window</em></span><input type="text" value={settings.mainEffectiveContextLimit} onChange={(event) => update('mainEffectiveContextLimit', event.target.value)} placeholder="Model maximum" spellCheck={false} /><small>{contextLimitInputError(settings.mainEffectiveContextLimit) || 'Optional. Accepts tokens such as 32000, 32k, or 1m. The model hard maximum still wins.'}</small></label>
             <label className={contextLimitInputError(settings.codexEffectiveContextLimit) ? 'invalid' : ''}><span><strong>Codex model context cap</strong><em>Used when a Codex model is set</em></span><input type="text" value={settings.codexEffectiveContextLimit} onChange={(event) => update('codexEffectiveContextLimit', event.target.value)} placeholder="Model maximum" spellCheck={false} /><small>{contextLimitInputError(settings.codexEffectiveContextLimit) || (settings.codexModel.trim() ? 'Optional cap for the selected Codex model.' : 'Codex currently falls back to Main, so the Story / Main cap applies.')}</small></label>
           </div>
-          <div className="response-length-setting">
-            <label htmlFor="response-length"><span><strong>Response length</strong><em>Story and Codex</em></span><textarea id="response-length" value={settings.responseLength} onChange={(event) => update('responseLength', event.target.value)} placeholder="Leave empty to let the model decide." /></label>
-            <div className="response-length-presets" aria-label="Response length presets">{RESPONSE_LENGTH_PRESETS.map((preset) => <button type="button" key={preset.label} onClick={() => update('responseLength', preset.value)}>{preset.label}</button>)}</div>
-            <small>Applied near the end of each request, immediately before the current instruction. Custom prompts can place <code>{'{{response.length}}'}</code> explicitly instead.</small>
-          </div>
           <div className="model-browser"><div className="model-search"><Search aria-hidden="true" /><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder="Search loaded models" /></div>{models.length ? <div className="model-list">{visibleModels.map((model) => <article key={model.id}><button className={`favorite ${settings.favorites.includes(model.id) ? 'active' : ''}`} type="button" onClick={() => toggleFavorite(model.id)} aria-label={`Favorite ${model.id}`}><Star fill={settings.favorites.includes(model.id) ? 'currentColor' : 'none'} aria-hidden="true" /></button><div><strong>{model.name || model.id}</strong>{model.name && model.name !== model.id && <small>{model.id}</small>}<p><span>{formatContext(model.context_length)}</span><span>{model.architecture?.modality || 'Text'}</span>{model.pricing?.prompt && <span>Pricing supplied</span>}</p></div><button className="use-model" type="button" onClick={() => selectModel('main', model.id)}>Use</button></article>)}</div> : <div className="model-empty"><Bot aria-hidden="true" /><strong>No models loaded</strong><p>Enter your key and reload the provider model list.</p></div>}</div>
         </section>
 
         <section className="settings-card prompts-card">
           <div className="card-heading"><div><span>03</span><h2>Request composition</h2></div><p>System prompt, ordered predefined messages, then Arc’s current instruction.</p></div>
           <div className="prompt-tabs" role="tablist">{([['story', 'Story'], ['summarize', 'Summarize'], ['lore', 'Lore entries'], ['assistant', 'Assistant']] as const).map(([key, label]) => <button key={key} className={promptTab === key ? 'active' : ''} type="button" onClick={() => setPromptTab(key)}>{label}</button>)}</div>
+          {responseLengthScope && <div className="response-length-setting">
+            <label htmlFor={`${responseLengthScope}-response-length`}><span><strong>Response length</strong><em>{promptTab === 'story' ? 'Story' : promptTab === 'lore' ? 'Codex' : 'Summary'}</em></span><textarea id={`${responseLengthScope}-response-length`} value={activeResponseLength} onChange={(event) => changeAiSettings((current) => ({ ...current, responseLengths: { ...current.responseLengths, [responseLengthScope]: event.target.value } }))} placeholder="Leave empty to let the model decide." /></label>
+            <div className="response-length-presets" aria-label={`${responseLengthScope} response length presets`}>{activeResponseLengthPresets.map((preset) => <button type="button" key={preset.label} onClick={() => changeAiSettings((current) => ({ ...current, responseLengths: { ...current.responseLengths, [responseLengthScope]: preset.value } }))}>{preset.label}</button>)}</div>
+            <small>Available as <code>{'{{response.length}}'}</code> only in this generation scope. It is sent only where an enabled template references it.</small>
+          </div>}
           <h3 className="prompt-section-label">System prompt</h3>
           <PromptTemplateEditor
             ref={promptEditorRef}
@@ -659,7 +666,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
             ariaLabel={`${promptTab} system prompt template`}
             onChange={(value) => changeAiSettings((current) => withPromptSystemPrompt(current, promptTab, value))}
           />
-          {(promptTab === 'story' || promptTab === 'assistant') && <StoryPredefinedMessages
+          {(promptTab === 'story' || promptTab === 'lore' || promptTab === 'assistant') && <PredefinedMessages
             scope={promptTab}
             messages={settings.promptCompositions[promptTab].predefinedMessages}
             previewValues={promptPreviewValues}
@@ -708,7 +715,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   )
 }
 
-function StoryPredefinedMessages({ scope = 'story', messages, previewValues, onChange }: { scope?: 'story' | 'assistant'; messages: PredefinedMessage[]; previewValues?: Record<string, string>; onChange: (messages: PredefinedMessage[]) => void }) {
+function PredefinedMessages({ scope = 'story', messages, previewValues, onChange }: { scope?: Extract<PromptCompositionScope, 'story' | 'lore' | 'assistant'>; messages: PredefinedMessage[]; previewValues?: Record<string, string>; onChange: (messages: PredefinedMessage[]) => void }) {
   const updateMessage = (id: string, patch: Partial<PredefinedMessage>) => onChange(messages.map((message) => message.id === id ? { ...message, ...patch } : message))
   const moveMessage = (index: number, direction: -1 | 1) => {
     const target = index + direction
@@ -717,8 +724,9 @@ function StoryPredefinedMessages({ scope = 'story', messages, previewValues, onC
     ;[next[index], next[target]] = [next[target], next[index]]
     onChange(next)
   }
-  return <section className="story-predefined" aria-label={`${scope === 'story' ? 'Story' : 'Chat'} predefined messages`}>
-    <header><div><strong>Predefined messages</strong><span>Sent in this order between the System prompt and {scope === 'story' ? 'Arc’s current instruction' : 'real Chat history'}.</span></div><button type="button" onClick={() => onChange([...messages, makePredefinedMessage({ name: 'New message', role: 'user' })])}><Plus aria-hidden="true" /> Add message</button></header>
+  const scopeLabel = scope === 'story' ? 'Story' : scope === 'lore' ? 'Codex' : 'Chat'
+  return <section className="story-predefined" aria-label={`${scopeLabel} predefined messages`}>
+    <header><div><strong>Predefined messages</strong><span>Sent in this order between the System prompt and {scope === 'assistant' ? 'real Chat history' : 'Arc’s current instruction'}.</span></div><button type="button" onClick={() => onChange([...messages, makePredefinedMessage({ name: 'New message', role: 'user' })])}><Plus aria-hidden="true" /> Add message</button></header>
     {messages.map((message, index) => {
       const diagnostics = promptTemplateDiagnostics(message.template, scope, previewValues)
       const errors = diagnostics.filter((diagnostic) => diagnostic.severity === 'error')
@@ -729,7 +737,7 @@ function StoryPredefinedMessages({ scope = 'story', messages, previewValues, onC
           <label className="story-message-enabled"><input type="checkbox" checked={message.enabled} onChange={(event) => updateMessage(message.id, { enabled: event.target.checked })} /><span>Enabled</span></label>
           <div className="story-message-actions"><button type="button" disabled={index === 0} onClick={() => moveMessage(index, -1)} aria-label={`Move ${message.name || 'message'} up`}>↑</button><button type="button" disabled={index === messages.length - 1} onClick={() => moveMessage(index, 1)} aria-label={`Move ${message.name || 'message'} down`}>↓</button><button type="button" onClick={() => onChange(messages.filter((candidate) => candidate.id !== message.id))} aria-label={`Delete ${message.name || 'message'}`}><Trash2 aria-hidden="true" /></button></div>
         </div>
-        <PromptTemplateEditor value={message.template} diagnostics={diagnostics} ariaLabel={`${message.name || `${scope === 'story' ? 'Story' : 'Chat'} message ${index + 1}`} template`} onChange={(template) => updateMessage(message.id, { template })} />
+        <PromptTemplateEditor value={message.template} diagnostics={diagnostics} ariaLabel={`${message.name || `${scopeLabel} message ${index + 1}`} template`} onChange={(template) => updateMessage(message.id, { template })} />
         <small className={errors.length ? 'story-message-error' : ''}>{errors.length ? `${errors.length} error${errors.length === 1 ? '' : 's'} — generation is blocked` : message.enabled ? `Message ${index + 1} · ${message.role}` : `Message ${index + 1} · omitted while disabled`}</small>
       </article>
     })}
@@ -805,20 +813,19 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
   }, [bookId, chatId, currentDocumentId, currentDocumentText, profile, sources, type, value.lastOpenedSceneId, value.previousScenesForCodexTriggers])
 
   const currentDocument = sources.find((item) => item.id === currentDocumentId)
-  const metadata: BookPromptValues = { ...(bookPromptValues ?? { title: bookTitle, series: '', seriesOrder: '', overview: '', genre: '', style: '', pov: '', tense: '', language: '' }), responseLength: settings.responseLength }
+  const responseLength = type === 'codex' ? settings.responseLengths.codex : type === 'scene' ? settings.responseLengths.story : ''
+  const metadata: BookPromptValues = { ...(bookPromptValues ?? { title: bookTitle, series: '', seriesOrder: '', overview: '', genre: '', style: '', pov: '', tense: '', language: '' }), responseLength }
   const typeLabel = type === 'scene' ? 'Story' : type === 'codex' ? 'Codex' : 'Chat'
   const previewPromptScope = type === 'scene' ? 'story' : type === 'codex' ? 'lore' : 'assistant'
-  const previewPromptTemplate = type === 'chat' ? previewChat?.promptComposition.systemPrompt ?? '' : settings.prompts[previewPromptScope]
-  const previewPromptDiagnostics = type === 'scene'
-    ? [settings.promptCompositions.story.systemPrompt, ...settings.promptCompositions.story.predefinedMessages.filter((message) => message.enabled).map((message) => message.template)]
-      .flatMap((template) => promptTemplateDiagnostics(template, 'story', bookTemplateValues(metadata)))
-    : type === 'chat' && previewChat
-      ? [previewChat.promptComposition.systemPrompt, ...previewChat.promptComposition.predefinedMessages.filter((message) => message.enabled).map((message) => message.template)]
-        .flatMap((template) => promptTemplateDiagnostics(template, 'assistant', bookTemplateValues(metadata)))
-      : promptTemplateDiagnostics(previewPromptTemplate, previewPromptScope, bookTemplateValues(metadata))
+  const previewComposition = type === 'chat' ? previewChat?.promptComposition : settings.promptCompositions[previewPromptScope]
+  const previewPromptDiagnostics = previewComposition
+    ? [previewComposition.systemPrompt, ...previewComposition.predefinedMessages.filter((message) => message.enabled).map((message) => message.template)]
+      .flatMap((template) => promptTemplateDiagnostics(template, previewPromptScope, bookTemplateValues(metadata)))
+    : []
   const previewPromptErrors = previewPromptDiagnostics.filter((diagnostic) => diagnostic.severity === 'error')
   const requestMessages: RequestPreviewMessage[] = []
   let storyNormalizedRequest: NormalizedAssembledRequest | null = null
+  let codexNormalizedRequest: NormalizedAssembledRequest | null = null
   let chatNormalizedRequest: NormalizedAssembledRequest | null = null
 
   if (preview && type === 'scene') {
@@ -829,7 +836,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
       insertionPosition: insertionPosition ?? preview.currentSceneText.length,
       scenePov: typeof currentDocument?.pov === 'string' ? currentDocument.pov : undefined,
       context: preview,
-      responseLength: settings.responseLength,
+      responseLength: settings.responseLengths.story,
       instruction: '',
     })
     storyNormalizedRequest.parts.forEach((part, index) => requestMessages.push({
@@ -845,19 +852,31 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
   }
 
   if (preview && type === 'codex') {
-    const systemPrompt = renderLorePrompt(settings.prompts.lore, {
+    const entryContent = currentDocumentText ?? String(currentDocument?.content ?? '')
+    codexNormalizedRequest = assembleCodexGenerationRequest({
+      composition: settings.promptCompositions.lore,
       book: metadata,
-      entryTitle: currentDocument?.title ?? '',
-      entryCategory: typeof currentDocument?.category === 'string' ? currentDocument.category : '',
-      entryContent: currentDocumentText ?? String(currentDocument?.content ?? ''),
-      sceneText: preview.lastSceneText,
-      additionalContext: preview.additionalContext,
+      responseLength: settings.responseLengths.codex,
+      entry: {
+        id: currentDocument?.id ?? currentDocumentId ?? 'current-codex-entry',
+        title: currentDocument?.title ?? '',
+        category: typeof currentDocument?.category === 'string' ? currentDocument.category : '',
+        content: entryContent,
+      },
+      insertionPosition: insertionPosition ?? entryContent.length,
+      context: preview,
+      instruction: '',
     })
-    requestMessages.push({ key: 'codex-system', role: 'system', title: 'Lore system prompt', detail: 'SYSTEM', content: systemPrompt })
-    if (!/{{\s*additional_context\s*}}/.test(settings.prompts.lore) && preview.additionalContext.trim()) {
-      requestMessages.push({ key: 'codex-context', role: 'user', title: 'Additional context', detail: 'USER', content: `# Additional context\n\n${preview.additionalContext}` })
-    }
-    requestMessages.push({ key: 'codex-instruction', role: 'user', title: 'Generation instruction', detail: 'USER · default shown', content: generationInstructionMessage(settings.prompts.lore, settings.responseLength, 'Create a complete Codex entry.') })
+    codexNormalizedRequest.parts.forEach((part, index) => requestMessages.push({
+      key: part.id,
+      role: part.role ?? 'user',
+      title: part.name || (part.sourceKind === 'current-turn' ? 'Current instruction' : `Message ${index + 1}`),
+      detail: `${part.role?.toUpperCase() ?? 'NO ROLE'} · ${part.ownership} · ${part.sourceKind}${part.omitted ? ' · omitted' : ''}`,
+      content: part.content,
+      omitted: part.omitted,
+      references: part.referencedVariables,
+      diagnostics: part.dynamicVariables?.flatMap((item) => item.sources.map((source) => `${item.variable}: ${source.title || source.sourceId}${source.representation ? ` · ${source.representation}` : ''}${source.reason ? ` · ${source.reason}` : ''}`)),
+    }))
   }
 
   if (preview && type === 'chat' && previewChat) {
@@ -875,7 +894,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
     }))
   }
 
-  const normalizedRequest = storyNormalizedRequest ?? chatNormalizedRequest
+  const normalizedRequest = storyNormalizedRequest ?? codexNormalizedRequest ?? chatNormalizedRequest
   const providerPreviewMessages = normalizedRequest?.providerMessages ?? requestMessages.filter((message) => !message.omitted).map((message) => ({ role: message.role, content: message.content }))
   const exactPreview = providerPreviewMessages.map((message) => `${message.role.toUpperCase()}:\n\n${message.content || '[empty]'}`).join('\n\n---\n\n')
   const selectedModel = type === 'codex' ? settings.codexModel.trim() || settings.mainModel.trim() : type === 'chat' ? previewChat?.model.trim() : settings.mainModel.trim()
@@ -896,9 +915,9 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
       <label className="context-trigger-window"><span><strong>Previous Scenes to scan for Codex triggers</strong><small>The current/last-opened Scene is always scanned; this controls how many immediately previous Scenes join it.</small></span><input type="number" min="0" step="1" value={value.previousScenesForCodexTriggers} onChange={(event) => onChange({ ...value, previousScenesForCodexTriggers: Math.max(0, Math.floor(Number(event.target.value) || 0)) })} /></label>
       {archivedSelectedCodex.length > 0 && <div className="context-inactive-source"><div><strong>{archivedSelectedCodex.length} archived Codex {archivedSelectedCodex.length === 1 ? 'selection is' : 'selections are'} inactive</strong><small>{archivedSelectedCodex.map((item) => item.title ?? 'Untitled').join(', ')}. Archived lore is skipped from requests.</small></div><button type="button" onClick={() => updateProfile({ ...profile, codexEntryIds: profile.codexEntryIds.filter((id) => !archivedSelectedIds.has(id)) })}>Remove inactive</button></div>}
       <div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Book metadata</strong><small>Provided through the book prompt variables.</small></span><b>Required</b></div>
-      {type === 'scene' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current Scene</strong><small>The active editor content is always included.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} /><span><strong>Previous Scene when empty</strong><small>Use the immediately previous Scene only when the current Scene has no text.</small></span></label><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Earlier summaries</strong><small>Uses the highest completed Act or Chapter summary without exposing later material.</small></span><b>Automatic</b></div></> : type === 'codex' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current entry</strong><small>Title, category, and existing body are supplied through lore prompt variables.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includeLastScene} onChange={(event) => updateProfile({ ...profile, includeLastScene: event.target.checked })} /><span><strong>Last-opened Scene</strong><small>Included by default for Codex generation.</small></span></label></> : <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current Scene and earlier summaries</strong><small>Available through Chat composition variables from the book's last-opened Scene anchor.</small></span><b>Automatic</b></div><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} /><span><strong>Previous Scene when empty</strong><small>Expose the immediately previous Scene only when the anchor Scene has no text.</small></span></label></>}
+      {type === 'scene' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current Scene</strong><small>The active editor content is always included.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} /><span><strong>Previous Scene when empty</strong><small>Use the immediately previous Scene only when the current Scene has no text.</small></span></label><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Earlier summaries</strong><small>Uses the highest completed Act or Chapter summary without exposing later material.</small></span><b>Automatic</b></div></> : type === 'codex' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current entry</strong><small>Title, category, full body, and the captured insertion point are available through <code>entry.*</code> variables.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includeLastScene} onChange={(event) => updateProfile({ ...profile, includeLastScene: event.target.checked })} /><span><strong>Last-opened Scene</strong><small>Use the Book’s last-opened Scene and earlier story summaries as the Codex story anchor.</small></span></label><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} disabled={!profile.includeLastScene} /><span><strong>Previous Scene when anchor is empty</strong><small>Use the immediately previous Scene as the full anchor without duplicating its summary.</small></span></label></> : <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current Scene and earlier summaries</strong><small>Available through Chat composition variables from the book's last-opened Scene anchor.</small></span><b>Automatic</b></div><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} /><span><strong>Previous Scene when empty</strong><small>Expose the immediately previous Scene only when the anchor Scene has no text.</small></span></label></>}
     </section>
-    <section className="settings-card context-sources-card"><div className="card-heading"><div><span>02</span><h2>Additional context</h2></div><p>Available as <code>{type === 'chat' ? '{{context.additional}}' : '{{additional_context}}'}</code>.</p></div>
+    <section className="settings-card context-sources-card"><div className="card-heading"><div><span>02</span><h2>Additional context</h2></div><p>Available as <code>{'{{context.additional}}'}</code>.</p></div>
       <fieldset className="summary-range"><legend>Summaries</legend>{([['none','None'],['all','All summaries'],['before','Before current Scene'],['after','After current Scene']] as const).map(([range,label]) => <label key={range}><input type="radio" name="summary-range" checked={profile.summaryRange === range} onChange={() => updateProfile({ ...profile, summaryRange: range })}/><span>{label}</span></label>)}</fieldset>
       <div className="context-source-search"><Search aria-hidden="true" /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find Acts, Chapters, Scenes, Notes, or Codex" /></div>
       <div className="context-managed-list">{groups.map(([label, items, key]) => items.length > 0 && <section key={label}><h3>{label}</h3>{items.map((item) => <label key={item.id}><input type="checkbox" checked={profile[key].includes(item.id)} onChange={() => toggle(key, item.id)} /><span><strong>{item.title || 'Untitled'}</strong><small>{item.type}</small></span></label>)}</section>)}{!visible.length && <p>No matching sources.</p>}</div>
@@ -906,13 +925,15 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
     <section className="settings-card context-preview-card"><div className="card-heading"><div><span>03</span><h2>Request preview</h2></div><p>{selectedModel ? `Model: ${selectedModel}. ` : ''}Rendered message stack for the current {typeLabel.toLowerCase()} request.</p></div>
       {type !== 'chat' && <p className="context-preview-empty">The generation instruction below shows the fallback used when the generation drawer is empty. Custom drawer text replaces it when you generate.</p>}
       {type === 'scene' && <p className="context-preview-empty">Captured generation point: {(insertionPosition ?? currentDocumentText?.length ?? 0).toLocaleString()} of {(currentDocumentText?.length ?? 0).toLocaleString()} characters. Empty instruction fallback: “{STORY_CONTINUE_FALLBACK}”</p>}
-      {type === 'scene' && <p className="context-preview-empty">Automatic and Additional sources are deduplicated by stable source identity; matching text is never used as identity.</p>}
+      {type === 'codex' && <p className="context-preview-empty">Captured generation point: {(insertionPosition ?? currentDocumentText?.length ?? 0).toLocaleString()} of {(currentDocumentText?.length ?? 0).toLocaleString()} characters. Empty instruction fallback: “{CODEX_CONTINUE_FALLBACK}”</p>}
+      {(type === 'scene' || type === 'codex') && <p className="context-preview-empty">Automatic and Additional sources are deduplicated by stable source identity; matching text is never used as identity.</p>}
       {previewError ? <p className="context-preview-error" role="alert">{previewError}</p> : preview ? <>
         {previewPromptErrors.length > 0 && <div className="context-preview-error" role="alert"><strong>Request blocked by an invalid {previewPromptScope} prompt.</strong><ul>{previewPromptErrors.map((diagnostic, index) => <li key={`${diagnostic.code}-${diagnostic.from}-${index}`}>{diagnostic.message}</li>)}</ul></div>}
         {diagnostics && <div className={`context-budget ${!diagnostics.limitValid || !diagnostics.fits ? 'over' : diagnostics.warning ? 'warning' : ''}`}><strong>{diagnostics.limitValid ? `${diagnostics.requestTokens.toLocaleString()} estimated input tokens · ${Math.round(diagnostics.usageRatio * 100)}% of usable budget` : 'Invalid effective context cap'}</strong><span>Effective limit: {diagnostics.effectiveContextTokens.toLocaleString()} · Response reserve: {diagnostics.responseReserveTokens.toLocaleString()} · {diagnostics.modelContextKnown ? `Model hard window: ${diagnostics.modelContextTokens.toLocaleString()}` : `Model window estimate: ${diagnostics.modelContextTokens.toLocaleString()}`}</span>{diagnostics.wasClamped && <small>Your configured cap is above the model hard maximum, so Arc uses the model maximum.</small>}{diagnostics.limitError && <small>{diagnostics.limitError}</small>}{diagnostics.warning && diagnostics.fits && <small>Near the limit. Consider summaries, deselecting full-text context, or raising the cap.</small>}{!diagnostics.fits && diagnostics.limitValid && <small>Over the usable budget. Generation will be refused; Arc will not trim or replace context automatically.</small>}</div>}
         {preview.automaticCodex.length > 0 && <div className="automatic-codex-preview"><strong>Automatic Codex</strong>{preview.automaticCodex.map((item) => <article key={item.entryId} className={item.source === 'dependency' ? 'dependency-cascade' : 'trigger-match'}><header><b>{item.title}</b><small>{item.source === 'dependency' ? 'Dependency cascade' : 'Direct trigger'} · {item.representation === 'Summary' ? 'Summary' : 'Full entry'}{item.fallbackReason ? ` · ${item.fallbackReason}` : ''}</small></header>{item.source === 'dependency' ? <p>Dependency path: {(item.dependencyPath ?? []).map((step) => step.title).join(' → ')}</p> : <ul>{item.matches.map((match, index) => <li key={`${item.entryId}-${match.sceneId}-${match.trigger}-${index}`}><code>{match.trigger}</code> · {match.sceneTitle}</li>)}</ul>}</article>)}</div>}
         {preview.codexRepresentations.length > 0 && <div className="codex-context-representations"><strong>Codex context representation</strong>{preview.codexRepresentations.map((item) => <span key={item.entryId}><b>{item.title}</b><em>{item.representation}{item.fallbackReason ? ` · ${item.fallbackReason}` : ''}</em></span>)}</div>}
         {normalizedRequest?.dynamicSourceDedupe.length ? <div className="codex-context-representations"><strong>Deduplicated Additional sources</strong>{normalizedRequest.dynamicSourceDedupe.map((decision) => <span key={decision.sourceId}><b>{decision.omittedAdditional.title || decision.sourceId}</b><em>Omitted because this source is already represented automatically{decision.automatic.representation ? ` as ${decision.automatic.representation}` : ''}.</em></span>)}</div> : null}
+        {normalizedRequest?.dynamicSourceExclusions.length ? <div className="codex-context-representations"><strong>Excluded current target</strong>{normalizedRequest.dynamicSourceExclusions.map((decision, index) => <span key={`${decision.sourceId}-${index}`}><b>{decision.omitted.title || decision.sourceId}</b><em>Omitted because the current Codex target is represented through entry variables.</em></span>)}</div> : null}
         {normalizedRequest && <div className="context-budget"><strong>Likely reusable prefix: {likelyReusablePrefix(normalizedRequest.parts, (name) => promptVariables.find((variable) => variable.name === name)?.stability).partCount} message(s)</strong><span>Reuse stops before the first message that references turn-dynamic data.</span></div>}
         {chatNormalizedRequest?.structuredParts.map((part) => <details className="context-preview-raw" key={part.id}><summary>{part.name || 'Structured request data'} · App managed</summary><pre>{JSON.stringify(part.value, null, 2)}</pre></details>)}
         <div className="context-preview-rendered">{requestMessages.map((message) => <section key={message.key} className={message.omitted ? 'omitted' : ''}><header><h3>{message.title}</h3><span>{message.detail}</span></header>{message.content ? <div className="context-preview-copy">{message.content}</div> : <p className="context-preview-empty">This message is empty.</p>}{message.references?.length ? <p className="context-preview-empty">References: {message.references.map((reference) => `{{${reference}}}`).join(', ')}</p> : null}{message.diagnostics?.length ? <ul>{message.diagnostics.map((diagnostic) => <li key={diagnostic}>{diagnostic}</li>)}</ul> : null}{message.reasoning && <div className="context-preview-copy"><strong>Reasoning</strong>\n\n{message.reasoning}</div>}</section>)}</div>
