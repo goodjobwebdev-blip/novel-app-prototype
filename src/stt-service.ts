@@ -52,14 +52,15 @@ type ActiveSession = {
   target: SttTarget
   settings: SpeechSettings
   model: SttModel
-  stream: MediaStream
+  stream?: MediaStream
   recorder?: MediaRecorder
   chunks: BlobPart[]
   peer?: RTCPeerConnection
   channel?: RTCDataChannel
   liveItems?: Map<string, { text: string; completed: boolean }>
   liveStopRequested?: boolean
-  liveFinalizeTimer?: number
+  liveSettleTimer?: number
+  liveDeadlineTimer?: number
 }
 
 function emit(next: SttState) {
@@ -100,8 +101,13 @@ export function parseTranscriptionModelId(value: string): { provider: SttProvide
   return { provider, modelId }
 }
 
-function openAiLiveModel(modelId: string) {
-  return /(?:^|[-_/])(live-transcribe|realtime-whisper)(?:$|[-_/])/i.test(modelId)
+export function openAiSupportsLiveTranscription(modelId: string) {
+  const normalized = modelId.toLowerCase()
+  if (normalized.startsWith('gpt-live-transcribe')) return true
+  if (normalized.startsWith('gpt-realtime-whisper')) return true
+  if (normalized.startsWith('gpt-4o-mini-transcribe')) return true
+  if (normalized.startsWith('gpt-4o-transcribe') && !normalized.startsWith('gpt-4o-transcribe-diarize')) return true
+  return false
 }
 
 function normalizeOpenAiModel(raw: unknown): SttModel | null {
@@ -114,7 +120,7 @@ function normalizeOpenAiModel(raw: unknown): SttModel | null {
     modelId,
     name: modelId,
     supportsFile: true,
-    supportsLive: openAiLiveModel(modelId),
+    supportsLive: openAiSupportsLiveTranscription(modelId),
     maxFileSizeMb: 25,
     supportedFormats: ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'],
   }
@@ -136,7 +142,9 @@ function normalizeNanoModel(raw: unknown): SttModel | null {
   const parameters = value.supported_parameters && typeof value.supported_parameters === 'object' ? value.supported_parameters as Record<string, unknown> : {}
   const formatsRaw = value.supported_formats ?? parameters.supported_formats
   const languagesRaw = value.supported_languages ?? parameters.supported_languages
-  const live = bool(capabilities.live_transcription) || bool(capabilities.realtime_transcription) || bool(capabilities.streaming_stt) || bool(value.supports_live)
+  // NanoGPT currently documents synchronous file/URL transcription only. Keep live=false
+  // even if upstream metadata exposes a provider-specific streaming hint; Arc has no NanoGPT
+  // live transport in v1 and must not advertise a mode it cannot actually run.
   return {
     id: `nanogpt:${modelId}`,
     provider: 'nanogpt',
@@ -144,7 +152,7 @@ function normalizeNanoModel(raw: unknown): SttModel | null {
     name: stringValue(value.name) || modelId,
     price: nanoPrice(value),
     supportsFile: capabilities.speech_to_text === undefined ? true : bool(capabilities.speech_to_text),
-    supportsLive: live,
+    supportsLive: false,
     maxFileSizeMb: finite(parameters.max_file_size_mb) ?? finite(value.max_file_size_mb),
     supportedFormats: Array.isArray(formatsRaw) ? formatsRaw.filter((item): item is string => typeof item === 'string') : undefined,
     supportedLanguages: Array.isArray(languagesRaw) ? languagesRaw.filter((item): item is string => typeof item === 'string') : undefined,
@@ -243,12 +251,17 @@ async function transcribeBlob(session: ActiveSession, blob: Blob) {
 }
 
 function cleanupSession(session: ActiveSession) {
-  if (session.liveFinalizeTimer !== undefined) window.clearTimeout(session.liveFinalizeTimer)
+  if (session.liveSettleTimer !== undefined && typeof window !== 'undefined') window.clearTimeout(session.liveSettleTimer)
+  if (session.liveDeadlineTimer !== undefined && typeof window !== 'undefined') window.clearTimeout(session.liveDeadlineTimer)
   session.recorder?.stream?.getTracks().forEach((track) => track.stop())
-  session.stream.getTracks().forEach((track) => track.stop())
+  session.stream?.getTracks().forEach((track) => track.stop())
   try { session.channel?.close() } catch { /* noop */ }
   try { session.peer?.close() } catch { /* noop */ }
   if (active?.id === session.id) active = null
+}
+
+function sessionIsCurrent(session: ActiveSession) {
+  return session.id === currentSession && active?.id === session.id && !session.controller.signal.aborted
 }
 
 function sessionState(session: ActiveSession, status: SttStatus, patch: Partial<SttState> = {}) {
@@ -283,15 +296,18 @@ function failSession(session: ActiveSession, error: unknown) {
 }
 
 async function startRecordedSession(session: ActiveSession) {
+  const stream = session.stream
+  if (!stream) throw new Error('The microphone stream is no longer available.')
+  if (typeof MediaRecorder === 'undefined') throw new Error('This browser does not support recorded transcription.')
   const mimeType = chooseRecorderMime()
-  const recorder = mimeType ? new MediaRecorder(session.stream, { mimeType }) : new MediaRecorder(session.stream)
+  const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
   session.recorder = recorder
   recorder.ondataavailable = (event) => { if (event.data.size) session.chunks.push(event.data) }
   recorder.onerror = (event) => failSession(session, new Error((event as Event & { error?: DOMException }).error?.message || 'Microphone recording failed.'))
   recorder.onstop = () => {
     if (session.id !== currentSession || session.controller.signal.aborted) return
     const blob = new Blob(session.chunks, { type: recorder.mimeType || mimeType || 'audio/webm' })
-    session.stream.getTracks().forEach((track) => track.stop())
+    stream.getTracks().forEach((track) => track.stop())
     sessionState(session, 'transcribing')
     void transcribeBlob(session, blob).then((text) => finalize(session, text)).catch((error) => failSession(session, error))
   }
@@ -303,14 +319,36 @@ function liveCombinedText(session: ActiveSession) {
   return [...(session.liveItems?.values() ?? [])].map((item) => item.text).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()
 }
 
-function scheduleLiveFinish(session: ActiveSession) {
-  if (!session.liveStopRequested || session.id !== currentSession) return
-  if (session.liveFinalizeTimer !== undefined) window.clearTimeout(session.liveFinalizeTimer)
-  session.liveFinalizeTimer = window.setTimeout(() => {
-    const text = liveCombinedText(session)
-    if (!text) { failSession(session, new Error('The realtime transcription returned no text.')); return }
-    void finalize(session, text).catch((error) => failSession(session, error))
-  }, 900)
+function allLiveItemsCompleted(session: ActiveSession) {
+  const items = [...(session.liveItems?.values() ?? [])]
+  return items.length > 0 && items.every((item) => item.completed)
+}
+
+function clearLiveSettleTimer(session: ActiveSession) {
+  if (session.liveSettleTimer === undefined || typeof window === 'undefined') return
+  window.clearTimeout(session.liveSettleTimer)
+  session.liveSettleTimer = undefined
+}
+
+function scheduleLiveSettle(session: ActiveSession) {
+  if (!session.liveStopRequested || !sessionIsCurrent(session) || !allLiveItemsCompleted(session) || typeof window === 'undefined') return
+  clearLiveSettleTimer(session)
+  session.liveSettleTimer = window.setTimeout(() => {
+    if (!sessionIsCurrent(session) || !session.liveStopRequested || !allLiveItemsCompleted(session)) return
+    const transcript = liveCombinedText(session)
+    if (!transcript) { failSession(session, new Error('The realtime transcription returned no text.')); return }
+    void finalize(session, transcript).catch((error) => failSession(session, error))
+  }, 350)
+}
+
+function armLiveDeadline(session: ActiveSession) {
+  if (!sessionIsCurrent(session) || typeof window === 'undefined' || session.liveDeadlineTimer !== undefined) return
+  session.liveDeadlineTimer = window.setTimeout(() => {
+    if (!sessionIsCurrent(session) || !session.liveStopRequested) return
+    const transcript = liveCombinedText(session)
+    if (!transcript) { failSession(session, new Error('Timed out waiting for the final realtime transcript.')); return }
+    void finalize(session, transcript).catch((error) => failSession(session, error))
+  }, 10_000)
 }
 
 function handleRealtimeEvent(session: ActiveSession, raw: unknown) {
@@ -321,30 +359,37 @@ function handleRealtimeEvent(session: ActiveSession, raw: unknown) {
     failSession(session, new Error(safeError(event, 'OpenAI realtime transcription failed.')))
     return
   }
+  if (!session.target.isValid()) {
+    failSession(session, new Error('The original dictation target is no longer available.'))
+    return
+  }
   const itemId = stringValue(event.item_id) || stringValue(event.itemId) || 'current'
   if (!session.liveItems) session.liveItems = new Map()
   const current = session.liveItems.get(itemId) ?? { text: '', completed: false }
   if (type === 'conversation.item.input_audio_transcription.delta') {
+    clearLiveSettleTimer(session)
     const delta = stringValue(event.delta) ?? ''
     current.text += delta
+    current.completed = false
     session.liveItems.set(itemId, current)
-    if (session.target.isValid()) session.target.onProvisional?.(liveCombinedText(session))
+    session.target.onProvisional?.(liveCombinedText(session))
     return
   }
   if (type === 'conversation.item.input_audio_transcription.completed') {
     current.text = stringValue(event.transcript) || current.text
     current.completed = true
     session.liveItems.set(itemId, current)
-    if (session.target.isValid()) session.target.onProvisional?.(liveCombinedText(session))
-    scheduleLiveFinish(session)
+    session.target.onProvisional?.(liveCombinedText(session))
+    scheduleLiveSettle(session)
   }
 }
 
 async function startOpenAiRealtime(session: ActiveSession) {
+  if (!session.stream) throw new Error('The microphone stream is no longer available.')
   if (typeof RTCPeerConnection === 'undefined') throw new Error('Realtime transcription is not supported by this browser.')
   const peer = new RTCPeerConnection()
   session.peer = peer
-  session.stream.getTracks().forEach((track) => peer.addTrack(track, session.stream))
+  session.stream.getTracks().forEach((track) => peer.addTrack(track, session.stream!))
   const channel = peer.createDataChannel('oai-events')
   session.channel = channel
   channel.onmessage = (event) => {
@@ -386,42 +431,62 @@ export async function startSttSession(settings: SpeechSettings, target: SttTarge
   const key = selectedKey(settings, selected.provider)
   if (!key) throw new Error(`Add a ${selected.provider === 'openai' ? 'OpenAI' : 'NanoGPT'} Speech API key in Speech settings before dictating.`)
   if (!target.isValid()) throw new Error('The dictation target is no longer available.')
-  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') throw new Error('This browser does not support microphone recording.')
+  if (!navigator.mediaDevices?.getUserMedia) throw new Error('This browser does not support microphone recording.')
 
-  let catalog: SttModel[] = []
-  try { catalog = await fetchTranscriptionModels(settings) } catch { /* saved model can still be attempted */ }
-  const catalogModel = catalog.find((model) => model.id === settings.transcriptionModel)
-  const model: SttModel = catalogModel ?? {
+  const id = ++currentSession
+  const controller = new AbortController()
+  const fallbackModel: SttModel = {
     id: settings.transcriptionModel,
     provider: selected.provider,
     modelId: selected.modelId,
     name: selected.modelId,
     supportsFile: true,
-    supportsLive: selected.provider === 'openai' && openAiLiveModel(selected.modelId),
+    supportsLive: selected.provider === 'openai' && openAiSupportsLiveTranscription(selected.modelId),
     maxFileSizeMb: selected.provider === 'openai' ? 25 : undefined,
   }
-  if (catalog.length && !catalogModel) throw new Error(`Saved transcription model “${settings.transcriptionModel}” is unavailable. Choose another model in Speech settings.`)
-  if (settings.streamTranscription && model.supportsLive && model.provider !== 'openai') throw new Error('This transcription provider does not have a live adapter in this version.')
+  const session: ActiveSession = { id, controller, target, settings, model: fallbackModel, chunks: [] }
+  active = session
+  emit({ status: 'requesting-permission', label: target.label, target: target.kind, provider: fallbackModel.provider, model: fallbackModel.modelId, live: settings.streamTranscription && fallbackModel.supportsLive, startedAt: Date.now() })
 
-  const id = ++currentSession
-  const controller = new AbortController()
-  emit({ status: 'requesting-permission', label: target.label, target: target.kind, provider: model.provider, model: model.modelId, live: settings.streamTranscription && model.supportsLive, startedAt: Date.now() })
+  let catalog: SttModel[] = []
+  try {
+    catalog = await fetchTranscriptionModels(settings, controller.signal)
+  } catch (error) {
+    if (!sessionIsCurrent(session)) return
+    // A catalog failure is recoverable: attempt the explicitly saved provider-qualified model.
+  }
+  if (!sessionIsCurrent(session)) return
+  const catalogModel = catalog.find((model) => model.id === settings.transcriptionModel)
+  if (catalog.length && !catalogModel) {
+    const error = new Error(`Saved transcription model “${settings.transcriptionModel}” is unavailable. Choose another model in Speech settings.`)
+    failSession(session, error)
+    throw error
+  }
+  if (catalogModel) session.model = catalogModel
+
   let stream: MediaStream
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true })
   } catch (error) {
+    if (!sessionIsCurrent(session)) return
     const message = error instanceof DOMException && (error.name === 'NotAllowedError' || error.name === 'SecurityError')
       ? 'Microphone permission was denied. Allow microphone access to use dictation.'
       : error instanceof Error ? error.message : 'Microphone access failed.'
-    emit({ status: 'failed', label: target.label, target: target.kind, provider: model.provider, model: model.modelId, live: false, error: message })
-    throw new Error(message)
+    const failure = new Error(message)
+    failSession(session, failure)
+    throw failure
   }
-  const session: ActiveSession = { id, controller, target, settings, model, stream, chunks: [] }
-  active = session
+  if (!sessionIsCurrent(session)) {
+    stream.getTracks().forEach((track) => track.stop())
+    return
+  }
+  session.stream = stream
+
   try {
-    if (settings.streamTranscription && model.supportsLive && model.provider === 'openai') await startOpenAiRealtime(session)
+    if (settings.streamTranscription && session.model.supportsLive && session.model.provider === 'openai') await startOpenAiRealtime(session)
     else await startRecordedSession(session)
   } catch (error) {
+    if (!sessionIsCurrent(session)) return
     failSession(session, error)
     throw error
   }
@@ -438,9 +503,13 @@ export function stopSttSession() {
   if (state.status === 'recording-live') {
     sessionState(session, 'finalizing')
     session.liveStopRequested = true
-    session.stream.getTracks().forEach((track) => track.stop())
-    if (session.channel?.readyState === 'open') session.channel.send(JSON.stringify({ type: 'input_audio_buffer.commit' }))
-    scheduleLiveFinish(session)
+    session.stream?.getTracks().forEach((track) => track.stop())
+    // WebRTC microphone audio is carried by the media track, not the client input-audio
+    // buffer. Stopping the track lets the transcription session flush its final item.
+    // Wait for the provider's completed event, with a bounded fallback instead of
+    // finalizing after an arbitrary sub-second delay.
+    armLiveDeadline(session)
+    scheduleLiveSettle(session)
   }
 }
 
