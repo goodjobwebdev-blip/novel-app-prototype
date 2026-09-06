@@ -1,5 +1,6 @@
 import { defaultAiPrompts, loadAiSettings, previousDefaultAssistantPrompts, type AiSettings } from './ai-settings'
 import { getCachedModelCatalog } from './model-catalog'
+import { KeyedAsyncQueue } from './keyed-async-queue'
 import { transitionProposalList } from './chat-proposal-transition'
 import { snapshotProposalListForFork } from './chat-fork-proposals'
 import {
@@ -114,6 +115,8 @@ export type ChatModel = {
   context_length?: number
 }
 
+const chatWriteQueue = new KeyedAsyncQueue()
+
 function makeId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
@@ -159,13 +162,17 @@ export async function getChat(chatId: string): Promise<ChatEntity | undefined> {
   const promptNeedsMigration = previousDefaultAssistantPrompts.some((prompt) => prompt === chat.systemPrompt)
   const limitNeedsMigration = typeof chat.effectiveContextLimit !== 'string'
   if (!promptNeedsMigration && !limitNeedsMigration) return chat
-  const migrated: ChatEntity = {
-    ...chat,
-    systemPrompt: promptNeedsMigration ? defaultAiPrompts.assistant : chat.systemPrompt,
-    effectiveContextLimit: limitNeedsMigration ? '' : chat.effectiveContextLimit,
-  }
-  await putEntity(migrated)
-  return migrated
+  return chatWriteQueue.run(chatId, () => updateEntityAtomically<ChatEntity>(chatId, (current) => {
+    if (current.type !== 'chat') throw new Error('Chat is no longer available.')
+    const currentPromptNeedsMigration = previousDefaultAssistantPrompts.some((prompt) => prompt === current.systemPrompt)
+    const currentLimitNeedsMigration = typeof current.effectiveContextLimit !== 'string'
+    if (!currentPromptNeedsMigration && !currentLimitNeedsMigration) return current
+    return {
+      ...current,
+      systemPrompt: currentPromptNeedsMigration ? defaultAiPrompts.assistant : current.systemPrompt,
+      effectiveContextLimit: currentLimitNeedsMigration ? '' : current.effectiveContextLimit,
+    }
+  }))
 }
 
 export async function createChat(bookId: string, title = 'New chat'): Promise<ChatEntity> {
@@ -196,17 +203,23 @@ export async function createChat(bookId: string, title = 'New chat'): Promise<Ch
 }
 
 export async function updateChat(chatId: string, patch: Partial<Pick<ChatEntity, 'title' | 'model' | 'modelContextLength' | 'effectiveContextLimit' | 'systemPrompt' | 'thinking' | 'contextProfile' | 'lastMessagePreview'>>): Promise<ChatEntity> {
-  const current = await getChat(chatId)
-  if (!current) throw new Error('Chat is no longer available.')
-  const next: ChatEntity = {
-    ...current,
+  const patchSnapshot = {
     ...patch,
-    contextProfile: patch.contextProfile ? copyProfile(patch.contextProfile) : current.contextProfile,
-    updatedAt: Date.now(),
+    ...(patch.contextProfile ? { contextProfile: copyProfile(patch.contextProfile) } : {}),
   }
-  await putEntity(next)
-  notifyChatChange(next.bookId)
-  return next
+  return chatWriteQueue.run(chatId, async () => {
+    const next = await updateEntityAtomically<ChatEntity>(chatId, (current) => {
+      if (current.type !== 'chat') throw new Error('Chat is no longer available.')
+      return {
+        ...current,
+        ...patchSnapshot,
+        contextProfile: patchSnapshot.contextProfile ? copyProfile(patchSnapshot.contextProfile) : current.contextProfile,
+        updatedAt: Date.now(),
+      }
+    })
+    notifyChatChange(next.bookId)
+    return next
+  })
 }
 
 export async function saveChatContextProfile(chatId: string, profile: GenerationContextProfile) {
@@ -227,14 +240,22 @@ export async function listChatMessages(bookId: string, chatId: string): Promise<
     .sort((a, b) => a.order - b.order || a.createdAt - b.createdAt)
 }
 
-async function touchFromMessages(bookId: string, chatId: string) {
-  const messages = await listChatMessages(bookId, chatId)
-  const last = messages[messages.length - 1]
-  const preview = last?.content.trim().replace(/\s+/g, ' ').slice(0, 120) ?? ''
-  const chat = await getChat(chatId)
-  if (!chat) return
-  await putEntity({ ...chat, lastMessagePreview: preview, updatedAt: Date.now() })
-  notifyChatChange(bookId)
+async function touchFromMessages(bookId: string, chatId: string, autoTitle?: string) {
+  await chatWriteQueue.run(chatId, async () => {
+    const messages = await listChatMessages(bookId, chatId)
+    const last = messages[messages.length - 1]
+    const preview = last?.content.trim().replace(/\s+/g, ' ').slice(0, 120) ?? ''
+    const next = await updateEntityAtomically<ChatEntity>(chatId, (current) => {
+      if (current.type !== 'chat' || current.bookId !== bookId) throw new Error('Chat is no longer available.')
+      return {
+        ...current,
+        ...(autoTitle && current.title === 'New chat' ? { title: autoTitle } : {}),
+        lastMessagePreview: preview,
+        updatedAt: Date.now(),
+      }
+    })
+    notifyChatChange(next.bookId)
+  })
 }
 
 export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntity['role'], content: string, extra: Pick<ChatMessageEntity, 'thoughts' | 'status' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions'> = {}): Promise<ChatMessageEntity> {
@@ -260,7 +281,7 @@ export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntit
   await putEntity(message)
   if (role === 'user' && chat.title === 'New chat') {
     const title = content.trim().replace(/\s+/g, ' ').slice(0, 54) || 'New chat'
-    await updateChat(chat.id, { title, lastMessagePreview: content.trim().replace(/\s+/g, ' ').slice(0, 120) })
+    await touchFromMessages(chat.bookId, chat.id, title)
   } else {
     await touchFromMessages(chat.bookId, chat.id)
   }
