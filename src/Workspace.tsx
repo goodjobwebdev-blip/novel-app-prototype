@@ -46,6 +46,7 @@ import { applyIfStillCurrent } from './async-state-guard'
 import { KeyedAsyncQueue } from './keyed-async-queue'
 import { runDeletionSaveBarrier } from './deletion-save-barrier'
 import { navigateAfterRequiredSave, saveRequiredBeforeNavigation } from './navigation-save-guard'
+import { canUnmountEditor } from './editor-unmount-guard'
 import ExpandableTextInput from './ExpandableTextInput'
 import MarkdownEditor, { type CodexMentionClick, type MarkdownEditorHandle } from './MarkdownEditor'
 import { fetchNanoGPTModelContextLength, nanoGPTRequestText, renderLorePrompt, renderStoryPrompt, streamNanoGPTCompletion, type NanoGPTStreamMetadata } from './nanogpt'
@@ -466,7 +467,7 @@ export default function Workspace() {
       if (closePanel) setRightOpen(false)
       return
     }
-    if (generationAbortRef.current) {
+    if (!canUnmountEditor(Boolean(generationAbortRef.current))) {
       showToast('Stop generation before switching documents.')
       return
     }
@@ -783,6 +784,10 @@ export default function Workspace() {
   }
 
   function openSettings(from: Screen) {
+    if (from === 'editor' && !canUnmountEditor(Boolean(generationAbortRef.current))) {
+      showToast('Stop generation before opening Settings.')
+      return
+    }
     if (from === 'editor' && changedSinceSnapshotRef.current) void flushDocument('navigation', true)
     setReturnScreen(from)
     setScreen('settings')
@@ -790,6 +795,10 @@ export default function Workspace() {
   }
 
   async function openChat(chatId: string) {
+    if (screen === 'editor' && !canUnmountEditor(Boolean(generationAbortRef.current))) {
+      showToast('Stop generation before opening Chat.')
+      return
+    }
     const opened = await navigateAfterRequiredSave(
       screen === 'editor' && changedSinceSnapshotRef.current,
       () => flushDocument('navigation', true),
