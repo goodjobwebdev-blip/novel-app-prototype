@@ -45,7 +45,7 @@ import { createBufferedWordRenderer } from './buffered-word-renderer'
 import { applyIfStillCurrent } from './async-state-guard'
 import { KeyedAsyncQueue } from './keyed-async-queue'
 import { runDeletionSaveBarrier } from './deletion-save-barrier'
-import { navigateAfterRequiredSave } from './navigation-save-guard'
+import { navigateAfterRequiredSave, saveRequiredBeforeNavigation } from './navigation-save-guard'
 import ExpandableTextInput from './ExpandableTextInput'
 import MarkdownEditor, { type CodexMentionClick, type MarkdownEditorHandle } from './MarkdownEditor'
 import { fetchNanoGPTModelContextLength, nanoGPTRequestText, renderLorePrompt, renderStoryPrompt, streamNanoGPTCompletion, type NanoGPTStreamMetadata } from './nanogpt'
@@ -470,7 +470,10 @@ export default function Workspace() {
       showToast('Stop generation before switching documents.')
       return
     }
-    if (changedSinceSnapshotRef.current) await flushDocument('navigation', true)
+    if (!await saveRequiredBeforeNavigation(changedSinceSnapshotRef.current, () => flushDocument('navigation', true))) {
+      showToast('Could not save the current document. Fix the save problem before switching documents.')
+      return
+    }
     const document = await getEntity<ArcEntity>(documentId)
     if (!document || !['scene', 'note', 'codexEntry', 'summary'].includes(document.type)) {
       showToast('That document is no longer available.')
@@ -500,7 +503,10 @@ export default function Workspace() {
   }
 
   async function openBook(bookId: string, preferredSceneId?: string) {
-    if (activeDocumentIdRef.current && changedSinceSnapshotRef.current) await flushDocument('navigation', true)
+    if (!await saveRequiredBeforeNavigation(Boolean(activeDocumentIdRef.current && changedSinceSnapshotRef.current), () => flushDocument('navigation', true))) {
+      showToast('Could not save the current document. Fix the save problem before switching books.')
+      return
+    }
     const book = await getEntity<BookEntity>(bookId)
     if (!book || book.type !== 'book') {
       showToast('That book is no longer available.')
