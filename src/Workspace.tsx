@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { createPortal } from 'react-dom'
 import {
   ArrowDown,
@@ -41,7 +43,7 @@ import AiSettingsScreen from './App'
 import { generationWordDelayMs, loadAiSettings, type AiSettings } from './ai-settings'
 import { createBufferedWordRenderer } from './buffered-word-renderer'
 import ExpandableTextInput from './ExpandableTextInput'
-import MarkdownEditor, { type MarkdownEditorHandle } from './MarkdownEditor'
+import MarkdownEditor, { type CodexMentionClick, type MarkdownEditorHandle } from './MarkdownEditor'
 import { fetchNanoGPTModelContextLength, nanoGPTRequestText, renderLorePrompt, renderStoryPrompt, streamNanoGPTCompletion, type NanoGPTStreamMetadata } from './nanogpt'
 import { generationInstructionMessage, type BookPromptValues } from './prompt-template'
 import { buildContextValues, generationContextDiagnostics } from './context-service'
@@ -93,7 +95,8 @@ import {
   type StructuralEntityType,
   type SummaryEntity,
 } from './persistence'
-import { buildSummarySource, getSummaryStateMap, renderSummaryPrompt, type SummaryState } from './summary-service'
+import { buildSummarySource, getSummaryStateMap, renderSummaryPrompt, summaryStateForSource, type SummaryState } from './summary-service'
+import { buildCodexMentionIndex, type CodexMentionEntry, type CodexMentionTerm } from './codex-trigger-service'
 import { generateAutotitleSuggestion, prepareAutotitleRequest, type AutotitleEntity, type AutotitleRequest, type AutotitleTargetType } from './autotitle-service'
 import { dismissTtsState, estimateSpeechRequest, fetchSpeechModels, getTtsState, pauseTtsSession, resumeTtsSession, startTtsSession, stopTtsSession, subscribeTtsState, type TtsState } from './tts-service'
 import { ChatSidebar, ChatView } from './ChatFeature'
@@ -103,6 +106,7 @@ import './codex-summary.css'
 import './autotitle.css'
 import './tts.css'
 import './codex-triggers.css'
+import './codex-mentions.css'
 
 type Screen = 'home' | 'editor' | 'chat' | 'settings'
 type RightTab = 'book' | 'outline' | 'notes' | 'codex' | 'chat'
@@ -111,6 +115,8 @@ type SaveState = 'loading' | 'saving' | 'saved' | 'error'
 type GenerationPhase = 'sending' | 'thinking' | 'writing' | 'stopping'
 type ToastMessage = { id: number; message: string }
 type AutotitleUiState = { targetId: string; targetType: AutotitleTargetType; targetTitle: string; status: 'loading' | 'ready' | 'error'; suggestion?: string; error?: string; request?: AutotitleRequest }
+type LoreMentionPreview = { entryId: string; title: string; category: string; content: string; source: 'summary' | 'excerpt' }
+type LoreMentionPopupState = { id: number; term: CodexMentionTerm; anchor: CodexMentionClick['rect']; selectedId?: string; loading?: boolean; preview?: LoreMentionPreview; error?: string }
 type GenerationRequestSnapshot = {
   baseUrl: string
   model: string
@@ -177,6 +183,7 @@ export default function Workspace() {
   const [toast, setToast] = useState<ToastMessage | null>(null)
   const [lastGeneratedPassage, setLastGeneratedPassage] = useState('')
   const [autotitle, setAutotitle] = useState<AutotitleUiState | null>(null)
+  const [loreMention, setLoreMention] = useState<LoreMentionPopupState | null>(null)
   const [bookList, setBookList] = useState<BookEntity[]>([])
   const [seriesList, setSeriesList] = useState<SeriesEntity[]>([])
   const [currentBook, setCurrentBook] = useState<BookEntity | null>(null)
@@ -202,12 +209,14 @@ export default function Workspace() {
   const autotitleAbortRef = useRef<AbortController | null>(null)
   const generationStartedAtRef = useRef(0)
   const latestGenerationRequestRef = useRef<GenerationRequestSnapshot | null>(null)
+  const codexMentionIndex = useMemo(() => buildCodexMentionIndex(codexEntries), [codexEntries])
 
   useEffect(() => {
     setArcPrompt('')
     setLorePrompt('')
     setLastGeneratedPassage('')
     setCodexTriggerDraft(activeDocument?.type === 'codexEntry' ? (activeDocument.autoIncludeTriggers ?? []).join('\n') : '')
+    setLoreMention(null)
   }, [activeDocument?.id])
 
   useEffect(() => {
@@ -787,6 +796,49 @@ export default function Workspace() {
     }
   }
 
+  function compactLoreExcerpt(markdown: string, limit = 700) {
+    const text = markdown.trim()
+    if (text.length <= limit) return text || '_No description provided._'
+    const cut = text.slice(0, limit)
+    const boundary = Math.max(cut.lastIndexOf('\n\n'), cut.lastIndexOf(' '))
+    return `${cut.slice(0, boundary > limit * .55 ? boundary : limit).trim()}…`
+  }
+
+  async function loadLoreMentionPreview(popupId: number, selected: CodexMentionEntry) {
+    const entry = codexEntries.find((candidate) => candidate.id === selected.id)
+    if (!entry || isCodexEntryArchived(entry) || !currentBook) {
+      setLoreMention((current) => current?.id === popupId ? { ...current, loading: false, error: 'This Codex entry is no longer available.' } : current)
+      return
+    }
+    setLoreMention((current) => current?.id === popupId ? { ...current, selectedId: entry.id, loading: true, preview: undefined, error: undefined } : current)
+    try {
+      const entities = await listEntitiesByBook(currentBook.id)
+      const summary = entities.find((entity): entity is SummaryEntity => entity.type === 'summary' && entity.sourceEntityId === entry.id)
+      const currentSummary = summaryStateForSource(entry, entities) === 'current' && summary?.content.trim() ? summary.content.trim() : ''
+      const preview: LoreMentionPreview = {
+        entryId: entry.id,
+        title: entry.title,
+        category: entry.category,
+        content: currentSummary || compactLoreExcerpt(entry.content),
+        source: currentSummary ? 'summary' : 'excerpt',
+      }
+      setLoreMention((current) => current?.id === popupId ? { ...current, selectedId: entry.id, loading: false, preview } : current)
+    } catch {
+      setLoreMention((current) => current?.id === popupId ? { ...current, loading: false, error: 'Lore preview could not be loaded.' } : current)
+    }
+  }
+
+  function openLoreMention(mention: CodexMentionClick) {
+    const popup: LoreMentionPopupState = { id: Date.now(), term: mention.term, anchor: mention.rect }
+    setLoreMention(popup)
+    if (mention.term.entries.length === 1) void loadLoreMentionPreview(popup.id, mention.term.entries[0])
+  }
+
+  async function openLoreMentionEntry(entryId: string) {
+    setLoreMention(null)
+    await loadDocument(entryId)
+  }
+
   async function speechSettings() {
     if (!currentBook) throw new Error('Open a book before reading aloud.')
     const defaults = loadAiSettings()
@@ -1252,6 +1304,7 @@ export default function Workspace() {
       <TtsStatusBar />
 
       {generationDetailsOpen && generationDetails && <GenerationDetailsDialog details={generationDetails} elapsedSeconds={generationElapsedSeconds} onClose={() => setGenerationDetailsOpen(false)} />}
+      {loreMention && <LoreMentionPopover state={loreMention} onClose={() => setLoreMention(null)} onSelect={(entry) => { void loadLoreMentionPreview(loreMention.id, entry) }} onOpen={(entryId) => { void openLoreMentionEntry(entryId) }} />}
       {autotitle && <AutotitlePanel state={autotitle} onAccept={() => { void acceptAutotitle() }} onRegenerate={() => { void regenerateAutotitle() }} onStop={stopAutotitle} onCancel={() => { autotitleAbortRef.current?.abort(); setAutotitle(null) }} />}
 
       {screen === 'editor' ? <article className="story-editor">
@@ -1259,7 +1312,7 @@ export default function Workspace() {
         {(activeDocument?.type === 'note' || activeDocument?.type === 'codexEntry') && <div className={`document-titlebar ${activeCodexArchived ? 'archived' : ''}`}><div><small>{activeDocument.type === 'note' ? 'Note' : activeCodexArchived ? `Archived · ${activeDocument.category}` : activeDocument.category}</small><h1>{activeDocument.title}</h1></div><div className="document-title-actions">{(activeDocument.type === 'note' || !activeCodexArchived) && <button className="autotitle-trigger" type="button" onClick={() => { void startAutotitle(activeDocument) }} aria-label={`Autotitle ${activeDocument.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></button>}{activeDocument.type === 'codexEntry' && <SummaryIcon state={summaryStates[activeDocument.id] ?? 'missing'} kind="codex" onOpen={() => { void openSummary(activeDocument) }} />}{activeDocument.type === 'codexEntry' && activeCodexArchived ? <button type="button" onClick={() => { void restoreCodex(activeDocument) }}><ArchiveRestore aria-hidden="true" /> Restore</button> : <button type="button" onClick={() => { void renameContentEntity(activeDocument) }}><Pencil aria-hidden="true" /> Rename</button>}</div></div>}
         {activeDocument?.type === 'codexEntry' && <div className={`document-metadata ${activeCodexArchived ? 'archived' : ''}`}><label><span>Category</span><select disabled={activeCodexArchived} value={activeDocument.category} onChange={(event) => { void changeCodexCategory(event.target.value) }}><option>Character</option><option>Place</option><option>Object</option><option>Event</option><option>Group</option><option>Other</option></select></label>{!activeCodexArchived && <label className="codex-summary-preference"><input type="checkbox" checked={activeDocument.preferSummaryForContext === true} onChange={(event) => { void changeCodexSummaryPreference(event.target.checked) }} /><span><strong>Prefer summary for AI context</strong><small>{codexSummaryPolicyText(activeDocument, summaryStates[activeDocument.id] ?? 'missing')}</small></span></label>}{!activeCodexArchived && <label className="codex-trigger-editor"><span><strong>Auto include when text contains</strong></span><textarea value={codexTriggerDraft} onChange={(event) => setCodexTriggerDraft(event.target.value)} onBlur={() => { void saveCodexTriggers() }} placeholder="One literal trigger per line" /><small>One name, alias, phrase, or #tag per line. New entries start with their title; removing it keeps it removed, and renaming the entry does not rewrite triggers.</small></label>}{activeCodexArchived && <p className="archived-document-note"><Archive aria-hidden="true" /><span><strong>Archived lore</strong><small>Readable here, but excluded from AI context, Chat discovery, and normal Codex search until restored.</small></span></p>}</div>}
         {activeDocument?.type === 'summary' && summaryContextIndicator && <div className="summary-context-indicator">{summaryContextIndicator}</div>}
-        {activeDocument ? <MarkdownEditor key={`${activeDocument.id}-${editorRevision}`} ref={editorRef} value={storyMarkdown} onChange={handleStoryChange} ariaLabel={`${activeDocument.title} Markdown editor`} readOnly={activeCodexArchived || activeSummarySourceArchived} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No document selected</strong><p>Choose a Scene, Note, Codex entry, or Summary from the book workspace.</p><button type="button" onClick={() => setRightOpen(true)}>Open Book Workspace</button></div>}
+        {activeDocument ? <MarkdownEditor key={`${activeDocument.id}-${editorRevision}`} ref={editorRef} value={storyMarkdown} onChange={handleStoryChange} ariaLabel={`${activeDocument.title} Markdown editor`} readOnly={activeCodexArchived || activeSummarySourceArchived} mentionTerms={activeDocument.type === 'scene' ? codexMentionIndex : []} onMentionClick={activeDocument.type === 'scene' ? openLoreMention : undefined} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No document selected</strong><p>Choose a Scene, Note, Codex entry, or Summary from the book workspace.</p><button type="button" onClick={() => setRightOpen(true)}>Open Book Workspace</button></div>}
       </article> : currentBook ? <ChatView bookId={currentBook.id} chatId={activeChatId} bookPromptValues={toBookPromptValues(currentBook, seriesList)} currentSceneId={activeSceneId} onChatChange={openChat} onToast={showToast} /> : <section className="conversation chat-empty"><MessageCircle aria-hidden="true" /><p>Open a book before starting a chat.</p></section>}
 
       {screen === 'editor' && (activeDocument?.type === 'scene' || (activeDocument?.type === 'codexEntry' && !activeCodexArchived)) && !arcOpen && <div className="editor-bottom"><button type="button" onClick={() => setArcOpen(true)} aria-label="Open generation input"><PanelBottomOpen aria-hidden="true" /></button><GenerateControl isGenerating={generationActive} phase={generationPhase} elapsedSeconds={generationElapsedSeconds} onOpenDetails={() => setGenerationDetailsOpen(true)} onGenerate={generate} onStop={stopGeneration} onMicro={insertEditorSpeech} onMicro2={insertPromptSpeech} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} onReadAloud={() => { void readCurrentDocument() }} readAloudDisabled={activeDocument?.type === 'scene' && !lastGeneratedPassage.trim()} readAloudTitle={activeDocument?.type === 'scene' ? 'Read latest generated passage' : 'Read full Codex entry'} /></div>}
@@ -1273,6 +1326,47 @@ export default function Workspace() {
       </aside>}
     </main>
   )
+}
+
+function LoreMentionPopover({ state, onClose, onSelect, onOpen }: {
+  state: LoreMentionPopupState
+  onClose: () => void
+  onSelect: (entry: CodexMentionEntry) => void
+  onOpen: (entryId: string) => void
+}) {
+  const panelRef = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
+    const onPointer = (event: PointerEvent) => {
+      const target = event.target as Node | null
+      if (target && panelRef.current?.contains(target)) return
+      if (event.target instanceof Element && event.target.closest('.cm-codex-mention')) return
+      onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('pointerdown', onPointer, true)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('pointerdown', onPointer, true)
+    }
+  }, [onClose])
+
+  const viewportWidth = typeof window === 'undefined' ? 420 : window.innerWidth
+  const viewportHeight = typeof window === 'undefined' ? 800 : window.innerHeight
+  const width = Math.min(380, viewportWidth - 24)
+  const left = Math.max(12, Math.min(state.anchor.left, viewportWidth - width - 12))
+  const preferBelow = state.anchor.bottom + 300 < viewportHeight
+  const top = preferBelow ? state.anchor.bottom + 8 : Math.max(12, state.anchor.top - 292)
+  const selected = state.term.entries.find((entry) => entry.id === state.selectedId)
+
+  return createPortal(<section ref={panelRef} className="codex-mention-popover" role="dialog" aria-label={`Lore preview for ${state.term.text}`} style={{ left, top, width, maxHeight: Math.max(180, viewportHeight - top - 12) }}>
+    <header><div><small>Codex mention</small><strong>{state.term.text}</strong></div><button type="button" onClick={onClose} aria-label="Close lore preview"><X aria-hidden="true" /></button></header>
+    {state.term.entries.length > 1 && <div className="codex-mention-choices"><p>{selected ? 'Other matching entries' : 'Multiple Codex entries use this name. Choose one:'}</p>{state.term.entries.map((entry) => <button key={entry.id} className={entry.id === state.selectedId ? 'selected' : ''} type="button" onClick={() => onSelect(entry)}><span><strong>{entry.title}</strong><small>{entry.category}</small></span>{entry.id === state.selectedId && <Check aria-hidden="true" />}</button>)}</div>}
+    {state.loading && <p className="codex-mention-loading">Loading lore…</p>}
+    {state.error && <p className="codex-mention-error" role="alert">{state.error}</p>}
+    {state.preview && <div className="codex-mention-preview"><div className="codex-mention-preview-heading"><span><strong>{state.preview.title}</strong><small>{state.preview.category} · {state.preview.source === 'summary' ? 'Current summary' : 'Entry excerpt'}</small></span></div><div className="codex-mention-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{state.preview.content}</ReactMarkdown></div><button className="codex-mention-open" type="button" onClick={() => onOpen(state.preview!.entryId)}>Open Codex entry <ChevronRight aria-hidden="true" /></button></div>}
+    {!state.loading && !state.preview && !state.error && state.term.entries.length === 1 && <button className="codex-mention-choice-single" type="button" onClick={() => onSelect(state.term.entries[0])}>Load lore preview</button>}
+  </section>, document.body)
 }
 
 function TtsStatusBar() {

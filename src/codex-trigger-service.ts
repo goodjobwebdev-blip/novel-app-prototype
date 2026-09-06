@@ -97,7 +97,7 @@ export function buildCodexMentionIndex(entities: ArcEntity[]): CodexMentionTerm[
     .filter((entity): entity is CodexEntryEntity => entity.type === 'codexEntry')
     .filter((entry) => !archived(entry))
     .forEach((entry) => {
-      entryTriggers(entry).forEach((trigger) => {
+      normalizeCodexTriggerList([entry.title, ...entryTriggers(entry)]).forEach((trigger) => {
         const key = triggerKey(trigger)
         const existing = byKey.get(key) ?? { key, text: trigger, entries: [] }
         if (!existing.entries.some((candidate) => candidate.id === entry.id)) {
