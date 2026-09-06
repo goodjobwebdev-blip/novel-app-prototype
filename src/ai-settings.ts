@@ -1,5 +1,6 @@
 import { PROMPT_COMPOSITION_SCHEMA_VERSION, clonePromptComposition, compositionsFromLegacyPrompts, legacyPromptMirror, normalizePromptCompositions, withSystemPrompt, type PromptComposition, type PromptCompositions, type PromptCompositionScope } from './prompt-composition'
 import { defaultStoryPromptComposition } from './story-request'
+import { defaultChatPromptComposition } from './chat-default-composition'
 
 export type AiProvider = 'openrouter' | 'nanogpt' | 'openai' | 'compatible' | 'fake'
 export type SpeechProvider = 'nanogpt'
@@ -292,6 +293,7 @@ Return only the final Markdown body. Do not repeat the entry title as a top-leve
 export const defaultPromptCompositions: PromptCompositions = {
   ...compositionsFromLegacyPrompts(defaultAiPrompts),
   story: clonePromptComposition(defaultStoryPromptComposition),
+  assistant: clonePromptComposition(defaultChatPromptComposition),
 }
 
 export const initialAiSettings: AiSettings = {
@@ -373,6 +375,19 @@ export function normalizeAiSettings(value?: Partial<AiSettings>): AiSettings {
         ? clonePromptComposition(defaultStoryPromptComposition)
         : { systemPrompt: storedPrompts!.story!, predefinedMessages: [] }
       : promptCompositions.story
+  const storedAssistantComposition = value?.promptCompositions?.assistant
+  const storedAssistantCompositionWasHistoricalDefault = Boolean(storedAssistantComposition
+    && storedAssistantComposition.predefinedMessages?.length === 0
+    && (storedAssistantComposition.systemPrompt === defaultAiPrompts.assistant
+      || previousDefaultAssistantPrompts.some((prompt) => storedAssistantComposition.systemPrompt === prompt)))
+  const storedAssistantPromptWasHistoricalDefault = !storedPrompts?.assistant
+    || storedPrompts.assistant === defaultAiPrompts.assistant
+    || previousDefaultAssistantPrompts.some((prompt) => storedPrompts.assistant === prompt)
+  promptCompositions.assistant = !storedAssistantComposition || storedAssistantCompositionWasHistoricalDefault
+    ? storedAssistantPromptWasHistoricalDefault || storedAssistantCompositionWasHistoricalDefault
+      ? clonePromptComposition(defaultChatPromptComposition)
+      : { systemPrompt: storedPrompts!.assistant!, predefinedMessages: [] }
+    : promptCompositions.assistant
   const promptMirror = legacyPromptMirror(promptCompositions) as AiPrompts
   return {
     ...initialAiSettings,

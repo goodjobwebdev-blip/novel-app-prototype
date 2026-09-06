@@ -134,7 +134,8 @@ The application should feel like a quiet writing workspace, not a general-purpos
 
 - Chat uses the current book's provider/API settings and a per-chat model inherited from Main by default.
 - The Assistant system prompt is copied into each Chat when created and can then be edited independently.
-- Selected book context is assembled through the same context service and sent as system context alongside the saved conversation history.
+- Chat uses a per-conversation PromptComposition: one System prompt plus ordered Predefined System/User/Assistant configuration messages, followed by real chronological history and the newest real User turn. Book/story context is exposed through explicit composition variables; no hidden selected-context or response-length message is injected.
+- Workspace instructions are exposed as the app-owned `chat.workspace_instructions` variable while callable tool schemas remain structured provider metadata. The prototype database v3 migration deletes legacy Chat and ChatMessage entities together while preserving all non-Chat entities and Book-level settings.
 - The request preview shows the Chat system prompt, workspace instructions, selected book context, saved user/assistant turns, and assistant reasoning where present.
 - Chat tool calls can inspect Scenes/Notes/Codex/outline and can create approval proposals for document, entity, Codex, and outline changes.
 - The current implementation still has two open issue #29 gaps: it rejects an over-budget full history instead of trimming older turns first, and a non-abort provider/network failure after streaming begins does not yet persist the partial assistant round.
