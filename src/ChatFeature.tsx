@@ -45,7 +45,7 @@ import {
   type ChatOutlineActionProposal,
 } from './chat-service'
 import { buildContextValues, generationContextDiagnostics } from './context-service'
-import { bookTemplateValues, renderPromptTemplate, type BookPromptValues } from './prompt-template'
+import { bookTemplateValues, renderPromptTemplate, responseLengthMessage, type BookPromptValues } from './prompt-template'
 import { applyChatDocumentEdit, chatWorkspaceTools, createChatCodexEntry, executeChatWorkspaceTool, rejectChatCodexEntry, rejectChatDocumentEdit } from './chat-tools'
 import { applyChatEntityAction, chatEntityToolNames, chatEntityTools, executeChatEntityTool, rejectChatEntityAction } from './chat-entity-tools'
 import { applyChatOutlineAction, chatOutlineToolNames, chatOutlineTools, executeChatOutlineTool, rejectChatOutlineAction } from './chat-outline-tools'
@@ -280,7 +280,8 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       return
     }
 
-    const systemPrompt = renderPromptTemplate(activeChat.systemPrompt, bookTemplateValues(bookPromptValues))
+    const promptValues = { ...bookPromptValues, responseLength: settings.responseLength }
+    const systemPrompt = renderPromptTemplate(activeChat.systemPrompt, bookTemplateValues(promptValues))
     const contextSections = [
       prepared.lastSceneText ? section(`Current scene${prepared.lastSceneTitle ? ` — ${prepared.lastSceneTitle}` : ''}`, prepared.lastSceneText) : '',
       prepared.additionalContext ? section('Additional context', prepared.additionalContext) : '',
@@ -288,31 +289,34 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     const workspaceInstructions = `# Workspace tools
 
 You can inspect and propose edits to Scenes, Notes, and Codex entries in this book. You can propose creating Notes and Codex entries, renaming or deleting Notes/Codex entries, and changing a Codex category. For the outline, use read_outline before structural changes; you may propose creating, renaming, moving/reordering, or deleting Acts, Chapters, and Scenes, and a newly created Scene may include initial Markdown content. Mutating tools only create approval proposals: never claim an edit, creation, rename, move, reorder, category change, or deletion happened until the user approves the card in Chat. Outline deletion is allowed only when the target and every descendant Scene have empty content. Search/read tools are read-only and can run automatically. Use search_entities and read_entity when a document target is not already known. For localized document changes, prefer propose_document_edit with exact old_text copied from read_entity. Use propose_document_replacement only for whole-document rewrites.`
+    const historyMessages = history.map((message): ChatCompletionMessage => {
+      const editState = message.role === 'assistant' && message.documentEdits?.length
+        ? `\n\n[Workspace edit proposals: ${message.documentEdits.map((proposal) => `${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
+        : ''
+      const creationState = message.role === 'assistant' && message.codexCreations?.length
+        ? `\n\n[Codex creation proposals: ${message.codexCreations.map((proposal) => `${proposal.title}: ${proposal.status}`).join('; ')}]`
+        : ''
+      const outlineState = message.role === 'assistant' && message.outlineActions?.length
+        ? `\n\n[Outline proposals: ${message.outlineActions.map((proposal) => `${proposal.action} ${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
+        : ''
+      const entityActionState = message.role === 'assistant' && message.entityActions?.length
+        ? `\n\n[Note/Codex proposals: ${message.entityActions.map((proposal) => `${proposal.action} ${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
+        : ''
+      return {
+        role: message.role,
+        content: `${message.content}${editState}${creationState}${outlineState}${entityActionState}`,
+        ...(message.role === 'assistant' && message.thoughts ? { reasoning_content: message.thoughts } : {}),
+      }
+    })
+    const lengthMessage = responseLengthMessage(activeChat.systemPrompt, settings.responseLength)
+    let latestUserIndex = -1
+    history.forEach((message, index) => { if (message.role === 'user') latestUserIndex = index })
+    if (lengthMessage && latestUserIndex >= 0) historyMessages.splice(latestUserIndex, 0, { role: 'user', content: lengthMessage })
     const providerMessages: ChatCompletionMessage[] = [
       { role: 'system', content: systemPrompt },
       { role: 'system', content: workspaceInstructions },
       ...(contextSections.length ? [{ role: 'system' as const, content: `# Selected book context\n\n${contextSections.join('\n\n')}` }] : []),
-      ...history.map((message): ChatCompletionMessage => {
-        const editState = message.role === 'assistant' && message.documentEdits?.length
-          ? `\n\n[Workspace edit proposals: ${message.documentEdits.map((proposal) => `${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
-          : ''
-        const creationState = message.role === 'assistant' && message.codexCreations?.length
-          ? `\n\n[Codex creation proposals: ${message.codexCreations.map((proposal) => `${proposal.title}: ${proposal.status}`).join('; ')}]`
-          : ''
-        const outlineState = message.role === 'assistant' && message.outlineActions?.length
-          ? `\n\n[Outline proposals: ${message.outlineActions.map((proposal) => `${proposal.action} ${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
-          : ''
-        const entityActionState = message.role === 'assistant' && message.entityActions?.length
-          ? `
-
-[Note/Codex proposals: ${message.entityActions.map((proposal) => `${proposal.action} ${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
-          : ''
-        return {
-          role: message.role,
-          content: `${message.content}${editState}${creationState}${outlineState}${entityActionState}`,
-          ...(message.role === 'assistant' && message.thoughts ? { reasoning_content: message.thoughts } : {}),
-        }
-      }),
+      ...historyMessages,
     ]
     const requestText = providerMessages.map((message) => `${message.role}: ${message.content ?? ''}${message.reasoning_content ? `\nreasoning: ${message.reasoning_content}` : ''}`).join('\n\n')
     const diagnostics = generationContextDiagnostics(activeChat.model, activeChat.modelContextLength, systemPrompt, requestText)
