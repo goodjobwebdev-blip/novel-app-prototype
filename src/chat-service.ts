@@ -24,7 +24,7 @@ export type ChatEntity = ArcEntity & {
   lastMessagePreview?: string
 }
 
-export type ChatMessageStatus = 'complete' | 'stopped'
+export type ChatMessageStatus = 'complete' | 'stopped' | 'failed'
 export type ChatCodexCreationStatus = 'proposed' | 'created' | 'rejected' | 'duplicate'
 export type ChatCodexCreationProposal = {
   id: string
