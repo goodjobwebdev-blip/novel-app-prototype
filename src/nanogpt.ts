@@ -1,5 +1,5 @@
 import { bookTemplateValues, renderPromptTemplate, type BookPromptValues } from './prompt-template'
-import type { ProviderMessageRole } from './prompt-composition'
+import type { NormalizedProviderMessage } from './prompt-composition'
 
 export type StoryPromptValues = {
   book: BookPromptValues
@@ -26,7 +26,7 @@ export type NanoGPTGenerationRequest = {
   systemPrompt: string
   contextMessage?: string
   userMessage?: string
-  messages?: Array<{ role: ProviderMessageRole; content: string }>
+  messages?: NormalizedProviderMessage[]
 }
 
 export type NanoGPTStreamLifecycle = {
@@ -192,10 +192,13 @@ function splitStoryPrompt(systemPrompt: string) {
   }
 }
 
-export function nanoGPTCompletionMessages(request: Pick<NanoGPTGenerationRequest, 'systemPrompt' | 'contextMessage' | 'userMessage' | 'messages'>): Array<{ role: ProviderMessageRole; content: string }> {
-  if (request.messages) return request.messages.map((message) => ({ ...message }))
+export function nanoGPTCompletionMessages(request: Pick<NanoGPTGenerationRequest, 'systemPrompt' | 'contextMessage' | 'userMessage' | 'messages'>): NormalizedProviderMessage[] {
+  if (request.messages) return request.messages.map((message) => ({
+    ...message,
+    ...(message.tool_calls ? { tool_calls: message.tool_calls.map((call) => ({ ...call, function: { ...call.function } })) } : {}),
+  }))
   const storyPrompt = splitStoryPrompt(request.systemPrompt)
-  const messages: Array<{ role: ProviderMessageRole; content: string }> = [{ role: 'system', content: storyPrompt?.systemPrompt ?? request.systemPrompt }]
+  const messages: NormalizedProviderMessage[] = [{ role: 'system', content: storyPrompt?.systemPrompt ?? request.systemPrompt }]
   if (storyPrompt?.bookContext.trim()) messages.push({ role: 'user', content: storyPrompt.bookContext })
   if (request.contextMessage?.trim()) messages.push({ role: 'user', content: request.contextMessage })
   if (storyPrompt?.sceneContext.trim()) messages.push({ role: 'user', content: storyPrompt.sceneContext })

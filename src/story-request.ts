@@ -1,7 +1,7 @@
 import { bookTemplateValues, type BookPromptValues } from './prompt-template'
 import {
   assembleCompositionRequest,
-  dedupeAdditionalSources,
+  dedupeDynamicSources,
   normalizeAppManagedPart,
   providerMessagesFromNormalized,
   type DynamicContextSource,
@@ -108,8 +108,8 @@ function sourcesFor(input: StoryRequestInput) {
     ...(input.sceneText.slice(0, insertionPosition).trim() || input.sceneText.slice(insertionPosition).trim() ? [{ sourceId: input.context.currentSceneId || 'current-scene', title: input.context.currentSceneTitle || 'Current scene', type: 'scene', representation: 'Caret split', content: input.sceneText, reason: `Captured generation point at character ${insertionPosition}` }] : []),
     ...(input.context.automaticSources ?? []),
   ]
-  const additional = dedupeAdditionalSources(automatic, input.context.additionalSources ?? [])
-  return { automatic, additional }
+  const dedupe = dedupeDynamicSources(automatic, input.context.additionalSources ?? [])
+  return { automatic: dedupe.automatic, additional: dedupe.additional, dedupe: dedupe.decisions }
 }
 
 export function storyRequestValues(input: StoryRequestInput) {
@@ -133,7 +133,7 @@ export function storyRequestValues(input: StoryRequestInput) {
 }
 
 export function assembleStoryGenerationRequest(input: StoryRequestInput): NormalizedAssembledRequest {
-  const { automatic, additional } = sourcesFor(input)
+  const { automatic, additional, dedupe } = sourcesFor(input)
   const request = assembleCompositionRequest({
     composition: input.composition,
     values: storyRequestValues(input),
@@ -146,6 +146,7 @@ export function assembleStoryGenerationRequest(input: StoryRequestInput): Normal
       'context.automatic_codex': input.context.automaticSources ?? [],
       'context.additional': additional,
     },
+    dynamicSourceDedupe: dedupe,
     after: [normalizeAppManagedPart({
       id: 'story-current-instruction',
       role: 'user',

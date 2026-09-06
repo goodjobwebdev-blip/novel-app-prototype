@@ -6,8 +6,11 @@ import {
   assembleNormalizedRequest,
   compositionsFromLegacyPrompts,
   dedupeAdditionalSources,
+  dedupeDynamicSources,
   likelyReusablePrefix,
   normalizeAppManagedPart,
+  normalizeRuntimeMessagePart,
+  normalizeStructuredTools,
   normalizePromptComposition,
   normalizedRequestDiagnosticText,
   parsePromptTemplate,
@@ -96,6 +99,10 @@ test('automatic sources dedupe Additional by stable source identity, not rendere
     { sourceId: 'note-b', content: 'same' },
   ]
   assert.deepEqual(dedupeAdditionalSources(automatic, additional).map((source) => source.sourceId), ['note-b'])
+  const detailed = dedupeDynamicSources(automatic, additional)
+  assert.deepEqual(detailed.decisions.map((decision) => [decision.sourceId, decision.reason]), [['codex-a', 'already-represented-automatically']])
+  assert.equal(detailed.decisions[0].automatic.representation, 'Summary')
+  assert.equal(detailed.decisions[0].omittedAdditional.representation, 'Full entry')
 })
 
 test('normalized request retains ownership/source metadata and is the source for serialization and diagnostics', () => {
@@ -109,6 +116,26 @@ test('normalized request retains ownership/source metadata and is the source for
   assert.equal(normalizedRequestDiagnosticText(request), JSON.stringify({ messages: request.providerMessages }))
   assert.equal(request.parts[1].ownership, 'user-configuration')
   assert.equal(request.parts[2].sourceKind, 'current-turn')
+})
+
+test('normalized requests preserve runtime tool messages and structured provider tools exactly', () => {
+  const toolCall = { id: 'call-1', type: 'function', function: { name: 'read_scene', arguments: '{"id":"scene-1"}' } }
+  const assistant = normalizeRuntimeMessagePart({
+    id: 'round-assistant', sourceKind: 'history', ownership: 'conversation',
+    message: { role: 'assistant', content: null, reasoning_content: 'Need the scene.', tool_calls: [toolCall] },
+  })
+  const tool = normalizeRuntimeMessagePart({
+    id: 'round-tool', sourceKind: 'app-managed', ownership: 'app-managed',
+    message: { role: 'tool', content: '{"title":"Opening"}', tool_call_id: 'call-1' },
+  })
+  const definition = { type: 'function', function: { name: 'read_scene', parameters: { type: 'object' } } }
+  const request = assembleNormalizedRequest([assistant, tool], { structuredParts: [normalizeStructuredTools([definition])] })
+  assert.deepEqual(request.providerMessages, [assistant.providerMessage, tool.providerMessage])
+  assert.deepEqual(request.providerTools, [definition])
+  assert.deepEqual(JSON.parse(normalizedRequestDiagnosticText(request)), { messages: request.providerMessages, tools: [definition] })
+  assert.equal(request.structuredParts[0].ownership, 'app-managed')
+  assert.equal(request.parts[0].ownership, 'conversation')
+  assert.equal(request.parts[1].sourceKind, 'app-managed')
 })
 
 test('provider role incompatibility is explicit and never silently rewritten', () => {

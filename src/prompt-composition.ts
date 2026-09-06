@@ -1,5 +1,6 @@
 export type PromptCompositionScope = 'story' | 'summarize' | 'lore' | 'assistant'
-export type ProviderMessageRole = 'system' | 'user' | 'assistant'
+export type PromptMessageRole = 'system' | 'user' | 'assistant'
+export type ProviderMessageRole = PromptMessageRole | 'tool'
 export type PromptOwnership = 'user-configuration' | 'app-managed' | 'conversation' | 'current-turn'
 export type PromptSourceKind = 'system-prompt' | 'predefined-message' | 'app-managed' | 'history' | 'current-turn'
 export type VariableStability = 'stable' | 'book-state' | 'turn-dynamic'
@@ -7,7 +8,7 @@ export type VariableStability = 'stable' | 'book-state' | 'turn-dynamic'
 export type PredefinedMessage = {
   id: string
   name?: string
-  role: ProviderMessageRole
+  role: PromptMessageRole
   enabled: boolean
   template: string
 }
@@ -33,6 +34,37 @@ export type DynamicVariableDiagnostics = {
   sources: DynamicContextSource[]
 }
 
+export type DynamicSourceDedupeDecision = {
+  sourceId: string
+  automatic: DynamicContextSource
+  omittedAdditional: DynamicContextSource
+  reason: 'already-represented-automatically'
+}
+
+export type ProviderToolCall = {
+  id: string
+  type: 'function'
+  function: { name: string; arguments: string }
+}
+
+export type NormalizedProviderMessage = {
+  role: ProviderMessageRole
+  content: string | null
+  reasoning_content?: string
+  tool_calls?: ProviderToolCall[]
+  tool_call_id?: string
+}
+
+export type NormalizedStructuredRequestPart = {
+  id: string
+  sourceKind: 'app-managed'
+  sourceId?: string
+  name?: string
+  ownership: 'app-managed'
+  value: unknown
+  omitted: boolean
+}
+
 export type NormalizedRequestPart = {
   id: string
   role?: ProviderMessageRole
@@ -45,11 +77,15 @@ export type NormalizedRequestPart = {
   enabled: boolean
   omitted: boolean
   dynamicVariables?: DynamicVariableDiagnostics[]
+  providerMessage?: NormalizedProviderMessage
 }
 
 export type NormalizedAssembledRequest = {
   parts: NormalizedRequestPart[]
-  providerMessages: Array<{ role: ProviderMessageRole; content: string }>
+  providerMessages: NormalizedProviderMessage[]
+  structuredParts: NormalizedStructuredRequestPart[]
+  providerTools: Array<Record<string, unknown>>
+  dynamicSourceDedupe: DynamicSourceDedupeDecision[]
 }
 
 export type RenderedTemplate = {
@@ -399,8 +435,23 @@ export function renderCompositionTemplate(template: string, values: Record<strin
 }
 
 export function dedupeAdditionalSources(automatic: DynamicContextSource[], additional: DynamicContextSource[]) {
-  const automaticIds = new Set(automatic.map((source) => source.sourceId))
-  return additional.filter((source) => !automaticIds.has(source.sourceId))
+  return dedupeDynamicSources(automatic, additional).additional
+}
+
+export function dedupeDynamicSources(automatic: DynamicContextSource[], additional: DynamicContextSource[]) {
+  const automaticById = new Map(automatic.map((source) => [source.sourceId, source]))
+  const decisions: DynamicSourceDedupeDecision[] = []
+  const deduplicatedAdditional = additional.filter((source) => {
+    const automaticSource = automaticById.get(source.sourceId)
+    if (!automaticSource) return true
+    decisions.push({ sourceId: source.sourceId, automatic: { ...automaticSource }, omittedAdditional: { ...source }, reason: 'already-represented-automatically' })
+    return false
+  })
+  return {
+    automatic: automatic.map((source) => ({ ...source })),
+    additional: deduplicatedAdditional.map((source) => ({ ...source })),
+    decisions,
+  }
 }
 
 function diagnosticsForVariables(references: string[], dynamicSources: Record<string, DynamicContextSource[]>) {
@@ -463,20 +514,83 @@ export function normalizeAppManagedPart(part: {
   content: string
   referencedVariables?: string[]
   dynamicVariables?: DynamicVariableDiagnostics[]
+  providerMessage?: NormalizedProviderMessage
 }): NormalizedRequestPart {
   return {
     ...part,
     referencedVariables: part.referencedVariables ?? [],
     enabled: true,
-    omitted: !part.content.trim(),
+    omitted: !part.content.trim() && !part.providerMessage?.tool_calls?.length && !part.providerMessage?.tool_call_id,
   }
 }
 
-export function assembleNormalizedRequest(parts: NormalizedRequestPart[]): NormalizedAssembledRequest {
+export function normalizeRuntimeMessagePart(input: {
+  id: string
+  sourceKind: 'app-managed' | 'history' | 'current-turn'
+  sourceId?: string
+  name?: string
+  ownership: 'app-managed' | 'conversation' | 'current-turn'
+  message: NormalizedProviderMessage
+}): NormalizedRequestPart {
+  return normalizeAppManagedPart({
+    id: input.id,
+    sourceKind: input.sourceKind,
+    sourceId: input.sourceId,
+    name: input.name,
+    ownership: input.ownership,
+    role: input.message.role,
+    content: input.message.content ?? '',
+    providerMessage: cloneProviderMessage(input.message),
+  })
+}
+
+function cloneProviderMessage(message: NormalizedProviderMessage): NormalizedProviderMessage {
+  return {
+    ...message,
+    ...(message.tool_calls ? { tool_calls: message.tool_calls.map((call) => ({ ...call, function: { ...call.function } })) } : {}),
+  }
+}
+
+function cloneStructuredValue<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((item) => cloneStructuredValue(item)) as T
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, cloneStructuredValue(item)])) as T
+  return value
+}
+
+export function normalizeStructuredTools(tools: Array<Record<string, unknown>>): NormalizedStructuredRequestPart {
+  return {
+    id: 'provider-tools',
+    sourceKind: 'app-managed',
+    sourceId: 'provider-tools',
+    name: 'Provider tool definitions',
+    ownership: 'app-managed',
+    value: tools.map((tool) => cloneStructuredValue(tool)),
+    omitted: tools.length === 0,
+  }
+}
+
+export function assembleNormalizedRequest(parts: NormalizedRequestPart[], options: {
+  structuredParts?: NormalizedStructuredRequestPart[]
+  dynamicSourceDedupe?: DynamicSourceDedupeDecision[]
+} = {}): NormalizedAssembledRequest {
   const providerMessages = parts.flatMap((part) => !part.omitted && part.role
-    ? [{ role: part.role, content: part.content }]
+    ? [part.providerMessage ? cloneProviderMessage(part.providerMessage) : { role: part.role, content: part.content }]
     : [])
-  return { parts, providerMessages }
+  const structuredParts = (options.structuredParts ?? []).map((part) => ({ ...part, value: cloneStructuredValue(part.value) }))
+  const providerTools = structuredParts.flatMap((part) => part.id === 'provider-tools' && !part.omitted && Array.isArray(part.value)
+    ? part.value as Array<Record<string, unknown>>
+    : [])
+  return {
+    parts,
+    providerMessages,
+    structuredParts,
+    providerTools: providerTools.map((tool) => cloneStructuredValue(tool)),
+    dynamicSourceDedupe: (options.dynamicSourceDedupe ?? []).map((decision) => ({
+      ...decision,
+      automatic: { ...decision.automatic },
+      omittedAdditional: { ...decision.omittedAdditional },
+    })),
+  }
 }
 
 export function assembleCompositionRequest(input: {
@@ -484,11 +598,13 @@ export function assembleCompositionRequest(input: {
   values: Record<string, string>
   dynamicSources?: Record<string, DynamicContextSource[]>
   after?: NormalizedRequestPart[]
+  structuredParts?: NormalizedStructuredRequestPart[]
+  dynamicSourceDedupe?: DynamicSourceDedupeDecision[]
 }): NormalizedAssembledRequest {
   return assembleNormalizedRequest([
     ...renderPromptComposition(input.composition, input.values, input.dynamicSources),
     ...(input.after ?? []),
-  ])
+  ], { structuredParts: input.structuredParts, dynamicSourceDedupe: input.dynamicSourceDedupe })
 }
 
 export function providerCompatibilityError(request: NormalizedAssembledRequest, supportedRoles: ProviderRoleSupport) {
@@ -501,11 +617,11 @@ export function providerCompatibilityError(request: NormalizedAssembledRequest, 
 export function providerMessagesFromNormalized(request: NormalizedAssembledRequest, supportedRoles: ProviderRoleSupport = {}) {
   const compatibilityError = providerCompatibilityError(request, supportedRoles)
   if (compatibilityError) throw new Error(compatibilityError)
-  return request.providerMessages.map((message) => ({ ...message }))
+  return request.providerMessages.map(cloneProviderMessage)
 }
 
 export function normalizedRequestDiagnosticText(request: NormalizedAssembledRequest) {
-  return JSON.stringify({ messages: request.providerMessages })
+  return JSON.stringify({ messages: request.providerMessages, ...(request.providerTools.length ? { tools: request.providerTools } : {}) })
 }
 
 export function likelyReusablePrefix(parts: NormalizedRequestPart[], stabilityFor: (variable: string) => VariableStability | undefined) {
