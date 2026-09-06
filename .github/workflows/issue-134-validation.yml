@@ -23,6 +23,18 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      - name: Tighten owner narrowing in integration patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/scripts/issue134.py')
+          source = path.read_text()
+          old = """    const owner = reservedOwner ?? reserveGeneration(activeChat)\n    if (!owner) {\n      if (isCurrentChat(activeChat)) onToast('This Chat already has a generation finishing. Try again when it completes.')\n      return\n    }\n    const controller = owner.controller\n"""
+          new = """    const candidateOwner = reservedOwner ?? reserveGeneration(activeChat)\n    if (!candidateOwner) {\n      if (isCurrentChat(activeChat)) onToast('This Chat already has a generation finishing. Try again when it completes.')\n      return\n    }\n    const owner: ChatGenerationOwner = candidateOwner\n    const controller = owner.controller\n"""
+          if old not in source:
+              raise SystemExit('owner narrowing patch anchor not found')
+          path.write_text(source.replace(old, new, 1))
+          PY
       - name: Apply issue 134 integration
         run: python .github/scripts/issue134.py
       - run: npm install --no-package-lock
