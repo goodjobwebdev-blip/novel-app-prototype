@@ -14,8 +14,14 @@ export type TtsState = {
   label: string
   chunkIndex: number
   chunkCount: number
+  currentTime?: number
+  duration?: number
+  canReplay?: boolean
   error?: string
 }
+
+type GeneratedAudio = { url: string; objectUrl: boolean }
+type RetainedPlayback = { label: string; items: GeneratedAudio[] }
 
 const TTS_EVENT = 'arc-tts-state'
 const TTS_BASE = 'https://nano-gpt.com/api'
@@ -25,6 +31,8 @@ let state: TtsState = { status: 'idle', label: '', chunkIndex: 0, chunkCount: 0 
 let sessionId = 0
 let activeController: AbortController | null = null
 let activeAudio: HTMLAudioElement | null = null
+let finishActiveAudio: (() => void) | null = null
+let retainedPlayback: RetainedPlayback | null = null
 let objectUrls = new Set<string>()
 
 function emit(next: TtsState) {
@@ -35,6 +43,8 @@ function emit(next: TtsState) {
 export function getTtsState() { return state }
 export function dismissTtsState() {
   if (activeController || activeAudio) return
+  retainedPlayback = null
+  cleanupObjectUrls()
   emit({ status: 'idle', label: '', chunkIndex: 0, chunkCount: 0 })
 }
 export function subscribeTtsState(listener: (value: TtsState) => void) {
@@ -269,6 +279,7 @@ function cleanupObjectUrls() {
 export function stopTtsSession() {
   if (!activeController && !activeAudio) return
   emit({ ...state, status: 'stopping' })
+  const canReplay = Boolean(retainedPlayback?.items.length)
   sessionId += 1
   activeController?.abort()
   activeController = null
@@ -277,8 +288,10 @@ export function stopTtsSession() {
     activeAudio.src = ''
     activeAudio = null
   }
-  cleanupObjectUrls()
-  emit({ ...state, status: 'stopped' })
+  finishActiveAudio?.()
+  finishActiveAudio = null
+  if (!canReplay) cleanupObjectUrls()
+  emit({ ...state, status: 'stopped', canReplay, error: undefined })
 }
 
 export function pauseTtsSession() {
@@ -293,21 +306,87 @@ export async function resumeTtsSession() {
   emit({ ...state, status: 'playing' })
 }
 
+function playableDuration(audio: HTMLAudioElement) {
+  return Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 0
+}
+
+function emitPlaybackProgress(audio: HTMLAudioElement) {
+  if (activeAudio !== audio) return
+  emit({
+    ...state,
+    currentTime: Math.max(0, Number.isFinite(audio.currentTime) ? audio.currentTime : 0),
+    duration: playableDuration(audio),
+  })
+}
+
+export function seekTtsTo(seconds: number) {
+  if (!activeAudio || !Number.isFinite(seconds)) return
+  const duration = playableDuration(activeAudio)
+  activeAudio.currentTime = Math.max(0, Math.min(duration || seconds, seconds))
+  emitPlaybackProgress(activeAudio)
+}
+
+export function seekTtsBy(seconds: number) {
+  if (!activeAudio || !Number.isFinite(seconds)) return
+  seekTtsTo((Number.isFinite(activeAudio.currentTime) ? activeAudio.currentTime : 0) + seconds)
+}
+
 async function playAudio(url: string, currentSession: number, chunkIndex: number, chunkCount: number, label: string) {
   if (currentSession !== sessionId) return
   const audio = new Audio(url)
   activeAudio = audio
-  emit({ status: 'playing', label, chunkIndex, chunkCount })
+  emit({ status: 'playing', label, chunkIndex, chunkCount, currentTime: 0, duration: 0, canReplay: Boolean(retainedPlayback) })
   await new Promise<void>((resolve, reject) => {
-    audio.onended = () => resolve()
-    audio.onerror = () => reject(new Error('The browser could not play generated audio.'))
-    audio.play().catch(reject)
+    let settled = false
+    const finish = (error?: Error) => {
+      if (settled) return
+      settled = true
+      if (finishActiveAudio === stop) finishActiveAudio = null
+      if (activeAudio === audio) activeAudio = null
+      if (error) reject(error); else resolve()
+    }
+    const stop = () => finish()
+    finishActiveAudio = stop
+    audio.onloadedmetadata = () => emitPlaybackProgress(audio)
+    audio.ondurationchange = () => emitPlaybackProgress(audio)
+    audio.ontimeupdate = () => emitPlaybackProgress(audio)
+    audio.onended = () => { emitPlaybackProgress(audio); finish() }
+    audio.onerror = () => finish(new Error('The browser could not play generated audio.'))
+    audio.play().catch((error) => finish(error instanceof Error ? error : new Error('The browser could not play generated audio.')))
   })
-  if (activeAudio === audio) activeAudio = null
+}
+
+async function playRetained(currentSession: number, playback: RetainedPlayback) {
+  const controller = new AbortController()
+  activeController = controller
+  try {
+    for (let index = 0; index < playback.items.length; index += 1) {
+      if (controller.signal.aborted || currentSession !== sessionId) return
+      await playAudio(playback.items[index].url, currentSession, index + 1, playback.items.length, playback.label)
+    }
+    if (currentSession === sessionId) emit({ ...state, status: 'complete', canReplay: true, error: undefined })
+  } catch (error) {
+    if (controller.signal.aborted || currentSession !== sessionId) return
+    emit({ ...state, status: 'failed', canReplay: true, error: error instanceof Error ? error.message : 'The browser could not replay generated audio.' })
+  } finally {
+    if (currentSession === sessionId) {
+      activeController = null
+      activeAudio = null
+      finishActiveAudio = null
+    }
+  }
+}
+
+export async function replayTtsSession() {
+  if (!retainedPlayback?.items.length || activeController || activeAudio) return
+  const currentSession = ++sessionId
+  await playRetained(currentSession, retainedPlayback)
 }
 
 export async function startTtsSession(settings: SpeechSettings, markdown: string, label = 'Read aloud') {
   stopTtsSession()
+  retainedPlayback = null
+  cleanupObjectUrls()
   const text = normalizeSpeakableText(markdown)
   if (!text) throw new Error('There is no readable text for this action.')
   if (settings.provider !== 'nanogpt') throw new Error('NanoGPT is the only supported TTS provider in this version.')
@@ -318,7 +397,7 @@ export async function startTtsSession(settings: SpeechSettings, markdown: string
   const currentSession = ++sessionId
   const controller = new AbortController()
   activeController = controller
-  emit({ status: 'preparing', label, chunkIndex: 0, chunkCount: 0 })
+  emit({ status: 'preparing', label, chunkIndex: 0, chunkCount: 0, currentTime: 0, duration: 0, canReplay: false })
   let models: SpeechModel[] = []
   try {
     models = await fetchSpeechModels(settings.apiKey, controller.signal)
@@ -341,7 +420,8 @@ export async function startTtsSession(settings: SpeechSettings, markdown: string
 
   const chunks = buildTtsChunks(text, settings.model, modelInfo)
   const count = chunks.length
-  emit({ status: 'generating', label, chunkIndex: 0, chunkCount: count })
+  emit({ status: 'generating', label, chunkIndex: 0, chunkCount: count, currentTime: 0, duration: 0, canReplay: false })
+  const generatedItems: GeneratedAudio[] = new Array(count)
   const deferred = chunks.map(() => {
     let resolve!: (value: { url: string; objectUrl: boolean }) => void
     let reject!: (reason?: unknown) => void
@@ -367,6 +447,7 @@ export async function startTtsSession(settings: SpeechSettings, markdown: string
           }
           return
         }
+        generatedItems[index] = result
         deferred[index].ready = true
         deferred[index].resolve(result)
       } catch (error) {
@@ -381,18 +462,20 @@ export async function startTtsSession(settings: SpeechSettings, markdown: string
   }
   const workers = Array.from({ length: Math.min(concurrency, chunks.length) }, () => worker())
 
+  let completed = false
   try {
     for (let index = 0; index < deferred.length; index += 1) {
-      if (!deferred[index].ready && index > 0) emit({ status: 'waiting', label, chunkIndex: index, chunkCount: count })
+      if (!deferred[index].ready && index > 0) emit({ status: 'waiting', label, chunkIndex: index, chunkCount: count, currentTime: 0, duration: 0, canReplay: false })
       const generated = await deferred[index].promise
       await playAudio(generated.url, currentSession, index + 1, count, label)
-      if (generated.objectUrl) {
-        URL.revokeObjectURL(generated.url)
-        objectUrls.delete(generated.url)
-      }
+      if (controller.signal.aborted || currentSession !== sessionId) return
     }
     await Promise.allSettled(workers)
-    if (currentSession === sessionId) emit({ status: 'complete', label, chunkIndex: count, chunkCount: count })
+    if (currentSession === sessionId) {
+      retainedPlayback = { label, items: generatedItems }
+      completed = true
+      emit({ ...state, status: 'complete', label, chunkIndex: count, chunkCount: count, canReplay: true, error: undefined })
+    }
   } catch (error) {
     const userCancelled = currentSession !== sessionId || (controller.signal.aborted && fatalError === undefined)
     if (!userCancelled && fatalError === undefined) {
@@ -409,7 +492,11 @@ export async function startTtsSession(settings: SpeechSettings, markdown: string
     if (currentSession === sessionId) {
       activeController = null
       activeAudio = null
-      cleanupObjectUrls()
+      finishActiveAudio = null
+      if (!completed) {
+        retainedPlayback = null
+        cleanupObjectUrls()
+      }
     }
   }
 }
