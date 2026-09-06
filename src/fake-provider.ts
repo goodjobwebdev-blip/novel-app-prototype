@@ -133,7 +133,7 @@ export function clearFakeProviderTrace() {
 
 export function subscribeFakeProviderTrace(listener: () => void) {
   listeners.add(listener)
-  return () => listeners.delete(listener)
+  return () => { listeners.delete(listener) }
 }
 
 function abortError() {

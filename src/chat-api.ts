@@ -179,11 +179,12 @@ export async function streamChatCompletion(
   signal: AbortSignal,
   onResponse?: () => void,
 ): Promise<ChatCompletionResult> {
+  const providerMessages = cacheFriendlyMessages(request.messages)
   if (request.provider === 'fake') {
     const result = await streamFakeProvider({
       task: 'chat',
       model: request.model,
-      messages: request.messages,
+      messages: providerMessages,
       tools: request.tools,
       thinking: request.thinking,
     }, {
@@ -196,7 +197,7 @@ export async function streamChatCompletion(
 
   const body: Record<string, unknown> = {
     model: request.model,
-    messages: cacheFriendlyMessages(request.messages),
+    messages: providerMessages,
     stream: true,
   }
   if (request.provider !== 'compatible') body.stream_options = { include_usage: true }

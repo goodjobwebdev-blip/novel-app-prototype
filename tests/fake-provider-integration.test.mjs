@@ -51,7 +51,7 @@ test('Chat loads Fake locally, skips key validation, and dispatches Fake before 
   const fakeBranch = chatApi.indexOf("if (request.provider === 'fake')")
   const networkFetch = chatApi.indexOf('const response = await fetch(')
   assert.ok(fakeBranch >= 0 && networkFetch > fakeBranch)
-  assert.match(chatApi, /streamFakeProvider\(\{[\s\S]*messages: request\.messages,[\s\S]*tools: request\.tools,[\s\S]*thinking: request\.thinking/)
+  assert.match(chatApi, /const providerMessages = cacheFriendlyMessages\(request\.messages\)[\s\S]*streamFakeProvider\(\{[\s\S]*messages: providerMessages,[\s\S]*tools: request\.tools,[\s\S]*thinking: request\.thinking/)
 })
 
 test('unsupported real providers remain unsupported for Story/Codex/Summary while Chat keeps existing provider behavior', () => {
