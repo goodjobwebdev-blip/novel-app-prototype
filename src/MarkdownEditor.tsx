@@ -3,6 +3,7 @@ import { defaultKeymap, history, historyKeymap, isolateHistory, redo, undo } fro
 import { markdown } from '@codemirror/lang-markdown'
 import { syntaxTree } from '@codemirror/language'
 import { EditorState, StateEffect, StateField, Transaction } from '@codemirror/state'
+import { findTriggerRanges, type CodexMentionTerm } from './codex-trigger-service'
 import {
   Decoration,
   EditorView,
@@ -13,6 +14,12 @@ import {
   type ViewUpdate,
 } from '@codemirror/view'
 import './markdown-editor.css'
+import './codex-mentions.css'
+
+export type CodexMentionClick = {
+  term: CodexMentionTerm
+  rect: { left: number; top: number; right: number; bottom: number; width: number; height: number }
+}
 
 type MarkdownEditorProps = {
   value: string
@@ -20,6 +27,8 @@ type MarkdownEditorProps = {
   ariaLabel?: string
   className?: string
   readOnly?: boolean
+  mentionTerms?: CodexMentionTerm[]
+  onMentionClick?: (mention: CodexMentionClick) => void
 }
 
 export type MarkdownEditorHandle = {
@@ -95,6 +104,65 @@ class GenerationCaretWidget extends WidgetType {
     return span
   }
 }
+
+type MentionFieldValue = { terms: CodexMentionTerm[]; decorations: DecorationSet }
+const setMentionTerms = StateEffect.define<CodexMentionTerm[]>()
+
+function intersects(from: number, to: number, blocked: Array<{ from: number; to: number }>) {
+  return blocked.some((range) => range.from < to && range.to > from)
+}
+
+function mentionBlockedRanges(state: EditorState) {
+  const blocked: Array<{ from: number; to: number }> = []
+  syntaxTree(state).iterate({
+    enter(node) {
+      if (/Code|URL|LinkMark/i.test(node.name)) blocked.push({ from: node.from, to: node.to })
+    },
+  })
+  const text = state.doc.toString()
+  for (const match of text.matchAll(/(?:https?:\/\/|www\.)[^\s<>()]+/giu)) {
+    const from = match.index ?? -1
+    if (from >= 0) blocked.push({ from, to: from + match[0].length })
+  }
+  return blocked
+}
+
+function buildMentionDecorations(state: EditorState, terms: CodexMentionTerm[]) {
+  if (!terms.length || !state.doc.length) return Decoration.none
+  const text = state.doc.toString()
+  const blocked = mentionBlockedRanges(state)
+  const candidates = terms.flatMap((term) => findTriggerRanges(text, term.text).map((range) => ({ ...range, term })))
+    .filter((candidate) => !intersects(candidate.from, candidate.to, blocked))
+    .sort((left, right) => left.from - right.from || (right.to - right.from) - (left.to - left.from) || left.term.key.localeCompare(right.term.key))
+  const accepted: typeof candidates = []
+  let occupiedTo = -1
+  candidates.forEach((candidate) => {
+    if (candidate.from < occupiedTo) return
+    accepted.push(candidate)
+    occupiedTo = candidate.to
+  })
+  return Decoration.set(accepted.map((candidate) => Decoration.mark({
+    class: 'cm-codex-mention',
+    attributes: { 'data-codex-term': candidate.term.key, 'aria-label': `Codex mention: ${candidate.term.text}` },
+  }).range(candidate.from, candidate.to)), true)
+}
+
+const mentionField = StateField.define<MentionFieldValue>({
+  create: () => ({ terms: [], decorations: Decoration.none }),
+  update(value, transaction) {
+    let terms = value.terms
+    let shouldRebuild = transaction.docChanged
+    for (const effect of transaction.effects) {
+      if (!effect.is(setMentionTerms)) continue
+      terms = effect.value
+      shouldRebuild = true
+    }
+    return shouldRebuild
+      ? { terms, decorations: buildMentionDecorations(transaction.state, terms) }
+      : { terms, decorations: value.decorations.map(transaction.changes) }
+  },
+  provide: field => EditorView.decorations.from(field, value => value.decorations),
+})
 
 type GenerationHighlight = { from: number; to: number; active: boolean } | null
 const setGenerationHighlight = StateEffect.define<GenerationHighlight>()
@@ -363,16 +431,23 @@ function runHistoryCommand(view: EditorView | null, command: (target: EditorView
 }
 
 const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor(
-  { value, onChange, ariaLabel = 'Markdown editor', className = '', readOnly = false },
+  { value, onChange, ariaLabel = 'Markdown editor', className = '', readOnly = false, mentionTerms = [], onMentionClick },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<EditorView | null>(null)
   const onChangeRef = useRef(onChange)
+  const mentionTermsRef = useRef(mentionTerms)
+  const onMentionClickRef = useRef(onMentionClick)
   const activeGenerationRef = useRef<ActiveGeneration | null>(null)
   const latestGenerationRef = useRef<GenerationRecord | null>(null)
 
   useEffect(() => { onChangeRef.current = onChange }, [onChange])
+  useEffect(() => { onMentionClickRef.current = onMentionClick }, [onMentionClick])
+  useEffect(() => {
+    mentionTermsRef.current = mentionTerms
+    viewRef.current?.dispatch({ effects: setMentionTerms.of(mentionTerms) })
+  }, [mentionTerms])
 
   useImperativeHandle(ref, () => ({
     beginGeneration: (mode = 'generate', placement = 'append') => {
@@ -445,6 +520,19 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
         keymap.of([...formattingKeymap(), ...defaultKeymap, ...historyKeymap]),
         livePreview,
         generationHighlightField,
+        mentionField,
+        EditorView.domEventHandlers({
+          click: (event, view) => {
+            if (event.button !== 0 || !view.state.selection.main.empty) return false
+            const element = event.target instanceof Element ? event.target.closest<HTMLElement>('.cm-codex-mention') : null
+            const key = element?.dataset.codexTerm
+            const term = key ? mentionTermsRef.current.find((candidate) => candidate.key === key) : undefined
+            if (!element || !term || !onMentionClickRef.current) return false
+            const bounds = element.getBoundingClientRect()
+            onMentionClickRef.current({ term, rect: { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom, width: bounds.width, height: bounds.height } })
+            return false
+          },
+        }),
         EditorView.lineWrapping,
         EditorView.contentAttributes.of({ 'aria-label': ariaLabel, spellcheck: 'true' }),
         EditorView.updateListener.of(update => {
@@ -463,6 +551,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
 
     const view = new EditorView({ state, parent: hostRef.current })
     viewRef.current = view
+    if (mentionTermsRef.current.length) view.dispatch({ effects: setMentionTerms.of(mentionTermsRef.current) })
 
     return () => {
       activeGenerationRef.current = null
