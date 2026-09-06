@@ -8,6 +8,7 @@ import {
   createNote,
   deleteEntityTree,
   getEntity,
+  isCodexEntryArchived,
   listEntitiesByBook,
   renameEntity,
   saveDocumentContent,
@@ -127,7 +128,7 @@ function entityTitle(entity: ArcEntity) {
 
 async function manageableEntity(bookId: string, entityId: string) {
   const entity = await getEntity<ArcEntity>(entityId)
-  if (!entity || entity.bookId !== bookId || !manageableTypeSet.has(entity.type)) {
+  if (!entity || entity.bookId !== bookId || !manageableTypeSet.has(entity.type) || isCodexEntryArchived(entity)) {
     throw new Error('That Note or Codex entry was not found in the current book.')
   }
   return entity
@@ -135,7 +136,7 @@ async function manageableEntity(bookId: string, entityId: string) {
 
 async function duplicateTitle(bookId: string, type: 'note' | 'codexEntry', title: string, exceptId?: string) {
   return (await listEntitiesByBook(bookId, type))
-    .find((entity) => entity.id !== exceptId && normalizedTitle(entity.title) === normalizedTitle(title))
+    .find((entity) => entity.id !== exceptId && !isCodexEntryArchived(entity) && normalizedTitle(entity.title) === normalizedTitle(title))
 }
 
 export async function executeChatEntityTool(bookId: string, call: ChatToolCall): Promise<{ content: string; entityAction?: ChatEntityActionProposal }> {

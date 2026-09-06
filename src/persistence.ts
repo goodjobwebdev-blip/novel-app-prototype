@@ -51,7 +51,7 @@ export type BookMetadata = {
 export type BookEntity = ArcEntity & { type: 'book'; title: string } & Partial<Omit<BookMetadata, 'title'>>
 export type SeriesEntity = ArcEntity & { type: 'series'; title: string }
 export type NoteEntity = ArcEntity & { type: 'note'; bookId: string; parentId: string; title: string; content: string }
-export type CodexEntryEntity = ArcEntity & { type: 'codexEntry'; bookId: string; parentId: string; title: string; category: string; content: string }
+export type CodexEntryEntity = ArcEntity & { type: 'codexEntry'; bookId: string; parentId: string; title: string; category: string; content: string; archivedAt?: number }
 export type SummaryEntity = ArcEntity & {
   type: 'summary'
   bookId: string
@@ -555,6 +555,39 @@ export async function saveSummaryContent(summaryIdValue: string, content: string
   await db.transaction('rw', db.table('entities'), async () => {
     await db.table('entities').put(updated)
     await touchAncestors(db, current.bookId, updated.updatedAt)
+  })
+  return updated
+}
+
+export function isCodexEntryArchived(entity: ArcEntity | CodexEntryEntity | undefined): boolean {
+  return entity?.type === 'codexEntry' && typeof entity.archivedAt === 'number' && entity.archivedAt > 0
+}
+
+export async function archiveCodexEntry(id: string): Promise<CodexEntryEntity> {
+  const db = await database()
+  const current = await db.table('entities').get(id) as CodexEntryEntity | undefined
+  if (!current || current.type !== 'codexEntry') throw new Error(`Cannot archive missing Codex entry ${id}`)
+  if (isCodexEntryArchived(current)) return current
+  const now = Date.now()
+  const updated: CodexEntryEntity = { ...current, archivedAt: now, updatedAt: now }
+  await db.transaction('rw', db.table('entities'), async () => {
+    await db.table('entities').put(updated)
+    await touchAncestors(db, current.bookId, now)
+  })
+  return updated
+}
+
+export async function restoreCodexEntry(id: string): Promise<CodexEntryEntity> {
+  const db = await database()
+  const current = await db.table('entities').get(id) as CodexEntryEntity | undefined
+  if (!current || current.type !== 'codexEntry') throw new Error(`Cannot restore missing Codex entry ${id}`)
+  if (!isCodexEntryArchived(current)) return current
+  const now = Date.now()
+  const { archivedAt: _archivedAt, ...active } = current
+  const updated: CodexEntryEntity = { ...active, updatedAt: now }
+  await db.transaction('rw', db.table('entities'), async () => {
+    await db.table('entities').put(updated)
+    await touchAncestors(db, current.bookId, now)
   })
   return updated
 }

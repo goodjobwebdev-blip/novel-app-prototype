@@ -19,6 +19,7 @@ type MarkdownEditorProps = {
   onChange: (value: string) => void
   ariaLabel?: string
   className?: string
+  readOnly?: boolean
 }
 
 export type MarkdownEditorHandle = {
@@ -362,7 +363,7 @@ function runHistoryCommand(view: EditorView | null, command: (target: EditorView
 }
 
 const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor(
-  { value, onChange, ariaLabel = 'Markdown editor', className = '' },
+  { value, onChange, ariaLabel = 'Markdown editor', className = '', readOnly = false },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null)
@@ -438,6 +439,8 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       doc: value,
       extensions: [
         markdown(),
+        EditorState.readOnly.of(readOnly),
+        EditorView.editable.of(!readOnly),
         history(),
         keymap.of([...formattingKeymap(), ...defaultKeymap, ...historyKeymap]),
         livePreview,
@@ -466,7 +469,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       view.destroy()
       if (viewRef.current === view) viewRef.current = null
     }
-  }, [ariaLabel])
+  }, [ariaLabel, readOnly])
 
   useEffect(() => {
     const view = viewRef.current
@@ -479,7 +482,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     })
   }, [value])
 
-  return <div ref={hostRef} className={`markdown-editor ${className}`.trim()} />
+  return <div ref={hostRef} className={`markdown-editor ${readOnly ? 'read-only' : ''} ${className}`.trim()} />
 })
 
 export default MarkdownEditor

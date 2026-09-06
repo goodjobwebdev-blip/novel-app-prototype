@@ -10,6 +10,7 @@ import {
   createCodexEntry,
   createSnapshot,
   getEntity,
+  isCodexEntryArchived,
   listEntitiesByBook,
   saveDocumentContent,
   type ArcEntity,
@@ -153,7 +154,7 @@ function titleFor(entity: ArcEntity) {
 
 async function editableEntity(bookId: string, entityId: string) {
   const entity = await getEntity<ArcEntity>(entityId)
-  if (!entity || entity.bookId !== bookId || !editableTypeSet.has(entity.type)) {
+  if (!entity || entity.bookId !== bookId || !editableTypeSet.has(entity.type) || isCodexEntryArchived(entity)) {
     throw new Error('That editable document was not found in the current book.')
   }
   return entity
@@ -206,7 +207,7 @@ export async function executeChatWorkspaceTool(bookId: string, call: ChatToolCal
         ? new Set(args.types.filter((value): value is string => typeof value === 'string' && editableTypeSet.has(value)))
         : null
       const entities = (await listEntitiesByBook(bookId))
-        .filter((entity) => editableTypeSet.has(entity.type) && (!requestedTypes?.size || requestedTypes.has(entity.type)))
+        .filter((entity) => editableTypeSet.has(entity.type) && !isCodexEntryArchived(entity) && (!requestedTypes?.size || requestedTypes.has(entity.type)))
         .filter((entity) => `${entity.title ?? ''} ${entity.category ?? ''} ${entity.content ?? ''}`.toLowerCase().includes(query))
         .slice(0, MAX_SEARCH_RESULTS)
         .map((entity) => ({
@@ -242,7 +243,7 @@ export async function executeChatWorkspaceTool(bookId: string, call: ChatToolCal
       const content = typeof args.content === 'string' ? args.content : ''
       if (!title) return { content: toolResult({ ok: false, error: 'Codex title cannot be empty.' }) }
       const existing = (await listEntitiesByBook(bookId, 'codexEntry'))
-        .filter((entity) => normalizedTitle(String(entity.title ?? '')) === normalizedTitle(title))
+        .filter((entity) => !isCodexEntryArchived(entity) && normalizedTitle(String(entity.title ?? '')) === normalizedTitle(title))
       if (existing.length) {
         return { content: toolResult({ ok: false, error: 'A Codex entry with this title already exists. Read or edit the existing entry instead of creating a duplicate.', existing: existing.map((entity) => ({ id: entity.id, title: titleFor(entity), category: String(entity.category ?? 'Other') })) }) }
       }
