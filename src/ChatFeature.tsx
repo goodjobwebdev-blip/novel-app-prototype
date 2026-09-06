@@ -40,6 +40,7 @@ import {
   type ChatEntity,
   type ChatEntityActionProposal,
   type ChatMessageEntity,
+  type ChatMessageStatus,
   type ChatModel,
   type ChatOutlineActionProposal,
 } from './chat-service'
@@ -332,15 +333,18 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
     followOutputRef.current = true
     setFollowOutput(true)
     let completed = false
+    let unexpectedFailure = false
     let activeRoundContent = ''
     let activeRoundThoughts = ''
+    let activeRoundExtras: Pick<ChatMessageEntity, 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions'> = {}
     let activeRoundPersisted = false
+    let activeRoundStartedAt = Date.now()
 
     async function persistAssistantRound(
       roundContent: string,
       roundThoughts: string,
       extras: Pick<ChatMessageEntity, 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions'> = {},
-      status: 'complete' | 'stopped' = 'complete',
+      status: ChatMessageStatus = 'complete',
     ) {
       const hasWorkspaceProposal = Boolean(extras.documentEdits?.length || extras.codexCreations?.length || extras.outlineActions?.length || extras.entityActions?.length)
       if (!roundContent && !roundThoughts && !hasWorkspaceProposal) return null
@@ -352,6 +356,25 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
         outlineActions: extras.outlineActions,
         entityActions: extras.entityActions,
       })
+    }
+
+    function workspaceProposalIds(extras: Pick<ChatMessageEntity, 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions'>) {
+      return [
+        ...(extras.documentEdits ?? []).map((proposal) => `document:${proposal.id}`),
+        ...(extras.codexCreations ?? []).map((proposal) => `codex:${proposal.id}`),
+        ...(extras.outlineActions ?? []).map((proposal) => `outline:${proposal.id}`),
+        ...(extras.entityActions ?? []).map((proposal) => `entity:${proposal.id}`),
+      ].sort().join('|')
+    }
+
+    async function findAlreadyPersistedRound() {
+      const expectedProposalIds = workspaceProposalIds(activeRoundExtras)
+      const persisted = await listChatMessages(activeChat.bookId, activeChat.id)
+      return [...persisted].reverse().find((message) => message.role === 'assistant'
+        && message.createdAt >= activeRoundStartedAt
+        && message.content === activeRoundContent
+        && (message.thoughts ?? '') === activeRoundThoughts
+        && workspaceProposalIds(message) === expectedProposalIds) ?? null
     }
 
     function commitVisibleRound(saved: ChatMessageEntity | null, hadThoughts: boolean) {
@@ -369,12 +392,28 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
       setStreamedThoughts('')
     }
 
+    async function persistInterruptedRound(status: Exclude<ChatMessageStatus, 'complete'>) {
+      if (activeRoundPersisted) return
+      const existing = await findAlreadyPersistedRound()
+      if (existing) {
+        activeRoundPersisted = true
+        const saved = existing.status === status ? existing : await updateChatMessage(existing.id, { status })
+        commitVisibleRound(saved, Boolean(activeRoundThoughts))
+        return
+      }
+      const saved = await persistAssistantRound(activeRoundContent, activeRoundThoughts, activeRoundExtras, status)
+      activeRoundPersisted = Boolean(saved)
+      commitVisibleRound(saved, Boolean(activeRoundThoughts))
+    }
+
     try {
       const workingMessages = [...providerMessages]
       for (let round = 0; round < 8 && !controller.signal.aborted; round += 1) {
         activeRoundContent = ''
         activeRoundThoughts = ''
+        activeRoundExtras = {}
         activeRoundPersisted = false
+        activeRoundStartedAt = Date.now()
         const result = await streamChatCompletion({
           apiKey: settings.apiKey.trim(),
           baseUrl: settings.baseUrl,
@@ -413,26 +452,33 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
           for (const call of result.toolCalls) {
             if (chatOutlineToolNames.has(call.function.name)) {
               const execution = await executeChatOutlineTool(bookId, call)
-              if (execution.outlineAction) roundOutlineActions.push(execution.outlineAction)
+              if (execution.outlineAction) {
+                roundOutlineActions.push(execution.outlineAction)
+                activeRoundExtras.outlineActions = roundOutlineActions
+              }
               workingMessages.push({ role: 'tool', tool_call_id: call.id, content: execution.content })
             } else if (chatEntityToolNames.has(call.function.name)) {
               const execution = await executeChatEntityTool(bookId, call)
-              if (execution.entityAction) roundEntityActions.push(execution.entityAction)
+              if (execution.entityAction) {
+                roundEntityActions.push(execution.entityAction)
+                activeRoundExtras.entityActions = roundEntityActions
+              }
               workingMessages.push({ role: 'tool', tool_call_id: call.id, content: execution.content })
             } else {
               const execution = await executeChatWorkspaceTool(bookId, call)
-              if (execution.proposal) roundProposals.push(execution.proposal)
-              if (execution.codexCreation) roundCodexCreations.push(execution.codexCreation)
+              if (execution.proposal) {
+                roundProposals.push(execution.proposal)
+                activeRoundExtras.documentEdits = roundProposals
+              }
+              if (execution.codexCreation) {
+                roundCodexCreations.push(execution.codexCreation)
+                activeRoundExtras.codexCreations = roundCodexCreations
+              }
               workingMessages.push({ role: 'tool', tool_call_id: call.id, content: execution.content })
             }
           }
 
-          const saved = await persistAssistantRound(activeRoundContent, activeRoundThoughts, {
-            documentEdits: roundProposals.length ? roundProposals : undefined,
-            codexCreations: roundCodexCreations.length ? roundCodexCreations : undefined,
-            outlineActions: roundOutlineActions.length ? roundOutlineActions : undefined,
-            entityActions: roundEntityActions.length ? roundEntityActions : undefined,
-          })
+          const saved = await persistAssistantRound(activeRoundContent, activeRoundThoughts, activeRoundExtras)
           activeRoundPersisted = Boolean(saved)
           commitVisibleRound(saved, Boolean(activeRoundThoughts))
           if (controller.signal.aborted) break
@@ -448,15 +494,16 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
       }
       if (!completed && !controller.signal.aborted) throw new Error('The assistant used too many workspace tool steps. Ask it to make a smaller edit.')
     } catch (error) {
-      if (!controller.signal.aborted && !(error instanceof DOMException && error.name === 'AbortError')) {
+      const aborted = controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')
+      if (!aborted) {
+        unexpectedFailure = true
         onToast(error instanceof Error ? error.message : 'Chat generation stopped unexpectedly.')
       }
     } finally {
       const stopped = controller.signal.aborted
-      if (stopped && !activeRoundPersisted && (activeRoundContent || activeRoundThoughts)) {
+      if (!activeRoundPersisted && (stopped || unexpectedFailure)) {
         try {
-          const saved = await persistAssistantRound(activeRoundContent, activeRoundThoughts, {}, 'stopped')
-          commitVisibleRound(saved, Boolean(activeRoundThoughts))
+          await persistInterruptedRound(stopped ? 'stopped' : 'failed')
         } catch {
           // Keep the already streamed partial visible until teardown even if persistence fails.
         }
@@ -698,7 +745,7 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
               {message.codexCreations?.length ? <div className="chat-document-edits">{message.codexCreations.map((proposal) => <CodexCreationCard key={proposal.id} proposal={proposal} onCreate={() => { void createCodexProposal(message, proposal) }} onReject={() => { void rejectCodexProposal(message, proposal) }} />)}</div> : null}
               {message.outlineActions?.length ? <div className="chat-document-edits">{message.outlineActions.map((proposal) => <OutlineActionCard key={proposal.id} proposal={proposal} onApply={() => { void applyOutlineProposal(message, proposal) }} onReject={() => { void rejectOutlineProposal(message, proposal) }} />)}</div> : null}
               {message.entityActions?.length ? <div className="chat-document-edits">{message.entityActions.map((proposal) => <EntityActionCard key={proposal.id} proposal={proposal} onApply={() => { void applyEntityProposal(message, proposal) }} onReject={() => { void rejectEntityProposal(message, proposal) }} />)}</div> : null}
-              {message.status === 'stopped' && <small className="chat-message-status">Stopped</small>}
+              {message.status && message.status !== 'complete' && <small className="chat-message-status">{message.status === 'failed' ? 'Interrupted' : 'Stopped'}</small>}
               <div className="message-tools"><button type="button" onClick={() => { void copyMessage(message) }}>{copiedMessageId === message.id ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />} {copiedMessageId === message.id ? 'Copied' : 'Copy'}</button><button type="button" onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" onClick={() => { void fork(message) }}><GitFork aria-hidden="true" /> Fork</button><button type="button" onClick={() => readAloud(message)}><Volume2 aria-hidden="true" /> Read aloud</button><button type="button" onClick={() => { void regenerate(message) }}><RefreshCw aria-hidden="true" /> Regenerate</button><button type="button" onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
             </>}
           </div> : editingId === message.id ? <InlineMessageEdit value={editingValue} onChange={setEditingValue} onCancel={() => setEditingId('')} onSave={() => { void saveEdit(message, false) }} onSaveAndRegenerate={() => { void saveEdit(message, true) }} /> : <>
