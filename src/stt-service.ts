@@ -39,7 +39,7 @@ export type SttTarget = {
 const STT_EVENT = 'arc-stt-state'
 const OPENAI_BASE = 'https://api.openai.com/v1'
 const NANOGPT_BASE = 'https://nano-gpt.com/api/v1'
-const NANOGPT_AUDIO_MODELS = `${NANOGPT_BASE}/audio-models?detailed=true&type=stt`
+const NANOGPT_AUDIO_MODELS = `${NANOGPT_BASE}/audio-models?detailed=true&type=speech-to-text`
 const OPENAI_TRANSCRIPTION_IDS = /(?:whisper|transcribe)/i
 
 let state: SttState = { status: 'idle', label: '', target: null, live: false }
@@ -138,6 +138,8 @@ function normalizeNanoModel(raw: unknown): SttModel | null {
   const value = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
   const modelId = stringValue(value.id) || stringValue(value.model) || stringValue(value.slug)
   if (!modelId) return null
+  const modelType = stringValue(value.type) || stringValue(value.model_type) || stringValue(value.category)
+  if (modelType && !/(?:speech[-_ ]?to[-_ ]?text|\bstt\b)/i.test(modelType)) return null
   const capabilities = value.capabilities && typeof value.capabilities === 'object' ? value.capabilities as Record<string, unknown> : {}
   const parameters = value.supported_parameters && typeof value.supported_parameters === 'object' ? value.supported_parameters as Record<string, unknown> : {}
   const formatsRaw = value.supported_formats ?? parameters.supported_formats
@@ -191,6 +193,11 @@ export async function fetchTranscriptionModels(settings: SpeechSettings, signal?
     if (errors.length) throw new Error(errors.join(' '))
   }
   return models.sort((a, b) => a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name))
+}
+
+export function transcriptionModelUnavailable(catalog: SttModel[], provider: SttProvider, selectedId: string) {
+  const providerModels = catalog.filter((model) => model.provider === provider)
+  return providerModels.length > 0 && !providerModels.some((model) => model.id === selectedId)
 }
 
 export function normalizeTranscriptForInsertion(transcript: string, before = '', after = '') {
@@ -278,7 +285,7 @@ function sessionState(session: ActiveSession, status: SttStatus, patch: Partial<
 }
 
 async function finalize(session: ActiveSession, transcript: string) {
-  if (session.id !== currentSession || session.controller.signal.aborted) return
+  if (!sessionIsCurrent(session)) return
   if (!session.target.isValid()) throw new Error('The original dictation target is no longer available.')
   session.target.onFinal(transcript)
   cleanupSession(session)
@@ -286,7 +293,7 @@ async function finalize(session: ActiveSession, transcript: string) {
 }
 
 function failSession(session: ActiveSession, error: unknown) {
-  if (session.id !== currentSession) return
+  if (session.id !== currentSession || active?.id !== session.id) return
   const aborted = session.controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')
   if (aborted) return
   session.target.onCancel?.()
@@ -402,6 +409,7 @@ async function startOpenAiRealtime(session: ActiveSession) {
     type: 'transcription',
     audio: {
       input: {
+        turn_detection: { type: 'server_vad' },
         transcription: {
           model: session.model.modelId,
           ...(session.settings.transcriptionLanguage !== 'auto' && session.settings.transcriptionLanguage.trim() ? { language: session.settings.transcriptionLanguage.trim() } : {}),
@@ -457,7 +465,7 @@ export async function startSttSession(settings: SpeechSettings, target: SttTarge
   }
   if (!sessionIsCurrent(session)) return
   const catalogModel = catalog.find((model) => model.id === settings.transcriptionModel)
-  if (catalog.length && !catalogModel) {
+  if (transcriptionModelUnavailable(catalog, selected.provider, settings.transcriptionModel)) {
     const error = new Error(`Saved transcription model “${settings.transcriptionModel}” is unavailable. Choose another model in Speech settings.`)
     failSession(session, error)
     throw error

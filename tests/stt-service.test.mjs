@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { normalizeTranscriptForInsertion, openAiSupportsLiveTranscription, parseTranscriptionModelId } from '../src/stt-service.ts'
+import { normalizeTranscriptForInsertion, openAiSupportsLiveTranscription, parseTranscriptionModelId, transcriptionModelUnavailable } from '../src/stt-service.ts'
 
 test('provider-qualified transcription model IDs are collision safe', () => {
   assert.deepEqual(parseTranscriptionModelId('openai:whisper-1'), { provider: 'openai', modelId: 'whisper-1' })
@@ -24,4 +24,12 @@ test('OpenAI live capability only advertises models Arc can stream as partial di
   for (const model of ['whisper-1', 'gpt-transcribe', 'gpt-4o-transcribe-diarize']) {
     assert.equal(openAiSupportsLiveTranscription(model), false, model)
   }
+})
+
+
+test('model unavailability is scoped to the selected provider catalog', () => {
+  const nanoOnly = [{ id: 'nanogpt:whisper-large-v3', provider: 'nanogpt', modelId: 'whisper-large-v3', name: 'Whisper Large V3', supportsFile: true, supportsLive: false }]
+  assert.equal(transcriptionModelUnavailable(nanoOnly, 'openai', 'openai:whisper-1'), false)
+  assert.equal(transcriptionModelUnavailable(nanoOnly, 'nanogpt', 'nanogpt:missing'), true)
+  assert.equal(transcriptionModelUnavailable(nanoOnly, 'nanogpt', 'nanogpt:whisper-large-v3'), false)
 })
