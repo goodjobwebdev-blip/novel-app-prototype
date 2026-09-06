@@ -17,12 +17,13 @@ import {
   X,
 } from 'lucide-react'
 import {
-  defaultAiPrompts,
   initialAiSettings,
   loadAiSettings,
   RESPONSE_LENGTH_PRESETS,
   saveAiSettings,
   saveGlobalFavorites,
+  resetPromptComposition,
+  withPromptSystemPrompt,
   type AiPrompts,
   type AiProvider,
   type AiSettings,
@@ -614,13 +615,13 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
         <section className="settings-card prompts-card">
           <div className="card-heading"><div><span>03</span><h2>System prompts</h2></div></div>
           <div className="prompt-tabs" role="tablist">{([['story', 'Story'], ['summarize', 'Summarize'], ['lore', 'Lore entries'], ['assistant', 'Assistant']] as const).map(([key, label]) => <button key={key} className={promptTab === key ? 'active' : ''} type="button" onClick={() => setPromptTab(key)}>{label}</button>)}</div>
-          <textarea className="prompt-editor" value={settings.prompts[promptTab]} onChange={(event) => update('prompts', { ...settings.prompts, [promptTab]: event.target.value })} spellCheck={false} />
+          <textarea className="prompt-editor" value={settings.promptCompositions[promptTab].systemPrompt} onChange={(event) => changeAiSettings((current) => withPromptSystemPrompt(current, promptTab, event.target.value))} spellCheck={false} />
           <details className="prompt-reference">
             <summary><CircleHelp aria-hidden="true" /><span>Variables & syntax</span></summary>
             <div className="prompt-syntax"><span>Insert a value</span><code>{'{{book.title}}'}</code><span>Include a block only when a value exists</span><code>{'{% if book.genre %}Genre: {{book.genre}}{% endif %}'}</code></div>
             <div className="prompt-variable-list">{promptVariables.filter((variable) => variable.scopes.includes(promptTab)).map((variable) => <div key={variable.name}><code>{`{{${variable.name}}}`}</code><span>{variable.description}</span></div>)}</div>
           </details>
-          <div className="prompt-footer"><button type="button" onClick={() => update('prompts', { ...settings.prompts, [promptTab]: defaultAiPrompts[promptTab] })}>Reset default</button></div>
+          <div className="prompt-footer"><button type="button" onClick={() => changeAiSettings((current) => resetPromptComposition(current, promptTab))}>Reset prompt composition</button></div>
         </section>
         {book && <footer className="save-bar"><div><strong>{book.title}</strong><span>Changes save automatically</span></div><div className="save-actions"><button className="reset-settings" type="button" onClick={() => { void resetFromDefaults() }} disabled={settingsLoading}><RefreshCw aria-hidden="true" /> Reset from defaults</button></div></footer>}
         </> : settingsTab === 'context' ? (book ? (book.contextType === 'note'
