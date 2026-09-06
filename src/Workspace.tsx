@@ -190,6 +190,8 @@ export default function Workspace() {
   const [toast, setToast] = useState<ToastMessage | null>(null)
   const [lastGeneratedPassage, setLastGeneratedPassage] = useState('')
   const [sttState, setSttState] = useState<SttState>(() => getSttState())
+  const [ttsState, setTtsState] = useState<TtsState>(() => getTtsState())
+  const [editorHistory, setEditorHistory] = useState({ canUndo: false, canRedo: false })
   const [autotitle, setAutotitle] = useState<AutotitleUiState | null>(null)
   const [loreMention, setLoreMention] = useState<LoreMentionPopupState | null>(null)
   const [bookList, setBookList] = useState<BookEntity[]>([])
@@ -225,6 +227,7 @@ export default function Workspace() {
     setArcPrompt('')
     setLorePrompt('')
     setLastGeneratedPassage('')
+    setEditorHistory({ canUndo: false, canRedo: false })
     setCodexTriggerDraft(activeDocument?.type === 'codexEntry' ? (activeDocument.autoIncludeTriggers ?? []).join('\n') : '')
     setLoreMention(null)
   }, [activeDocument?.id])
@@ -235,6 +238,7 @@ export default function Workspace() {
   }, [])
 
   useEffect(() => subscribeSttState(setSttState), [])
+  useEffect(() => subscribeTtsState(setTtsState), [])
 
   useEffect(() => () => {
     generationAbortRef.current?.abort()
@@ -1444,10 +1448,10 @@ export default function Workspace() {
         {(activeDocument?.type === 'note' || activeDocument?.type === 'codexEntry') && <div className={`document-titlebar ${activeCodexArchived ? 'archived' : ''}`}><div><small>{activeDocument.type === 'note' ? 'Note' : activeCodexArchived ? `Archived · ${activeDocument.category}` : activeDocument.category}</small><h1>{activeDocument.title}</h1></div><div className="document-title-actions">{(activeDocument.type === 'note' || !activeCodexArchived) && <button className="autotitle-trigger" type="button" onClick={() => { void startAutotitle(activeDocument) }} aria-label={`Autotitle ${activeDocument.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></button>}{activeDocument.type === 'codexEntry' && <SummaryIcon state={summaryStates[activeDocument.id] ?? 'missing'} kind="codex" onOpen={() => { void openSummary(activeDocument) }} />}{activeDocument.type === 'codexEntry' && activeCodexArchived ? <button type="button" onClick={() => { void restoreCodex(activeDocument) }}><ArchiveRestore aria-hidden="true" /> Restore</button> : <button type="button" onClick={() => { void renameContentEntity(activeDocument) }}><Pencil aria-hidden="true" /> Rename</button>}</div></div>}
         {activeDocument?.type === 'codexEntry' && <div className={`document-metadata ${activeCodexArchived ? 'archived' : ''}`}><label><span>Category</span><select disabled={activeCodexArchived} value={activeDocument.category} onChange={(event) => { void changeCodexCategory(event.target.value) }}><option>Character</option><option>Place</option><option>Object</option><option>Event</option><option>Group</option><option>Other</option></select></label>{!activeCodexArchived && <label className="codex-summary-preference"><input type="checkbox" checked={activeDocument.preferSummaryForContext === true} onChange={(event) => { void changeCodexSummaryPreference(event.target.checked) }} /><span><strong>Prefer summary for AI context</strong><small>{codexSummaryPolicyText(activeDocument, summaryStates[activeDocument.id] ?? 'missing')}</small></span></label>}{!activeCodexArchived && <label className="codex-trigger-editor"><span><strong>Auto include when text contains</strong></span><textarea value={codexTriggerDraft} onChange={(event) => setCodexTriggerDraft(event.target.value)} onBlur={() => { void saveCodexTriggers() }} placeholder="One literal trigger per line" /><small>One name, alias, phrase, or #tag per line. New entries start with their title; removing it keeps it removed, and renaming the entry does not rewrite triggers.</small></label>}{activeCodexArchived && <p className="archived-document-note"><Archive aria-hidden="true" /><span><strong>Archived lore</strong><small>Readable here, but excluded from AI context, Chat discovery, and normal Codex search until restored.</small></span></p>}</div>}
         {activeDocument?.type === 'summary' && summaryContextIndicator && <div className="summary-context-indicator">{summaryContextIndicator}</div>}
-        {activeDocument ? <MarkdownEditor key={`${activeDocument.id}-${editorRevision}`} ref={editorRef} value={storyMarkdown} onChange={handleStoryChange} ariaLabel={`${activeDocument.title} Markdown editor`} readOnly={activeCodexArchived || activeSummarySourceArchived} mentionTerms={activeDocument.type === 'scene' ? codexMentionIndex : []} onMentionClick={activeDocument.type === 'scene' ? openLoreMention : undefined} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No document selected</strong><p>Choose a Scene, Note, Codex entry, or Summary from the book workspace.</p><button type="button" onClick={() => setRightOpen(true)}>Open Book Workspace</button></div>}
+        {activeDocument ? <MarkdownEditor key={`${activeDocument.id}-${editorRevision}`} ref={editorRef} value={storyMarkdown} onChange={handleStoryChange} onHistoryChange={setEditorHistory} ariaLabel={`${activeDocument.title} Markdown editor`} readOnly={activeCodexArchived || activeSummarySourceArchived} mentionTerms={activeDocument.type === 'scene' ? codexMentionIndex : []} onMentionClick={activeDocument.type === 'scene' ? openLoreMention : undefined} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No document selected</strong><p>Choose a Scene, Note, Codex entry, or Summary from the book workspace.</p><button type="button" onClick={() => setRightOpen(true)}>Open Book Workspace</button></div>}
       </article> : currentBook ? <ChatView bookId={currentBook.id} chatId={activeChatId} bookPromptValues={toBookPromptValues(currentBook, seriesList)} currentSceneId={activeSceneId} onChatChange={openChat} onToast={showToast} /> : <section className="conversation chat-empty"><MessageCircle aria-hidden="true" /><p>Open a book before starting a chat.</p></section>}
 
-      {screen === 'editor' && (activeDocument?.type === 'scene' || (activeDocument?.type === 'codexEntry' && !activeCodexArchived)) && !arcOpen && <div className="editor-bottom"><button type="button" onClick={() => setArcOpen(true)} aria-label="Open generation input"><PanelBottomOpen aria-hidden="true" /></button><GenerateControl isGenerating={generationActive} phase={generationPhase} elapsedSeconds={generationElapsedSeconds} onOpenDetails={() => setGenerationDetailsOpen(true)} onGenerate={generate} onStop={stopGeneration} onMicro={() => { void dictateEditor() }} onMicro2={() => { void dictateInstruction() }} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} onReadAloud={() => { void readCurrentDocument() }} readAloudDisabled={activeDocument?.type === 'scene' && !lastGeneratedPassage.trim()} readAloudTitle={activeDocument?.type === 'scene' ? 'Read latest generated passage' : 'Read full Codex entry'} /></div>}
+      {screen === 'editor' && (activeDocument?.type === 'scene' || (activeDocument?.type === 'codexEntry' && !activeCodexArchived)) && !arcOpen && <div className="editor-bottom"><button type="button" onClick={() => setArcOpen(true)} aria-label="Open generation input"><PanelBottomOpen aria-hidden="true" /></button><GenerateControl isGenerating={generationActive} phase={generationPhase} elapsedSeconds={generationElapsedSeconds} sttState={sttState} ttsState={ttsState} canUndo={editorHistory.canUndo} canRedo={editorHistory.canRedo} onOpenDetails={() => setGenerationDetailsOpen(true)} onGenerate={generate} onStop={stopGeneration} onMicro={() => { void dictateEditor() }} onMicro2={() => { void dictateInstruction() }} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} onReadAloud={() => { void readCurrentDocument() }} readAloudDisabled={activeDocument?.type === 'scene' && !lastGeneratedPassage.trim()} readAloudTitle={activeDocument?.type === 'scene' ? 'Read latest generated passage' : 'Read full Codex entry'} /></div>}
       {screen === 'editor' && activeDocument?.type === 'summary' && !activeSummarySourceArchived && <div className="summary-generate-wrap"><button className="summary-generate" type="button" onClick={generationActive ? stopGeneration : generate}>{generationActive ? <Square aria-hidden="true" fill="currentColor" /> : <RefreshCw aria-hidden="true" />} {generationActive ? 'Stop' : openSummaryState === 'missing' ? 'Summarize' : 'Re-summarize'}</button></div>}
       {screen === 'editor' && (activeDocument?.type === 'scene' || (activeDocument?.type === 'codexEntry' && !activeCodexArchived)) && arcOpen && <section className="arc-drawer"><div><small>{activeDocument.type === 'codexEntry' ? 'LORE' : 'ARC'}</small>{generationActive && generationPhase ? <GenerationActivityStrip phase={generationPhase} elapsedSeconds={generationElapsedSeconds} placement="drawer" onOpenDetails={() => setGenerationDetailsOpen(true)} /> : <span>{activeDocument.type === 'codexEntry' ? 'Create or revise this entry' : 'Guide the next passage'}</span>}<button type="button" onClick={() => setArcOpen(false)} aria-label="Close generation input"><X aria-hidden="true" /></button></div><div className="arc-compose"><div className="arc-prompt-field"><ExpandableTextInput ref={promptRef} value={activeDocument.type === 'codexEntry' ? lorePrompt : arcPrompt} onChange={activeDocument.type === 'codexEntry' ? setLorePrompt : setArcPrompt} readOnly={sttState.target === 'instruction' && ['requesting-permission', 'recording', 'recording-live', 'stopping', 'transcribing', 'finalizing'].includes(sttState.status)} aria-label="generation prompt" dialogTitle="Edit generation prompt" /><span aria-live="polite">{(activeDocument.type === 'codexEntry' ? lorePrompt : arcPrompt).length} characters</span></div><button className={`play ${generationActive ? 'generating' : ''}`} type="button" onClick={generationActive ? stopGeneration : generate} aria-label={generationActive ? 'Stop generation' : 'Generate'}>{generationActive ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" fill="currentColor" />}</button></div></section>}
 
@@ -1578,10 +1582,14 @@ function GenerationActivityStrip({ phase, elapsedSeconds, placement, onOpenDetai
   </button>
 }
 
-function GenerateControl({ isGenerating, phase, elapsedSeconds, onOpenDetails, onGenerate, onStop, onMicro, onMicro2, onUndo, onRedo, onRegenerate, onReadAloud, readAloudDisabled, readAloudTitle }: {
+function GenerateControl({ isGenerating, phase, elapsedSeconds, sttState, ttsState, canUndo, canRedo, onOpenDetails, onGenerate, onStop, onMicro, onMicro2, onUndo, onRedo, onRegenerate, onReadAloud, readAloudDisabled, readAloudTitle }: {
   isGenerating: boolean
   phase: GenerationPhase | null
   elapsedSeconds: number
+  sttState: SttState
+  ttsState: TtsState
+  canUndo: boolean
+  canRedo: boolean
   onOpenDetails: () => void
   onGenerate: () => void
   onStop: () => void
@@ -1595,53 +1603,117 @@ function GenerateControl({ isGenerating, phase, elapsedSeconds, onOpenDetails, o
   readAloudTitle?: string
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [pressing, setPressing] = useState(false)
+  const [speechElapsed, setSpeechElapsed] = useState(0)
   const longPressRef = useRef(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const sttActive = (sttState.target === 'editor' || sttState.target === 'instruction') && ['requesting-permission', 'recording', 'recording-live', 'stopping', 'transcribing', 'finalizing'].includes(sttState.status)
+  const ttsActive = ['preparing', 'generating', 'playing', 'paused', 'waiting', 'stopping'].includes(ttsState.status)
+
+  useEffect(() => {
+    if (!sttActive || !sttState.startedAt || !['recording', 'recording-live'].includes(sttState.status)) { setSpeechElapsed(0); return }
+    const update = () => setSpeechElapsed(Math.max(0, Math.floor((Date.now() - sttState.startedAt!) / 1000)))
+    update()
+    const timer = window.setInterval(update, 250)
+    return () => window.clearInterval(timer)
+  }, [sttActive, sttState.startedAt, sttState.status])
+
+  useEffect(() => {
+    if (isGenerating || sttActive || ttsActive) setExpanded(false)
+  }, [isGenerating, sttActive, ttsActive])
 
   function cancelTimer() {
     if (timerRef.current) clearTimeout(timerRef.current)
     timerRef.current = null
+    setPressing(false)
   }
 
-  if (isGenerating && phase) return <div className="floating-generation-status">
-    <GenerationActivityStrip phase={phase} elapsedSeconds={elapsedSeconds} placement="floating" onOpenDetails={onOpenDetails} />
-    <button className="play generate-trigger generating" type="button" onClick={onStop} aria-label="Stop generation" title="Stop generation"><Square aria-hidden="true" fill="currentColor" /></button>
+  function startHold() {
+    if (isGenerating || sttActive || ttsActive) return
+    longPressRef.current = false
+    cancelTimer()
+    setPressing(true)
+    timerRef.current = setTimeout(() => {
+      longPressRef.current = true
+      setPressing(false)
+      setExpanded(true)
+    }, 450)
+  }
+
+  function collapseAnd(action: () => void) {
+    setExpanded(false)
+    action()
+  }
+
+  if (isGenerating && phase) return <div className="generate-control-shell mode generation-mode">
+    <div className="generate-mode-card generation" role="status" aria-live="polite">
+      <GenerationActivityStrip phase={phase} elapsedSeconds={elapsedSeconds} placement="floating" onOpenDetails={onOpenDetails} />
+      <button className="generate-mode-stop" type="button" onClick={onStop} aria-label="Stop generation"><Square aria-hidden="true" fill="currentColor" /><span>Stop</span></button>
+    </div>
   </div>
 
-  if (expanded) return <div className="generate-actions" role="toolbar" aria-label="Generate actions">
-    <button type="button" onClick={onMicro} aria-label="Dictate to editor" title="Dictate editor"><Mic aria-hidden="true" /></button>
-    <button type="button" onClick={onMicro2} aria-label="Dictate generation instruction" title="Dictate instruction"><Mic aria-hidden="true" /></button>
-    <button type="button" onClick={onUndo} aria-label="Undo editor change" title="Back / Undo"><Undo2 aria-hidden="true" /></button>
-    <button type="button" onClick={onRedo} aria-label="Redo editor change" title="Forward / Redo"><Redo2 aria-hidden="true" /></button>
-    <button type="button" onClick={onRegenerate} aria-label="Regenerate latest result" title="Regenerate"><RefreshCw aria-hidden="true" /></button>
-    <button className="read-aloud-action" type="button" onClick={onReadAloud} disabled={readAloudDisabled} aria-label={readAloudTitle || 'Read aloud'} title={readAloudDisabled ? 'No latest generated passage is available' : readAloudTitle || 'Read aloud'}><Volume2 aria-hidden="true" /></button>
-    <button type="button" onClick={() => setExpanded(false)} aria-label="Collapse generate actions" title="Collapse"><X aria-hidden="true" /></button>
-  </div>
+  if (sttActive) {
+    const label = sttState.status === 'requesting-permission' ? 'Microphone permission'
+      : sttState.status === 'recording' ? `Recording · ${formatGenerationTime(speechElapsed)}`
+      : sttState.status === 'recording-live' ? `Recording · Live · ${formatGenerationTime(speechElapsed)}`
+      : sttState.status === 'transcribing' ? 'Transcribing…'
+      : sttState.status === 'finalizing' ? 'Finalizing…'
+      : 'Stopping…'
+    return <div className="generate-control-shell mode dictation-mode">
+      <div className="generate-mode-card dictation" role="status" aria-live="polite"><Mic aria-hidden="true" /><span><strong>{sttState.label || 'Dictation'}</strong><small>{label}</small></span><div className="generate-mode-actions">{['recording','recording-live'].includes(sttState.status) && <button type="button" onClick={stopSttSession}><Square aria-hidden="true" fill="currentColor" /><span>Stop</span></button>}<button type="button" className="cancel" onClick={cancelSttSession}><X aria-hidden="true" /><span>Cancel</span></button></div></div>
+    </div>
+  }
 
-  return <button
-    className="play generate-trigger"
-    type="button"
-    aria-label="Generate. Press and hold for more actions."
-    onContextMenu={(event) => event.preventDefault()}
-    onPointerDown={() => {
-      longPressRef.current = false
-      cancelTimer()
-      timerRef.current = setTimeout(() => {
-        longPressRef.current = true
-        setExpanded(true)
-      }, 450)
-    }}
-    onPointerUp={cancelTimer}
-    onPointerCancel={cancelTimer}
-    onPointerLeave={cancelTimer}
-    onClick={() => {
-      if (longPressRef.current) {
-        longPressRef.current = false
-        return
-      }
-      onGenerate()
-    }}
-  ><Play aria-hidden="true" fill="currentColor" /></button>
+  if (ttsActive) {
+    const label = ttsState.status === 'preparing' ? 'Preparing audio…'
+      : ttsState.status === 'generating' ? 'Generating audio…'
+      : ttsState.status === 'playing' ? 'Playing'
+      : ttsState.status === 'paused' ? 'Paused'
+      : ttsState.status === 'waiting' ? 'Waiting for next chunk…'
+      : 'Stopping…'
+    return <div className="generate-control-shell mode playback-mode">
+      <div className="generate-mode-card playback" role="status" aria-live="polite"><Volume2 aria-hidden="true" /><span><strong>{ttsState.label || 'Read aloud'}</strong><small>{label}</small></span><div className="generate-mode-actions">{ttsState.status === 'playing' && <button type="button" onClick={pauseTtsSession}><Pause aria-hidden="true" /><span>Pause</span></button>}{ttsState.status === 'paused' && <button type="button" onClick={() => { void resumeTtsSession() }}><Play aria-hidden="true" /><span>Resume</span></button>}<button type="button" className="cancel" onClick={stopTtsSession}><Square aria-hidden="true" fill="currentColor" /><span>Stop</span></button></div></div>
+    </div>
+  }
+
+  return <div className={`generate-control-shell ${expanded ? 'expanded' : ''}`}>
+    {expanded && <section className="generate-panel" role="toolbar" aria-label="Generate actions">
+      <div className="generate-panel-primary">
+        <button type="button" className="generate-action labeled" onClick={() => collapseAnd(onMicro)}><Mic aria-hidden="true" /><span>Dictate editor</span></button>
+        <button type="button" className="generate-action labeled" onClick={() => collapseAnd(onMicro2)}><Mic aria-hidden="true" /><span>Dictate instruction</span></button>
+        <button type="button" className="generate-action labeled" onClick={() => collapseAnd(onRegenerate)}><RefreshCw aria-hidden="true" /><span>Regenerate</span></button>
+        <button type="button" className="generate-action labeled" onClick={() => collapseAnd(onReadAloud)} disabled={readAloudDisabled} aria-label={readAloudTitle || 'Read aloud'} title={readAloudDisabled ? 'No latest generated passage is available' : readAloudTitle || 'Read aloud'}><Volume2 aria-hidden="true" /><span>Read aloud</span></button>
+      </div>
+      <div className="generate-panel-utilities">
+        <button type="button" className="generate-action icon-only" onClick={onUndo} disabled={!canUndo} aria-label="Undo editor change" title={canUndo ? 'Undo' : 'Nothing to undo'}><Undo2 aria-hidden="true" /></button>
+        <button type="button" className="generate-action icon-only" onClick={onRedo} disabled={!canRedo} aria-label="Redo editor change" title={canRedo ? 'Redo' : 'Nothing to redo'}><Redo2 aria-hidden="true" /></button>
+        <button type="button" className="generate-action icon-only collapse" onClick={() => { setExpanded(false); triggerRef.current?.focus() }} aria-label="Collapse generate actions" title="Collapse"><X aria-hidden="true" /></button>
+      </div>
+    </section>}
+    <button
+      ref={triggerRef}
+      className={`play generate-trigger transformed ${pressing ? 'pressing' : ''} ${expanded ? 'expanded' : ''}`}
+      type="button"
+      aria-haspopup="menu"
+      aria-expanded={expanded}
+      aria-label="Generate. Press and hold, or press Arrow Up, for more actions."
+      onContextMenu={(event) => event.preventDefault()}
+      onKeyDown={(event) => {
+        if (event.key === 'ArrowUp') { event.preventDefault(); cancelTimer(); setExpanded(true) }
+        if (event.key === 'Escape' && expanded) { event.preventDefault(); setExpanded(false) }
+      }}
+      onPointerDown={startHold}
+      onPointerUp={cancelTimer}
+      onPointerCancel={cancelTimer}
+      onPointerLeave={cancelTimer}
+      onClick={() => {
+        if (longPressRef.current) { longPressRef.current = false; return }
+        setExpanded(false)
+        onGenerate()
+      }}
+    ><span className="generate-hold-ring" aria-hidden="true"><svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="21" /></svg></span><Play aria-hidden="true" fill="currentColor" /><span className="generate-trigger-label">Generate</span></button>
+  </div>
 }
 
 function AutotitlePanel({ state, onAccept, onRegenerate, onStop, onCancel }: { state: AutotitleUiState; onAccept: () => void; onRegenerate: () => void; onStop: () => void; onCancel: () => void }) {

@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
-import { defaultKeymap, history, historyKeymap, isolateHistory, redo, undo } from '@codemirror/commands'
+import { defaultKeymap, history, historyKeymap, isolateHistory, redo, redoDepth, undo, undoDepth } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
 import { syntaxTree } from '@codemirror/language'
 import { Annotation, Compartment, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state'
@@ -30,6 +30,7 @@ type MarkdownEditorProps = {
   readOnly?: boolean
   mentionTerms?: CodexMentionTerm[]
   onMentionClick?: (mention: CodexMentionClick) => void
+  onHistoryChange?: (state: { canUndo: boolean; canRedo: boolean }) => void
 }
 
 export type MarkdownEditorHandle = {
@@ -440,12 +441,13 @@ function runHistoryCommand(view: EditorView | null, command: (target: EditorView
 }
 
 const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor(
-  { value, onChange, ariaLabel = 'Markdown editor', className = '', readOnly = false, mentionTerms = [], onMentionClick },
+  { value, onChange, ariaLabel = 'Markdown editor', className = '', readOnly = false, mentionTerms = [], onMentionClick, onHistoryChange },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<EditorView | null>(null)
   const onChangeRef = useRef(onChange)
+  const onHistoryChangeRef = useRef(onHistoryChange)
   const mentionTermsRef = useRef(mentionTerms)
   const onMentionClickRef = useRef(onMentionClick)
   const activeGenerationRef = useRef<ActiveGeneration | null>(null)
@@ -454,6 +456,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
   const editableCompartmentRef = useRef(new Compartment())
 
   useEffect(() => { onChangeRef.current = onChange }, [onChange])
+  useEffect(() => { onHistoryChangeRef.current = onHistoryChange }, [onHistoryChange])
   useEffect(() => { onMentionClickRef.current = onMentionClick }, [onMentionClick])
   useEffect(() => {
     mentionTermsRef.current = mentionTerms
@@ -607,6 +610,9 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
         EditorView.contentAttributes.of({ 'aria-label': ariaLabel, spellcheck: 'true' }),
         EditorView.updateListener.of(update => {
           if (update.docChanged && !update.transactions.some((transaction) => transaction.annotation(dictationProvisional))) onChangeRef.current(update.state.doc.toString())
+          if (update.docChanged || update.transactions.length) {
+            onHistoryChangeRef.current?.({ canUndo: undoDepth(update.state) > 0, canRedo: redoDepth(update.state) > 0 })
+          }
         }),
         EditorView.theme({
           '&': { backgroundColor: 'transparent', width: '100%', maxWidth: '100%' },
@@ -621,6 +627,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
 
     const view = new EditorView({ state, parent: hostRef.current })
     viewRef.current = view
+    onHistoryChangeRef.current?.({ canUndo: undoDepth(view.state) > 0, canRedo: redoDepth(view.state) > 0 })
     if (mentionTermsRef.current.length) view.dispatch({ effects: setMentionTerms.of(mentionTermsRef.current) })
 
     return () => {
