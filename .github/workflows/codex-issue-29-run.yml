@@ -31,11 +31,9 @@ jobs:
           start = workflow.index("          from pathlib import Path\n")
           end = workflow.index("          PY\n", start)
           script = textwrap.dedent(workflow[start:end])
-          bad = "\n\"\"\")\nreplace('src/App.tsx',\n\"\"\"  const outlineState"
-          good = "\n'')\nreplace('src/App.tsx',\n\"\"\"  const outlineState"
-          if bad not in script:
-              raise SystemExit('Could not locate the malformed empty-string argument in issue 29 patch script.')
-          script = script.replace(bad, good, 1)
+          marker = script.index('const chatWorkspaceInstructions')
+          malformed = script.index('""")', marker)
+          script = script[:malformed] + "'')" + script[malformed + 4:]
           exec(compile(script, 'issue29_patch', 'exec'))
           PY
       - name: Install dependencies
