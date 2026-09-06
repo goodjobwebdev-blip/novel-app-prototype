@@ -21,6 +21,7 @@ jobs:
       - name: Apply focused source edits
         run: |
           sed -i "s/'cachedTextModelCatalog(defaults)', 3)/'cachedTextModelCatalog(defaults)', 2)/" scripts/apply-issue-109.mjs
+          sed -i "s/'cachedTextModelCatalog(copied)', 2)/'cachedTextModelCatalog(copied)', 1)/" scripts/apply-issue-109.mjs
           node scripts/apply-issue-109.mjs
       - name: Commit patched source
         run: |
