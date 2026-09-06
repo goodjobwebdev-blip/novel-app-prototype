@@ -218,6 +218,7 @@ export default function Workspace() {
   const changedSinceSnapshotRef = useRef(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const documentSaveQueueRef = useRef(new KeyedAsyncQueue())
+  const bookMetadataSaveQueueRef = useRef(new KeyedAsyncQueue())
   const deletingEntityIdsRef = useRef(new Set<string>())
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const generationAbortRef = useRef<AbortController | null>(null)
@@ -690,10 +691,11 @@ export default function Workspace() {
   }
 
   async function saveBookMetadata(metadata: BookMetadata) {
-    if (!currentBook) return
-    const updated = await updateBookMetadata(currentBook.id, metadata)
-    setCurrentBook(updated)
+    const sourceBookId = currentBookIdRef.current
+    if (!sourceBookId) return
+    const updated = await bookMetadataSaveQueueRef.current.run(sourceBookId, () => updateBookMetadata(sourceBookId, metadata))
     setBookList((books) => books.map((book) => book.id === updated.id ? updated : book))
+    if (bookScopeMatches(sourceBookId, currentBookIdRef.current)) setCurrentBook(updated)
   }
 
   async function addSeries(title: string) {
@@ -2092,18 +2094,20 @@ function BookSettings({ book, books, series, onSave, onCreateSeries, onRenameSer
     if (!draft || JSON.stringify(draft) === savedRef.current) return
     setSaveStatus('saving')
     const sequence = ++saveSequenceRef.current
+    const draftSnapshot = draft
     const timer = window.setTimeout(async () => {
       try {
-        await onSave(draft)
-        savedRef.current = JSON.stringify(draft)
-        if (sequence === saveSequenceRef.current) setSaveStatus('saved')
+        await saveHandlerRef.current(draftSnapshot)
+        if (sequence !== saveSequenceRef.current) return
+        savedRef.current = JSON.stringify(draftSnapshot)
+        setSaveStatus('saved')
       } catch (error) {
         console.error('Failed to save book metadata', error)
         if (sequence === saveSequenceRef.current) setSaveStatus('error')
       }
     }, 650)
     return () => window.clearTimeout(timer)
-  }, [draft, onSave])
+  }, [draft])
 
   useEffect(() => {
     if (!deleteConfirm) return
