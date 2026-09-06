@@ -1,0 +1,35 @@
+name: Fix issue 101
+
+on:
+  push:
+    branches:
+      - fix/issue-101-tts-stop-preparing
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/issue-101-tts-stop-preparing
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Apply fix
+        run: python .github/scripts/issue101.py
+      - run: npm install --no-package-lock
+      - run: node --test tests/tts-service-stop-preparing.test.mjs
+      - run: npm run build
+      - name: Commit validated fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm .github/scripts/issue101.py .github/workflows/fix-issue-101.yml
+          git add -A
+          git commit -m "Fix TTS stop during preparation"
+          git push origin HEAD:fix/issue-101-tts-stop-preparing
