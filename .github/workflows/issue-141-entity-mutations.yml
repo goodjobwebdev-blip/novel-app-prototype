@@ -1,0 +1,36 @@
+name: Validate issue 141 entity mutation races
+
+on:
+  push:
+    branches:
+      - fix/issue-141-entity-mutation-races
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/issue-141-entity-mutation-races
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Apply issue 141 fix
+        run: python .github/scripts/issue141.py
+      - run: npm install --no-package-lock
+      - name: Regression tests
+        run: node --test tests/*.test.mjs
+      - run: npm run build
+      - name: Commit validated source
+        run: |
+          rm .github/scripts/issue141.py .github/workflows/issue-141-entity-mutations.yml
+          git config user.name "goodjobwebdev-blip"
+          git config user.email "goodjob.webdev@gmail.com"
+          git add src/persistence.ts tests/entity-mutation-race.test.mjs .github/scripts/issue141.py .github/workflows/issue-141-entity-mutations.yml
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Make entity mutations field-safe"
+          git push origin HEAD:fix/issue-141-entity-mutation-races
