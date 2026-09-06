@@ -447,7 +447,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       throw new Error('This book’s AI settings could not be loaded.')
     }
     assertGenerationOwnerCurrent(owner, activeChat)
-    if (!settings.apiKey.trim()) throw new Error('Add an API key in Book AI settings before chatting.')
+    if (settings.provider !== 'fake' && !settings.apiKey.trim()) throw new Error('Add an API key in Book AI settings before chatting.')
     if (!activeChat.model.trim()) throw new Error('Choose a chat model before sending.')
 
     let context: Awaited<ReturnType<typeof buildContextValues>>

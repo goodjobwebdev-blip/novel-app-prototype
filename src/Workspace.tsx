@@ -40,7 +40,7 @@ import {
   X,
 } from 'lucide-react'
 import AiSettingsScreen from './App'
-import { generationWordDelayMs, loadAiSettings, type AiSettings } from './ai-settings'
+import { generationWordDelayMs, loadAiSettings, textAiIsConfigured, type AiSettings } from './ai-settings'
 import { createBufferedWordRenderer } from './buffered-word-renderer'
 import { applyIfStillCurrent } from './async-state-guard'
 import { LatestAsyncIntent, bookScopeMatches, documentBelongsToBook } from './book-scope-guard'
@@ -51,7 +51,8 @@ import { canUnmountEditor } from './editor-unmount-guard'
 import { summaryGenerationOwnsUi, type SummaryGenerationOwner } from './summary-generation-owner'
 import ExpandableTextInput from './ExpandableTextInput'
 import MarkdownEditor, { type CodexMentionClick, type MarkdownEditorHandle } from './MarkdownEditor'
-import { fetchNanoGPTModelContextLength, nanoGPTRequestText, renderLorePrompt, renderStoryPrompt, streamNanoGPTCompletion, type NanoGPTStreamMetadata } from './nanogpt'
+import { renderLorePrompt, renderStoryPrompt, type NanoGPTStreamMetadata } from './nanogpt'
+import { fetchTextProviderModelContextLength, streamTextProviderCompletion, textProviderRequestText } from './text-provider'
 import { generationInstructionMessage, type BookPromptValues } from './prompt-template'
 import { buildContextValues, generationContextDiagnostics } from './context-service'
 import {
@@ -134,6 +135,7 @@ type LoreMentionPreview = { entryId: string; title: string; category: string; co
 type LoreMentionPopupState = { id: number; term: CodexMentionTerm; anchor: CodexMentionClick['rect']; selectedId?: string; loading?: boolean; preview?: LoreMentionPreview; error?: string }
 type ActiveSummaryGenerationOwner = SummaryGenerationOwner & { controller: AbortController }
 type GenerationRequestSnapshot = {
+  provider: AiSettings['provider']
   baseUrl: string
   model: string
   systemPrompt: string
@@ -147,7 +149,7 @@ type GenerationDetails = NanoGPTStreamMetadata & {
   action: 'Generate' | 'Regenerate' | 'Summarize'
   targetTitle: string
   requestedModel: string
-  provider: 'NanoGPT'
+  provider: 'NanoGPT' | 'Fake (testing)'
   startedAt: number
   finishedAt?: number
   status: GenerationPhase | 'complete' | 'cancelled' | 'error'
@@ -254,7 +256,7 @@ export default function Workspace() {
 
   useEffect(() => {
     const settings = loadAiSettings()
-    setAiReady(settings.provider === 'nanogpt' && Boolean(settings.apiKey.trim() && settings.mainModel.trim()))
+    setAiReady(textAiIsConfigured(settings))
   }, [])
 
   useEffect(() => subscribeSttState(setSttState), [])
@@ -1208,11 +1210,11 @@ export default function Workspace() {
       showToast('This book’s AI settings could not be loaded. Open Book settings and try again.')
       return
     }
-    if (settings.provider !== 'nanogpt') {
-      showToast('Text generation currently supports NanoGPT only. Choose it in Book settings.')
+    if (settings.provider !== 'nanogpt' && settings.provider !== 'fake') {
+      showToast('Text generation currently supports NanoGPT or Fake (testing) only. Choose one in Book settings.')
       return
     }
-    if (!settings.apiKey.trim()) {
+    if (settings.provider === 'nanogpt' && !settings.apiKey.trim()) {
       showToast('Add your NanoGPT API key in Book settings before generating.')
       return
     }
@@ -1255,7 +1257,7 @@ export default function Workspace() {
           profile,
         })
         const modelContextLength = (isCodex ? settings.codexModelContextLength || settings.mainModelContextLength : settings.mainModelContextLength)
-          ?? await fetchNanoGPTModelContextLength(settings.apiKey.trim(), settings.baseUrl, selectedModel).catch(() => undefined)
+          ?? await fetchTextProviderModelContextLength({ provider: settings.provider, apiKey: settings.apiKey.trim(), baseUrl: settings.baseUrl, model: selectedModel }).catch(() => undefined)
         if (modelContextLength) {
           settings = await saveBookAiSettings(currentBook.id, isCodex && settings.codexModel.trim()
             ? { ...settings, codexModelContextLength: modelContextLength }
@@ -1273,7 +1275,7 @@ export default function Workspace() {
           ? `# Additional context\n\n${prepared.additionalContext}`
           : ''
         const effectiveLimit = isCodex && settings.codexModel.trim() ? settings.codexEffectiveContextLimit : settings.mainEffectiveContextLimit
-        const requestText = nanoGPTRequestText({ systemPrompt, contextMessage, userMessage })
+        const requestText = textProviderRequestText({ systemPrompt, contextMessage, userMessage })
         const diagnostics = generationContextDiagnostics(selectedModel, modelContextLength, effectiveLimit, requestText)
         if (!diagnostics.limitValid) {
           editor.finishGeneration('error')
@@ -1291,6 +1293,7 @@ export default function Workspace() {
           showToast(`Context is near the configured limit (${Math.round(diagnostics.usageRatio * 100)}%). Consider summarizing older material, deselecting full-text context, or raising the cap before adding more context.${dependencyTitles.length ? ` Dependency cascade includes: ${dependencyTitles.join(', ')}.` : ''}`)
         }
         requestSnapshot = {
+          provider: settings.provider,
           baseUrl: settings.baseUrl,
           model: selectedModel,
           systemPrompt,
@@ -1313,7 +1316,7 @@ export default function Workspace() {
       action: mode === 'regenerate' ? 'Regenerate' : 'Generate',
       targetTitle: activeDocument.title,
       requestedModel: requestSnapshot.model,
-      provider: 'NanoGPT',
+      provider: requestSnapshot.provider === 'fake' ? 'Fake (testing)' : 'NanoGPT',
       estimatedRequestTokens: requestSnapshot.estimatedRequestTokens,
       modelContextTokens: requestSnapshot.modelContextTokens,
     })
@@ -1328,7 +1331,9 @@ export default function Workspace() {
     })
 
     try {
-      await streamNanoGPTCompletion({
+      await streamTextProviderCompletion({
+        provider: requestSnapshot.provider,
+        task: isCodex ? 'codex' : 'story',
         apiKey: settings.apiKey.trim(),
         baseUrl: requestSnapshot.baseUrl,
         model: requestSnapshot.model,
@@ -1431,9 +1436,9 @@ export default function Workspace() {
         return
       }
       if (cancelledDuringPreflight()) return
-      if (settings.provider !== 'nanogpt' || !settings.apiKey.trim() || !settings.supportModel.trim()) {
+      if ((settings.provider !== 'nanogpt' && settings.provider !== 'fake') || (settings.provider === 'nanogpt' && !settings.apiKey.trim()) || !settings.supportModel.trim()) {
         status = 'error'
-        showToast('Choose NanoGPT and a Support model in Book settings before summarizing.')
+        showToast('Choose NanoGPT or Fake (testing) and a Support model in Book settings before summarizing.')
         return
       }
 
@@ -1450,14 +1455,16 @@ export default function Workspace() {
         action: 'Summarize',
         targetTitle: source.source.title,
         requestedModel: settings.supportModel,
-        provider: 'NanoGPT',
+        provider: settings.provider === 'fake' ? 'Fake (testing)' : 'NanoGPT',
         startedAt: generationStartedAtRef.current,
         status: 'sending',
         thoughts: '',
       })
 
       let generated = ''
-      await streamNanoGPTCompletion({
+      await streamTextProviderCompletion({
+        provider: settings.provider,
+        task: 'summary',
         apiKey: settings.apiKey.trim(),
         baseUrl: settings.baseUrl,
         model: settings.supportModel,
@@ -1628,7 +1635,7 @@ export default function Workspace() {
     onHome={() => setScreen('home')}
     onBack={() => setScreen(returnScreen)}
     onSaved={(settings) => {
-      if (returnScreen === 'home') setAiReady(settings.provider === 'nanogpt' && Boolean(settings.apiKey.trim() && settings.mainModel.trim()))
+      if (returnScreen === 'home') setAiReady(textAiIsConfigured(settings))
     }}
   />
 
