@@ -301,6 +301,17 @@ export async function putEntity(entity: ArcEntity) {
   return entity
 }
 
+export async function updateEntityAtomically<T extends ArcEntity = ArcEntity>(id: string, update: (current: T) => T): Promise<T> {
+  const db = await database()
+  return db.transaction('rw', db.table('entities'), async () => {
+    const current = await db.table('entities').get(id) as T | undefined
+    if (!current) throw new Error(`Cannot update missing entity ${id}`)
+    const next = update(current)
+    await db.table('entities').put(next)
+    return next
+  })
+}
+
 export async function listEntitiesByParent(parentId: string): Promise<ArcEntity[]> {
   const db = await database()
   const children: ArcEntity[] = await db.table('entities').where('parentId').equals(parentId).toArray()

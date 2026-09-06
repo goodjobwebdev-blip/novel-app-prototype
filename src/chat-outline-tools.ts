@@ -1,6 +1,7 @@
 import type { ChatToolCall, ChatToolDefinition } from './chat-api'
 import {
-  updateChatMessage,
+  claimChatMessageProposal,
+  transitionChatMessageProposal,
   type ChatMessageEntity,
   type ChatOutlineActionProposal,
 } from './chat-service'
@@ -305,23 +306,14 @@ export async function executeChatOutlineTool(bookId: string, call: ChatToolCall)
   }
 }
 
-async function messageWithOutlineAction(messageId: string, proposalId: string) {
-  const entity = await getEntity<ArcEntity>(messageId)
-  if (!entity || entity.type !== 'chatMessage') throw new Error('The chat message is no longer available.')
-  const message = entity as ChatMessageEntity
-  const proposal = message.outlineActions?.find((item) => item.id === proposalId)
-  if (!proposal) throw new Error('That outline proposal is no longer available.')
-  return { message, proposal }
-}
-
-async function setOutlineActionStatus(message: ChatMessageEntity, proposalId: string, patch: Partial<ChatOutlineActionProposal>) {
-  const outlineActions = (message.outlineActions ?? []).map((proposal) => proposal.id === proposalId ? { ...proposal, ...patch } : proposal)
-  return updateChatMessage(message.id, { outlineActions })
+async function setOutlineActionStatus(messageId: string, proposalId: string, patch: Partial<ChatOutlineActionProposal>) {
+  return transitionChatMessageProposal(messageId, 'outlineActions', proposalId, ['applying'], patch)
 }
 
 export async function applyChatOutlineAction(messageId: string, proposalId: string) {
-  const { message, proposal } = await messageWithOutlineAction(messageId, proposalId)
-  if (proposal.status !== 'proposed') throw new Error(`This outline proposal is already ${proposal.status}.`)
+  const claimed = await claimChatMessageProposal(messageId, 'outlineActions', proposalId)
+  const message = claimed.message
+  const proposal = claimed.proposal as ChatOutlineActionProposal
 
   try {
     if (proposal.action === 'create') {
@@ -330,60 +322,58 @@ export async function applyChatOutlineAction(messageId: string, proposalId: stri
       const created = await createStructuralEntity(proposal.entityType, message.bookId, parentId, proposal.newTitle || proposal.entityTitle)
       if (proposal.entityType === 'scene' && proposal.initialContent) await saveDocumentContent(created.id, proposal.initialContent)
       const appliedAt = Date.now()
-      await setOutlineActionStatus(message, proposal.id, { status: 'applied', appliedAt, entityId: created.id })
+      await setOutlineActionStatus(message.id, proposal.id, { status: 'applied', appliedAt, entityId: created.id })
       if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('arc-entity-changed', { detail: { bookId: message.bookId, entityId: created.id } }))
       return { entityId: created.id, appliedAt }
     }
 
     const entity = await structuralEntity(message.bookId, proposal.entityId ?? '')
     if (proposal.expectedUpdatedAt !== undefined && entity.updatedAt !== proposal.expectedUpdatedAt) {
-      await setOutlineActionStatus(message, proposal.id, { status: 'stale' })
+      await setOutlineActionStatus(message.id, proposal.id, { status: 'stale' })
       throw new Error('The outline item changed after this proposal was created. Ask Chat to read the outline again.')
     }
 
     if (proposal.action === 'rename') {
       await renameEntity(entity.id, proposal.newTitle || entity.title)
       const appliedAt = Date.now()
-      await setOutlineActionStatus(message, proposal.id, { status: 'applied', appliedAt })
+      await setOutlineActionStatus(message.id, proposal.id, { status: 'applied', appliedAt })
       if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('arc-entity-changed', { detail: { bookId: message.bookId, entityId: entity.id } }))
       return { entityId: entity.id, appliedAt }
     }
 
     if (proposal.action === 'move') {
       if (entity.parentId !== proposal.sourceParentId || (entity.order ?? 0) !== proposal.sourceOrder) {
-        await setOutlineActionStatus(message, proposal.id, { status: 'stale' })
+        await setOutlineActionStatus(message.id, proposal.id, { status: 'stale' })
         throw new Error('The outline order changed after this proposal was created. Ask Chat to read the outline again.')
       }
       await outlineParent(message.bookId, entity.type, proposal.targetParentId ?? '')
       await validateBefore(message.bookId, entity, proposal.targetParentId ?? '', proposal.beforeId)
       await placeStructuralEntity(entity.id, proposal.targetParentId ?? '', proposal.beforeId)
       const appliedAt = Date.now()
-      await setOutlineActionStatus(message, proposal.id, { status: 'applied', appliedAt })
+      await setOutlineActionStatus(message.id, proposal.id, { status: 'applied', appliedAt })
       if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('arc-entity-changed', { detail: { bookId: message.bookId, entityId: entity.id } }))
       return { entityId: entity.id, appliedAt }
     }
 
     const blockers = await nonEmptyScenesInSubtree(message.bookId, entity.id)
     if (blockers.length) {
-      await setOutlineActionStatus(message, proposal.id, { status: 'stale' })
+      await setOutlineActionStatus(message.id, proposal.id, { status: 'stale' })
       throw new Error('This outline item now contains non-empty Scene content, so it cannot be deleted.')
     }
     const deletedIds = await deleteEntityTree(entity.id)
     const appliedAt = Date.now()
-    await setOutlineActionStatus(message, proposal.id, { status: 'applied', appliedAt })
+    await setOutlineActionStatus(message.id, proposal.id, { status: 'applied', appliedAt })
     if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('arc-entity-changed', { detail: { bookId: message.bookId, entityId: entity.id, deletedIds } }))
     return { entityId: entity.id, appliedAt, deletedIds }
   } catch (error) {
-    if (proposal.status === 'proposed' && proposal.action !== 'create') {
+    if (proposal.status === 'applying') {
       const refreshed = await getEntity<ArcEntity>(proposal.entityId ?? '')
-      if (!refreshed) await setOutlineActionStatus(message, proposal.id, { status: 'stale' }).catch(() => undefined)
+      if (!refreshed) await setOutlineActionStatus(message.id, proposal.id, { status: 'stale' }).catch(() => undefined)
     }
     throw error
   }
 }
 
 export async function rejectChatOutlineAction(messageId: string, proposalId: string) {
-  const { message, proposal } = await messageWithOutlineAction(messageId, proposalId)
-  if (proposal.status !== 'proposed') return
-  await setOutlineActionStatus(message, proposal.id, { status: 'rejected' })
+  await transitionChatMessageProposal(messageId, 'outlineActions', proposalId, ['proposed'], { status: 'rejected' })
 }

@@ -1,5 +1,6 @@
 import { defaultAiPrompts, loadAiSettings, previousDefaultAssistantPrompts, type AiSettings } from './ai-settings'
 import { getCachedModelCatalog } from './model-catalog'
+import { transitionProposalList } from './chat-proposal-transition'
 import {
   deleteEntityTree,
   getBookAiSettings,
@@ -7,6 +8,7 @@ import {
   getEntity,
   listEntitiesByBook,
   putEntity,
+  updateEntityAtomically,
   type ArcEntity,
   type GenerationContextProfile,
 } from './persistence'
@@ -26,7 +28,7 @@ export type ChatEntity = ArcEntity & {
 }
 
 export type ChatMessageStatus = 'complete' | 'stopped' | 'failed'
-export type ChatCodexCreationStatus = 'proposed' | 'created' | 'rejected' | 'duplicate'
+export type ChatCodexCreationStatus = 'proposed' | 'applying' | 'created' | 'rejected' | 'duplicate'
 export type ChatCodexCreationProposal = {
   id: string
   title: string
@@ -51,7 +53,7 @@ export type ChatEntityActionProposal = {
   category?: string
   expectedUpdatedAt?: number
   summary?: string
-  status: 'proposed' | 'applied' | 'rejected' | 'stale'
+  status: 'proposed' | 'applying' | 'applied' | 'rejected' | 'stale'
   createdAt: number
   appliedAt?: number
 }
@@ -71,7 +73,7 @@ export type ChatOutlineActionProposal = {
   beforeId?: string
   beforeTitle?: string
   summary?: string
-  status: 'proposed' | 'applied' | 'rejected' | 'stale'
+  status: 'proposed' | 'applying' | 'applied' | 'rejected' | 'stale'
   createdAt: number
   appliedAt?: number
 }
@@ -86,7 +88,7 @@ export type ChatDocumentEditProposal = {
   edits?: ChatTextReplacement[]
   newContent?: string
   summary?: string
-  status: 'proposed' | 'applied' | 'rejected' | 'stale'
+  status: 'proposed' | 'applying' | 'applied' | 'rejected' | 'stale'
   createdAt: number
   appliedAt?: number
 }
@@ -271,6 +273,39 @@ export async function updateChatMessage(messageId: string, patch: Partial<Pick<C
   await putEntity(next)
   await touchFromMessages(next.bookId, next.parentId)
   return next
+}
+
+export type ChatProposalField = 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions'
+type AnyChatProposal = ChatDocumentEditProposal | ChatCodexCreationProposal | ChatOutlineActionProposal | ChatEntityActionProposal
+
+export async function transitionChatMessageProposal(
+  messageId: string,
+  field: ChatProposalField,
+  proposalId: string,
+  allowedStatuses: readonly string[] | null,
+  patch: Partial<AnyChatProposal>,
+): Promise<{ message: ChatMessageEntity; proposal: AnyChatProposal; changed: boolean }> {
+  let selected: AnyChatProposal | undefined
+  let changed = false
+  const next = await updateEntityAtomically<ChatMessageEntity>(messageId, (current) => {
+    if (current.type !== 'chatMessage') throw new Error('Message is no longer available.')
+    const proposals = (current[field] ?? []) as AnyChatProposal[]
+    const result = transitionProposalList(proposals, proposalId, allowedStatuses, patch)
+    selected = result.proposal
+    changed = result.changed
+    return result.changed
+      ? { ...current, [field]: result.proposals, updatedAt: Date.now() } as ChatMessageEntity
+      : current
+  })
+  if (!selected) throw new Error('That proposal is no longer available.')
+  if (changed) await touchFromMessages(next.bookId, next.parentId)
+  return { message: next, proposal: selected, changed }
+}
+
+export async function claimChatMessageProposal(messageId: string, field: ChatProposalField, proposalId: string) {
+  const result = await transitionChatMessageProposal(messageId, field, proposalId, ['proposed'], { status: 'applying' })
+  if (!result.changed) throw new Error(`This proposal is already ${result.proposal.status}.`)
+  return result
 }
 
 export async function deleteMessageAndFollowing(bookId: string, chatId: string, order: number) {

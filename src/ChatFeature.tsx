@@ -906,7 +906,7 @@ function ChatModelPicker({ value, models, onChange }: { value: string; models: C
 function EntityActionCard({ proposal, onApply, onReject }: { proposal: ChatEntityActionProposal; onApply: () => void; onReject: () => void }) {
   const actionLabel = proposal.action === 'create_note' ? 'Create' : proposal.action === 'rename' ? 'Rename' : proposal.action === 'delete' ? 'Delete' : 'Change category'
   const typeLabel = proposal.entityType === 'book' ? 'Book' : proposal.entityType === 'codexEntry' ? 'Codex' : 'Note'
-  const statusLabel = proposal.status === 'proposed' ? 'Needs approval' : proposal.status === 'applied' ? 'Applied' : proposal.status === 'stale' ? 'Item changed' : 'Rejected'
+  const statusLabel = proposal.status === 'proposed' ? 'Needs approval' : proposal.status === 'applying' ? 'Applying…' : proposal.status === 'applied' ? 'Applied' : proposal.status === 'stale' ? 'Item changed' : 'Rejected'
   return <section className={`chat-document-edit chat-entity-action ${proposal.action} ${proposal.status}`}>
     <header><div><small>{actionLabel} {typeLabel}</small><strong>{proposal.entityTitle}</strong></div><span>{statusLabel}</span></header>
     {proposal.summary && <p>{proposal.summary}</p>}
@@ -922,7 +922,7 @@ function EntityActionCard({ proposal, onApply, onReject }: { proposal: ChatEntit
 
 function OutlineActionCard({ proposal, onApply, onReject }: { proposal: ChatOutlineActionProposal; onApply: () => void; onReject: () => void }) {
   const actionLabel = proposal.action === 'create' ? 'Create' : proposal.action === 'rename' ? 'Rename' : proposal.action === 'move' ? 'Move' : 'Delete'
-  const statusLabel = proposal.status === 'proposed' ? 'Needs approval' : proposal.status === 'applied' ? 'Applied' : proposal.status === 'stale' ? 'Outline changed' : 'Rejected'
+  const statusLabel = proposal.status === 'proposed' ? 'Needs approval' : proposal.status === 'applying' ? 'Applying…' : proposal.status === 'applied' ? 'Applied' : proposal.status === 'stale' ? 'Outline changed' : 'Rejected'
   const typeLabel = proposal.entityType[0].toUpperCase() + proposal.entityType.slice(1)
   return <section className={`chat-document-edit chat-outline-action ${proposal.action} ${proposal.status}`}>
     <header><div><small>{actionLabel} {typeLabel}</small><strong>{proposal.entityTitle}</strong></div><span>{statusLabel}</span></header>
@@ -938,7 +938,7 @@ function OutlineActionCard({ proposal, onApply, onReject }: { proposal: ChatOutl
 }
 
 function CodexCreationCard({ proposal, onCreate, onReject }: { proposal: ChatCodexCreationProposal; onCreate: () => void; onReject: () => void }) {
-  const statusLabel = proposal.status === 'proposed' ? 'Ready to create' : proposal.status === 'created' ? 'Created' : proposal.status === 'duplicate' ? 'Already exists' : 'Rejected'
+  const statusLabel = proposal.status === 'proposed' ? 'Ready to create' : proposal.status === 'applying' ? 'Creating…' : proposal.status === 'created' ? 'Created' : proposal.status === 'duplicate' ? 'Already exists' : 'Rejected'
   return <section className={`chat-document-edit chat-codex-creation ${proposal.status}`}>
     <header><div><small>New Codex · {proposal.category}</small><strong>{proposal.title}</strong></div><span>{statusLabel}</span></header>
     {proposal.summary && <p>{proposal.summary}</p>}
@@ -948,7 +948,7 @@ function CodexCreationCard({ proposal, onCreate, onReject }: { proposal: ChatCod
 }
 
 function DocumentEditCard({ proposal, onApply, onReject }: { proposal: ChatDocumentEditProposal; onApply: () => void; onReject: () => void }) {
-  const statusLabel = proposal.status === 'proposed' ? 'Ready to apply' : proposal.status === 'applied' ? 'Applied' : proposal.status === 'stale' ? 'Document changed' : 'Rejected'
+  const statusLabel = proposal.status === 'proposed' ? 'Ready to apply' : proposal.status === 'applying' ? 'Applying…' : proposal.status === 'applied' ? 'Applied' : proposal.status === 'stale' ? 'Document changed' : 'Rejected'
   return <section className={`chat-document-edit ${proposal.status}`}>
     <header><div><small>${proposal.entityType === 'codexEntry' ? 'Codex' : proposal.entityType === 'scene' ? 'Scene' : 'Note'}</small><strong>{proposal.entityTitle}</strong></div><span>{statusLabel}</span></header>
     {proposal.summary && <p>{proposal.summary}</p>}

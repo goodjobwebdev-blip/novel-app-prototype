@@ -2,7 +2,8 @@ import type { ChatToolCall, ChatToolDefinition } from './chat-api'
 import { isActiveCodexTitleDuplicate } from './chat-codex-duplicate'
 import { loadProposalTargetOrMarkStale } from './chat-proposal-target'
 import {
-  updateChatMessage,
+  claimChatMessageProposal,
+  transitionChatMessageProposal,
   type ChatCodexCreationProposal,
   type ChatDocumentEditProposal,
   type ChatMessageEntity,
@@ -310,29 +311,20 @@ export async function executeChatWorkspaceTool(bookId: string, call: ChatToolCal
   }
 }
 
-async function messageWithProposal(messageId: string, proposalId: string) {
-  const entity = await getEntity<ArcEntity>(messageId)
-  if (!entity || entity.type !== 'chatMessage') throw new Error('The chat message is no longer available.')
-  const message = entity as ChatMessageEntity
-  const proposal = message.documentEdits?.find((item) => item.id === proposalId)
-  if (!proposal) throw new Error('That edit proposal is no longer available.')
-  return { message, proposal }
-}
-
-async function setProposalStatus(message: ChatMessageEntity, proposalId: string, status: ChatDocumentEditProposal['status'], appliedAt?: number) {
-  const documentEdits = (message.documentEdits ?? []).map((proposal) => proposal.id === proposalId ? { ...proposal, status, ...(appliedAt ? { appliedAt } : {}) } : proposal)
-  return updateChatMessage(message.id, { documentEdits })
+async function setProposalStatus(messageId: string, proposalId: string, status: ChatDocumentEditProposal['status'], appliedAt?: number) {
+  return transitionChatMessageProposal(messageId, 'documentEdits', proposalId, ['applying'], { status, ...(appliedAt ? { appliedAt } : {}) })
 }
 
 export async function applyChatDocumentEdit(messageId: string, proposalId: string) {
-  const { message, proposal } = await messageWithProposal(messageId, proposalId)
-  if (proposal.status !== 'proposed') throw new Error(`This proposal is already ${proposal.status}.`)
+  const claimed = await claimChatMessageProposal(messageId, 'documentEdits', proposalId)
+  const message = claimed.message
+  const proposal = claimed.proposal as ChatDocumentEditProposal
   const entity = await loadProposalTargetOrMarkStale(
     () => editableEntity(message.bookId, proposal.entityId),
-    () => setProposalStatus(message, proposal.id, 'stale'),
+    () => setProposalStatus(message.id, proposal.id, 'stale'),
   )
   if (entity.updatedAt !== proposal.expectedUpdatedAt) {
-    await setProposalStatus(message, proposal.id, 'stale')
+    await setProposalStatus(message.id, proposal.id, 'stale')
     throw new Error('This document changed after the proposal was created. Ask the chat to read it again and prepare a new edit.')
   }
 
@@ -343,7 +335,7 @@ export async function applyChatDocumentEdit(messageId: string, proposalId: strin
       ? proposal.newContent ?? ''
       : applyExactReplacements(currentContent, proposal.edits ?? [])
   } catch (error) {
-    await setProposalStatus(message, proposal.id, 'stale')
+    await setProposalStatus(message.id, proposal.id, 'stale')
     throw error
   }
 
@@ -352,52 +344,39 @@ export async function applyChatDocumentEdit(messageId: string, proposalId: strin
     await saveDocumentContent(entity.id, nextContent)
   }
   const appliedAt = Date.now()
-  await setProposalStatus(message, proposal.id, 'applied', appliedAt)
+  await setProposalStatus(message.id, proposal.id, 'applied', appliedAt)
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('arc-entity-changed', { detail: { bookId: message.bookId, entityId: entity.id } }))
   return { entityId: entity.id, appliedAt }
 }
 
 export async function rejectChatDocumentEdit(messageId: string, proposalId: string) {
-  const { message, proposal } = await messageWithProposal(messageId, proposalId)
-  if (proposal.status !== 'proposed') return
-  await setProposalStatus(message, proposal.id, 'rejected')
+  await transitionChatMessageProposal(messageId, 'documentEdits', proposalId, ['proposed'], { status: 'rejected' })
 }
 
-async function messageWithCodexCreation(messageId: string, proposalId: string) {
-  const entity = await getEntity<ArcEntity>(messageId)
-  if (!entity || entity.type !== 'chatMessage') throw new Error('The chat message is no longer available.')
-  const message = entity as ChatMessageEntity
-  const proposal = message.codexCreations?.find((item) => item.id === proposalId)
-  if (!proposal) throw new Error('That Codex creation proposal is no longer available.')
-  return { message, proposal }
-}
-
-async function setCodexCreationStatus(message: ChatMessageEntity, proposalId: string, patch: Partial<ChatCodexCreationProposal>) {
-  const codexCreations = (message.codexCreations ?? []).map((proposal) => proposal.id === proposalId ? { ...proposal, ...patch } : proposal)
-  return updateChatMessage(message.id, { codexCreations })
+async function setCodexCreationStatus(messageId: string, proposalId: string, patch: Partial<ChatCodexCreationProposal>) {
+  return transitionChatMessageProposal(messageId, 'codexCreations', proposalId, ['applying'], patch)
 }
 
 export async function createChatCodexEntry(messageId: string, proposalId: string) {
-  const { message, proposal } = await messageWithCodexCreation(messageId, proposalId)
-  if (proposal.status !== 'proposed') throw new Error(`This Codex proposal is already ${proposal.status}.`)
+  const claimed = await claimChatMessageProposal(messageId, 'codexCreations', proposalId)
+  const message = claimed.message
+  const proposal = claimed.proposal as ChatCodexCreationProposal
 
   const duplicates = (await listEntitiesByBook(message.bookId, 'codexEntry'))
     .filter((entity) => isActiveCodexTitleDuplicate(entity, proposal.title))
   if (duplicates.length) {
-    await setCodexCreationStatus(message, proposal.id, { status: 'duplicate', entityId: duplicates[0].id })
+    await setCodexCreationStatus(message.id, proposal.id, { status: 'duplicate', entityId: duplicates[0].id })
     throw new Error('A Codex entry with this title now exists. The proposal was not created again.')
   }
 
   const created = await createCodexEntry(message.bookId, proposal.title, proposal.category)
   if (proposal.content) await saveDocumentContent(created.id, proposal.content)
   const appliedAt = Date.now()
-  await setCodexCreationStatus(message, proposal.id, { status: 'created', entityId: created.id, appliedAt })
+  await setCodexCreationStatus(message.id, proposal.id, { status: 'created', entityId: created.id, appliedAt })
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('arc-entity-changed', { detail: { bookId: message.bookId, entityId: created.id } }))
   return { entityId: created.id, appliedAt }
 }
 
 export async function rejectChatCodexEntry(messageId: string, proposalId: string) {
-  const { message, proposal } = await messageWithCodexCreation(messageId, proposalId)
-  if (proposal.status !== 'proposed') return
-  await setCodexCreationStatus(message, proposal.id, { status: 'rejected' })
+  await transitionChatMessageProposal(messageId, 'codexCreations', proposalId, ['proposed'], { status: 'rejected' })
 }
