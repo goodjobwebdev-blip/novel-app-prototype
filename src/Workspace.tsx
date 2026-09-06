@@ -56,6 +56,7 @@ import { fetchTextProviderModelContextLength, streamTextProviderCompletion, text
 import { assertPromptTemplateValid, type BookPromptValues } from './prompt-template'
 import { assembleStoryGenerationRequest } from './story-request'
 import { assembleCodexGenerationRequest } from './codex-request'
+import { assembleSummaryGenerationRequest } from './summary-request'
 import type { NormalizedProviderMessage } from './prompt-composition'
 import { buildContextValues, generationContextDiagnostics } from './context-service'
 import {
@@ -112,7 +113,7 @@ import {
   type StructuralEntityType,
   type SummaryEntity,
 } from './persistence'
-import { buildSummarySource, getSummaryStateMap, renderSummaryPrompt, summaryStateForSource, type SummaryState } from './summary-service'
+import { buildSummarySource, getSummaryStateMap, summaryStateForSource, type SummaryState } from './summary-service'
 import { buildCodexMentionIndex, type CodexMentionEntry, type CodexMentionTerm } from './codex-trigger-service'
 import { generateAutotitleSuggestion, prepareAutotitleRequest, type AutotitleEntity, type AutotitleRequest, type AutotitleTargetType } from './autotitle-service'
 import { dismissTtsState, estimateSpeechRequest, fetchSpeechModels, getTtsState, pauseTtsSession, resumeTtsSession, startTtsSession, stopTtsSession, subscribeTtsState, type TtsState } from './tts-service'
@@ -150,7 +151,7 @@ type GenerationRequestSnapshot = {
 }
 type GenerationDetails = NanoGPTStreamMetadata & {
   task: 'Story' | 'Codex' | 'Summary'
-  action: 'Generate' | 'Regenerate' | 'Summarize'
+  action: 'Generate' | 'Regenerate' | 'Summarize' | 'Re-summarize'
   targetTitle: string
   requestedModel: string
   provider: 'NanoGPT' | 'Fake (testing)'
@@ -1480,7 +1481,9 @@ export default function Workspace() {
         return
       }
       try {
-        assertPromptTemplateValid(settings.prompts.summarize, 'summarize')
+        const composition = settings.promptCompositions.summarize
+        assertPromptTemplateValid(composition.systemPrompt, 'summarize')
+        composition.predefinedMessages.filter((message) => message.enabled).forEach((message) => assertPromptTemplateValid(message.template, 'summarize'))
       } catch (error) {
         status = 'error'
         showToast(error instanceof Error ? error.message : 'Fix the invalid summarize prompt in Book AI settings.')
@@ -1495,12 +1498,46 @@ export default function Workspace() {
         return
       }
 
+      const responseLength = settings.responseLengths.summary
+      const action = summary.content.trim() ? 'resummarize' : 'summarize'
+      const normalizedRequest = assembleSummaryGenerationRequest({
+        composition: settings.promptCompositions.summarize,
+        book: { ...toBookPromptValues(book, seriesList), responseLength },
+        responseLength,
+        summary: { id: summary.id, content: summary.content },
+        target: { id: source.source.id, type: source.source.type, title: source.source.title, source: source.content },
+        sourceDiagnostics: source.diagnostics,
+        action,
+      })
+      const modelContextLength = settings.supportModelContextLength
+        ?? await fetchTextProviderModelContextLength({ provider: settings.provider, apiKey: settings.apiKey.trim(), baseUrl: settings.baseUrl, model: settings.supportModel }).catch(() => undefined)
+      if (cancelledDuringPreflight()) return
+      if (modelContextLength && modelContextLength !== settings.supportModelContextLength) {
+        settings = await saveBookAiSettings(owner.bookId, { ...settings, supportModelContextLength: modelContextLength })
+        if (cancelledDuringPreflight()) return
+      }
+      const messages = normalizedRequest.providerMessages
+      const diagnostics = generationContextDiagnostics(
+        settings.supportModel,
+        modelContextLength,
+        '',
+        textProviderRequestText({ systemPrompt: '', contextMessage: '', userMessage: '', messages }),
+      )
+      if (!diagnostics.fits) {
+        status = 'error'
+        showToast(`Summary source is too large: ~${diagnostics.requestTokens.toLocaleString()} input tokens for a ${diagnostics.usableInputTokens.toLocaleString()}-token usable budget. Arc will not trim or replace authoritative source material.`)
+        return
+      }
+      if (diagnostics.warning) showToast(`Summary context is near the model limit (${Math.round(diagnostics.usageRatio * 100)}%).`)
+
       setGenerationDetails({
         task: 'Summary',
-        action: 'Summarize',
+        action: action === 'resummarize' ? 'Re-summarize' : 'Summarize',
         targetTitle: source.source.title,
         requestedModel: settings.supportModel,
         provider: settings.provider === 'fake' ? 'Fake (testing)' : 'NanoGPT',
+        estimatedRequestTokens: diagnostics.requestTokens,
+        modelContextTokens: diagnostics.modelContextTokens,
         startedAt: generationStartedAtRef.current,
         status: 'sending',
         thoughts: '',
@@ -1513,8 +1550,9 @@ export default function Workspace() {
         apiKey: settings.apiKey.trim(),
         baseUrl: settings.baseUrl,
         model: settings.supportModel,
-        systemPrompt: renderSummaryPrompt(settings.prompts.summarize, summary.sourceType, summary.content, toBookPromptValues(book, seriesList)),
-        userMessage: `${summary.content.trim() ? `# Existing summary\n\n${summary.content.trim()}\n\n` : ''}# Source material\n\n${source.content}\n\nReturn only the updated summary as Markdown.`,
+        systemPrompt: '',
+        userMessage: '',
+        messages,
       }, (chunk) => {
         if (!controller.signal.aborted) setGenerationActivityPhase('writing')
         generated += chunk
@@ -1677,7 +1715,7 @@ export default function Workspace() {
   const autotitleOverlay = autotitle && <AutotitlePanel state={autotitle} onAccept={() => { void acceptAutotitle() }} onRegenerate={() => { void regenerateAutotitle() }} onStop={stopAutotitle} onCancel={() => { autotitleAbortRef.current?.abort(); setAutotitle(null) }} />
 
   if (screen === 'settings') return <AiSettingsScreen
-    book={returnScreen === 'home' || !currentBook ? undefined : { id: currentBook.id, title: currentBook.title, contextType, currentDocumentId: activeDocument?.id, currentDocumentText: settingsGenerationContextRef.current?.sceneText ?? storyMarkdown, insertionPosition: settingsGenerationContextRef.current?.insertionPosition, promptValues: toBookPromptValues(currentBook, seriesList), chatId: contextType === 'chat' ? activeChatId || undefined : undefined }}
+    book={returnScreen === 'home' || !currentBook ? undefined : { id: currentBook.id, title: currentBook.title, contextType, currentDocumentId: activeDocument?.id, currentDocumentText: settingsGenerationContextRef.current?.sceneText ?? storyMarkdown, insertionPosition: settingsGenerationContextRef.current?.insertionPosition, promptValues: toBookPromptValues(currentBook, seriesList), chatId: contextType === 'chat' ? activeChatId || undefined : undefined, ...(activeDocument?.type === 'summary' ? { currentSummary: { id: activeDocument.id, sourceEntityId: activeDocument.sourceEntityId, sourceType: activeDocument.sourceType, content: activeDocument.content } } : {}) }}
     onHome={() => setScreen('home')}
     onBack={() => setScreen(returnScreen)}
     onSaved={(settings) => {
