@@ -36,6 +36,7 @@ export type DocumentSnapshot = {
 }
 
 export type StructuralEntityType = 'act' | 'chapter' | 'scene'
+export type SummarySourceType = StructuralEntityType | 'codexEntry'
 export type StructuralEntity = ArcEntity & { type: StructuralEntityType; bookId: string; parentId: string; order: number; title: string }
 export type BookMetadata = {
   title: string
@@ -51,13 +52,13 @@ export type BookMetadata = {
 export type BookEntity = ArcEntity & { type: 'book'; title: string } & Partial<Omit<BookMetadata, 'title'>>
 export type SeriesEntity = ArcEntity & { type: 'series'; title: string }
 export type NoteEntity = ArcEntity & { type: 'note'; bookId: string; parentId: string; title: string; content: string }
-export type CodexEntryEntity = ArcEntity & { type: 'codexEntry'; bookId: string; parentId: string; title: string; category: string; content: string; archivedAt?: number }
+export type CodexEntryEntity = ArcEntity & { type: 'codexEntry'; bookId: string; parentId: string; title: string; category: string; content: string; archivedAt?: number; preferSummaryForContext?: boolean; sourceRevision?: number }
 export type SummaryEntity = ArcEntity & {
   type: 'summary'
   bookId: string
   parentId: string
   sourceEntityId: string
-  sourceType: StructuralEntityType
+  sourceType: SummarySourceType
   title: string
   content: string
   summarizedSourceRevision?: number
@@ -517,7 +518,7 @@ export async function createNote(bookId: string, title = 'Untitled Note'): Promi
 export async function createCodexEntry(bookId: string, title = 'Untitled Entry', category = 'Character'): Promise<CodexEntryEntity> {
   const db = await database()
   const now = Date.now()
-  const entry: CodexEntryEntity = { id: makeId('codex'), type: 'codexEntry', bookId, parentId: bookId, title, category, content: '', createdAt: now, updatedAt: now }
+  const entry: CodexEntryEntity = { id: makeId('codex'), type: 'codexEntry', bookId, parentId: bookId, title, category, content: '', preferSummaryForContext: false, sourceRevision: now, createdAt: now, updatedAt: now }
   await db.transaction('rw', db.table('entities'), async () => {
     await db.table('entities').put(entry)
     await touchAncestors(db, bookId, now)
@@ -525,7 +526,7 @@ export async function createCodexEntry(bookId: string, title = 'Untitled Entry',
   return entry
 }
 
-export async function getOrCreateSummary(source: StructuralEntity): Promise<SummaryEntity> {
+export async function getOrCreateSummary(source: StructuralEntity | CodexEntryEntity): Promise<SummaryEntity> {
   const db = await database()
   const id = summaryId(source.id)
   const existing = await db.table('entities').get(id) as SummaryEntity | undefined
@@ -596,10 +597,23 @@ export async function updateCodexCategory(id: string, category: string): Promise
   const db = await database()
   const current = await db.table('entities').get(id) as CodexEntryEntity | undefined
   if (!current || current.type !== 'codexEntry') throw new Error(`Cannot update missing Codex entry ${id}`)
-  const updated: CodexEntryEntity = { ...current, category: category.trim() || 'Other', updatedAt: Date.now() }
+  const now = Date.now()
+  const updated: CodexEntryEntity = { ...current, category: category.trim() || 'Other', sourceRevision: now, updatedAt: now }
   await db.transaction('rw', db.table('entities'), async () => {
     await db.table('entities').put(updated)
-    await touchAncestors(db, current.bookId, updated.updatedAt)
+    await touchAncestors(db, current.bookId, now)
+  })
+  return updated
+}
+
+export async function updateCodexSummaryPreference(id: string, preferSummaryForContext: boolean): Promise<CodexEntryEntity> {
+  const db = await database()
+  const current = await db.table('entities').get(id) as CodexEntryEntity | undefined
+  if (!current || current.type !== 'codexEntry') throw new Error(`Cannot update missing Codex entry ${id}`)
+  const updated: CodexEntryEntity = { ...current, preferSummaryForContext }
+  await db.transaction('rw', db.table('entities'), async () => {
+    await db.table('entities').put(updated)
+    await touchAncestors(db, current.bookId, Date.now())
   })
   return updated
 }
@@ -608,7 +622,8 @@ export async function renameEntity(id: string, title: string): Promise<ArcEntity
   const db = await database()
   const entity = await db.table('entities').get(id) as ArcEntity | undefined
   if (!entity) throw new Error(`Cannot rename missing entity ${id}`)
-  const updated = { ...entity, title: title.trim() || entity.title || 'Untitled', updatedAt: Date.now() }
+  const now = Date.now()
+  const updated = { ...entity, title: title.trim() || entity.title || 'Untitled', updatedAt: now, ...(entity.type === 'codexEntry' ? { sourceRevision: now } : {}) }
   await db.transaction('rw', db.table('entities'), async () => {
     await db.table('entities').put(updated)
     if (['act', 'chapter', 'scene'].includes(entity.type)) await touchAncestors(db, entity.parentId, updated.updatedAt)
@@ -732,7 +747,7 @@ export async function saveDocumentContent(entityId: string, content: string) {
   const current = await db.table('entities').get(entityId) as ArcEntity | undefined
   if (!current) throw new Error(`Cannot save missing entity ${entityId}`)
   const now = Date.now()
-  const updated = { ...current, content, updatedAt: now }
+  const updated = { ...current, content, updatedAt: now, ...(current.type === 'codexEntry' ? { sourceRevision: now } : {}) }
   await db.transaction('rw', db.table('entities'), async () => {
     await db.table('entities').put(updated)
     if (current.type === 'scene') await touchAncestors(db, current.parentId, now)

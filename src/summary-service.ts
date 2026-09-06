@@ -2,22 +2,37 @@ import {
   getEntity,
   listEntitiesByBook,
   type ArcEntity,
+  type CodexEntryEntity,
   type StructuralEntity,
   type StructuralEntityType,
   type SummaryEntity,
+  type SummarySourceType,
 } from './persistence'
 import { bookTemplateValues, renderPromptTemplate, type BookPromptValues } from './prompt-template'
 
 export type SummaryState = 'missing' | 'current' | 'outdated'
+export type SummarySourceEntity = StructuralEntity | CodexEntryEntity
 
 export type SummarySource = {
-  source: StructuralEntity
+  source: SummarySourceEntity
   content: string
   sourceRevision: number
 }
 
+export type CodexContextRepresentation = {
+  entryId: string
+  title: string
+  representation: 'Full entry' | 'Summary'
+  fallbackReason?: 'summary missing' | 'summary outdated'
+  content: string
+}
+
 function isStructural(entity: ArcEntity): entity is StructuralEntity {
   return entity.type === 'scene' || entity.type === 'chapter' || entity.type === 'act'
+}
+
+function isSummarySource(entity: ArcEntity): entity is SummarySourceEntity {
+  return isStructural(entity) || entity.type === 'codexEntry'
 }
 
 function isSummary(entity: ArcEntity): entity is SummaryEntity {
@@ -34,7 +49,8 @@ function summariesBySource(entities: ArcEntity[]) {
   return new Map(entities.filter(isSummary).map((summary) => [summary.sourceEntityId, summary]))
 }
 
-function sourceRevision(source: StructuralEntity, entities: ArcEntity[], summaries: Map<string, SummaryEntity>): number {
+function sourceRevision(source: SummarySourceEntity, entities: ArcEntity[], summaries: Map<string, SummaryEntity>): number {
+  if (source.type === 'codexEntry') return typeof source.sourceRevision === 'number' ? source.sourceRevision : source.updatedAt
   if (source.type === 'scene') return source.updatedAt
 
   const chapters = source.type === 'act' ? sortedChildren(entities, source.id, 'chapter') : [source]
@@ -52,9 +68,14 @@ function sourceRevision(source: StructuralEntity, entities: ArcEntity[], summari
   return Math.max(...relevant)
 }
 
-function stateFor(source: StructuralEntity, summary: SummaryEntity | undefined, entities: ArcEntity[], summaries: Map<string, SummaryEntity>): SummaryState {
+function stateFor(source: SummarySourceEntity, summary: SummaryEntity | undefined, entities: ArcEntity[], summaries: Map<string, SummaryEntity>): SummaryState {
   if (!summary?.content.trim()) return 'missing'
   return (summary.summarizedSourceRevision ?? 0) >= sourceRevision(source, entities, summaries) ? 'current' : 'outdated'
+}
+
+export function summaryStateForSource(source: SummarySourceEntity, entities: ArcEntity[]): SummaryState {
+  const summaries = summariesBySource(entities)
+  return stateFor(source, summaries.get(source.id), entities, summaries)
 }
 
 export async function getSummaryStateMap(bookId: string): Promise<Record<string, SummaryState>> {
@@ -62,7 +83,7 @@ export async function getSummaryStateMap(bookId: string): Promise<Record<string,
   const summaries = summariesBySource(entities)
   return Object.fromEntries(
     entities
-      .filter(isStructural)
+      .filter(isSummarySource)
       .map((source) => [source.id, stateFor(source, summaries.get(source.id), entities, summaries)]),
   )
 }
@@ -81,13 +102,15 @@ function chapterSource(chapter: StructuralEntity, entities: ArcEntity[], summari
 }
 
 export async function buildSummarySource(sourceId: string): Promise<SummarySource> {
-  const source = await getEntity<StructuralEntity>(sourceId)
-  if (!source || !isStructural(source)) throw new Error('The summary source is no longer available.')
+  const source = await getEntity<ArcEntity>(sourceId)
+  if (!source || !isSummarySource(source)) throw new Error('The summary source is no longer available.')
   const entities = await listEntitiesByBook(source.bookId)
   const summaries = summariesBySource(entities)
   let content: string
 
-  if (source.type === 'scene') {
+  if (source.type === 'codexEntry') {
+    content = `# Codex entry: ${source.title}\n\nCategory: ${source.category}\n\n${String(source.content ?? '').trim() || '_No content_'}`
+  } else if (source.type === 'scene') {
     content = `# Scene: ${source.title}\n\n${String(source.content ?? '').trim() || '_No content_'}`
   } else if (source.type === 'chapter') {
     content = chapterSource(source, entities, summaries)
@@ -107,7 +130,26 @@ export async function buildSummarySource(sourceId: string): Promise<SummarySourc
   return { source, content, sourceRevision: sourceRevision(source, entities, summaries) }
 }
 
-export function renderSummaryPrompt(template: string, targetType: StructuralEntityType, previousSummary: string, book: BookPromptValues) {
+export function codexContextRepresentation(entry: CodexEntryEntity, entities: ArcEntity[]): CodexContextRepresentation {
+  const summaries = summariesBySource(entities)
+  const summary = summaries.get(entry.id)
+  const state = stateFor(entry, summary, entities, summaries)
+  if (entry.preferSummaryForContext === true && state === 'current' && summary?.content.trim()) {
+    return { entryId: entry.id, title: entry.title, representation: 'Summary', content: summary.content.trim() }
+  }
+  const fallbackReason = entry.preferSummaryForContext === true
+    ? state === 'missing' ? 'summary missing' : state === 'outdated' ? 'summary outdated' : undefined
+    : undefined
+  return {
+    entryId: entry.id,
+    title: entry.title,
+    representation: 'Full entry',
+    ...(fallbackReason ? { fallbackReason } : {}),
+    content: String(entry.content ?? '').trim() || '_No description provided._',
+  }
+}
+
+export function renderSummaryPrompt(template: string, targetType: SummarySourceType, previousSummary: string, book: BookPromptValues) {
   const values: Record<string, string> = {
     ...bookTemplateValues(book),
     'target.type': targetType,
