@@ -1,0 +1,40 @@
+name: Validate issue 139 AI reset ordering
+
+on:
+  push:
+    branches:
+      - fix/issue-139-ai-reset-save-order
+
+permissions:
+  contents: write
+
+concurrency:
+  group: issue-139-ai-reset-save-order
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/issue-139-ai-reset-save-order
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Apply issue 139 integration
+        run: python .github/scripts/issue139.py
+      - run: npm install --no-package-lock
+      - name: Regression tests
+        run: node --test tests/*.test.mjs
+      - name: Production build
+        run: npm run build
+      - name: Commit validated integration
+        run: |
+          rm .github/scripts/issue139.py .github/workflows/issue-139-validation.yml
+          git config user.name "goodjobwebdev-blip"
+          git config user.email "goodjob.webdev@gmail.com"
+          git add -A
+          git commit -m "Fix AI settings reset save ordering"
+          git push origin HEAD:fix/issue-139-ai-reset-save-order
