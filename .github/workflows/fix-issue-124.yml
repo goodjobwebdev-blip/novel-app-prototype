@@ -1,0 +1,34 @@
+name: Fix issue 124
+
+on:
+  push:
+    branches:
+      - fix/issue-124-chat-history-stream-race
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/issue-124-chat-history-stream-race
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Apply fix
+        run: python .github/scripts/issue124.py
+      - run: npm install --no-package-lock
+      - run: node --test tests/chat-history-guard.test.mjs tests/chat-proposal-transition.test.mjs tests/chat-proposal-target.test.mjs tests/chat-codex-duplicate.test.mjs tests/editor-unmount-guard.test.mjs tests/navigation-save-guard.test.mjs tests/deletion-save-barrier.test.mjs tests/persistence-delete-write-guard.test.mjs tests/keyed-async-queue.test.mjs tests/async-state-guard.test.mjs tests/chat-selection-guard.test.mjs tests/tts-service-*.test.mjs
+      - run: npm run build
+      - name: Commit validated fix
+        run: |
+          rm .github/scripts/issue124.py .github/workflows/fix-issue-124.yml
+          git config user.name "goodjobwebdev-blip"
+          git config user.email "goodjob.webdev@gmail.com"
+          git add -A
+          git commit -m "Guard Chat history while a response is streaming"
+          git push origin HEAD:fix/issue-124-chat-history-stream-race
