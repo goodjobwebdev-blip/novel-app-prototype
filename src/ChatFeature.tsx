@@ -303,7 +303,6 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   async function dictateMessage() {
     if (!chat || generating || !isCurrentChat(chat)) return
     const sourceChat = chat
-    const sourceChatId = sourceChat.id
     const input = inputRef.current
     const base = draft
     const start = input?.selectionStart ?? base.length
@@ -1077,7 +1076,7 @@ function ChatModelPicker({ value, models, onChange }: { value: string; models: C
         {value && !models.some((model) => model.id === value) && !normalized && <button type="button" className="selected" role="option" aria-selected="true" onClick={() => choose(value)}><span><strong>{value}</strong><small>Current model · not in loaded list</small></span><b>Current</b></button>}
         {visible.map((model) => {
           const isSelected = model.id === value
-          return <button type="button" className={isSelected ? 'selected' : ''} role="option" aria-selected={isSelected} onClick={() => choose(model.id)} key={model.id}><span><strong>{model.name || model.id}</strong>{model.name && model.name !== model.id && <small>{model.id}</small>}</span>{isSelected && <b>Current</b>}</button>}
+          return <button type="button" className={isSelected ? 'selected' : ''} role="option" aria-selected={isSelected} onClick={() => choose(model.id)} key={model.id}><span><strong>{model.name || model.id}</strong>{model.name && model.name !== model.id && <small>{model.id}</small>}</span>{isSelected && <b>Current</b>}</button>
         })}
         {!visible.length && <p>No models match “{query.trim()}”.</p>}
       </div>
