@@ -1,0 +1,35 @@
+name: Validate final issue 80 review
+
+on:
+  push:
+    branches:
+      - feat/issue-80-speech-to-text
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/issue-80-speech-to-text
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Apply final review patch
+        run: python .github/scripts/issue80_final_review.py
+      - run: npm install --no-package-lock
+      - name: Regression tests
+        run: node --test tests/stt-service.test.mjs tests/stt-lifecycle.test.mjs tests/chat-history-guard.test.mjs tests/chat-fork-proposals.test.mjs tests/chat-proposal-transition.test.mjs tests/chat-proposal-target.test.mjs tests/chat-codex-duplicate.test.mjs tests/editor-unmount-guard.test.mjs tests/navigation-save-guard.test.mjs tests/deletion-save-barrier.test.mjs tests/persistence-delete-write-guard.test.mjs tests/keyed-async-queue.test.mjs tests/async-state-guard.test.mjs tests/chat-selection-guard.test.mjs tests/tts-service-*.test.mjs
+      - run: npm run build
+      - name: Commit validated final review
+        run: |
+          rm .github/scripts/issue80_final_review.py .github/workflows/issue-80-final-review.yml
+          git config user.name "goodjobwebdev-blip"
+          git config user.email "goodjob.webdev@gmail.com"
+          git add -A
+          git commit -m "Finalize speech to text provider safeguards"
+          git push origin HEAD:feat/issue-80-speech-to-text
