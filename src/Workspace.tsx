@@ -701,9 +701,9 @@ export default function Workspace() {
 
   async function removeContentEntity(entity: NoteEntity | CodexEntryEntity) {
     if (!currentBook || !window.confirm(`Delete “${entity.title}”? This cannot be undone.`)) return
-    await deleteWithSaveBarrier(entity.id)
+    const removedIds = await deleteWithSaveBarrier(entity.id)
     await reloadBookContent(currentBook.id)
-    if (activeDocumentIdRef.current === entity.id) {
+    if (activeDocumentIdRef.current && removedIds.includes(activeDocumentIdRef.current)) {
       activeDocumentIdRef.current = null
       setActiveDocument(null)
       storyRef.current = ''
