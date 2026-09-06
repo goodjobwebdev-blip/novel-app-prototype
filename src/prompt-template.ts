@@ -45,6 +45,8 @@ export const promptVariables: PromptVariable[] = [
   { name: 'book.language', description: 'Primary writing language', scopes: everyPrompt, stability: 'book-state', canonical: true },
   { name: RESPONSE_LENGTH_VARIABLE, description: 'Response-length guidance from AI settings', scopes: ['story', 'lore', 'assistant'], stability: 'book-state', canonical: true },
   { name: 'scene.text', description: 'Current Scene used as the generation anchor', scopes: ['story', 'lore', 'assistant'], stability: 'turn-dynamic', canonical: true },
+  { name: 'scene.before_cursor', description: 'Scene text before the captured generation point', scopes: ['story'], stability: 'turn-dynamic', canonical: true },
+  { name: 'scene.after_cursor', description: 'Scene text after the captured generation point', scopes: ['story'], stability: 'turn-dynamic', canonical: true },
   { name: 'scene.pov', description: 'Scene-specific POV when one is set', scopes: ['story'], stability: 'turn-dynamic', canonical: true },
   { name: 'scene.previous_text', description: 'Previous Scene when automatic rules expose it', scopes: ['story'], stability: 'turn-dynamic', canonical: true },
   { name: 'story.so_far', description: 'Hierarchically compressed earlier-story state', scopes: ['story', 'assistant'], stability: 'turn-dynamic', canonical: true },

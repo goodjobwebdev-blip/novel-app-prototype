@@ -50,10 +50,12 @@ import { navigateAfterRequiredSave, saveRequiredBeforeNavigation } from './navig
 import { canUnmountEditor } from './editor-unmount-guard'
 import { summaryGenerationOwnsUi, type SummaryGenerationOwner } from './summary-generation-owner'
 import ExpandableTextInput from './ExpandableTextInput'
-import MarkdownEditor, { type CodexMentionClick, type MarkdownEditorHandle } from './MarkdownEditor'
-import { renderLorePrompt, renderStoryPrompt, type NanoGPTStreamMetadata } from './nanogpt'
+import MarkdownEditor, { type CodexMentionClick, type GenerationContext, type MarkdownEditorHandle } from './MarkdownEditor'
+import { renderLorePrompt, type NanoGPTStreamMetadata } from './nanogpt'
 import { fetchTextProviderModelContextLength, streamTextProviderCompletion, textProviderRequestText } from './text-provider'
 import { assertPromptTemplateValid, generationInstructionMessage, type BookPromptValues } from './prompt-template'
+import { assembleStoryGenerationRequest } from './story-request'
+import type { ProviderMessageRole } from './prompt-composition'
 import { buildContextValues, generationContextDiagnostics } from './context-service'
 import {
   PROTOTYPE_BOOK_ID,
@@ -141,6 +143,7 @@ type GenerationRequestSnapshot = {
   systemPrompt: string
   contextMessage: string
   userMessage: string
+  messages?: Array<{ role: ProviderMessageRole; content: string }>
   estimatedRequestTokens?: number
   modelContextTokens?: number
 }
@@ -234,6 +237,7 @@ export default function Workspace() {
   const autotitleAbortRef = useRef<AbortController | null>(null)
   const generationStartedAtRef = useRef(0)
   const latestGenerationRequestRef = useRef<GenerationRequestSnapshot | null>(null)
+  const settingsGenerationContextRef = useRef<GenerationContext | null>(null)
   const summaryGenerationSequenceRef = useRef(0)
   const summaryGenerationOwnerRef = useRef<ActiveSummaryGenerationOwner | null>(null)
   const currentBookIdRef = useRef<string | null>(currentBook?.id ?? null)
@@ -956,6 +960,9 @@ export default function Workspace() {
       showToast('Stop generation before opening Settings.')
       return
     }
+    settingsGenerationContextRef.current = from === 'editor' && activeDocument?.type === 'scene'
+      ? editorRef.current?.captureGenerationContext() ?? { sceneText: storyRef.current, insertionPosition: storyRef.current.length }
+      : null
     if (from === 'editor' && changedSinceSnapshotRef.current) void flushDocument('navigation', true)
     setReturnScreen(from)
     setScreen('settings')
@@ -1225,6 +1232,7 @@ export default function Workspace() {
     }
     try {
       assertPromptTemplateValid(isCodex ? settings.prompts.lore : settings.prompts.story, isCodex ? 'lore' : 'story')
+      if (!isCodex) settings.promptCompositions.story.predefinedMessages.filter((message) => message.enabled).forEach((message) => assertPromptTemplateValid(message.template, 'story'))
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Fix the invalid prompt in Book AI settings before generating.')
       return
@@ -1272,17 +1280,29 @@ export default function Workspace() {
         const instruction = isCodex ? lorePrompt : arcPrompt
         const promptTemplate = isCodex ? settings.prompts.lore : settings.prompts.story
         const promptBook = { ...toBookPromptValues(currentBook, seriesList), responseLength: settings.responseLength }
+        const storyRequest = isCodex ? undefined : assembleStoryGenerationRequest({
+          composition: settings.promptCompositions.story,
+          book: promptBook,
+          responseLength: settings.responseLength,
+          sceneText: context.sceneText,
+          insertionPosition: context.insertionPosition,
+          scenePov: scenePovRef.current || undefined,
+          context: prepared,
+          instruction,
+        })
         const systemPrompt = isCodex
           ? renderLorePrompt(settings.prompts.lore, { book: promptBook, entryTitle: activeDocument.title, entryCategory: activeDocument.category, entryContent: context.sceneText, sceneText: prepared.lastSceneText, additionalContext: prepared.additionalContext })
-          : renderStoryPrompt(settings.prompts.story, { book: promptBook, sceneText: context.sceneText, scenePov: scenePovRef.current || undefined, previousSceneText: prepared.previousSceneText, summaryContext: prepared.summaryContext, additionalContext: prepared.additionalContext })
-        const userMessage = generationInstructionMessage(promptTemplate, settings.responseLength, instruction.trim() || (isCodex ? 'Create a complete Codex entry.' : 'Continue the story.'))
+          : ''
+        const userMessage = isCodex ? generationInstructionMessage(promptTemplate, settings.responseLength, instruction.trim() || 'Create a complete Codex entry.') : ''
         const selectedContextIsTemplated = /{{\s*additional_context\s*}}/.test(promptTemplate)
-        const contextMessage = !selectedContextIsTemplated && prepared.additionalContext.trim()
+        const contextMessage = isCodex && !selectedContextIsTemplated && prepared.additionalContext.trim()
           ? `# Additional context\n\n${prepared.additionalContext}`
           : ''
         const effectiveLimit = isCodex && settings.codexModel.trim() ? settings.codexEffectiveContextLimit : settings.mainEffectiveContextLimit
+        const messages = storyRequest?.providerMessages
         const requestText = textProviderRequestText({ systemPrompt, contextMessage, userMessage })
-        const diagnostics = generationContextDiagnostics(selectedModel, modelContextLength, effectiveLimit, requestText)
+        const normalizedRequestText = messages ? textProviderRequestText({ systemPrompt, contextMessage, userMessage, messages }) : requestText
+        const diagnostics = generationContextDiagnostics(selectedModel, modelContextLength, effectiveLimit, normalizedRequestText)
         if (!diagnostics.limitValid) {
           editor.finishGeneration('error')
           showToast(diagnostics.limitError ?? 'The effective context cap is invalid. Check Book AI settings.')
@@ -1305,6 +1325,7 @@ export default function Workspace() {
           systemPrompt,
           contextMessage,
           userMessage,
+          ...(messages ? { messages } : {}),
           estimatedRequestTokens: diagnostics.requestTokens,
           modelContextTokens: diagnostics.modelContextTokens,
         }
@@ -1346,6 +1367,7 @@ export default function Workspace() {
         systemPrompt: requestSnapshot.systemPrompt,
         contextMessage: requestSnapshot.contextMessage,
         userMessage: requestSnapshot.userMessage,
+        messages: requestSnapshot.messages,
       }, (chunk) => {
         if (!controller.signal.aborted) setGenerationActivityPhase('writing')
         renderer.push(chunk)
@@ -1644,7 +1666,7 @@ export default function Workspace() {
   const contextType: GenerationContextType = screen === 'chat' || (screen === 'settings' && returnScreen === 'chat') ? 'chat' : activeDocument?.type === 'codexEntry' ? 'codex' : activeDocument?.type === 'note' ? 'note' : 'scene'
 
   if (screen === 'settings') return <AiSettingsScreen
-    book={returnScreen === 'home' || !currentBook ? undefined : { id: currentBook.id, title: currentBook.title, contextType, currentDocumentId: activeDocument?.id, currentDocumentText: storyMarkdown, promptValues: toBookPromptValues(currentBook, seriesList), chatId: contextType === 'chat' ? activeChatId || undefined : undefined }}
+    book={returnScreen === 'home' || !currentBook ? undefined : { id: currentBook.id, title: currentBook.title, contextType, currentDocumentId: activeDocument?.id, currentDocumentText: settingsGenerationContextRef.current?.sceneText ?? storyMarkdown, insertionPosition: settingsGenerationContextRef.current?.insertionPosition, promptValues: toBookPromptValues(currentBook, seriesList), chatId: contextType === 'chat' ? activeChatId || undefined : undefined }}
     onHome={() => setScreen('home')}
     onBack={() => setScreen(returnScreen)}
     onSaved={(settings) => {

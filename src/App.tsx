@@ -12,6 +12,7 @@ import {
   Search,
   SlidersHorizontal,
   Star,
+  Trash2,
   Type,
   Volume2,
   X,
@@ -23,6 +24,7 @@ import {
   saveAiSettings,
   saveGlobalFavorites,
   resetPromptComposition,
+  withPromptComposition,
   withPromptSystemPrompt,
   type AiPrompts,
   type AiProvider,
@@ -46,10 +48,12 @@ import {
 } from './persistence'
 import { bookTemplateValues, generationInstructionMessage, promptTemplateDiagnostics, promptVariables, renderPromptTemplate, responseLengthMessage, type BookPromptValues } from './prompt-template'
 import PromptTemplateEditor, { type PromptTemplateEditorHandle } from './PromptTemplateEditor'
+import { makePredefinedMessage, likelyReusablePrefix, type NormalizedAssembledRequest, type PredefinedMessage } from './prompt-composition'
+import { assembleStoryGenerationRequest, STORY_CONTINUE_FALLBACK } from './story-request'
 import { buildContextValues, contextLimitInputError, generationContextDiagnostics, type PreparedContextValues } from './context-service'
 import { getChat, listChatMessages, saveChatContextProfile, type ChatEntity, type ChatMessageEntity } from './chat-service'
 import { CHAT_TOOL_DEFINITIONS, CHAT_WORKSPACE_INSTRUCTIONS, serializeChatModelInput } from './chat-request'
-import { renderLorePrompt, renderStoryPrompt } from './nanogpt'
+import { renderLorePrompt } from './nanogpt'
 import { clearModelCatalog, getCachedModelCatalog, providerModelEndpoint, saveModelCatalog, type ProviderModel } from './model-catalog'
 import { FAKE_PROVIDER_MODEL, clearFakeProviderTrace, getFakeProviderTrace, subscribeFakeProviderTrace } from './fake-provider'
 import { KeyedAsyncQueue } from './keyed-async-queue'
@@ -72,6 +76,9 @@ type RequestPreviewMessage = {
   detail: string
   content: string
   reasoning?: string
+  omitted?: boolean
+  references?: string[]
+  diagnostics?: string[]
 }
 
 const providerLabels: Record<AiProvider, string> = { openrouter: 'OpenRouter', nanogpt: 'nano-gpt.com', openai: 'OpenAI', compatible: 'OpenAI-compatible', fake: 'Fake (testing)' }
@@ -121,7 +128,7 @@ type AiSettingsProps = {
   onHome?: () => void
   onBack?: () => void
   onSaved?: (settings: AiSettings) => void
-  book?: { id: string; title: string; contextType?: GenerationContextType; currentDocumentId?: string; currentDocumentText?: string; promptValues?: BookPromptValues; chatId?: string }
+  book?: { id: string; title: string; contextType?: GenerationContextType; currentDocumentId?: string; currentDocumentText?: string; insertionPosition?: number; promptValues?: BookPromptValues; chatId?: string }
 }
 
 export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) {
@@ -574,8 +581,10 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
     ? bookTemplateValues({ ...book.promptValues, responseLength: settings.responseLength })
     : undefined
   const activePromptDiagnostics = promptTemplateDiagnostics(activePrompt, promptTab, promptPreviewValues)
-  const activePromptErrors = activePromptDiagnostics.filter((diagnostic) => diagnostic.severity === 'error')
-  const activePromptWarnings = activePromptDiagnostics.filter((diagnostic) => diagnostic.severity === 'warning')
+  const compositionPromptDiagnostics = [activePrompt, ...(promptTab === 'story' ? settings.promptCompositions.story.predefinedMessages.filter((message) => message.enabled).map((message) => message.template) : [])]
+    .flatMap((template) => promptTemplateDiagnostics(template, promptTab, promptPreviewValues))
+  const activePromptErrors = compositionPromptDiagnostics.filter((diagnostic) => diagnostic.severity === 'error')
+  const activePromptWarnings = compositionPromptDiagnostics.filter((diagnostic) => diagnostic.severity === 'warning')
   const normalizedVariableQuery = promptVariableQuery.trim().toLowerCase()
   const availablePromptVariables = promptVariables.filter((variable) => variable.scopes.includes(promptTab))
     .filter((variable) => !normalizedVariableQuery || `${variable.name} ${variable.description}`.toLowerCase().includes(normalizedVariableQuery))
@@ -656,8 +665,9 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
         </section>
 
         <section className="settings-card prompts-card">
-          <div className="card-heading"><div><span>03</span><h2>System prompts</h2></div></div>
+          <div className="card-heading"><div><span>03</span><h2>Request composition</h2></div><p>System prompt, ordered predefined messages, then Arc’s current instruction.</p></div>
           <div className="prompt-tabs" role="tablist">{([['story', 'Story'], ['summarize', 'Summarize'], ['lore', 'Lore entries'], ['assistant', 'Assistant']] as const).map(([key, label]) => <button key={key} className={promptTab === key ? 'active' : ''} type="button" onClick={() => setPromptTab(key)}>{label}</button>)}</div>
+          <h3 className="prompt-section-label">System prompt</h3>
           <PromptTemplateEditor
             ref={promptEditorRef}
             value={settings.promptCompositions[promptTab].systemPrompt}
@@ -665,13 +675,18 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
             ariaLabel={`${promptTab} system prompt template`}
             onChange={(value) => changeAiSettings((current) => withPromptSystemPrompt(current, promptTab, value))}
           />
+          {promptTab === 'story' && <StoryPredefinedMessages
+            messages={settings.promptCompositions.story.predefinedMessages}
+            previewValues={promptPreviewValues}
+            onChange={(messages) => changeAiSettings((current) => withPromptComposition(current, 'story', { ...current.promptCompositions.story, predefinedMessages: messages }))}
+          />}
           <div className={`prompt-validation-summary ${activePromptErrors.length ? 'invalid' : activePromptWarnings.length ? 'warning' : 'valid'}`} role="status">
             <strong>{activePromptErrors.length
               ? `${activePromptErrors.length} template error${activePromptErrors.length === 1 ? '' : 's'} — generation is blocked`
               : activePromptWarnings.length
                 ? `${activePromptWarnings.length} preview warning${activePromptWarnings.length === 1 ? '' : 's'}`
                 : 'Template is valid'}</strong>
-            {activePromptDiagnostics.length > 0 && <ul>{activePromptDiagnostics.map((diagnostic, index) => <li key={`${diagnostic.code}-${diagnostic.from}-${index}`}><b>{diagnostic.severity === 'error' ? 'Error' : 'Warning'}:</b> {diagnostic.message}</li>)}</ul>}
+            {compositionPromptDiagnostics.length > 0 && <ul>{compositionPromptDiagnostics.map((diagnostic, index) => <li key={`${diagnostic.code}-${diagnostic.from}-${index}`}><b>{diagnostic.severity === 'error' ? 'Error' : 'Warning'}:</b> {diagnostic.message}</li>)}</ul>}
           </div>
           <details className="prompt-local-preview">
             <summary>Rendered preview</summary>
@@ -689,7 +704,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
               const hasPreviewValue = Boolean(promptPreviewValues && Object.prototype.hasOwnProperty.call(promptPreviewValues, previewName))
               return <div key={variable.name}>
                 <button type="button" onClick={() => promptEditorRef.current?.insert(`{{${variable.name}}}`)}><code>{`{{${variable.name}}}`}</code></button>
-                <span>{variable.description}{promptPreviewValues && <small>{hasPreviewValue ? (previewValue?.trim() ? 'Available in current preview' : 'Empty in current preview') : 'Resolved at generation time'}</small>}</span>
+                <span>{variable.description}<small>{variable.stability === 'stable' ? 'Stable' : variable.stability === 'book-state' ? 'Changes with book/settings' : 'Changes each generation'}{promptPreviewValues ? ` · ${hasPreviewValue ? (previewValue?.trim() ? 'available now' : 'empty now') : 'resolved at generation time'}` : ''}</small></span>
                 <button type="button" className="insert-condition" onClick={() => promptEditorRef.current?.insert(`{% if ${variable.name} %}\n{{${variable.name}}}\n{% endif %}`)}>Insert if block</button>
               </div>
             })}{!availablePromptVariables.length && <p>No variables match that search.</p>}</div>
@@ -699,13 +714,42 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
         {book && <footer className="save-bar"><div><strong>{book.title}</strong><span>Changes save automatically</span></div><div className="save-actions"><button className="reset-settings" type="button" onClick={() => { void resetFromDefaults() }} disabled={settingsLoading}><RefreshCw aria-hidden="true" /> Reset from defaults</button></div></footer>}
         </> : settingsTab === 'context' ? (book ? (book.contextType === 'note'
           ? <NoteContextPlaceholder />
-          : <ContextSettings bookId={book.id} bookTitle={book.title} bookPromptValues={book.promptValues} type={book.contextType ?? 'scene'} currentDocumentId={book.currentDocumentId} currentDocumentText={book.currentDocumentText} chatId={book.chatId} settings={settings} value={contextSettings} sources={contextSources} saved={contextSaved} onChange={updateContextDefaults} />)
+          : <ContextSettings bookId={book.id} bookTitle={book.title} bookPromptValues={book.promptValues} type={book.contextType ?? 'scene'} currentDocumentId={book.currentDocumentId} currentDocumentText={book.currentDocumentText} insertionPosition={book.insertionPosition} chatId={book.chatId} settings={settings} value={contextSettings} sources={contextSources} saved={contextSaved} onChange={updateContextDefaults} />)
           : <GlobalContextDefaults value={contextSettings} onChange={updateContextDefaults} />)
           : settingsTab === 'speech' ? <SpeechSettingsPanel settings={settings} scope={isBookSettings ? 'book' : 'defaults'} onChange={(speech) => update('speech', speech)} />
           : <SettingsPlaceholder tab={settingsTab} scope={isBookSettings ? 'book' : 'defaults'} />}
       </section>
     </main>
   )
+}
+
+function StoryPredefinedMessages({ messages, previewValues, onChange }: { messages: PredefinedMessage[]; previewValues?: Record<string, string>; onChange: (messages: PredefinedMessage[]) => void }) {
+  const updateMessage = (id: string, patch: Partial<PredefinedMessage>) => onChange(messages.map((message) => message.id === id ? { ...message, ...patch } : message))
+  const moveMessage = (index: number, direction: -1 | 1) => {
+    const target = index + direction
+    if (target < 0 || target >= messages.length) return
+    const next = [...messages]
+    ;[next[index], next[target]] = [next[target], next[index]]
+    onChange(next)
+  }
+  return <section className="story-predefined" aria-label="Story predefined messages">
+    <header><div><strong>Predefined messages</strong><span>Sent in this order between the System prompt and Arc’s current instruction.</span></div><button type="button" onClick={() => onChange([...messages, makePredefinedMessage({ name: 'New message', role: 'user' })])}><Plus aria-hidden="true" /> Add message</button></header>
+    {messages.map((message, index) => {
+      const diagnostics = promptTemplateDiagnostics(message.template, 'story', previewValues)
+      const errors = diagnostics.filter((diagnostic) => diagnostic.severity === 'error')
+      return <article key={message.id} className={!message.enabled ? 'disabled' : ''}>
+        <div className="story-message-toolbar">
+          <label><span>Name</span><input value={message.name ?? ''} onChange={(event) => updateMessage(message.id, { name: event.target.value })} placeholder="Optional label" /></label>
+          <label><span>Role</span><select value={message.role} onChange={(event) => updateMessage(message.id, { role: event.target.value as PredefinedMessage['role'] })}><option value="system">System</option><option value="user">User</option><option value="assistant">Assistant</option></select></label>
+          <label className="story-message-enabled"><input type="checkbox" checked={message.enabled} onChange={(event) => updateMessage(message.id, { enabled: event.target.checked })} /><span>Enabled</span></label>
+          <div className="story-message-actions"><button type="button" disabled={index === 0} onClick={() => moveMessage(index, -1)} aria-label={`Move ${message.name || 'message'} up`}>↑</button><button type="button" disabled={index === messages.length - 1} onClick={() => moveMessage(index, 1)} aria-label={`Move ${message.name || 'message'} down`}>↓</button><button type="button" onClick={() => onChange(messages.filter((candidate) => candidate.id !== message.id))} aria-label={`Delete ${message.name || 'message'}`}><Trash2 aria-hidden="true" /></button></div>
+        </div>
+        <PromptTemplateEditor value={message.template} diagnostics={diagnostics} ariaLabel={`${message.name || `Story message ${index + 1}`} template`} onChange={(template) => updateMessage(message.id, { template })} />
+        <small className={errors.length ? 'story-message-error' : ''}>{errors.length ? `${errors.length} error${errors.length === 1 ? '' : 's'} — generation is blocked` : message.enabled ? `Message ${index + 1} · ${message.role}` : `Message ${index + 1} · omitted while disabled`}</small>
+      </article>
+    })}
+    {!messages.length && <p>No predefined messages. Only the System prompt and Arc’s current instruction will be sent.</p>}
+  </section>
 }
 
 function GlobalContextDefaults({ value, onChange }: { value: BookContextSettings; onChange: (value: BookContextSettings) => void }) {
@@ -725,7 +769,7 @@ function NoteContextPlaceholder() {
   </section>
 }
 
-function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDocumentId, currentDocumentText, chatId, settings, value, sources, saved, onChange }: { bookId: string; bookTitle: string; bookPromptValues?: BookPromptValues; type: Exclude<GenerationContextType, 'note'>; currentDocumentId?: string; currentDocumentText?: string; chatId?: string; settings: AiSettings; value: BookContextSettings; sources: ArcEntity[]; saved: boolean; onChange: (value: BookContextSettings) => void }) {
+function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDocumentId, currentDocumentText, insertionPosition, chatId, settings, value, sources, saved, onChange }: { bookId: string; bookTitle: string; bookPromptValues?: BookPromptValues; type: Exclude<GenerationContextType, 'note'>; currentDocumentId?: string; currentDocumentText?: string; insertionPosition?: number; chatId?: string; settings: AiSettings; value: BookContextSettings; sources: ArcEntity[]; saved: boolean; onChange: (value: BookContextSettings) => void }) {
   const [query, setQuery] = useState('')
   const [preview, setPreview] = useState<PreparedContextValues | null>(null)
   const [previewError, setPreviewError] = useState('')
@@ -780,24 +824,35 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
   const typeLabel = type === 'scene' ? 'Story' : type === 'codex' ? 'Codex' : 'Chat'
   const previewPromptScope = type === 'scene' ? 'story' : type === 'codex' ? 'lore' : 'assistant'
   const previewPromptTemplate = type === 'chat' ? previewChat?.systemPrompt ?? '' : settings.prompts[previewPromptScope]
-  const previewPromptDiagnostics = promptTemplateDiagnostics(previewPromptTemplate, previewPromptScope, bookTemplateValues(metadata))
+  const previewPromptDiagnostics = type === 'scene'
+    ? [settings.promptCompositions.story.systemPrompt, ...settings.promptCompositions.story.predefinedMessages.filter((message) => message.enabled).map((message) => message.template)]
+      .flatMap((template) => promptTemplateDiagnostics(template, 'story', bookTemplateValues(metadata)))
+    : promptTemplateDiagnostics(previewPromptTemplate, previewPromptScope, bookTemplateValues(metadata))
   const previewPromptErrors = previewPromptDiagnostics.filter((diagnostic) => diagnostic.severity === 'error')
   const requestMessages: RequestPreviewMessage[] = []
+  let storyNormalizedRequest: NormalizedAssembledRequest | null = null
 
   if (preview && type === 'scene') {
-    const systemPrompt = renderStoryPrompt(settings.prompts.story, {
+    storyNormalizedRequest = assembleStoryGenerationRequest({
+      composition: settings.promptCompositions.story,
       book: metadata,
       sceneText: preview.currentSceneText,
+      insertionPosition: insertionPosition ?? preview.currentSceneText.length,
       scenePov: typeof currentDocument?.pov === 'string' ? currentDocument.pov : undefined,
-      previousSceneText: preview.previousSceneText,
-      summaryContext: preview.summaryContext,
-      additionalContext: preview.additionalContext,
+      context: preview,
+      responseLength: settings.responseLength,
+      instruction: '',
     })
-    requestMessages.push({ key: 'story-system', role: 'system', title: 'Story system prompt', detail: 'SYSTEM', content: systemPrompt })
-    if (!/{{\s*additional_context\s*}}/.test(settings.prompts.story) && preview.additionalContext.trim()) {
-      requestMessages.push({ key: 'story-context', role: 'user', title: 'Additional context', detail: 'USER', content: `# Additional context\n\n${preview.additionalContext}` })
-    }
-    requestMessages.push({ key: 'story-instruction', role: 'user', title: 'Generation instruction', detail: 'USER · default shown', content: generationInstructionMessage(settings.prompts.story, settings.responseLength, 'Continue the story.') })
+    storyNormalizedRequest.parts.forEach((part, index) => requestMessages.push({
+      key: part.id,
+      role: part.role ?? 'user',
+      title: part.name || (part.sourceKind === 'current-turn' ? 'Current instruction' : `Message ${index + 1}`),
+      detail: `${part.role?.toUpperCase() ?? 'NO ROLE'} · ${part.sourceKind}${part.omitted ? ' · omitted' : ''}`,
+      content: part.content,
+      omitted: part.omitted,
+      references: part.referencedVariables,
+      diagnostics: part.dynamicVariables?.flatMap((item) => item.sources.map((source) => `${item.variable}: ${source.title || source.sourceId}${source.representation ? ` · ${source.representation}` : ''}${source.reason ? ` · ${source.reason}` : ''}`)),
+    }))
   }
 
   if (preview && type === 'codex') {
@@ -848,7 +903,8 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
     }
   }
 
-  const exactPreview = requestMessages.map((message) => `${message.role.toUpperCase()}:\n\n${message.content || '[empty]'}${message.reasoning ? `\n\nreasoning:\n${message.reasoning}` : ''}`).join('\n\n---\n\n')
+  const providerPreviewMessages = storyNormalizedRequest?.providerMessages ?? requestMessages.filter((message) => !message.omitted).map((message) => ({ role: message.role, content: message.content }))
+  const exactPreview = providerPreviewMessages.map((message) => `${message.role.toUpperCase()}:\n\n${message.content || '[empty]'}`).join('\n\n---\n\n')
   const selectedModel = type === 'codex' ? settings.codexModel.trim() || settings.mainModel.trim() : type === 'chat' ? previewChat?.model.trim() : settings.mainModel.trim()
   const selectedModelContextLength = type === 'codex'
     ? (settings.codexModel.trim() ? settings.codexModelContextLength : settings.mainModelContextLength)
@@ -856,7 +912,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
   const effectiveLimitInput = type === 'codex'
     ? (settings.codexModel.trim() ? settings.codexEffectiveContextLimit : settings.mainEffectiveContextLimit)
     : type === 'chat' ? previewChat?.effectiveContextLimit ?? '' : settings.mainEffectiveContextLimit
-  const diagnosticMessages = requestMessages.map((message) => ({ role: message.role, content: message.content || null, ...(message.reasoning ? { reasoning_content: message.reasoning } : {}) }))
+  const diagnosticMessages = storyNormalizedRequest?.providerMessages ?? requestMessages.filter((message) => !message.omitted).map((message) => ({ role: message.role, content: message.content || null, ...(message.reasoning ? { reasoning_content: message.reasoning } : {}) }))
   const diagnostics = selectedModel && requestMessages.length && !previewPromptErrors.length
     ? generationContextDiagnostics(selectedModel, selectedModelContextLength, effectiveLimitInput, type === 'chat' ? serializeChatModelInput(diagnosticMessages) : JSON.stringify({ messages: diagnosticMessages }))
     : null
@@ -876,12 +932,15 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
     </section>
     <section className="settings-card context-preview-card"><div className="card-heading"><div><span>03</span><h2>Request preview</h2></div><p>{selectedModel ? `Model: ${selectedModel}. ` : ''}Rendered message stack for the current {typeLabel.toLowerCase()} request.</p></div>
       {type !== 'chat' && <p className="context-preview-empty">The generation instruction below shows the fallback used when the generation drawer is empty. Custom drawer text replaces it when you generate.</p>}
+      {type === 'scene' && <p className="context-preview-empty">Captured generation point: {(insertionPosition ?? currentDocumentText?.length ?? 0).toLocaleString()} of {(currentDocumentText?.length ?? 0).toLocaleString()} characters. Empty instruction fallback: “{STORY_CONTINUE_FALLBACK}”</p>}
+      {type === 'scene' && <p className="context-preview-empty">Automatic and Additional sources are deduplicated by stable source identity; matching text is never used as identity.</p>}
       {previewError ? <p className="context-preview-error" role="alert">{previewError}</p> : preview ? <>
         {previewPromptErrors.length > 0 && <div className="context-preview-error" role="alert"><strong>Request blocked by an invalid {previewPromptScope} prompt.</strong><ul>{previewPromptErrors.map((diagnostic, index) => <li key={`${diagnostic.code}-${diagnostic.from}-${index}`}>{diagnostic.message}</li>)}</ul></div>}
         {diagnostics && <div className={`context-budget ${!diagnostics.limitValid || !diagnostics.fits ? 'over' : diagnostics.warning ? 'warning' : ''}`}><strong>{diagnostics.limitValid ? `${diagnostics.requestTokens.toLocaleString()} estimated input tokens · ${Math.round(diagnostics.usageRatio * 100)}% of usable budget` : 'Invalid effective context cap'}</strong><span>Effective limit: {diagnostics.effectiveContextTokens.toLocaleString()} · Response reserve: {diagnostics.responseReserveTokens.toLocaleString()} · {diagnostics.modelContextKnown ? `Model hard window: ${diagnostics.modelContextTokens.toLocaleString()}` : `Model window estimate: ${diagnostics.modelContextTokens.toLocaleString()}`}</span>{diagnostics.wasClamped && <small>Your configured cap is above the model hard maximum, so Arc uses the model maximum.</small>}{diagnostics.limitError && <small>{diagnostics.limitError}</small>}{diagnostics.warning && diagnostics.fits && <small>Near the limit. Consider summaries, deselecting full-text context, or raising the cap.</small>}{!diagnostics.fits && diagnostics.limitValid && <small>Over the usable budget. Generation will be refused; Arc will not trim or replace context automatically.</small>}</div>}
         {preview.automaticCodex.length > 0 && <div className="automatic-codex-preview"><strong>Automatic Codex</strong>{preview.automaticCodex.map((item) => <article key={item.entryId} className={item.source === 'dependency' ? 'dependency-cascade' : 'trigger-match'}><header><b>{item.title}</b><small>{item.source === 'dependency' ? 'Dependency cascade' : 'Direct trigger'} · {item.representation === 'Summary' ? 'Summary' : 'Full entry'}{item.fallbackReason ? ` · ${item.fallbackReason}` : ''}</small></header>{item.source === 'dependency' ? <p>Dependency path: {(item.dependencyPath ?? []).map((step) => step.title).join(' → ')}</p> : <ul>{item.matches.map((match, index) => <li key={`${item.entryId}-${match.sceneId}-${match.trigger}-${index}`}><code>{match.trigger}</code> · {match.sceneTitle}</li>)}</ul>}</article>)}</div>}
         {preview.codexRepresentations.length > 0 && <div className="codex-context-representations"><strong>Codex context representation</strong>{preview.codexRepresentations.map((item) => <span key={item.entryId}><b>{item.title}</b><em>{item.representation}{item.fallbackReason ? ` · ${item.fallbackReason}` : ''}</em></span>)}</div>}
-        <div className="context-preview-rendered">{requestMessages.map((message) => <section key={message.key}><header><h3>{message.title}</h3><span>{message.detail}</span></header>{message.content ? <div className="context-preview-copy">{message.content}</div> : <p className="context-preview-empty">This message is empty.</p>}{message.reasoning && <div className="context-preview-copy"><strong>Reasoning</strong>\n\n{message.reasoning}</div>}</section>)}</div>
+        {storyNormalizedRequest && <div className="context-budget"><strong>Likely reusable prefix: {likelyReusablePrefix(storyNormalizedRequest.parts, (name) => promptVariables.find((variable) => variable.name === name)?.stability).partCount} message(s)</strong><span>Reuse stops before the first message that references turn-dynamic data.</span></div>}
+        <div className="context-preview-rendered">{requestMessages.map((message) => <section key={message.key} className={message.omitted ? 'omitted' : ''}><header><h3>{message.title}</h3><span>{message.detail}</span></header>{message.content ? <div className="context-preview-copy">{message.content}</div> : <p className="context-preview-empty">This message is empty.</p>}{message.references?.length ? <p className="context-preview-empty">References: {message.references.map((reference) => `{{${reference}}}`).join(', ')}</p> : null}{message.diagnostics?.length ? <ul>{message.diagnostics.map((diagnostic) => <li key={diagnostic}>{diagnostic}</li>)}</ul> : null}{message.reasoning && <div className="context-preview-copy"><strong>Reasoning</strong>\n\n{message.reasoning}</div>}</section>)}</div>
         <details className="context-preview-raw"><summary>View message stack</summary><pre>{exactPreview || '[No messages would be sent yet.]'}</pre></details>
       </> : <p className="context-preview-empty">Preparing preview…</p>}
     </section>

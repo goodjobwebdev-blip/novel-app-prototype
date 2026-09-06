@@ -2,12 +2,15 @@ import { getBookContextSettings, isCodexEntryArchived, listCodexDependencies, li
 import { automaticCodexMatches, type CodexTriggerSceneMatch } from './codex-trigger-service'
 import { cascadeAutomaticCodexDependencies } from './codex-dependency-cascade'
 import { codexContextRepresentation, type CodexContextRepresentation } from './summary-service'
+import type { DynamicContextSource } from './prompt-composition'
 
 export type PreparedAutomaticCodex = { entryId: string; title: string; category: string; representation: 'Full entry' | 'Summary'; fallbackReason?: string; source: 'trigger' | 'dependency'; matches: CodexTriggerSceneMatch[]; dependencyPath?: Array<{ entryId: string; title: string }> }
 
 export type PreparedContextValues = {
+  currentSceneId: string
   currentSceneText: string
   currentSceneTitle: string
+  previousSceneId: string
   previousSceneText: string
   previousSceneTitle: string
   summaryContext: string
@@ -16,6 +19,11 @@ export type PreparedContextValues = {
   additionalContext: string
   codexRepresentations: CodexContextRepresentation[]
   automaticCodex: PreparedAutomaticCodex[]
+  automaticCodexContext?: string
+  manualAdditionalContext?: string
+  storySoFarSources?: DynamicContextSource[]
+  automaticSources?: DynamicContextSource[]
+  additionalSources?: DynamicContextSource[]
 }
 export type ContextDiagnostics = {
   modelId: string
@@ -70,10 +78,10 @@ function descendantScenes(source: StructuralEntity, outline: StructuralEntity[])
 }
 
 function automaticSummaries(bookId: string, entities: ArcEntity[], outline: StructuralEntity[], currentSceneId?: string, excludedSceneId?: string) {
-  if (!currentSceneId) return { text: '', ids: new Set<string>() }
+  if (!currentSceneId) return { text: '', ids: new Set<string>(), sources: [] as DynamicContextSource[] }
   const scenes = outline.filter((item) => item.type === 'scene')
   const currentIndex = scenes.findIndex((item) => item.id === currentSceneId)
-  if (currentIndex < 0) return { text: '', ids: new Set<string>() }
+  if (currentIndex < 0) return { text: '', ids: new Set<string>(), sources: [] as DynamicContextSource[] }
   const summaries = summaryMap(entities)
   const chosen: SummaryEntity[] = []
   const visit = (item: StructuralEntity) => {
@@ -89,7 +97,11 @@ function automaticSummaries(bookId: string, entities: ArcEntity[], outline: Stru
     sorted(outline.filter((child) => child.parentId === item.id)).forEach(visit)
   }
   sorted(outline.filter((item) => item.parentId === bookId)).forEach(visit)
-  return { text: chosen.map((summary) => section(summary.title, summary.content)).join('\n\n'), ids: new Set(chosen.map((summary) => summary.id)) }
+  return {
+    text: chosen.map((summary) => section(summary.title, summary.content)).join('\n\n'),
+    ids: new Set(chosen.map((summary) => summary.id)),
+    sources: chosen.map((summary) => ({ sourceId: summary.id, title: summary.title, type: 'summary', representation: 'Summary', content: summary.content, reason: 'Earlier-story summary' })),
+  }
 }
 
 function summaryMatches(source: StructuralEntity, outline: StructuralEntity[], currentSceneId: string | undefined, range: GenerationContextProfile['summaryRange']) {
@@ -126,7 +138,7 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
     : ''
   const automatic = options.type === 'scene'
     ? automaticSummaries(options.bookId, entities, outline, anchorSceneId, previousSceneText ? previousScene?.id : undefined)
-    : { text: '', ids: new Set<string>() }
+    : { text: '', ids: new Set<string>(), sources: [] as DynamicContextSource[] }
   const automaticFullIds = new Set<string>()
   if (options.type === 'scene' && anchorSceneId) automaticFullIds.add(anchorSceneId)
   if (previousSceneText && previousScene?.id) automaticFullIds.add(previousScene.id)
@@ -217,9 +229,12 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
     }
   })
 
+  const manualSections = [...fullSections, ...summarySections, ...notes, ...codex].sort(additionalContextOrder)
   return {
+    currentSceneId: currentScene?.id ?? '',
     currentSceneText: liveCurrentText,
     currentSceneTitle: currentScene?.title ?? '',
+    previousSceneId: previousSceneText ? previousScene?.id ?? '' : '',
     previousSceneText,
     previousSceneTitle: previousSceneText ? previousScene?.title ?? '' : '',
     summaryContext: automatic.text,
@@ -227,7 +242,21 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
     lastSceneTitle: (options.type === 'codex' || options.type === 'chat') && options.profile.includeLastScene ? currentScene?.title ?? '' : '',
     codexRepresentations,
     automaticCodex,
-    additionalContext: [automaticSection, ...[...fullSections, ...summarySections, ...notes, ...codex].sort(additionalContextOrder).map((item) => item.text)].filter(Boolean).join('\n\n'),
+    automaticCodexContext: automaticText,
+    manualAdditionalContext: manualSections.map((item) => item.text).join('\n\n'),
+    storySoFarSources: automatic.sources,
+    automaticSources: automaticEntries.map((item) => {
+      const representation = automaticRepresentations.find((candidate) => candidate.entryId === item.entry.id)!
+      return { sourceId: item.entry.id, title: item.entry.title, type: 'codex', representation: representation.representation, content: representation.content, reason: item.source === 'dependency' ? 'Dependency cascade' : 'Trigger match' }
+    }),
+    additionalSources: manualSections.map((item) => ({
+      sourceId: item.id,
+      title: item.text.match(/^## ([^\n]+)/)?.[1],
+      representation: item.stabilityRank === 0 ? 'Full' : 'Selected',
+      content: item.text,
+      reason: 'Selected in Context Management',
+    })),
+    additionalContext: [automaticSection, ...manualSections.map((item) => item.text)].filter(Boolean).join('\n\n'),
   }
 }
 
