@@ -19,6 +19,7 @@ import {
   defaultAiPrompts,
   initialAiSettings,
   loadAiSettings,
+  RESPONSE_LENGTH_PRESETS,
   saveAiSettings,
   saveGlobalFavorites,
   type AiPrompts,
@@ -38,11 +39,12 @@ import {
   type BookContextSettings,
   type GenerationContextType,
 } from './persistence'
-import { bookTemplateValues, promptVariables, renderPromptTemplate, type BookPromptValues } from './prompt-template'
+import { bookTemplateValues, generationInstructionMessage, promptVariables, renderPromptTemplate, responseLengthMessage, type BookPromptValues } from './prompt-template'
 import { buildContextValues, type PreparedContextValues } from './context-service'
 import { getChat, listChatMessages, saveChatContextProfile, type ChatEntity, type ChatMessageEntity } from './chat-service'
 import { renderLorePrompt, renderStoryPrompt } from './nanogpt'
 import { clearModelCatalog, getCachedModelCatalog, providerModelEndpoint, saveModelCatalog, type ProviderModel } from './model-catalog'
+import './response-length-settings.css'
 type SettingsTab = 'ai' | 'context' | 'appearance' | 'speech' | 'images'
 type SaveState = 'loading' | 'saved' | 'saving' | 'error'
 type RequestPreviewMessage = {
@@ -438,6 +440,11 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
             <input type="text" inputMode="numeric" pattern="[0-9]*" value={settings.generationWordDelayMs} onChange={(event) => update('generationWordDelayMs', event.target.value)} aria-describedby="generation-speed-help" spellCheck={false} />
             <small id="generation-speed-help">40 ms is the default. Use a lower value for faster writing or a higher value for slower writing (1–2000).</small>
           </label>
+          <div className="response-length-setting">
+            <label htmlFor="response-length"><span><strong>Response length</strong><em>Story, Codex, and Chat</em></span><textarea id="response-length" value={settings.responseLength} onChange={(event) => update('responseLength', event.target.value)} placeholder="Leave empty to let the model decide." /></label>
+            <div className="response-length-presets" aria-label="Response length presets">{RESPONSE_LENGTH_PRESETS.map((preset) => <button type="button" key={preset.label} onClick={() => update('responseLength', preset.value)}>{preset.label}</button>)}</div>
+            <small>Applied near the end of each request, immediately before the current instruction. Custom prompts can place <code>{'{{response.length}}'}</code> explicitly instead.</small>
+          </div>
           <div className="model-browser"><div className="model-search"><Search aria-hidden="true" /><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder="Search loaded models" /></div>{models.length ? <div className="model-list">{visibleModels.map((model) => <article key={model.id}><button className={`favorite ${settings.favorites.includes(model.id) ? 'active' : ''}`} type="button" onClick={() => toggleFavorite(model.id)} aria-label={`Favorite ${model.id}`}><Star fill={settings.favorites.includes(model.id) ? 'currentColor' : 'none'} aria-hidden="true" /></button><div><strong>{model.name || model.id}</strong>{model.name && model.name !== model.id && <small>{model.id}</small>}<p><span>{formatContext(model.context_length)}</span><span>{model.architecture?.modality || 'Text'}</span>{model.pricing?.prompt && <span>Pricing supplied</span>}</p></div><button className="use-model" type="button" onClick={() => selectModel('main', model.id)}>Use</button></article>)}</div> : <div className="model-empty"><Bot aria-hidden="true" /><strong>No models loaded</strong><p>Enter your key and reload the provider model list.</p></div>}</div>
         </section>
 
@@ -519,7 +526,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
   }, [bookId, chatId, currentDocumentId, currentDocumentText, profile, sources, type, value.lastOpenedSceneId])
 
   const currentDocument = sources.find((item) => item.id === currentDocumentId)
-  const metadata = bookPromptValues ?? { title: bookTitle, series: '', seriesOrder: '', overview: '', genre: '', style: '', pov: '', tense: '', language: '' }
+  const metadata: BookPromptValues = { ...(bookPromptValues ?? { title: bookTitle, series: '', seriesOrder: '', overview: '', genre: '', style: '', pov: '', tense: '', language: '' }), responseLength: settings.responseLength }
   const typeLabel = type === 'scene' ? 'Story' : type === 'codex' ? 'Codex' : 'Chat'
   const requestMessages: RequestPreviewMessage[] = []
 
@@ -536,7 +543,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
     if (!/{{\s*additional_context\s*}}/.test(settings.prompts.story) && preview.additionalContext.trim()) {
       requestMessages.push({ key: 'story-context', role: 'user', title: 'Additional context', detail: 'USER', content: `# Additional context\n\n${preview.additionalContext}` })
     }
-    requestMessages.push({ key: 'story-instruction', role: 'user', title: 'Generation instruction', detail: 'USER · default shown', content: '# Instruction\n\nContinue the story.' })
+    requestMessages.push({ key: 'story-instruction', role: 'user', title: 'Generation instruction', detail: 'USER · default shown', content: generationInstructionMessage(settings.prompts.story, settings.responseLength, 'Continue the story.') })
   }
 
   if (preview && type === 'codex') {
@@ -552,7 +559,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
     if (!/{{\s*additional_context\s*}}/.test(settings.prompts.lore) && preview.additionalContext.trim()) {
       requestMessages.push({ key: 'codex-context', role: 'user', title: 'Additional context', detail: 'USER', content: `# Additional context\n\n${preview.additionalContext}` })
     }
-    requestMessages.push({ key: 'codex-instruction', role: 'user', title: 'Generation instruction', detail: 'USER · default shown', content: '# Instruction\n\nCreate a complete Codex entry.' })
+    requestMessages.push({ key: 'codex-instruction', role: 'user', title: 'Generation instruction', detail: 'USER · default shown', content: generationInstructionMessage(settings.prompts.lore, settings.responseLength, 'Create a complete Codex entry.') })
   }
 
   if (preview && type === 'chat' && previewChat) {
@@ -566,14 +573,25 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
     if (contextSections.length) {
       requestMessages.push({ key: 'chat-context', role: 'system', title: 'Selected book context', detail: 'SYSTEM', content: `# Selected book context\n\n${contextSections.join('\n\n')}` })
     }
-    previewHistory.forEach((message) => requestMessages.push({
-      key: message.id,
-      role: message.role,
-      title: message.role === 'user' ? 'User message' : 'Assistant message',
-      detail: message.role.toUpperCase(),
-      content: chatHistoryContent(message),
-      reasoning: message.role === 'assistant' ? message.thoughts : undefined,
-    }))
+    const lengthMessage = responseLengthMessage(previewChat.systemPrompt, settings.responseLength)
+    let latestUserIndex = -1
+    previewHistory.forEach((message, index) => { if (message.role === 'user') latestUserIndex = index })
+    previewHistory.forEach((message, index) => {
+      if (lengthMessage && index === latestUserIndex) {
+        requestMessages.push({ key: 'chat-response-length', role: 'user', title: 'Response length', detail: 'USER · before latest instruction', content: lengthMessage })
+      }
+      requestMessages.push({
+        key: message.id,
+        role: message.role,
+        title: message.role === 'user' ? 'User message' : 'Assistant message',
+        detail: message.role.toUpperCase(),
+        content: chatHistoryContent(message),
+        reasoning: message.role === 'assistant' ? message.thoughts : undefined,
+      })
+    })
+    if (lengthMessage && latestUserIndex < 0) {
+      requestMessages.push({ key: 'chat-response-length', role: 'user', title: 'Response length', detail: 'USER · before next message', content: lengthMessage })
+    }
   }
 
   const exactPreview = requestMessages.map((message) => `${message.role.toUpperCase()}:\n\n${message.content || '[empty]'}${message.reasoning ? `\n\nreasoning:\n${message.reasoning}` : ''}`).join('\n\n---\n\n')
