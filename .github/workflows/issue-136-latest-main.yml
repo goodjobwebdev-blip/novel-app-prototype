@@ -1,0 +1,38 @@
+name: Validate issue 136 on latest main
+
+on:
+  push:
+    branches:
+      - fix/issue-136-settings-save-recovery
+
+permissions:
+  contents: write
+
+concurrency:
+  group: issue-136-latest-main
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/issue-136-settings-save-recovery
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npm install --no-package-lock
+      - name: Regression tests
+        run: node --test tests/*.test.mjs
+      - name: Production build
+        run: npm run build
+      - name: Remove validation workflow
+        run: |
+          rm .github/workflows/issue-136-latest-main.yml
+          git config user.name "goodjobwebdev-blip"
+          git config user.email "goodjob.webdev@gmail.com"
+          git add -A
+          git commit -m "Remove issue 136 validation workflow"
+          git push origin HEAD:fix/issue-136-settings-save-recovery
