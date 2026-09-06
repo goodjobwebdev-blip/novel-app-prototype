@@ -21,6 +21,7 @@ import {
   Mic,
   NotebookPen,
   PanelBottomOpen,
+  Pause,
   Pencil,
   Play,
   Plus,
@@ -93,11 +94,13 @@ import {
 } from './persistence'
 import { buildSummarySource, getSummaryStateMap, renderSummaryPrompt, type SummaryState } from './summary-service'
 import { generateAutotitleSuggestion, prepareAutotitleRequest, type AutotitleEntity, type AutotitleRequest, type AutotitleTargetType } from './autotitle-service'
+import { estimateSpeechRequest, fetchSpeechModels, getTtsState, pauseTtsSession, resumeTtsSession, startTtsSession, stopTtsSession, subscribeTtsState, type TtsState } from './tts-service'
 import { ChatSidebar, ChatView } from './ChatFeature'
 import './generation-controls.css'
 import './codex-archive.css'
 import './codex-summary.css'
 import './autotitle.css'
+import './tts.css'
 
 type Screen = 'home' | 'editor' | 'chat' | 'settings'
 type RightTab = 'book' | 'outline' | 'notes' | 'codex' | 'chat'
@@ -169,6 +172,7 @@ export default function Workspace() {
   const [generationDetails, setGenerationDetails] = useState<GenerationDetails | null>(null)
   const [generationDetailsOpen, setGenerationDetailsOpen] = useState(false)
   const [toast, setToast] = useState<ToastMessage | null>(null)
+  const [lastGeneratedPassage, setLastGeneratedPassage] = useState('')
   const [autotitle, setAutotitle] = useState<AutotitleUiState | null>(null)
   const [bookList, setBookList] = useState<BookEntity[]>([])
   const [seriesList, setSeriesList] = useState<SeriesEntity[]>([])
@@ -199,6 +203,7 @@ export default function Workspace() {
   useEffect(() => {
     setArcPrompt('')
     setLorePrompt('')
+    setLastGeneratedPassage('')
   }, [activeDocument?.id])
 
   useEffect(() => {
@@ -766,6 +771,61 @@ export default function Workspace() {
     }
   }
 
+  async function speechSettings() {
+    if (!currentBook) throw new Error('Open a book before reading aloud.')
+    const defaults = loadAiSettings()
+    return (await getBookAiSettings(currentBook.id, defaults.favorites)).speech
+  }
+
+  async function readText(text: string, label: string) {
+    try {
+      const speech = await speechSettings()
+      await startTtsSession(speech, text, label)
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not start text to speech.')
+    }
+  }
+
+  async function readCurrentDocument() {
+    if (!activeDocument) return
+    if (activeDocument.type === 'scene') {
+      if (!lastGeneratedPassage.trim()) { showToast('There is no identifiable latest generated passage to read in this Scene.'); return }
+      await readText(lastGeneratedPassage, `Scene · ${activeDocument.title}`)
+      return
+    }
+    if (activeDocument.type === 'codexEntry') await readText(storyMarkdown, `Codex · ${activeDocument.title}`)
+  }
+
+  async function readNote(note: NoteEntity) {
+    const text = activeDocument?.id === note.id ? storyMarkdown : note.content
+    await readText(text, `Note · ${note.title}`)
+  }
+
+  async function readOutline(entity: StructuralEntity) {
+    if (!currentBook || !['scene', 'chapter'].includes(entity.type)) return
+    try {
+      const speech = await speechSettings()
+      let text = ''
+      if (entity.type === 'scene') text = activeDocument?.id === entity.id ? storyMarkdown : String(entity.content ?? '')
+      else text = outlineEntities
+        .filter((item) => item.type === 'scene' && item.parentId === entity.id)
+        .sort((a, b) => a.order - b.order)
+        .map((scene) => activeDocument?.id === scene.id ? storyMarkdown : String(scene.content ?? ''))
+        .filter((content) => content.trim())
+        .join('\n\n')
+      if (!text.trim()) { showToast(`“${entity.title}” has no readable prose.`); return }
+      const models = await fetchSpeechModels(speech.apiKey).catch(() => [])
+      const modelInfo = models.find((model) => model.id === speech.model)
+      const estimate = estimateSpeechRequest(speech, text, modelInfo)
+      const price = modelInfo?.averagePrice ? `\nProvider average price: ${modelInfo.averagePrice}` : '\nProvider price: unavailable for a reliable estimate'
+      const confirmed = window.confirm(`Read ${entity.type === 'scene' ? 'Scene' : 'Chapter'} “${entity.title}” aloud with a paid NanoGPT request?\n\n${estimate.words.toLocaleString()} words · ${estimate.characters.toLocaleString()} characters · about ${estimate.chunks} TTS request${estimate.chunks === 1 ? '' : 's'}\nModel: ${speech.model}${price}`)
+      if (!confirmed) return
+      await startTtsSession(speech, text, `${entity.type === 'scene' ? 'Scene' : 'Chapter'} · ${entity.title}`)
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not start text to speech.')
+    }
+  }
+
   function startGenerationActivity(details: Omit<GenerationDetails, 'startedAt' | 'status' | 'thoughts'>) {
     const startedAt = Date.now()
     generationStartedAtRef.current = startedAt
@@ -980,8 +1040,13 @@ export default function Workspace() {
       finishGenerationActivity(status)
       if (result?.status === 'complete') {
         latestGenerationRequestRef.current = requestSnapshot
+        if (!isCodex) setLastGeneratedPassage(result.generatedText)
         if (isCodex) changedSinceSnapshotRef.current = true
         await flushDocument('generation', true)
+        if (settings.speech.readAloudAfterGeneration) {
+          const textToRead = isCodex ? result.resultDocument : result.generatedText
+          void startTtsSession(settings.speech, textToRead, `${isCodex ? 'Codex' : 'Story'} · ${activeDocument.title}`).catch((error) => showToast(error instanceof Error ? error.message : 'Automatic read aloud failed.'))
+        }
       }
     }
   }
@@ -1168,6 +1233,7 @@ export default function Workspace() {
       </header>
 
       {toast && <div className="app-toast" role="alert" key={toast.id}><span>{toast.message}</span><button type="button" onClick={() => setToast(null)} aria-label="Dismiss notification"><X aria-hidden="true" /></button></div>}
+      <TtsStatusBar />
 
       {generationDetailsOpen && generationDetails && <GenerationDetailsDialog details={generationDetails} elapsedSeconds={generationElapsedSeconds} onClose={() => setGenerationDetailsOpen(false)} />}
       {autotitle && <AutotitlePanel state={autotitle} onAccept={() => { void acceptAutotitle() }} onRegenerate={() => { void regenerateAutotitle() }} onStop={stopAutotitle} onCancel={() => { autotitleAbortRef.current?.abort(); setAutotitle(null) }} />}
@@ -1180,17 +1246,32 @@ export default function Workspace() {
         {activeDocument ? <MarkdownEditor key={`${activeDocument.id}-${editorRevision}`} ref={editorRef} value={storyMarkdown} onChange={handleStoryChange} ariaLabel={`${activeDocument.title} Markdown editor`} readOnly={activeCodexArchived || activeSummarySourceArchived} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No document selected</strong><p>Choose a Scene, Note, Codex entry, or Summary from the book workspace.</p><button type="button" onClick={() => setRightOpen(true)}>Open Book Workspace</button></div>}
       </article> : currentBook ? <ChatView bookId={currentBook.id} chatId={activeChatId} bookPromptValues={toBookPromptValues(currentBook, seriesList)} currentSceneId={activeSceneId} onChatChange={openChat} onToast={showToast} /> : <section className="conversation chat-empty"><MessageCircle aria-hidden="true" /><p>Open a book before starting a chat.</p></section>}
 
-      {screen === 'editor' && (activeDocument?.type === 'scene' || (activeDocument?.type === 'codexEntry' && !activeCodexArchived)) && !arcOpen && <div className="editor-bottom"><button type="button" onClick={() => setArcOpen(true)} aria-label="Open generation input"><PanelBottomOpen aria-hidden="true" /></button><GenerateControl isGenerating={generationActive} phase={generationPhase} elapsedSeconds={generationElapsedSeconds} onOpenDetails={() => setGenerationDetailsOpen(true)} onGenerate={generate} onStop={stopGeneration} onMicro={insertEditorSpeech} onMicro2={insertPromptSpeech} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} /></div>}
+      {screen === 'editor' && (activeDocument?.type === 'scene' || (activeDocument?.type === 'codexEntry' && !activeCodexArchived)) && !arcOpen && <div className="editor-bottom"><button type="button" onClick={() => setArcOpen(true)} aria-label="Open generation input"><PanelBottomOpen aria-hidden="true" /></button><GenerateControl isGenerating={generationActive} phase={generationPhase} elapsedSeconds={generationElapsedSeconds} onOpenDetails={() => setGenerationDetailsOpen(true)} onGenerate={generate} onStop={stopGeneration} onMicro={insertEditorSpeech} onMicro2={insertPromptSpeech} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} onReadAloud={() => { void readCurrentDocument() }} readAloudDisabled={activeDocument?.type === 'scene' && !lastGeneratedPassage.trim()} readAloudTitle={activeDocument?.type === 'scene' ? 'Read latest generated passage' : 'Read full Codex entry'} /></div>}
       {screen === 'editor' && activeDocument?.type === 'summary' && !activeSummarySourceArchived && <div className="summary-generate-wrap"><button className="summary-generate" type="button" onClick={generationActive ? stopGeneration : generate}>{generationActive ? <Square aria-hidden="true" fill="currentColor" /> : <RefreshCw aria-hidden="true" />} {generationActive ? 'Stop' : openSummaryState === 'missing' ? 'Summarize' : 'Re-summarize'}</button></div>}
       {screen === 'editor' && (activeDocument?.type === 'scene' || (activeDocument?.type === 'codexEntry' && !activeCodexArchived)) && arcOpen && <section className="arc-drawer"><div><small>{activeDocument.type === 'codexEntry' ? 'LORE' : 'ARC'}</small>{generationActive && generationPhase ? <GenerationActivityStrip phase={generationPhase} elapsedSeconds={generationElapsedSeconds} placement="drawer" onOpenDetails={() => setGenerationDetailsOpen(true)} /> : <span>{activeDocument.type === 'codexEntry' ? 'Create or revise this entry' : 'Guide the next passage'}</span>}<button type="button" onClick={() => setArcOpen(false)} aria-label="Close generation input"><X aria-hidden="true" /></button></div><div className="arc-compose"><div className="arc-prompt-field"><ExpandableTextInput ref={promptRef} value={activeDocument.type === 'codexEntry' ? lorePrompt : arcPrompt} onChange={activeDocument.type === 'codexEntry' ? setLorePrompt : setArcPrompt} aria-label="generation prompt" dialogTitle="Edit generation prompt" /><span aria-live="polite">{(activeDocument.type === 'codexEntry' ? lorePrompt : arcPrompt).length} characters</span></div><button className={`play ${generationActive ? 'generating' : ''}`} type="button" onClick={generationActive ? stopGeneration : generate} aria-label={generationActive ? 'Stop generation' : 'Generate'}>{generationActive ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" fill="currentColor" />}</button></div></section>}
 
       {rightOpen && <aside className="book-panel">
         <header><div><small>{formatSeries(currentBook, seriesList)}</small><strong>{currentBook?.title ?? 'Untitled Book'}</strong></div><button type="button" onClick={() => setRightOpen(false)} aria-label="Close book workspace"><X aria-hidden="true" /></button></header>
         <nav>{([['book', Settings2], ['outline', BookOpenText], ['notes', NotebookPen], ['codex', WandSparkles], ['chat', MessageCircle]] as const).map(([tab, Icon]) => <button type="button" className={rightTab === tab ? 'active' : ''} onClick={() => { setRightTab(tab); if (tab === 'chat') setChatPanel(screen === 'chat' ? 'settings' : 'list') }} key={tab}><Icon aria-hidden="true" /><span>{tab}</span></button>)}</nav>
-        <div className="panel-content">{rightTab === 'book' ? <BookSettings book={currentBook} books={bookList} series={seriesList} onSave={saveBookMetadata} onCreateSeries={addSeries} onRenameSeries={renameSeries} onDelete={removeCurrentBookFromSettings} /> : rightTab === 'outline' ? <Outline book={currentBook} entities={outlineEntities} activeSceneId={activeSceneId} summaryStates={summaryStates} expandedIds={expandedIds} onToggle={(id) => setExpandedIds((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })} onOpenScene={(id) => { void loadScene(id) }} onOpenSummary={(entity) => { void openSummary(entity) }} onCreate={(type, parentId) => { void addOutlineEntity(type, parentId) }} onAutotitle={(entity) => { void startAutotitle(entity) }} onRename={(entity) => { void editOutlineTitle(entity) }} onMove={(entity, direction) => { void moveOutlineEntity(entity, direction) }} onDelete={(entity) => { void removeOutlineEntity(entity) }} /> : rightTab === 'notes' ? <Notes notes={notes} activeId={activeDocument?.type === 'note' ? activeDocument.id : null} onCreate={() => { void addNote() }} onOpen={(id) => { void loadDocument(id) }} onAutotitle={(entity) => { void startAutotitle(entity) }} onRename={(entity) => { void renameContentEntity(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> : rightTab === 'codex' ? <Codex entries={codexEntries} activeId={activeDocument?.type === 'codexEntry' ? activeDocument.id : null} summaryStates={summaryStates} onCreate={() => { void addCodexEntry() }} onOpen={(id) => { void loadDocument(id) }} onOpenSummary={(entity) => { void openSummary(entity) }} onAutotitle={(entity) => { void startAutotitle(entity) }} onRename={(entity) => { void renameContentEntity(entity) }} onArchive={(entity) => { void archiveCodex(entity) }} onRestore={(entity) => { void restoreCodex(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> : <ChatSidebar bookId={currentBook?.id ?? ''} activeChatId={screen === 'chat' ? activeChatId : ''} onOpen={openChat} />}</div>
+        <div className="panel-content">{rightTab === 'book' ? <BookSettings book={currentBook} books={bookList} series={seriesList} onSave={saveBookMetadata} onCreateSeries={addSeries} onRenameSeries={renameSeries} onDelete={removeCurrentBookFromSettings} /> : rightTab === 'outline' ? <Outline book={currentBook} entities={outlineEntities} activeSceneId={activeSceneId} summaryStates={summaryStates} expandedIds={expandedIds} onToggle={(id) => setExpandedIds((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })} onOpenScene={(id) => { void loadScene(id) }} onOpenSummary={(entity) => { void openSummary(entity) }} onCreate={(type, parentId) => { void addOutlineEntity(type, parentId) }} onAutotitle={(entity) => { void startAutotitle(entity) }} onRead={(entity) => { void readOutline(entity) }} onRename={(entity) => { void editOutlineTitle(entity) }} onMove={(entity, direction) => { void moveOutlineEntity(entity, direction) }} onDelete={(entity) => { void removeOutlineEntity(entity) }} /> : rightTab === 'notes' ? <Notes notes={notes} activeId={activeDocument?.type === 'note' ? activeDocument.id : null} onCreate={() => { void addNote() }} onOpen={(id) => { void loadDocument(id) }} onAutotitle={(entity) => { void startAutotitle(entity) }} onRead={(entity) => { void readNote(entity) }} onRename={(entity) => { void renameContentEntity(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> : rightTab === 'codex' ? <Codex entries={codexEntries} activeId={activeDocument?.type === 'codexEntry' ? activeDocument.id : null} summaryStates={summaryStates} onCreate={() => { void addCodexEntry() }} onOpen={(id) => { void loadDocument(id) }} onOpenSummary={(entity) => { void openSummary(entity) }} onAutotitle={(entity) => { void startAutotitle(entity) }} onRename={(entity) => { void renameContentEntity(entity) }} onArchive={(entity) => { void archiveCodex(entity) }} onRestore={(entity) => { void restoreCodex(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> : <ChatSidebar bookId={currentBook?.id ?? ''} activeChatId={screen === 'chat' ? activeChatId : ''} onOpen={openChat} />}</div>
       </aside>}
     </main>
   )
+}
+
+function TtsStatusBar() {
+  const [tts, setTts] = useState<TtsState>(() => getTtsState())
+  useEffect(() => subscribeTtsState(setTts), [])
+  if (tts.status === 'idle') return null
+  const label = tts.status === 'preparing' ? 'Preparing text'
+    : tts.status === 'generating' ? 'Generating audio'
+      : tts.status === 'playing' ? 'Playing'
+        : tts.status === 'paused' ? 'Paused'
+          : tts.status === 'waiting' ? 'Waiting for next audio…'
+            : tts.status === 'stopping' ? 'Stopping'
+              : tts.status === 'complete' ? 'Complete'
+                : 'Failed'
+  return <section className={`tts-status ${tts.status}`} aria-live="polite"><Volume2 aria-hidden="true" /><div className="tts-status-copy"><strong>{tts.label || 'Read aloud'}</strong><small>{label}{tts.chunkCount ? ` · ${Math.max(1, tts.chunkIndex || 1)}/${tts.chunkCount}` : ''}{tts.error ? ` · ${tts.error}` : ''}</small></div><div className="tts-status-actions">{tts.status === 'playing' && <button type="button" onClick={pauseTtsSession} aria-label="Pause audio"><Pause aria-hidden="true" /></button>}{tts.status === 'paused' && <button type="button" onClick={() => { void resumeTtsSession() }} aria-label="Resume audio"><Play aria-hidden="true" /></button>}{!['complete','failed'].includes(tts.status) && <button type="button" onClick={stopTtsSession} aria-label="Stop audio"><Square aria-hidden="true" /></button>}</div></section>
 }
 
 function formatGenerationTime(seconds: number) {
@@ -1221,7 +1302,7 @@ function GenerationActivityStrip({ phase, elapsedSeconds, placement, onOpenDetai
   </button>
 }
 
-function GenerateControl({ isGenerating, phase, elapsedSeconds, onOpenDetails, onGenerate, onStop, onMicro, onMicro2, onUndo, onRedo, onRegenerate }: {
+function GenerateControl({ isGenerating, phase, elapsedSeconds, onOpenDetails, onGenerate, onStop, onMicro, onMicro2, onUndo, onRedo, onRegenerate, onReadAloud, readAloudDisabled, readAloudTitle }: {
   isGenerating: boolean
   phase: GenerationPhase | null
   elapsedSeconds: number
@@ -1233,6 +1314,9 @@ function GenerateControl({ isGenerating, phase, elapsedSeconds, onOpenDetails, o
   onUndo: () => void
   onRedo: () => void
   onRegenerate: () => void
+  onReadAloud: () => void
+  readAloudDisabled?: boolean
+  readAloudTitle?: string
 }) {
   const [expanded, setExpanded] = useState(false)
   const longPressRef = useRef(false)
@@ -1254,6 +1338,7 @@ function GenerateControl({ isGenerating, phase, elapsedSeconds, onOpenDetails, o
     <button type="button" onClick={onUndo} aria-label="Undo editor change" title="Back / Undo"><Undo2 aria-hidden="true" /></button>
     <button type="button" onClick={onRedo} aria-label="Redo editor change" title="Forward / Redo"><Redo2 aria-hidden="true" /></button>
     <button type="button" onClick={onRegenerate} aria-label="Regenerate latest result" title="Regenerate"><RefreshCw aria-hidden="true" /></button>
+    <button className="read-aloud-action" type="button" onClick={onReadAloud} disabled={readAloudDisabled} aria-label={readAloudTitle || 'Read aloud'} title={readAloudDisabled ? 'No latest generated passage is available' : readAloudTitle || 'Read aloud'}><Volume2 aria-hidden="true" /></button>
     <button type="button" onClick={() => setExpanded(false)} aria-label="Collapse generate actions" title="Collapse"><X aria-hidden="true" /></button>
   </div>
 
@@ -1608,12 +1693,13 @@ type OutlineProps = {
   onOpenSummary: (entity: StructuralEntity) => void
   onCreate: (type: StructuralEntityType, parentId: string) => void
   onAutotitle: (entity: StructuralEntity) => void
+  onRead: (entity: StructuralEntity) => void
   onRename: (entity: StructuralEntity) => void
   onMove: (entity: StructuralEntity, direction: -1 | 1) => void
   onDelete: (entity: StructuralEntity) => void
 }
 
-function Outline({ book, entities, activeSceneId, summaryStates, expandedIds, onToggle, onOpenScene, onOpenSummary, onCreate, onAutotitle, onRename, onMove, onDelete }: OutlineProps) {
+function Outline({ book, entities, activeSceneId, summaryStates, expandedIds, onToggle, onOpenScene, onOpenSummary, onCreate, onAutotitle, onRead, onRename, onMove, onDelete }: OutlineProps) {
   if (!book) return <section className="outline-empty"><BookOpenText aria-hidden="true" /><p>Create or open a book to see its outline.</p></section>
   const children = (parentId: string, type: StructuralEntityType) => entities
     .filter((entity) => entity.parentId === parentId && entity.type === type)
@@ -1635,8 +1721,8 @@ function Outline({ book, entities, activeSceneId, summaryStates, expandedIds, on
     const scenes = children(chapter.id, 'scene')
     const open = expandedIds.has(chapter.id)
     return <div className="outline-branch" key={chapter.id}>
-      <OutlineRow entity={chapter} label={`Chapter ${index + 1}`} wordCount={wordCountFor(chapter)} summaryState={summaryStates[chapter.id] ?? 'missing'} expanded={open} expandable onToggle={onToggle} onOpenScene={onOpenScene} onOpenSummary={onOpenSummary} onCreate={onCreate} onAutotitle={onAutotitle} onRename={onRename} onMove={onMove} onDelete={onDelete} first={index === 0} last={index === count - 1} />
-      {open && <div className="tree-children">{scenes.length ? scenes.map((scene, sceneIndex) => <OutlineRow key={scene.id} entity={scene} label={`Scene ${sceneIndex + 1}`} wordCount={wordCountFor(scene)} summaryState={summaryStates[scene.id] ?? 'missing'} selected={activeSceneId === scene.id} onToggle={onToggle} onOpenScene={onOpenScene} onOpenSummary={onOpenSummary} onCreate={onCreate} onAutotitle={onAutotitle} onRename={onRename} onMove={onMove} onDelete={onDelete} first={sceneIndex === 0} last={sceneIndex === scenes.length - 1} />) : <p className="tree-empty">No scenes yet</p>}</div>}
+      <OutlineRow entity={chapter} label={`Chapter ${index + 1}`} wordCount={wordCountFor(chapter)} summaryState={summaryStates[chapter.id] ?? 'missing'} expanded={open} expandable onToggle={onToggle} onOpenScene={onOpenScene} onOpenSummary={onOpenSummary} onCreate={onCreate} onAutotitle={onAutotitle} onRead={onRead} onRename={onRename} onMove={onMove} onDelete={onDelete} first={index === 0} last={index === count - 1} />
+      {open && <div className="tree-children">{scenes.length ? scenes.map((scene, sceneIndex) => <OutlineRow key={scene.id} entity={scene} label={`Scene ${sceneIndex + 1}`} wordCount={wordCountFor(scene)} summaryState={summaryStates[scene.id] ?? 'missing'} selected={activeSceneId === scene.id} onToggle={onToggle} onOpenScene={onOpenScene} onOpenSummary={onOpenSummary} onCreate={onCreate} onAutotitle={onAutotitle} onRead={onRead} onRename={onRename} onMove={onMove} onDelete={onDelete} first={sceneIndex === 0} last={sceneIndex === scenes.length - 1} />) : <p className="tree-empty">No scenes yet</p>}</div>}
     </div>
   }
 
@@ -1648,7 +1734,7 @@ function Outline({ book, entities, activeSceneId, summaryStates, expandedIds, on
         const chapters = children(act.id, 'chapter')
         const open = expandedIds.has(act.id)
         return <div className="outline-branch" key={act.id}>
-          <OutlineRow entity={act} label={`Act ${actIndex + 1}`} wordCount={wordCountFor(act)} summaryState={summaryStates[act.id] ?? 'missing'} expanded={open} expandable onToggle={onToggle} onOpenScene={onOpenScene} onOpenSummary={onOpenSummary} onCreate={onCreate} onAutotitle={onAutotitle} onRename={onRename} onMove={onMove} onDelete={onDelete} first={actIndex === 0} last={actIndex === acts.length - 1} />
+          <OutlineRow entity={act} label={`Act ${actIndex + 1}`} wordCount={wordCountFor(act)} summaryState={summaryStates[act.id] ?? 'missing'} expanded={open} expandable onToggle={onToggle} onOpenScene={onOpenScene} onOpenSummary={onOpenSummary} onCreate={onCreate} onAutotitle={onAutotitle} onRead={onRead} onRename={onRename} onMove={onMove} onDelete={onDelete} first={actIndex === 0} last={actIndex === acts.length - 1} />
           {open && <div className="tree-children">{chapters.length ? chapters.map((chapter, chapterIndex) => renderChapter(chapter, chapterIndex, chapters.length)) : <p className="tree-empty">No chapters yet</p>}</div>}
         </div>
       })}
@@ -1658,7 +1744,7 @@ function Outline({ book, entities, activeSceneId, summaryStates, expandedIds, on
   </section>
 }
 
-function OutlineRow({ entity, label, wordCount, summaryState, selected = false, expandable = false, expanded = false, first, last, onToggle, onOpenScene, onOpenSummary, onCreate, onAutotitle, onRename, onMove, onDelete }: {
+function OutlineRow({ entity, label, wordCount, summaryState, selected = false, expandable = false, expanded = false, first, last, onToggle, onOpenScene, onOpenSummary, onCreate, onAutotitle, onRead, onRename, onMove, onDelete }: {
   entity: StructuralEntity
   label: string
   wordCount: number
@@ -1673,6 +1759,7 @@ function OutlineRow({ entity, label, wordCount, summaryState, selected = false, 
   onOpenSummary: (entity: StructuralEntity) => void
   onCreate: (type: StructuralEntityType, parentId: string) => void
   onAutotitle: (entity: StructuralEntity) => void
+  onRead: (entity: StructuralEntity) => void
   onRename: (entity: StructuralEntity) => void
   onMove: (entity: StructuralEntity, direction: -1 | 1) => void
   onDelete: (entity: StructuralEntity) => void
@@ -1685,6 +1772,7 @@ function OutlineRow({ entity, label, wordCount, summaryState, selected = false, 
       {entity.type === 'act' && <button type="button" onClick={() => onCreate('chapter', entity.id)} aria-label={`Add chapter to ${entity.title}`} title="Add chapter"><Plus aria-hidden="true" /></button>}
       {entity.type === 'chapter' && <button type="button" onClick={() => onCreate('scene', entity.id)} aria-label={`Add scene to ${entity.title}`} title="Add scene"><Plus aria-hidden="true" /></button>}
       <button className="autotitle-trigger" type="button" onClick={() => onAutotitle(entity)} aria-label={`Autotitle ${entity.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></button>
+      {(entity.type === 'scene' || entity.type === 'chapter') && <button className="read-aloud-action" type="button" onClick={() => onRead(entity)} aria-label={`Read ${entity.title} aloud`} title="Read aloud · paid TTS"><Volume2 aria-hidden="true" /></button>}
       <button type="button" onClick={() => onRename(entity)} aria-label={`Rename ${entity.title}`} title="Rename"><Pencil aria-hidden="true" /></button>
       <button type="button" onClick={() => onMove(entity, -1)} disabled={first} aria-label={`Move ${entity.title} up`} title="Move up"><ArrowUp aria-hidden="true" /></button>
       <button type="button" onClick={() => onMove(entity, 1)} disabled={last} aria-label={`Move ${entity.title} down`} title="Move down"><ArrowDown aria-hidden="true" /></button>
@@ -1692,19 +1780,20 @@ function OutlineRow({ entity, label, wordCount, summaryState, selected = false, 
     </div>
   </div>
 }
-function Notes({ notes, activeId, onCreate, onOpen, onAutotitle, onRename, onDelete }: {
+function Notes({ notes, activeId, onCreate, onOpen, onAutotitle, onRead, onRename, onDelete }: {
   notes: NoteEntity[]
   activeId: string | null
   onCreate: () => void
   onOpen: (id: string) => void
   onAutotitle: (entity: NoteEntity) => void
+  onRead: (entity: NoteEntity) => void
   onRename: (entity: NoteEntity) => void
   onDelete: (entity: NoteEntity) => void
 }) {
   const [query, setQuery] = useState('')
   const normalizedQuery = query.trim().toLowerCase()
   const visible = notes.filter((note) => !normalizedQuery || `${note.title} ${note.content}`.toLowerCase().includes(normalizedQuery))
-  return <section><div className="panel-title"><div><small>Reference</small><h2>Notes</h2></div><button type="button" onClick={onCreate} aria-label="Add note"><Plus aria-hidden="true" /> New</button></div><input className="panel-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search notes"/>{visible.length ? visible.map((note) => <article className={`content-row ${activeId === note.id ? 'selected' : ''}`} key={note.id}><button className="content-open" type="button" onClick={() => onOpen(note.id)}><NotebookPen aria-hidden="true" /><span><strong>{note.title}</strong><small>{formatEdited(note.updatedAt)}</small></span><ChevronRight aria-hidden="true" /></button><div className="content-actions"><button className="autotitle-trigger" type="button" onClick={() => onAutotitle(note)} aria-label={`Autotitle ${note.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></button><button type="button" onClick={() => onRename(note)} aria-label={`Rename ${note.title}`}><Pencil aria-hidden="true" /></button><button type="button" onClick={() => onDelete(note)} aria-label={`Delete ${note.title}`}><Trash2 aria-hidden="true" /></button></div></article>) : <p className="content-empty">{query ? 'No matching notes.' : 'No notes yet.'}</p>}</section>
+  return <section><div className="panel-title"><div><small>Reference</small><h2>Notes</h2></div><button type="button" onClick={onCreate} aria-label="Add note"><Plus aria-hidden="true" /> New</button></div><input className="panel-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search notes"/>{visible.length ? visible.map((note) => <article className={`content-row ${activeId === note.id ? 'selected' : ''}`} key={note.id}><button className="content-open" type="button" onClick={() => onOpen(note.id)}><NotebookPen aria-hidden="true" /><span><strong>{note.title}</strong><small>{formatEdited(note.updatedAt)}</small></span><ChevronRight aria-hidden="true" /></button><div className="content-actions"><button className="autotitle-trigger" type="button" onClick={() => onAutotitle(note)} aria-label={`Autotitle ${note.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></button><button className="read-aloud-action" type="button" onClick={() => onRead(note)} aria-label={`Read ${note.title} aloud`} title="Read aloud"><Volume2 aria-hidden="true" /></button><button type="button" onClick={() => onRename(note)} aria-label={`Rename ${note.title}`}><Pencil aria-hidden="true" /></button><button type="button" onClick={() => onDelete(note)} aria-label={`Delete ${note.title}`}><Trash2 aria-hidden="true" /></button></div></article>) : <p className="content-empty">{query ? 'No matching notes.' : 'No notes yet.'}</p>}</section>
 }
 
 function Codex({ entries, activeId, summaryStates, onCreate, onOpen, onOpenSummary, onAutotitle, onRename, onArchive, onRestore, onDelete }: {

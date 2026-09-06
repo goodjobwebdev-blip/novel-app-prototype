@@ -1,4 +1,22 @@
 export type AiProvider = 'openrouter' | 'nanogpt' | 'openai' | 'compatible'
+export type SpeechProvider = 'nanogpt'
+export type SpeechSettings = {
+  provider: SpeechProvider
+  apiKey: string
+  model: string
+  voice: string
+  readAloudAfterGeneration: boolean
+  maxParallelRequests: string
+}
+
+export const initialSpeechSettings: SpeechSettings = {
+  provider: 'nanogpt',
+  apiKey: '',
+  model: 'Kokoro-82m',
+  voice: 'af_bella',
+  readAloudAfterGeneration: false,
+  maxParallelRequests: '1',
+}
 
 export type AiPrompts = {
   story: string
@@ -21,6 +39,7 @@ export type AiSettings = {
   codexEffectiveContextLimit: string
   generationWordDelayMs: string
   responseLength: string
+  speech: SpeechSettings
   favorites: string[]
   prompts: AiPrompts
 }
@@ -267,6 +286,7 @@ export const initialAiSettings: AiSettings = {
   codexEffectiveContextLimit: '',
   generationWordDelayMs: String(DEFAULT_GENERATION_WORD_DELAY_MS),
   responseLength: '',
+  speech: initialSpeechSettings,
   favorites: [],
   prompts: defaultAiPrompts,
 }
@@ -285,6 +305,20 @@ export function generationWordDelayMs(settings: Pick<AiSettings, 'generationWord
   return Number(normalizeGenerationWordDelay(settings.generationWordDelayMs))
 }
 
+function normalizeSpeechSettings(value: unknown): SpeechSettings {
+  const speech = value && typeof value === 'object' ? value as Partial<SpeechSettings> : {}
+  const rawConcurrency = typeof speech.maxParallelRequests === 'number' || typeof speech.maxParallelRequests === 'string' ? String(speech.maxParallelRequests).trim() : '1'
+  const concurrency = /^\d+$/.test(rawConcurrency) ? Math.max(1, Math.min(8, Number(rawConcurrency))) : 1
+  return {
+    provider: 'nanogpt',
+    apiKey: typeof speech.apiKey === 'string' ? speech.apiKey : '',
+    model: typeof speech.model === 'string' && speech.model.trim() ? speech.model : initialSpeechSettings.model,
+    voice: typeof speech.voice === 'string' ? speech.voice : initialSpeechSettings.voice,
+    readAloudAfterGeneration: speech.readAloudAfterGeneration === true,
+    maxParallelRequests: String(concurrency),
+  }
+}
+
 export function normalizeAiSettings(value?: Partial<AiSettings>): AiSettings {
   const storedPrompts = value?.prompts as (Partial<AiPrompts> & { titles?: string }) | undefined
   const prompts: AiPrompts = {
@@ -300,6 +334,7 @@ export function normalizeAiSettings(value?: Partial<AiSettings>): AiSettings {
     ...initialAiSettings,
     ...value,
     responseLength: typeof value?.responseLength === 'string' ? value.responseLength : '',
+    speech: normalizeSpeechSettings(value?.speech),
     mainEffectiveContextLimit: typeof value?.mainEffectiveContextLimit === 'string' ? value.mainEffectiveContextLimit : '',
     codexEffectiveContextLimit: typeof value?.codexEffectiveContextLimit === 'string' ? value.codexEffectiveContextLimit : '',
     prompts,
