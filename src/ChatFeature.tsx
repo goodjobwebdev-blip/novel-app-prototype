@@ -303,7 +303,6 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   async function dictateMessage() {
     if (!chat || generating || !isCurrentChat(chat)) return
     const sourceChat = chat
-    const sourceChatId = sourceChat.id
     const input = inputRef.current
     const base = draft
     const start = input?.selectionStart ?? base.length
@@ -1000,12 +999,15 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     {generating && !followOutput && <button className="chat-follow-output" type="button" onClick={jumpToLatest}>↓ New content</button>}
 
     <section className="chat-composer functional-chat-composer">
-      <div className="chat-config-row">
-        <ChatModelPicker value={chat.model} models={sortedModels} onChange={(modelId) => { void changeModel(modelId) }} />
-        <label className={`chat-context-limit ${contextLimitInputError(limitDraft) ? 'invalid' : ''}`}><span>Context cap</span><input value={limitDraft} onChange={(event) => setLimitDraft(event.target.value)} onBlur={() => { void saveEffectiveContextLimit() }} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} placeholder="Model max" inputMode="text" aria-label="Chat effective context cap" /><small>{contextLimitInputError(limitDraft) || 'Empty uses the model maximum. 32k / 1m supported.'}</small></label>
-        <button className="chat-system-prompt-button" type="button" onClick={() => { setPromptDraft(chat.systemPrompt); setPromptOpen(true) }}><Bot aria-hidden="true" /><span>System prompt</span></button>
-        {modelStatus && <small className="chat-model-status">{modelStatus}</small>}
-      </div>
+      <details className="chat-config-strip">
+        <summary><span>Generation settings</span><small>Model · context · system prompt</small><ChevronDown aria-hidden="true" /></summary>
+        <div className="chat-config-row">
+          <ChatModelPicker value={chat.model} models={sortedModels} onChange={(modelId) => { void changeModel(modelId) }} />
+          <label className={`chat-context-limit ${contextLimitInputError(limitDraft) ? 'invalid' : ''}`}><span>Context cap</span><input value={limitDraft} onChange={(event) => setLimitDraft(event.target.value)} onBlur={() => { void saveEffectiveContextLimit() }} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} placeholder="Model max" inputMode="text" aria-label="Chat effective context cap" /><small>{contextLimitInputError(limitDraft) || 'Empty uses the model maximum. 32k / 1m supported.'}</small></label>
+          <button className="chat-system-prompt-button" type="button" onClick={() => { setPromptDraft(chat.systemPrompt); setPromptOpen(true) }}><Bot aria-hidden="true" /><span>System prompt</span></button>
+          {modelStatus && <small className="chat-model-status">{modelStatus}</small>}
+        </div>
+      </details>
       <div className="chat-compose-row">
         <ExpandableTextInput ref={inputRef} value={draft} onChange={setDraft} readOnly={sttState.target === 'chat' && ['requesting-permission', 'recording', 'recording-live', 'stopping', 'transcribing', 'finalizing'].includes(sttState.status)} onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.shiftKey) {
