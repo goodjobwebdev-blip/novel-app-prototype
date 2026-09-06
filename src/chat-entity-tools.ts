@@ -1,7 +1,8 @@
 import type { ChatToolCall, ChatToolDefinition } from './chat-api'
 import { loadProposalTargetOrMarkStale } from './chat-proposal-target'
 import {
-  updateChatMessage,
+  claimChatMessageProposal,
+  transitionChatMessageProposal,
   type ChatEntityActionProposal,
   type ChatMessageEntity,
 } from './chat-service'
@@ -277,35 +278,26 @@ export async function executeChatEntityTool(bookId: string, call: ChatToolCall):
   }
 }
 
-async function messageWithAction(messageId: string, proposalId: string) {
-  const entity = await getEntity<ArcEntity>(messageId)
-  if (!entity || entity.type !== 'chatMessage') throw new Error('The chat message is no longer available.')
-  const message = entity as ChatMessageEntity
-  const proposal = message.entityActions?.find((item) => item.id === proposalId)
-  if (!proposal) throw new Error('That entity proposal is no longer available.')
-  return { message, proposal }
-}
-
-async function setActionStatus(message: ChatMessageEntity, proposalId: string, patch: Partial<ChatEntityActionProposal>) {
-  const entityActions = (message.entityActions ?? []).map((proposal) => proposal.id === proposalId ? { ...proposal, ...patch } : proposal)
-  return updateChatMessage(message.id, { entityActions })
+async function setActionStatus(messageId: string, proposalId: string, patch: Partial<ChatEntityActionProposal>) {
+  return transitionChatMessageProposal(messageId, 'entityActions', proposalId, ['applying'], patch)
 }
 
 export async function applyChatEntityAction(messageId: string, proposalId: string) {
-  const { message, proposal } = await messageWithAction(messageId, proposalId)
-  if (proposal.status !== 'proposed') throw new Error(`This proposal is already ${proposal.status}.`)
+  const claimed = await claimChatMessageProposal(messageId, 'entityActions', proposalId)
+  const message = claimed.message
+  const proposal = claimed.proposal as ChatEntityActionProposal
 
   if (proposal.action === 'create_note') {
     const title = proposal.newTitle || proposal.entityTitle
     const duplicate = await duplicateTitle(message.bookId, 'note', title)
     if (duplicate) {
-      await setActionStatus(message, proposal.id, { status: 'stale' })
+      await setActionStatus(message.id, proposal.id, { status: 'stale' })
       throw new Error('A Note with this title now exists. Ask Chat to prepare a new proposal or edit the existing Note.')
     }
     const created = await createNote(message.bookId, title)
     if (proposal.content) await saveDocumentContent(created.id, proposal.content)
     const appliedAt = Date.now()
-    await setActionStatus(message, proposal.id, { status: 'applied', appliedAt, entityId: created.id })
+    await setActionStatus(message.id, proposal.id, { status: 'applied', appliedAt, entityId: created.id })
     if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('arc-entity-changed', { detail: { bookId: message.bookId, entityId: created.id } }))
     return { entityId: created.id, appliedAt }
   }
@@ -314,14 +306,14 @@ export async function applyChatEntityAction(messageId: string, proposalId: strin
     ? await getEntity<ArcEntity>(proposal.entityId ?? '')
     : await loadProposalTargetOrMarkStale(
         () => manageableEntity(message.bookId, proposal.entityId ?? ''),
-        () => setActionStatus(message, proposal.id, { status: 'stale' }),
+        () => setActionStatus(message.id, proposal.id, { status: 'stale' }),
       )
   if (!entity || (proposal.entityType === 'book' ? entity.type !== 'book' || entity.id !== message.bookId : false)) {
-    await setActionStatus(message, proposal.id, { status: 'stale' })
+    await setActionStatus(message.id, proposal.id, { status: 'stale' })
     throw new Error('The proposed item is no longer available in this book.')
   }
   if (proposal.expectedUpdatedAt !== undefined && entity.updatedAt !== proposal.expectedUpdatedAt) {
-    await setActionStatus(message, proposal.id, { status: 'stale' })
+    await setActionStatus(message.id, proposal.id, { status: 'stale' })
     throw new Error('This item changed after the proposal was created. Ask Chat to read it again and prepare a new proposal.')
   }
 
@@ -330,13 +322,13 @@ export async function applyChatEntityAction(messageId: string, proposalId: strin
     if (entity.type === 'codexEntry') {
       const duplicate = await duplicateTitle(message.bookId, 'codexEntry', newTitle, entity.id)
       if (duplicate) {
-        await setActionStatus(message, proposal.id, { status: 'stale' })
+        await setActionStatus(message.id, proposal.id, { status: 'stale' })
         throw new Error('Another Codex entry now has this title. Ask Chat to choose a distinct title.')
       }
     }
     await renameEntity(entity.id, newTitle)
     const appliedAt = Date.now()
-    await setActionStatus(message, proposal.id, { status: 'applied', appliedAt })
+    await setActionStatus(message.id, proposal.id, { status: 'applied', appliedAt })
     if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('arc-entity-changed', { detail: { bookId: message.bookId, entityId: entity.id } }))
     return { entityId: entity.id, appliedAt }
   }
@@ -345,7 +337,7 @@ export async function applyChatEntityAction(messageId: string, proposalId: strin
     if (entity.type !== 'codexEntry') throw new Error('Only Codex entries have categories.')
     await updateCodexCategory(entity.id, proposal.category || 'Other')
     const appliedAt = Date.now()
-    await setActionStatus(message, proposal.id, { status: 'applied', appliedAt })
+    await setActionStatus(message.id, proposal.id, { status: 'applied', appliedAt })
     if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('arc-entity-changed', { detail: { bookId: message.bookId, entityId: entity.id } }))
     return { entityId: entity.id, appliedAt }
   }
@@ -353,7 +345,7 @@ export async function applyChatEntityAction(messageId: string, proposalId: strin
   if (proposal.action === 'delete') {
     const removedIds = await deleteEntityTree(entity.id)
     const appliedAt = Date.now()
-    await setActionStatus(message, proposal.id, { status: 'applied', appliedAt })
+    await setActionStatus(message.id, proposal.id, { status: 'applied', appliedAt })
     if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('arc-entity-changed', { detail: { bookId: message.bookId, entityId: entity.id, deletedIds: removedIds } }))
     return { entityId: entity.id, appliedAt, removedIds }
   }
@@ -362,7 +354,5 @@ export async function applyChatEntityAction(messageId: string, proposalId: strin
 }
 
 export async function rejectChatEntityAction(messageId: string, proposalId: string) {
-  const { message, proposal } = await messageWithAction(messageId, proposalId)
-  if (proposal.status !== 'proposed') throw new Error(`This proposal is already ${proposal.status}.`)
-  await setActionStatus(message, proposal.id, { status: 'rejected' })
+  await transitionChatMessageProposal(messageId, 'entityActions', proposalId, ['proposed'], { status: 'rejected' })
 }
