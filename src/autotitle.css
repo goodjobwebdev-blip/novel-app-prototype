@@ -29,7 +29,7 @@
 .autotitle-actions .danger { border-color: color-mix(in srgb, var(--danger) 38%, var(--line)); background: color-mix(in srgb, var(--surface-2) 82%, var(--danger) 8%); color: var(--danger); }
 .autotitle-request { border-top: 1px solid var(--line); padding-top: 10px; }
 .autotitle-request summary { color: var(--faint); cursor: pointer; font-size: .72rem; }
-.autotitle-request pre { margin: 9px 0 0; max-height: 220px; overflow: auto; padding: 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--editor-surface); color: var(--soft); white-space: pre-wrap; overflow-wrap: anywhere; font: 10px/1.5 var(--mono); }
+.autotitle-request pre { margin: 9px 0 0; max-height: 220px; overflow: auto; padding: 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--editor-surface, var(--deep)); color: var(--soft); white-space: pre-wrap; overflow-wrap: anywhere; font: 10px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
 .document-title-actions .autotitle-trigger { min-width: 34px; }
 @keyframes autotitle-pulse { 50% { opacity: .45; transform: scale(.92); } }
 @keyframes autotitle-spin { to { transform: rotate(360deg); } }
