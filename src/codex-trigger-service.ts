@@ -49,6 +49,11 @@ export function normalizeCodexTriggerList(values: string[]) {
   return result
 }
 
+function entryTriggers(entry: CodexEntryEntity) {
+  const value: unknown = entry.autoIncludeTriggers
+  return normalizeCodexTriggerList(Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [])
+}
+
 function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -85,7 +90,7 @@ export function triggerMatchesText(text: string, trigger: string) {
 export function buildCodexMentionIndex(entities: ArcEntity[]): CodexMentionTerm[] {
   const byKey = new Map<string, CodexMentionTerm>()
   entities.filter((entity): entity is CodexEntryEntity => entity.type === 'codexEntry' && !isCodexEntryArchived(entity)).forEach((entry) => {
-    normalizeCodexTriggerList(entry.autoIncludeTriggers ?? []).forEach((trigger) => {
+    entryTriggers(entry).forEach((trigger) => {
       const key = triggerKey(trigger)
       const existing = byKey.get(key) ?? { key, text: trigger, entries: [] }
       if (!existing.entries.some((candidate) => candidate.id === entry.id)) {
@@ -122,15 +127,14 @@ export function automaticCodexMatches({
     scene,
     text: scene.id === anchorSceneId && anchorSceneText !== undefined ? anchorSceneText : String(scene.content ?? ''),
   }))
-  const activeEntries = entities.filter((entity): entity is CodexEntryEntity => entity.type === 'codexEntry'
-    && entity.id !== excludeEntryId
-    && !isCodexEntryArchived(entity)
-    && normalizeCodexTriggerList(entity.autoIncludeTriggers ?? []).length > 0)
+  const activeEntries = entities
+    .filter((entity): entity is CodexEntryEntity => entity.type === 'codexEntry')
+    .filter((entity) => entity.id !== excludeEntryId && !isCodexEntryArchived(entity) && entryTriggers(entity).length > 0)
     .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
 
   return activeEntries.map((entry) => {
     const matches: CodexTriggerSceneMatch[] = []
-    for (const trigger of normalizeCodexTriggerList(entry.autoIncludeTriggers ?? [])) {
+    for (const trigger of entryTriggers(entry)) {
       for (const { scene, text } of scanned) {
         if (triggerMatchesText(text, trigger)) matches.push({ trigger, sceneId: scene.id, sceneTitle: scene.title })
       }
