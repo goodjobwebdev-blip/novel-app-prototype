@@ -1,4 +1,4 @@
-export type PromptScope = 'story' | 'summarize' | 'titles' | 'lore' | 'assistant'
+export type PromptScope = 'story' | 'summarize' | 'lore' | 'assistant'
 
 export type BookPromptValues = {
   title: string
@@ -19,7 +19,7 @@ export type PromptVariable = {
   scopes: PromptScope[]
 }
 
-const everyPrompt: PromptScope[] = ['story', 'summarize', 'titles', 'lore', 'assistant']
+const everyPrompt: PromptScope[] = ['story', 'summarize', 'lore', 'assistant']
 export const RESPONSE_LENGTH_VARIABLE = 'response.length'
 
 export const promptVariables: PromptVariable[] = [
@@ -38,9 +38,8 @@ export const promptVariables: PromptVariable[] = [
   { name: 'scene.previous_text', description: 'Previous Scene when the current Scene is empty', scopes: ['story'] },
   { name: 'scene.summary_context', description: 'Hierarchically compressed summaries of earlier material', scopes: ['story'] },
   { name: 'additional_context', description: 'Sources selected in Context Management', scopes: ['story', 'lore'] },
-  { name: 'target.type', description: 'The requested summary, title, or name target', scopes: ['summarize', 'titles'] },
+  { name: 'target.type', description: 'The requested summary target', scopes: ['summarize'] },
   { name: 'target.previous_summary', description: 'Existing summary when re-summarizing', scopes: ['summarize'] },
-  { name: 'count', description: 'Requested number of title or name options', scopes: ['titles'] },
   { name: 'entry.title', description: 'Current Codex entry title', scopes: ['lore'] },
   { name: 'entry.category', description: 'Current Codex entry category', scopes: ['lore'] },
   { name: 'entry.content', description: 'Existing Codex entry Markdown', scopes: ['lore'] },

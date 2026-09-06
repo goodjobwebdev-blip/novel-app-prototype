@@ -3,7 +3,6 @@ export type AiProvider = 'openrouter' | 'nanogpt' | 'openai' | 'compatible'
 export type AiPrompts = {
   story: string
   summarize: string
-  titles: string
   lore: string
   assistant: string
 }
@@ -85,7 +84,7 @@ Default response language: {{book.language}}
 
 export const previousDefaultAssistantPrompts = [previousDefaultAssistantPrompt, assistantPromptBeforeBookOverview] as const
 
-const previousDefaultAiPrompts: Array<Partial<AiPrompts>> = [{
+const previousDefaultAiPrompts: Array<Partial<AiPrompts> & { titles?: string }> = [{
   story: `You are the story writer for {{book.title}}.
 
 {% if scene.pov %}
@@ -231,14 +230,6 @@ Write the summary in {{book.language}}.
 {% if target.previous_summary %}
 Update the existing summary instead of starting over.
 {% endif %}`,
-  titles: `Generate concise names or titles for {{target.type}}.
-
-{% if book.genre %}
-Genre: {{book.genre}}
-{% endif %}
-Tone: {{book.style}}
-Language: {{book.language}}
-Return {{count}} distinct options without commentary.`,
   lore: `You are the canon editor for {{book.title}}.
 
 Create or revise the Codex entry “{{entry.title}}”.
@@ -295,7 +286,13 @@ export function generationWordDelayMs(settings: Pick<AiSettings, 'generationWord
 }
 
 export function normalizeAiSettings(value?: Partial<AiSettings>): AiSettings {
-  const prompts = { ...defaultAiPrompts, ...value?.prompts }
+  const storedPrompts = value?.prompts as (Partial<AiPrompts> & { titles?: string }) | undefined
+  const prompts: AiPrompts = {
+    story: storedPrompts?.story ?? defaultAiPrompts.story,
+    summarize: storedPrompts?.summarize ?? defaultAiPrompts.summarize,
+    lore: storedPrompts?.lore ?? defaultAiPrompts.lore,
+    assistant: storedPrompts?.assistant ?? defaultAiPrompts.assistant,
+  }
   ;(Object.keys(defaultAiPrompts) as Array<keyof AiPrompts>).forEach((key) => {
     if (previousDefaultAiPrompts.some((defaults) => prompts[key] === defaults[key])) prompts[key] = defaultAiPrompts[key]
   })

@@ -1,12 +1,9 @@
 import { generationContextDiagnostics, type ContextDiagnostics } from './context-service'
 import { fetchNanoGPTModelContextLength, streamNanoGPTCompletion } from './nanogpt'
+import type { AiSettings } from './ai-settings'
 import {
   getEntity,
   listEntitiesByBook,
-  type AiSettings as _UnusedAiSettings,
-} from './persistence'
-import type { AiSettings } from './ai-settings'
-import {
   type ArcEntity,
   type BookEntity,
   type CodexEntryEntity,
@@ -126,9 +123,9 @@ async function contextForTarget(book: BookEntity, target: AutotitleEntity, entit
     return `# Book metadata\n${meta}\n\n# Scene text\n${String(target.content ?? '').trim() || '_Scene is empty._'}\n\n# Chapter context\n${chapterContext}\n\n# Previous story state\n${previousState}\n\n# Sibling Scene titles\n${sameLevelSiblings(target, entities)}`
   }
   if (target.type === 'note') {
-    return `# Book metadata\n${meta}\n\n# Note body\n${target.content.trim() || '_Note is empty._'}`
+    return `# Book metadata\n${meta}\n\n# Note body\n${String(target.content ?? '').trim() || '_Note is empty._'}`
   }
-  return `# Book metadata\n${meta}\n\n# Codex category\n${target.category}\n\n# Authoritative Codex body\n${target.content.trim() || '_Codex entry is empty._'}`
+  return `# Book metadata\n${meta}\n\n# Codex category\n${target.category}\n\n# Authoritative Codex body\n${String(target.content ?? '').trim() || '_Codex entry is empty._'}`
 }
 
 function goalFor(type: AutotitleTargetType) {

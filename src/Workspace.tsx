@@ -92,10 +92,12 @@ import {
   type SummaryEntity,
 } from './persistence'
 import { buildSummarySource, getSummaryStateMap, renderSummaryPrompt, type SummaryState } from './summary-service'
+import { generateAutotitleSuggestion, prepareAutotitleRequest, type AutotitleEntity, type AutotitleRequest, type AutotitleTargetType } from './autotitle-service'
 import { ChatSidebar, ChatView } from './ChatFeature'
 import './generation-controls.css'
 import './codex-archive.css'
 import './codex-summary.css'
+import './autotitle.css'
 
 type Screen = 'home' | 'editor' | 'chat' | 'settings'
 type RightTab = 'book' | 'outline' | 'notes' | 'codex' | 'chat'
@@ -103,6 +105,7 @@ type ChatPanel = 'list' | 'settings'
 type SaveState = 'loading' | 'saving' | 'saved' | 'error'
 type GenerationPhase = 'sending' | 'thinking' | 'writing' | 'stopping'
 type ToastMessage = { id: number; message: string }
+type AutotitleUiState = { targetId: string; targetType: AutotitleTargetType; targetTitle: string; status: 'loading' | 'ready' | 'error'; suggestion?: string; error?: string; request?: AutotitleRequest }
 type GenerationRequestSnapshot = {
   baseUrl: string
   model: string
@@ -166,6 +169,7 @@ export default function Workspace() {
   const [generationDetails, setGenerationDetails] = useState<GenerationDetails | null>(null)
   const [generationDetailsOpen, setGenerationDetailsOpen] = useState(false)
   const [toast, setToast] = useState<ToastMessage | null>(null)
+  const [autotitle, setAutotitle] = useState<AutotitleUiState | null>(null)
   const [bookList, setBookList] = useState<BookEntity[]>([])
   const [seriesList, setSeriesList] = useState<SeriesEntity[]>([])
   const [currentBook, setCurrentBook] = useState<BookEntity | null>(null)
@@ -188,6 +192,7 @@ export default function Workspace() {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const generationAbortRef = useRef<AbortController | null>(null)
+  const autotitleAbortRef = useRef<AbortController | null>(null)
   const generationStartedAtRef = useRef(0)
   const latestGenerationRequestRef = useRef<GenerationRequestSnapshot | null>(null)
 
@@ -203,6 +208,7 @@ export default function Workspace() {
 
   useEffect(() => () => {
     generationAbortRef.current?.abort()
+    autotitleAbortRef.current?.abort()
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
   }, [])
 
@@ -212,6 +218,13 @@ export default function Workspace() {
       if (!detail?.bookId || !detail.entityId || detail.bookId !== currentBook?.id) return
       void (async () => {
         const structural = await reloadBookContent(detail.bookId!)
+        if (detail.entityId === currentBook?.id) {
+          const refreshedBook = await getEntity<BookEntity>(detail.bookId!)
+          if (refreshedBook?.type === 'book') {
+            setCurrentBook(refreshedBook)
+            setBookList((books) => books.map((book) => book.id === refreshedBook.id ? refreshedBook : book))
+          }
+        }
         if (activeDocumentIdRef.current && detail.deletedIds?.includes(activeDocumentIdRef.current)) {
           const fallback = structural.find((entity) => entity.type === 'scene')
           if (fallback) {
@@ -686,6 +699,73 @@ export default function Workspace() {
     toastTimerRef.current = setTimeout(() => setToast(null), 5200)
   }
 
+  async function startAutotitle(entity: AutotitleEntity) {
+    if (!currentBook) return
+    if (autotitleAbortRef.current) {
+      showToast('Finish or cancel the current autotitle request first.')
+      return
+    }
+    if (entity.type !== 'book' && entity.bookId !== currentBook.id) return
+    try {
+      if (activeDocumentIdRef.current === entity.id && changedSinceSnapshotRef.current) await flushDocument('navigation', true)
+      const defaults = loadAiSettings()
+      const settings = await getBookAiSettings(currentBook.id, defaults.favorites)
+      const controller = new AbortController()
+      autotitleAbortRef.current = controller
+      setAutotitle({ targetId: entity.id, targetType: entity.type as AutotitleTargetType, targetTitle: entity.title, status: 'loading' })
+      const request = await prepareAutotitleRequest(currentBook.id, entity.id, settings)
+      setAutotitle((current) => current?.targetId === entity.id ? { ...current, request, targetTitle: request.targetTitle } : current)
+      const suggestion = await generateAutotitleSuggestion(settings, request, controller.signal)
+      setAutotitle((current) => current?.targetId === entity.id ? { ...current, request, suggestion, status: 'ready', error: undefined } : current)
+    } catch (error) {
+      const aborted = autotitleAbortRef.current?.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')
+      setAutotitle((current) => current?.targetId === entity.id ? { ...current, status: 'error', error: aborted ? 'Autotitle stopped.' : error instanceof Error ? error.message : 'Autotitle failed.' } : current)
+    } finally {
+      autotitleAbortRef.current = null
+    }
+  }
+
+  async function regenerateAutotitle() {
+    const targetId = autotitle?.targetId
+    if (!targetId || autotitleAbortRef.current) return
+    const entity = await getEntity<ArcEntity>(targetId)
+    if (!entity || !['book', 'act', 'chapter', 'scene', 'note', 'codexEntry'].includes(entity.type)) {
+      setAutotitle((current) => current ? { ...current, status: 'error', error: 'This item no longer exists.' } : current)
+      return
+    }
+    await startAutotitle(entity as AutotitleEntity)
+  }
+
+  function stopAutotitle() {
+    autotitleAbortRef.current?.abort()
+  }
+
+  async function acceptAutotitle() {
+    if (!autotitle?.request || !autotitle.suggestion) return
+    try {
+      const current = await getEntity<ArcEntity>(autotitle.request.targetId)
+      if (!current || current.updatedAt !== autotitle.request.expectedUpdatedAt || current.title !== autotitle.request.targetTitle) {
+        throw new Error('This item changed after the suggestion was generated. Regenerate before applying a title.')
+      }
+      const renamed = await renameEntity(current.id, autotitle.suggestion)
+      if (renamed.type === 'book') {
+        const book = renamed as BookEntity
+        setCurrentBook((value) => value?.id === book.id ? book : value)
+        setBookList((books) => books.map((item) => item.id === book.id ? book : item))
+      } else if (currentBook) {
+        await reloadBookContent(currentBook.id)
+        if (activeDocumentIdRef.current === renamed.id) {
+          const refreshed = await getEntity<EditableEntity>(renamed.id)
+          if (refreshed) setActiveDocument(refreshed)
+        }
+      }
+      showToast(`Renamed “${autotitle.request.targetTitle}” to “${autotitle.suggestion}”.`)
+      setAutotitle(null)
+    } catch (error) {
+      setAutotitle((state) => state ? { ...state, status: 'error', error: error instanceof Error ? error.message : 'Could not apply the title.' } : state)
+    }
+  }
+
   function startGenerationActivity(details: Omit<GenerationDetails, 'startedAt' | 'status' | 'thoughts'>) {
     const startedAt = Date.now()
     generationStartedAtRef.current = startedAt
@@ -1073,7 +1153,7 @@ export default function Workspace() {
         {!aiReady && <div className="setup-warning"><Bot aria-hidden="true" /><div><strong>Text AI is not set up</strong><p>Choose a provider and models before using generation or chat.</p></div><button type="button" onClick={() => openSettings('home')}>Set up AI <ChevronRight aria-hidden="true" /></button></div>}
         <div className="library-grid">{bookList.map((book, index) => <article className="library-book-card" key={book.id}>
           <button type="button" className="library-book" onClick={() => { void openBook(book.id) }}><i className={`mock-cover ${['tide', 'orchard', 'fires'][index % 3]}`}>{book.title.slice(0,1)}</i><span><small>{formatSeries(book, seriesList)}</small><strong>{book.title}</strong><em>{formatEdited(book.updatedAt)}</em></span></button>
-          <div className="library-book-actions"><button type="button" onClick={() => { void editBookTitle(book) }} aria-label={`Rename ${book.title}`}><Pencil aria-hidden="true" /></button><button type="button" onClick={() => { void removeBook(book) }} aria-label={`Delete ${book.title}`}><Trash2 aria-hidden="true" /></button></div>
+          <div className="library-book-actions"><button className="autotitle-trigger" type="button" onClick={() => { void startAutotitle(book) }} aria-label={`Autotitle ${book.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></button><button type="button" onClick={() => { void editBookTitle(book) }} aria-label={`Rename ${book.title}`}><Pencil aria-hidden="true" /></button><button type="button" onClick={() => { void removeBook(book) }} aria-label={`Delete ${book.title}`}><Trash2 aria-hidden="true" /></button></div>
         </article>)}</div>
       </section>
     </main>
@@ -1090,10 +1170,11 @@ export default function Workspace() {
       {toast && <div className="app-toast" role="alert" key={toast.id}><span>{toast.message}</span><button type="button" onClick={() => setToast(null)} aria-label="Dismiss notification"><X aria-hidden="true" /></button></div>}
 
       {generationDetailsOpen && generationDetails && <GenerationDetailsDialog details={generationDetails} elapsedSeconds={generationElapsedSeconds} onClose={() => setGenerationDetailsOpen(false)} />}
+      {autotitle && <AutotitlePanel state={autotitle} onAccept={() => { void acceptAutotitle() }} onRegenerate={() => { void regenerateAutotitle() }} onStop={stopAutotitle} onCancel={() => { autotitleAbortRef.current?.abort(); setAutotitle(null) }} />}
 
       {screen === 'editor' ? <article className="story-editor">
         <small className="page-number">{pageLabel}</small><p className="document-path">{documentPath || 'No document selected'}</p>
-        {(activeDocument?.type === 'note' || activeDocument?.type === 'codexEntry') && <div className={`document-titlebar ${activeCodexArchived ? 'archived' : ''}`}><div><small>{activeDocument.type === 'note' ? 'Note' : activeCodexArchived ? `Archived · ${activeDocument.category}` : activeDocument.category}</small><h1>{activeDocument.title}</h1></div><div className="document-title-actions">{activeDocument.type === 'codexEntry' && <SummaryIcon state={summaryStates[activeDocument.id] ?? 'missing'} kind="codex" onOpen={() => { void openSummary(activeDocument) }} />}{activeDocument.type === 'codexEntry' && activeCodexArchived ? <button type="button" onClick={() => { void restoreCodex(activeDocument) }}><ArchiveRestore aria-hidden="true" /> Restore</button> : <button type="button" onClick={() => { void renameContentEntity(activeDocument) }}><Pencil aria-hidden="true" /> Rename</button>}</div></div>}
+        {(activeDocument?.type === 'note' || activeDocument?.type === 'codexEntry') && <div className={`document-titlebar ${activeCodexArchived ? 'archived' : ''}`}><div><small>{activeDocument.type === 'note' ? 'Note' : activeCodexArchived ? `Archived · ${activeDocument.category}` : activeDocument.category}</small><h1>{activeDocument.title}</h1></div><div className="document-title-actions"><button className="autotitle-trigger" type="button" onClick={() => { void startAutotitle(activeDocument) }} aria-label={`Autotitle ${activeDocument.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></button>{activeDocument.type === 'codexEntry' && <SummaryIcon state={summaryStates[activeDocument.id] ?? 'missing'} kind="codex" onOpen={() => { void openSummary(activeDocument) }} />}{activeDocument.type === 'codexEntry' && activeCodexArchived ? <button type="button" onClick={() => { void restoreCodex(activeDocument) }}><ArchiveRestore aria-hidden="true" /> Restore</button> : <button type="button" onClick={() => { void renameContentEntity(activeDocument) }}><Pencil aria-hidden="true" /> Rename</button>}</div></div>}
         {activeDocument?.type === 'codexEntry' && <div className={`document-metadata ${activeCodexArchived ? 'archived' : ''}`}><label><span>Category</span><select disabled={activeCodexArchived} value={activeDocument.category} onChange={(event) => { void changeCodexCategory(event.target.value) }}><option>Character</option><option>Place</option><option>Object</option><option>Event</option><option>Group</option><option>Other</option></select></label>{!activeCodexArchived && <label className="codex-summary-preference"><input type="checkbox" checked={activeDocument.preferSummaryForContext === true} onChange={(event) => { void changeCodexSummaryPreference(event.target.checked) }} /><span><strong>Prefer summary for AI context</strong><small>{codexSummaryPolicyText(activeDocument, summaryStates[activeDocument.id] ?? 'missing')}</small></span></label>}{activeCodexArchived && <p className="archived-document-note"><Archive aria-hidden="true" /><span><strong>Archived lore</strong><small>Readable here, but excluded from AI context, Chat discovery, and normal Codex search until restored.</small></span></p>}</div>}
         {activeDocument?.type === 'summary' && summaryContextIndicator && <div className="summary-context-indicator">{summaryContextIndicator}</div>}
         {activeDocument ? <MarkdownEditor key={`${activeDocument.id}-${editorRevision}`} ref={editorRef} value={storyMarkdown} onChange={handleStoryChange} ariaLabel={`${activeDocument.title} Markdown editor`} readOnly={activeCodexArchived || activeSummarySourceArchived} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No document selected</strong><p>Choose a Scene, Note, Codex entry, or Summary from the book workspace.</p><button type="button" onClick={() => setRightOpen(true)}>Open Book Workspace</button></div>}
@@ -1106,7 +1187,7 @@ export default function Workspace() {
       {rightOpen && <aside className="book-panel">
         <header><div><small>{formatSeries(currentBook, seriesList)}</small><strong>{currentBook?.title ?? 'Untitled Book'}</strong></div><button type="button" onClick={() => setRightOpen(false)} aria-label="Close book workspace"><X aria-hidden="true" /></button></header>
         <nav>{([['book', Settings2], ['outline', BookOpenText], ['notes', NotebookPen], ['codex', WandSparkles], ['chat', MessageCircle]] as const).map(([tab, Icon]) => <button type="button" className={rightTab === tab ? 'active' : ''} onClick={() => { setRightTab(tab); if (tab === 'chat') setChatPanel(screen === 'chat' ? 'settings' : 'list') }} key={tab}><Icon aria-hidden="true" /><span>{tab}</span></button>)}</nav>
-        <div className="panel-content">{rightTab === 'book' ? <BookSettings book={currentBook} books={bookList} series={seriesList} onSave={saveBookMetadata} onCreateSeries={addSeries} onRenameSeries={renameSeries} onDelete={removeCurrentBookFromSettings} /> : rightTab === 'outline' ? <Outline book={currentBook} entities={outlineEntities} activeSceneId={activeSceneId} summaryStates={summaryStates} expandedIds={expandedIds} onToggle={(id) => setExpandedIds((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })} onOpenScene={(id) => { void loadScene(id) }} onOpenSummary={(entity) => { void openSummary(entity) }} onCreate={(type, parentId) => { void addOutlineEntity(type, parentId) }} onRename={(entity) => { void editOutlineTitle(entity) }} onMove={(entity, direction) => { void moveOutlineEntity(entity, direction) }} onDelete={(entity) => { void removeOutlineEntity(entity) }} /> : rightTab === 'notes' ? <Notes notes={notes} activeId={activeDocument?.type === 'note' ? activeDocument.id : null} onCreate={() => { void addNote() }} onOpen={(id) => { void loadDocument(id) }} onRename={(entity) => { void renameContentEntity(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> : rightTab === 'codex' ? <Codex entries={codexEntries} activeId={activeDocument?.type === 'codexEntry' ? activeDocument.id : null} summaryStates={summaryStates} onCreate={() => { void addCodexEntry() }} onOpen={(id) => { void loadDocument(id) }} onOpenSummary={(entity) => { void openSummary(entity) }} onRename={(entity) => { void renameContentEntity(entity) }} onArchive={(entity) => { void archiveCodex(entity) }} onRestore={(entity) => { void restoreCodex(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> : <ChatSidebar bookId={currentBook?.id ?? ''} activeChatId={screen === 'chat' ? activeChatId : ''} onOpen={openChat} />}</div>
+        <div className="panel-content">{rightTab === 'book' ? <BookSettings book={currentBook} books={bookList} series={seriesList} onSave={saveBookMetadata} onCreateSeries={addSeries} onRenameSeries={renameSeries} onDelete={removeCurrentBookFromSettings} /> : rightTab === 'outline' ? <Outline book={currentBook} entities={outlineEntities} activeSceneId={activeSceneId} summaryStates={summaryStates} expandedIds={expandedIds} onToggle={(id) => setExpandedIds((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })} onOpenScene={(id) => { void loadScene(id) }} onOpenSummary={(entity) => { void openSummary(entity) }} onCreate={(type, parentId) => { void addOutlineEntity(type, parentId) }} onAutotitle={(entity) => { void startAutotitle(entity) }} onRename={(entity) => { void editOutlineTitle(entity) }} onMove={(entity, direction) => { void moveOutlineEntity(entity, direction) }} onDelete={(entity) => { void removeOutlineEntity(entity) }} /> : rightTab === 'notes' ? <Notes notes={notes} activeId={activeDocument?.type === 'note' ? activeDocument.id : null} onCreate={() => { void addNote() }} onOpen={(id) => { void loadDocument(id) }} onAutotitle={(entity) => { void startAutotitle(entity) }} onRename={(entity) => { void renameContentEntity(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> : rightTab === 'codex' ? <Codex entries={codexEntries} activeId={activeDocument?.type === 'codexEntry' ? activeDocument.id : null} summaryStates={summaryStates} onCreate={() => { void addCodexEntry() }} onOpen={(id) => { void loadDocument(id) }} onOpenSummary={(entity) => { void openSummary(entity) }} onAutotitle={(entity) => { void startAutotitle(entity) }} onRename={(entity) => { void renameContentEntity(entity) }} onArchive={(entity) => { void archiveCodex(entity) }} onRestore={(entity) => { void restoreCodex(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> : <ChatSidebar bookId={currentBook?.id ?? ''} activeChatId={screen === 'chat' ? activeChatId : ''} onOpen={openChat} />}</div>
       </aside>}
     </main>
   )
@@ -1200,6 +1281,18 @@ function GenerateControl({ isGenerating, phase, elapsedSeconds, onOpenDetails, o
       onGenerate()
     }}
   ><Play aria-hidden="true" fill="currentColor" /></button>
+}
+
+function AutotitlePanel({ state, onAccept, onRegenerate, onStop, onCancel }: { state: AutotitleUiState; onAccept: () => void; onRegenerate: () => void; onStop: () => void; onCancel: () => void }) {
+  const label = state.targetType === 'codexEntry' ? 'Codex entry' : state.targetType[0].toUpperCase() + state.targetType.slice(1)
+  const diagnostics = state.request?.diagnostics
+  return <section className="autotitle-panel" role="dialog" aria-label={`Autotitle ${state.targetTitle}`}>
+    <header><div><small>Autotitle · {label}</small><strong>{state.targetTitle}</strong></div><button type="button" onClick={onCancel} aria-label="Cancel autotitle"><X aria-hidden="true" /></button></header>
+    {state.status === 'loading' ? <div className="autotitle-suggestion">Generating one suggestion…</div> : state.suggestion ? <div className="autotitle-suggestion">{state.suggestion}</div> : null}
+    {state.error && <p className="autotitle-error" role="alert">{state.error}</p>}
+    {state.request && <><div className="autotitle-meta">Model: {state.request.model}{diagnostics ? ` · ~${diagnostics.requestTokens.toLocaleString()} input tokens · ${Math.round(diagnostics.usageRatio * 100)}% of usable context` : ''}</div><details className="autotitle-request"><summary>View app-managed request</summary><pre>{`SYSTEM:\n${state.request.systemPrompt}\n\nUSER:\n${state.request.userMessage}`}</pre></details></>}
+    <div className="autotitle-actions">{state.status === 'loading' ? <button type="button" onClick={onStop}><Square aria-hidden="true" /> Stop</button> : <><button type="button" onClick={onCancel}>Cancel</button><button type="button" onClick={onRegenerate}><RefreshCw aria-hidden="true" /> Regenerate</button>{state.suggestion && <button className="primary" type="button" onClick={onAccept}><Check aria-hidden="true" /> Accept</button>}</>}</div>
+  </section>
 }
 
 function GenerationDetailsDialog({ details, elapsedSeconds, onClose }: {
@@ -1514,12 +1607,13 @@ type OutlineProps = {
   onOpenScene: (id: string) => void
   onOpenSummary: (entity: StructuralEntity) => void
   onCreate: (type: StructuralEntityType, parentId: string) => void
+  onAutotitle: (entity: StructuralEntity) => void
   onRename: (entity: StructuralEntity) => void
   onMove: (entity: StructuralEntity, direction: -1 | 1) => void
   onDelete: (entity: StructuralEntity) => void
 }
 
-function Outline({ book, entities, activeSceneId, summaryStates, expandedIds, onToggle, onOpenScene, onOpenSummary, onCreate, onRename, onMove, onDelete }: OutlineProps) {
+function Outline({ book, entities, activeSceneId, summaryStates, expandedIds, onToggle, onOpenScene, onOpenSummary, onCreate, onAutotitle, onRename, onMove, onDelete }: OutlineProps) {
   if (!book) return <section className="outline-empty"><BookOpenText aria-hidden="true" /><p>Create or open a book to see its outline.</p></section>
   const children = (parentId: string, type: StructuralEntityType) => entities
     .filter((entity) => entity.parentId === parentId && entity.type === type)
@@ -1541,8 +1635,8 @@ function Outline({ book, entities, activeSceneId, summaryStates, expandedIds, on
     const scenes = children(chapter.id, 'scene')
     const open = expandedIds.has(chapter.id)
     return <div className="outline-branch" key={chapter.id}>
-      <OutlineRow entity={chapter} label={`Chapter ${index + 1}`} wordCount={wordCountFor(chapter)} summaryState={summaryStates[chapter.id] ?? 'missing'} expanded={open} expandable onToggle={onToggle} onOpenScene={onOpenScene} onOpenSummary={onOpenSummary} onCreate={onCreate} onRename={onRename} onMove={onMove} onDelete={onDelete} first={index === 0} last={index === count - 1} />
-      {open && <div className="tree-children">{scenes.length ? scenes.map((scene, sceneIndex) => <OutlineRow key={scene.id} entity={scene} label={`Scene ${sceneIndex + 1}`} wordCount={wordCountFor(scene)} summaryState={summaryStates[scene.id] ?? 'missing'} selected={activeSceneId === scene.id} onToggle={onToggle} onOpenScene={onOpenScene} onOpenSummary={onOpenSummary} onCreate={onCreate} onRename={onRename} onMove={onMove} onDelete={onDelete} first={sceneIndex === 0} last={sceneIndex === scenes.length - 1} />) : <p className="tree-empty">No scenes yet</p>}</div>}
+      <OutlineRow entity={chapter} label={`Chapter ${index + 1}`} wordCount={wordCountFor(chapter)} summaryState={summaryStates[chapter.id] ?? 'missing'} expanded={open} expandable onToggle={onToggle} onOpenScene={onOpenScene} onOpenSummary={onOpenSummary} onCreate={onCreate} onAutotitle={onAutotitle} onRename={onRename} onMove={onMove} onDelete={onDelete} first={index === 0} last={index === count - 1} />
+      {open && <div className="tree-children">{scenes.length ? scenes.map((scene, sceneIndex) => <OutlineRow key={scene.id} entity={scene} label={`Scene ${sceneIndex + 1}`} wordCount={wordCountFor(scene)} summaryState={summaryStates[scene.id] ?? 'missing'} selected={activeSceneId === scene.id} onToggle={onToggle} onOpenScene={onOpenScene} onOpenSummary={onOpenSummary} onCreate={onCreate} onAutotitle={onAutotitle} onRename={onRename} onMove={onMove} onDelete={onDelete} first={sceneIndex === 0} last={sceneIndex === scenes.length - 1} />) : <p className="tree-empty">No scenes yet</p>}</div>}
     </div>
   }
 
@@ -1554,7 +1648,7 @@ function Outline({ book, entities, activeSceneId, summaryStates, expandedIds, on
         const chapters = children(act.id, 'chapter')
         const open = expandedIds.has(act.id)
         return <div className="outline-branch" key={act.id}>
-          <OutlineRow entity={act} label={`Act ${actIndex + 1}`} wordCount={wordCountFor(act)} summaryState={summaryStates[act.id] ?? 'missing'} expanded={open} expandable onToggle={onToggle} onOpenScene={onOpenScene} onOpenSummary={onOpenSummary} onCreate={onCreate} onRename={onRename} onMove={onMove} onDelete={onDelete} first={actIndex === 0} last={actIndex === acts.length - 1} />
+          <OutlineRow entity={act} label={`Act ${actIndex + 1}`} wordCount={wordCountFor(act)} summaryState={summaryStates[act.id] ?? 'missing'} expanded={open} expandable onToggle={onToggle} onOpenScene={onOpenScene} onOpenSummary={onOpenSummary} onCreate={onCreate} onAutotitle={onAutotitle} onRename={onRename} onMove={onMove} onDelete={onDelete} first={actIndex === 0} last={actIndex === acts.length - 1} />
           {open && <div className="tree-children">{chapters.length ? chapters.map((chapter, chapterIndex) => renderChapter(chapter, chapterIndex, chapters.length)) : <p className="tree-empty">No chapters yet</p>}</div>}
         </div>
       })}
@@ -1564,7 +1658,7 @@ function Outline({ book, entities, activeSceneId, summaryStates, expandedIds, on
   </section>
 }
 
-function OutlineRow({ entity, label, wordCount, summaryState, selected = false, expandable = false, expanded = false, first, last, onToggle, onOpenScene, onOpenSummary, onCreate, onRename, onMove, onDelete }: {
+function OutlineRow({ entity, label, wordCount, summaryState, selected = false, expandable = false, expanded = false, first, last, onToggle, onOpenScene, onOpenSummary, onCreate, onAutotitle, onRename, onMove, onDelete }: {
   entity: StructuralEntity
   label: string
   wordCount: number
@@ -1578,6 +1672,7 @@ function OutlineRow({ entity, label, wordCount, summaryState, selected = false, 
   onOpenScene: (id: string) => void
   onOpenSummary: (entity: StructuralEntity) => void
   onCreate: (type: StructuralEntityType, parentId: string) => void
+  onAutotitle: (entity: StructuralEntity) => void
   onRename: (entity: StructuralEntity) => void
   onMove: (entity: StructuralEntity, direction: -1 | 1) => void
   onDelete: (entity: StructuralEntity) => void
@@ -1589,6 +1684,7 @@ function OutlineRow({ entity, label, wordCount, summaryState, selected = false, 
     <div className="outline-actions">
       {entity.type === 'act' && <button type="button" onClick={() => onCreate('chapter', entity.id)} aria-label={`Add chapter to ${entity.title}`} title="Add chapter"><Plus aria-hidden="true" /></button>}
       {entity.type === 'chapter' && <button type="button" onClick={() => onCreate('scene', entity.id)} aria-label={`Add scene to ${entity.title}`} title="Add scene"><Plus aria-hidden="true" /></button>}
+      <button className="autotitle-trigger" type="button" onClick={() => onAutotitle(entity)} aria-label={`Autotitle ${entity.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></button>
       <button type="button" onClick={() => onRename(entity)} aria-label={`Rename ${entity.title}`} title="Rename"><Pencil aria-hidden="true" /></button>
       <button type="button" onClick={() => onMove(entity, -1)} disabled={first} aria-label={`Move ${entity.title} up`} title="Move up"><ArrowUp aria-hidden="true" /></button>
       <button type="button" onClick={() => onMove(entity, 1)} disabled={last} aria-label={`Move ${entity.title} down`} title="Move down"><ArrowDown aria-hidden="true" /></button>
@@ -1596,27 +1692,29 @@ function OutlineRow({ entity, label, wordCount, summaryState, selected = false, 
     </div>
   </div>
 }
-function Notes({ notes, activeId, onCreate, onOpen, onRename, onDelete }: {
+function Notes({ notes, activeId, onCreate, onOpen, onAutotitle, onRename, onDelete }: {
   notes: NoteEntity[]
   activeId: string | null
   onCreate: () => void
   onOpen: (id: string) => void
+  onAutotitle: (entity: NoteEntity) => void
   onRename: (entity: NoteEntity) => void
   onDelete: (entity: NoteEntity) => void
 }) {
   const [query, setQuery] = useState('')
   const normalizedQuery = query.trim().toLowerCase()
   const visible = notes.filter((note) => !normalizedQuery || `${note.title} ${note.content}`.toLowerCase().includes(normalizedQuery))
-  return <section><div className="panel-title"><div><small>Reference</small><h2>Notes</h2></div><button type="button" onClick={onCreate} aria-label="Add note"><Plus aria-hidden="true" /> New</button></div><input className="panel-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search notes"/>{visible.length ? visible.map((note) => <article className={`content-row ${activeId === note.id ? 'selected' : ''}`} key={note.id}><button className="content-open" type="button" onClick={() => onOpen(note.id)}><NotebookPen aria-hidden="true" /><span><strong>{note.title}</strong><small>{formatEdited(note.updatedAt)}</small></span><ChevronRight aria-hidden="true" /></button><div className="content-actions"><button type="button" onClick={() => onRename(note)} aria-label={`Rename ${note.title}`}><Pencil aria-hidden="true" /></button><button type="button" onClick={() => onDelete(note)} aria-label={`Delete ${note.title}`}><Trash2 aria-hidden="true" /></button></div></article>) : <p className="content-empty">{query ? 'No matching notes.' : 'No notes yet.'}</p>}</section>
+  return <section><div className="panel-title"><div><small>Reference</small><h2>Notes</h2></div><button type="button" onClick={onCreate} aria-label="Add note"><Plus aria-hidden="true" /> New</button></div><input className="panel-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search notes"/>{visible.length ? visible.map((note) => <article className={`content-row ${activeId === note.id ? 'selected' : ''}`} key={note.id}><button className="content-open" type="button" onClick={() => onOpen(note.id)}><NotebookPen aria-hidden="true" /><span><strong>{note.title}</strong><small>{formatEdited(note.updatedAt)}</small></span><ChevronRight aria-hidden="true" /></button><div className="content-actions"><button className="autotitle-trigger" type="button" onClick={() => onAutotitle(note)} aria-label={`Autotitle ${note.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></button><button type="button" onClick={() => onRename(note)} aria-label={`Rename ${note.title}`}><Pencil aria-hidden="true" /></button><button type="button" onClick={() => onDelete(note)} aria-label={`Delete ${note.title}`}><Trash2 aria-hidden="true" /></button></div></article>) : <p className="content-empty">{query ? 'No matching notes.' : 'No notes yet.'}</p>}</section>
 }
 
-function Codex({ entries, activeId, summaryStates, onCreate, onOpen, onOpenSummary, onRename, onArchive, onRestore, onDelete }: {
+function Codex({ entries, activeId, summaryStates, onCreate, onOpen, onOpenSummary, onAutotitle, onRename, onArchive, onRestore, onDelete }: {
   entries: CodexEntryEntity[]
   activeId: string | null
   summaryStates: Record<string, SummaryState>
   onCreate: () => void
   onOpen: (id: string) => void
   onOpenSummary: (entity: CodexEntryEntity) => void
+  onAutotitle: (entity: CodexEntryEntity) => void
   onRename: (entity: CodexEntryEntity) => void
   onArchive: (entity: CodexEntryEntity) => void
   onRestore: (entity: CodexEntryEntity) => void
@@ -1635,7 +1733,7 @@ function Codex({ entries, activeId, summaryStates, onCreate, onOpen, onOpenSumma
     <div className="panel-title"><div><small>{showArchived ? 'Inactive knowledge' : 'Book knowledge'}</small><h2>{showArchived ? 'Codex archive' : 'Codex'}</h2></div><div className="codex-panel-actions"><button className={showArchived ? 'active' : ''} type="button" onClick={() => { setShowArchived((value) => !value); setCategory('All') }} aria-pressed={showArchived}><Archive aria-hidden="true" /> {showArchived ? 'Active' : `Archive${archivedCount ? ` ${archivedCount}` : ''}`}</button>{!showArchived && <button type="button" onClick={onCreate}><Plus aria-hidden="true" /> New</button>}</div></div>
     <input className="panel-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={showArchived ? 'Search archived Codex' : 'Search the Codex'}/>
     <div className="chips category-filter">{categories.map((item) => <button className={activeCategory === item ? 'active' : ''} type="button" onClick={() => setCategory(item)} key={item}>{item}</button>)}</div>
-    {visible.length ? visible.map((entry) => <article className={`content-row codex-content-row ${showArchived ? 'archived' : ''} ${activeId === entry.id ? 'selected' : ''}`} key={entry.id}><button className="content-open" type="button" onClick={() => onOpen(entry.id)}><i>{entry.title.slice(0, 1).toUpperCase()}</i><span><small>{showArchived ? `Archived · ${entry.category}` : entry.category}</small><strong>{entry.title}</strong></span><ChevronRight aria-hidden="true" /></button><SummaryIcon state={summaryStates[entry.id] ?? 'missing'} kind="codex" onOpen={() => onOpenSummary(entry)} /><div className="content-actions">{showArchived ? <button type="button" onClick={() => onRestore(entry)} aria-label={`Restore ${entry.title}`} title="Restore"><ArchiveRestore aria-hidden="true" /></button> : <><button type="button" onClick={() => onRename(entry)} aria-label={`Rename ${entry.title}`} title="Rename"><Pencil aria-hidden="true" /></button><button type="button" onClick={() => onArchive(entry)} aria-label={`Archive ${entry.title}`} title="Archive"><Archive aria-hidden="true" /></button></>}<button type="button" onClick={() => onDelete(entry)} aria-label={`Delete ${entry.title}`} title="Delete permanently"><Trash2 aria-hidden="true" /></button></div></article>) : <p className="content-empty">{showArchived ? (query || activeCategory !== 'All' ? 'No matching archived entries.' : 'No archived Codex entries.') : (query || activeCategory !== 'All' ? 'No matching entries.' : 'No Codex entries yet.')}</p>}
+    {visible.length ? visible.map((entry) => <article className={`content-row codex-content-row ${showArchived ? 'archived' : ''} ${activeId === entry.id ? 'selected' : ''}`} key={entry.id}><button className="content-open" type="button" onClick={() => onOpen(entry.id)}><i>{entry.title.slice(0, 1).toUpperCase()}</i><span><small>{showArchived ? `Archived · ${entry.category}` : entry.category}</small><strong>{entry.title}</strong></span><ChevronRight aria-hidden="true" /></button><SummaryIcon state={summaryStates[entry.id] ?? 'missing'} kind="codex" onOpen={() => onOpenSummary(entry)} /><div className="content-actions">{showArchived ? <button type="button" onClick={() => onRestore(entry)} aria-label={`Restore ${entry.title}`} title="Restore"><ArchiveRestore aria-hidden="true" /></button> : <><button className="autotitle-trigger" type="button" onClick={() => onAutotitle(entry)} aria-label={`Autotitle ${entry.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></button><button type="button" onClick={() => onRename(entry)} aria-label={`Rename ${entry.title}`} title="Rename"><Pencil aria-hidden="true" /></button><button type="button" onClick={() => onArchive(entry)} aria-label={`Archive ${entry.title}`} title="Archive"><Archive aria-hidden="true" /></button></>}<button type="button" onClick={() => onDelete(entry)} aria-label={`Delete ${entry.title}`} title="Delete permanently"><Trash2 aria-hidden="true" /></button></div></article>) : <p className="content-empty">{showArchived ? (query || activeCategory !== 'All' ? 'No matching archived entries.' : 'No archived Codex entries.') : (query || activeCategory !== 'All' ? 'No matching entries.' : 'No Codex entries yet.')}</p>}
   </section>
 }
 function ChatList({onOpen,activeChat,onSettings}:{onOpen:(title:string)=>void;activeChat:string;onSettings:()=>void}) { return <section><div className="panel-title"><div><small>Conversations</small><h2>Chats</h2></div><button type="button" aria-label="Start new chat"><Plus aria-hidden="true" /></button></div>{activeChat && <button className="current-chat" onClick={onSettings}><Settings2 aria-hidden="true" /><span><small>Current chat</small>{activeChat} settings</span><ChevronRight aria-hidden="true" /></button>}<input className="panel-search" placeholder="Search chats"/>{chats.map(([title,preview,time]) => <button className="chat-row" key={title} onClick={() => onOpen(title)}><i><MessageCircle aria-hidden="true" /></i><span><strong>{title}</strong><small>{preview}</small></span><em>{time}</em></button>)}</section> }

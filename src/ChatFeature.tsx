@@ -315,7 +315,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
         ? `\n\n[Outline proposals: ${message.outlineActions.map((proposal) => `${proposal.action} ${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
         : ''
       const entityActionState = message.role === 'assistant' && message.entityActions?.length
-        ? `\n\n[Note/Codex proposals: ${message.entityActions.map((proposal) => `${proposal.action} ${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
+        ? `\n\n[Entity proposals: ${message.entityActions.map((proposal) => `${proposal.action} ${proposal.entityTitle}: ${proposal.status}`).join('; ')}]`
         : ''
       return {
         role: message.role,
@@ -672,7 +672,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       onToast(`${verb} “${proposal.entityTitle}”.`)
     } catch (error) {
       await reloadMessages().catch(() => undefined)
-      onToast(error instanceof Error ? error.message : 'Could not apply the Note/Codex proposal.')
+      onToast(error instanceof Error ? error.message : 'Could not apply the entity proposal.')
     }
   }
 
@@ -681,7 +681,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       await rejectChatEntityAction(message.id, proposal.id)
       await reloadMessages()
     } catch (error) {
-      onToast(error instanceof Error ? error.message : 'Could not reject the Note/Codex proposal.')
+      onToast(error instanceof Error ? error.message : 'Could not reject the entity proposal.')
     }
   }
 
@@ -875,7 +875,7 @@ function ChatModelPicker({ value, models, onChange }: { value: string; models: C
 
 function EntityActionCard({ proposal, onApply, onReject }: { proposal: ChatEntityActionProposal; onApply: () => void; onReject: () => void }) {
   const actionLabel = proposal.action === 'create_note' ? 'Create' : proposal.action === 'rename' ? 'Rename' : proposal.action === 'delete' ? 'Delete' : 'Change category'
-  const typeLabel = proposal.entityType === 'codexEntry' ? 'Codex' : 'Note'
+  const typeLabel = proposal.entityType === 'book' ? 'Book' : proposal.entityType === 'codexEntry' ? 'Codex' : 'Note'
   const statusLabel = proposal.status === 'proposed' ? 'Needs approval' : proposal.status === 'applied' ? 'Applied' : proposal.status === 'stale' ? 'Item changed' : 'Rejected'
   return <section className={`chat-document-edit chat-entity-action ${proposal.action} ${proposal.status}`}>
     <header><div><small>{actionLabel} {typeLabel}</small><strong>{proposal.entityTitle}</strong></div><span>{statusLabel}</span></header>

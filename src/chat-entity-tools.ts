@@ -23,6 +23,7 @@ const CODEX_CATEGORIES = ['Character', 'Place', 'Object', 'Event', 'Group', 'Oth
 export const chatEntityToolNames = new Set([
   'propose_note_create',
   'propose_entity_rename',
+  'propose_book_rename',
   'propose_entity_delete',
   'propose_codex_category',
 ])
@@ -58,6 +59,22 @@ export const chatEntityTools: ChatToolDefinition[] = [
           summary: { type: 'string' },
         },
         required: ['entity_id', 'new_title'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'propose_book_rename',
+      description: 'Propose renaming the current Book. This does not rename the Book until the user explicitly approves the proposal in Chat.',
+      parameters: {
+        type: 'object',
+        properties: {
+          new_title: { type: 'string' },
+          summary: { type: 'string' },
+        },
+        required: ['new_title'],
         additionalProperties: false,
       },
     },
@@ -166,6 +183,26 @@ export async function executeChatEntityTool(bookId: string, call: ChatToolCall):
       return { content: result({ ok: true, proposalId: proposal.id, message: 'Note creation proposal created. The user must press Create before the Note exists.' }), entityAction: proposal }
     }
 
+    if (call.function.name === 'propose_book_rename') {
+      const entity = await getEntity<ArcEntity>(bookId)
+      if (!entity || entity.type !== 'book') return { content: result({ ok: false, error: 'The current Book was not found.' }) }
+      const newTitle = cleanTitle(args.new_title)
+      if (!newTitle) return { content: result({ ok: false, error: 'The new Book title cannot be empty.' }) }
+      const proposal: ChatEntityActionProposal = {
+        id: makeProposalId(),
+        action: 'rename',
+        entityId: entity.id,
+        entityType: 'book',
+        entityTitle: entityTitle(entity),
+        newTitle,
+        expectedUpdatedAt: entity.updatedAt,
+        summary: cleanTitle(args.summary),
+        status: 'proposed',
+        createdAt: Date.now(),
+      }
+      return { content: result({ ok: true, proposalId: proposal.id, message: 'Book rename proposal created. The user must approve it before the title changes.' }), entityAction: proposal }
+    }
+
     if (call.function.name === 'propose_entity_rename') {
       const entityId = typeof args.entity_id === 'string' ? args.entity_id : ''
       const entity = await manageableEntity(bookId, entityId)
@@ -272,7 +309,13 @@ export async function applyChatEntityAction(messageId: string, proposalId: strin
     return { entityId: created.id, appliedAt }
   }
 
-  const entity = await manageableEntity(message.bookId, proposal.entityId ?? '')
+  const entity = proposal.entityType === 'book'
+    ? await getEntity<ArcEntity>(proposal.entityId ?? '')
+    : await manageableEntity(message.bookId, proposal.entityId ?? '')
+  if (!entity || (proposal.entityType === 'book' ? entity.type !== 'book' || entity.id !== message.bookId : false)) {
+    await setActionStatus(message, proposal.id, { status: 'stale' })
+    throw new Error('The proposed item is no longer available in this book.')
+  }
   if (proposal.expectedUpdatedAt !== undefined && entity.updatedAt !== proposal.expectedUpdatedAt) {
     await setActionStatus(message, proposal.id, { status: 'stale' })
     throw new Error('This item changed after the proposal was created. Ask Chat to read it again and prepare a new proposal.')
