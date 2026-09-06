@@ -39,7 +39,7 @@ export type SttTarget = {
 const STT_EVENT = 'arc-stt-state'
 const OPENAI_BASE = 'https://api.openai.com/v1'
 const NANOGPT_BASE = 'https://nano-gpt.com/api/v1'
-const NANOGPT_AUDIO_MODELS = `${NANOGPT_BASE}/audio-models?detailed=true&type=speech-to-text`
+const NANOGPT_AUDIO_MODELS = `${NANOGPT_BASE}/audio-models?detailed=true&type=stt`
 const OPENAI_TRANSCRIPTION_IDS = /(?:whisper|transcribe)/i
 
 let state: SttState = { status: 'idle', label: '', target: null, live: false }
