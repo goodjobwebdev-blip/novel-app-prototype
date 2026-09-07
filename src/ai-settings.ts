@@ -1,3 +1,4 @@
+import type { ProviderProfile } from './provider-profiles'
 import { PROMPT_COMPOSITION_SCHEMA_VERSION, clonePromptComposition, compositionsFromLegacyPrompts, legacyPromptMirror, normalizePromptCompositions, withSystemPrompt, type PromptComposition, type PromptCompositions, type PromptCompositionScope } from './prompt-composition'
 import { defaultStoryPromptComposition } from './story-request'
 import { defaultChatPromptComposition } from './chat-default-composition'
@@ -44,6 +45,7 @@ export type AiPrompts = {
 }
 
 export type AiSettings = {
+  providerProfiles?: Partial<Record<AiProvider, ProviderProfile>>
   provider: AiProvider
   apiKey: string
   baseUrl: string
