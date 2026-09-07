@@ -27,6 +27,7 @@ import './chat-model-picker-shape.css'
 import './settings-scope.css'
 import './ui-settings.css'
 import './mobile-control-hardening.css'
+import './ai-settings-ux.css'
 import './generation-actions.css'
 
 applyStoredUiSettings()
@@ -47,4 +48,3 @@ if ('serviceWorker' in navigator) {
     })
   })
 }
-

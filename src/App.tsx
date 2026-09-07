@@ -1,3 +1,5 @@
+import { switchProviderProfile } from './provider-profiles'
+import { TextRevealPreview } from './TextRevealPreview'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bot,
@@ -131,6 +133,11 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   const [promptTab, setPromptTab] = useState<keyof AiPrompts>('story')
   const [promptVariableQuery, setPromptVariableQuery] = useState('')
   const [modelSearch, setModelSearch] = useState('')
+  const [aiSection, setAiSection] = useState<'connection' | 'models' | 'prompts'>('models')
+  const [modelRole, setModelRole] = useState<'main' | 'support' | 'codex'>('main')
+  const [modelCount, setModelCount] = useState(8)
+  const [connectionExpanded, setConnectionExpanded] = useState(false)
+  const [saveError, setSaveError] = useState('')
   const [showKey, setShowKey] = useState(false)
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState('Add an API key, then reload the model list.')
@@ -202,6 +209,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
       aiSavedRef.current = JSON.stringify(defaults)
       aiLoadedScopeRef.current = scope
       setSettings(defaults)
+      setAiSection(defaults.apiKey || defaults.provider === 'fake' ? 'models' : 'connection')
       const cachedModels = cachedTextModelCatalog(defaults)
       setModels(cachedModels?.models ?? [])
       setStatus(cachedModels ? `${cachedModels.models.length} cached models available. Reload the model list to refresh it.` : 'No cached model list yet. Use Reload model list to fetch it from the provider.')
@@ -221,6 +229,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
         aiSavedRef.current = JSON.stringify(bookSettings)
         aiLoadedScopeRef.current = scope
         setSettings(bookSettings)
+        setAiSection(bookSettings.apiKey || bookSettings.provider === 'fake' ? 'models' : 'connection')
         const cachedModels = cachedTextModelCatalog(bookSettings)
         setModels(cachedModels?.models ?? [])
         setStatus(cachedModels ? `${cachedModels.models.length} cached models available for “${book.title}”. Reload the model list to refresh it.` : 'No cached model list yet. Use Reload model list to fetch it from the provider.')
@@ -263,7 +272,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
 
   const visibleModels = useMemo(() => {
     const query = modelSearch.trim().toLowerCase()
-    return models.filter((model) => !query || `${model.id} ${model.name ?? ''}`.toLowerCase().includes(query)).sort((a, b) => Number(settings.favorites.includes(b.id)) - Number(settings.favorites.includes(a.id))).slice(0, 8)
+    return models.filter((model) => !query || `${model.id} ${model.name ?? ''}`.toLowerCase().includes(query)).sort((a, b) => Number(settings.favorites.includes(b.id)) - Number(settings.favorites.includes(a.id)))
   }, [modelSearch, models, settings.favorites])
 
   function persistAiSettings(snapshot: AiSettings, scope: string, version: number): Promise<boolean> {
@@ -275,16 +284,14 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
       if (version !== aiSaveVersionRef.current || scope !== aiLoadedScopeRef.current) return false
       aiSavedRef.current = JSON.stringify(snapshot)
       setSaveState('saved')
-      setStatus(scope === 'defaults' ? 'AI defaults saved automatically on this device.' : `AI settings saved automatically for “${book?.title ?? 'this book'}”.`)
-      setStatusKind('success')
+      setSaveError('')
       onSavedRef.current?.(savedSettings)
       return true
     })
     return pending.catch(() => {
       if (version !== aiSaveVersionRef.current || scope !== aiLoadedScopeRef.current) return false
       setSaveState('error')
-      setStatus('Settings could not be saved. Your changes are still shown; edit a setting to try again.')
-      setStatusKind('error')
+      setSaveError('Settings could not be saved. Your changes are still here.')
       return false
     })
   }
@@ -349,8 +356,8 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
     const current = latestAiSettingsRef.current
     if (current.provider === provider) return
     invalidateModelRefresh()
-    const baseUrl = provider === 'nanogpt' ? 'https://nano-gpt.com/api/v1' : provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : provider === 'openai' ? 'https://api.openai.com/v1' : provider === 'fake' ? '' : current.baseUrl
-    const next = { ...current, provider, apiKey: provider === 'fake' ? '' : current.apiKey, baseUrl, mainModel: '', mainModelContextLength: undefined, supportModel: '', supportModelContextLength: undefined, codexModel: '', codexModelContextLength: undefined }
+    const next = switchProviderProfile(current, provider)
+    setShowKey(false)
     clearModelCatalog(current)
     clearModelCatalog(next)
     changeAiSettings(() => next)
@@ -449,15 +456,13 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
         setSettings(copied)
         setSaveState('saved')
         setModels(cachedTextModelCatalog(copied)?.models ?? [])
-        setStatus(`Current defaults copied to “${book.title}”.`)
-        setStatusKind('success')
+        setSaveError('')
         onSavedRef.current?.(copied)
       })
     } catch {
       if (version !== aiSaveVersionRef.current || scope !== aiLoadedScopeRef.current) return
       setSaveState('error')
-      setStatus('Defaults could not be copied to this book. Try again.')
-      setStatusKind('error')
+      setSaveError('Defaults could not be copied to this book. Try again.')
     }
   }
 
@@ -624,12 +629,12 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
     : null
 
   return (
-    <main className="app-shell">
+    <main className="app-shell ai-settings-shell">
       <aside className="settings-rail" aria-label={`${isBookSettings ? 'Book' : 'Default'} settings navigation`}>
         <div className="rail-header"><button className="home-button" type="button" aria-label="Back to library" onClick={() => { void leaveSettings(onHome) }} disabled={leaveSaving}><Home aria-hidden="true" /><b>Home</b></button>{onBack && <button className="settings-close" type="button" onClick={() => { void leaveSettings(onBack) }} aria-label="Close settings" disabled={leaveSaving}><X aria-hidden="true" /></button>}</div>
         <nav>
           {([['ai', Bot, 'AI'], ['context', SlidersHorizontal, 'Context'], ['appearance', Type, 'UI'], ['speech', Volume2, 'Speech'], ['images', ImageIcon, 'Images']] as const).map(([key, Icon, label]) => (
-            <button className={settingsTab === key ? 'active' : ''} type="button" onClick={() => setSettingsTab(key)} key={key}><Icon aria-hidden="true" /><span>{label}</span></button>
+            <button className={settingsTab === key ? 'active' : ''} type="button" onClick={() => setSettingsTab(key)} aria-current={settingsTab === key ? 'page' : undefined} key={key}><Icon aria-hidden="true" /><span>{label}</span></button>
           ))}
         </nav>
         <p>{isBookSettings ? `Changes here affect only “${book?.title}”. Favorite models are shared across books.` : 'Defaults are copied into a new book. After that, each book keeps its own settings.'}</p>
@@ -646,9 +651,12 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
         {settingsTab === 'ai' ? <>
         <header className="page-heading"><div><p>{isBookSettings ? 'Book AI' : 'Default AI'}</p><h1 id="page-title">Models & prompts</h1><span>{isBookSettings ? `Configure AI for “${book?.title}”. These settings are independent from the defaults.` : 'Configure the writing and support models used when a book is created.'}</span></div><div className={`save-state ${saveState}`} aria-live="polite"><i />{saveState === 'loading' || settingsLoading ? 'Loading' : saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Save failed' : 'Saved'}</div></header>
 
-        <section className="settings-card provider-card">
+        <div className="ai-scope-row"><span>{isBookSettings ? `This book only · ${book?.title}` : 'Defaults for new books'}</span>{book && <details className="ai-settings-menu"><summary>More options</summary><button type="button" onClick={() => { void resetFromDefaults() }} disabled={settingsLoading}>Reset from defaults</button></details>}</div>
+        {saveError && <div className="status error" role="alert">{saveError}<button type="button" onClick={() => { void flushAiSettings() }}>Retry saving</button></div>}
+        <nav className="ai-section-nav" aria-label="AI sections">{(['connection', 'models', 'prompts'] as const).map(section => <button key={section} type="button" aria-current={aiSection === section ? 'page' : undefined} onClick={() => setAiSection(section)}>{section[0].toUpperCase() + section.slice(1)}</button>)}</nav>
+        <section hidden={aiSection !== 'connection'} className="settings-card provider-card">
           <div className="card-heading"><div><span>01</span><h2>Provider</h2></div><p>Connection details stay in this browser.</p></div>
-          <div className="provider-grid">{(Object.keys(providerLabels) as AiProvider[]).map((provider) => <button key={provider} className={settings.provider === provider ? 'selected' : ''} type="button" onClick={() => selectProvider(provider)}><i>{provider === 'fake' ? 'T' : provider === 'nanogpt' ? 'N' : provider === 'openrouter' ? 'O' : provider === 'openai' ? 'AI' : '{ }'}</i><span><strong>{providerLabels[provider]}</strong><small>{provider === 'fake' ? 'Local · no network' : provider === 'compatible' ? 'Custom endpoint' : 'Managed endpoint'}</small></span><b>{settings.provider === provider ? '✓' : ''}</b></button>)}</div>
+          <p className="connection-summary">{providerLabels[settings.provider]} · {settings.provider === 'fake' ? 'Local testing' : settings.apiKey ? 'Key saved on this device' : 'Setup required'}</p><details open={connectionExpanded || (!settings.apiKey && settings.provider !== 'fake')} onToggle={event => setConnectionExpanded(event.currentTarget.open)}><summary>Edit connection</summary><div className="provider-grid">{(Object.keys(providerLabels) as AiProvider[]).map((provider) => <button key={provider} className={settings.provider === provider ? 'selected' : ''} type="button" aria-pressed={settings.provider === provider} onClick={() => selectProvider(provider)}><i>{provider === 'fake' ? 'T' : provider === 'nanogpt' ? 'N' : provider === 'openrouter' ? 'O' : provider === 'openai' ? 'AI' : '{ }'}</i><span><strong>{providerLabels[provider]}</strong><small>{provider === 'fake' ? 'Local · no network' : provider === 'compatible' ? 'Custom endpoint' : 'Managed endpoint'}</small></span><b>{settings.provider === provider ? '✓' : ''}</b></button>)}</div>
           <div className="connection-fields">
             {settings.provider === 'compatible' && <label><span>Endpoint URL</span><input value={settings.baseUrl} onChange={(event) => updateConnection('baseUrl', event.target.value)} placeholder="https://provider.example/v1" /></label>}
             {settings.provider !== 'fake' && <label><span>API key</span><div className="input-action"><input
@@ -668,20 +676,28 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
             {settings.provider === 'fake' && <div className="status success" role="note"><i />Testing provider — responses, errors, reasoning, and tool calls are generated locally and deterministically. No text-AI network request is sent.</div>}
             <button className="reload-button" type="button" onClick={refreshModels} disabled={loading}><RefreshCw className={loading ? 'spinning' : ''} aria-hidden="true" />{loading ? 'Loading models…' : 'Reload model list'}</button>
           </div>
-          <p className={`status ${statusKind}`} role="status"><i />{status}</p>
+          </details><p className={`status ${statusKind}`}  role="status"><i />{status}</p>
         </section>
 
-        {settings.provider === 'fake' && <section className="settings-card provider-card" aria-label="Fake provider request trace">
+        {settings.provider === 'fake' && aiSection === 'connection' && <section className="settings-card provider-card" aria-label="Fake provider request trace">
           <div className="card-heading"><div><span>T</span><h2>Request trace</h2></div><p>Session only · last 20 Fake requests</p></div>
           <div className="connection-fields"><button className="reload-button" type="button" onClick={clearFakeProviderTrace} disabled={!fakeTrace.length}>Clear trace</button></div>
           <details><summary>{fakeTrace.length ? `${fakeTrace.length} request${fakeTrace.length === 1 ? '' : 's'}` : 'No Fake requests yet'}</summary><pre>{fakeTrace.length ? JSON.stringify(fakeTrace, null, 2) : 'Generate, summarize, autotitle, or chat with Fake (testing) to inspect the exact provider-boundary request.'}</pre></details>
         </section>}
 
-        <section className="settings-card models-card">
+        <section hidden={aiSection !== 'models'} className="settings-card models-card">
           <div className="card-heading"><div><span>02</span><h2>Models</h2></div><p>{isBookSettings ? 'Favorites are shared; model choices belong to this book.' : 'Main writes; Support handles summaries and autotitles.'}</p></div>
-          <div className="model-pickers"><label><span>Main model <em>Story generation and fallback</em></span><input list="model-options" value={settings.mainModel} onChange={(event) => selectModel('main', event.target.value)} placeholder={models.length ? 'Search models…' : 'Reload models first'} /></label><label><span>Support model <em>Fast utility tasks</em></span><input list="model-options" value={settings.supportModel} onChange={(event) => selectModel('support', event.target.value)} placeholder={models.length ? 'Search models…' : 'Reload models first'} /></label><label><span>Codex model <em>Optional · uses Main when empty</em></span><input list="model-options" value={settings.codexModel} onChange={(event) => selectModel('codex', event.target.value)} placeholder="Use Main model" /></label><datalist id="model-options">{models.map((model) => <option key={model.id} value={model.id}>{model.name ?? model.id}</option>)}</datalist></div>
+          <div className="model-pickers">{(['main', 'support', 'codex'] as const).map(role => {
+            const id = settings[`${role}Model`]
+            const model = models.find(item => item.id === id)
+            return <button className="model-role-card" type="button" key={role} aria-pressed={modelRole === role} onClick={() => { setModelRole(role); setModelSearch(''); setModelCount(8) }}><strong>{role === 'main' ? 'Main · Story writing' : role === 'support' ? 'Support · Summaries & titles' : 'Codex · Worldbuilding'}</strong><span>{model?.name || id || (role === 'codex' ? `Use Main · ${settings.mainModel || 'not selected'}` : 'Choose a model')}</span><small>{formatContext(model?.context_length ?? settings[`${role}ModelContextLength`])}</small></button>
+          })}</div>
+          <h3>Choose {modelRole === 'main' ? 'Main' : modelRole === 'support' ? 'Support' : 'Codex'} model</h3>
+          <label><span>Model ID <em>Choose below or enter a custom ID</em></span><input value={settings[`${modelRole}Model`]} onChange={event => selectModel(modelRole, event.target.value)} placeholder={modelRole === 'codex' ? 'Leave empty to use Main' : 'Enter model ID'} /></label>
+          <div className="reveal-setting"><h3>Text reveal speed</h3><p>Controls how quickly generated words appear.</p><div className="speed-presets">{([['Slow', '120'], ['Normal', '40'], ['Fast', '10']] as const).map(([label, delay]) => <button type="button" key={label} aria-pressed={settings.generationWordDelayMs === delay} onClick={() => update('generationWordDelayMs', delay)}>{label}</button>)}</div><TextRevealPreview delay={Number(settings.generationWordDelayMs)} /></div>
+          <details className="ai-advanced"><summary>Advanced · Speed & context limits</summary>
           <label className="generation-speed-setting">
-            <span><strong>Writing pace</strong><em>Milliseconds per word</em></span>
+            <span><strong>Custom reveal speed</strong><em>Milliseconds per word</em></span>
             <input type="text" inputMode="numeric" pattern="[0-9]*" value={settings.generationWordDelayMs} onChange={(event) => update('generationWordDelayMs', event.target.value)} aria-describedby="generation-speed-help" spellCheck={false} />
             <small id="generation-speed-help">40 ms is the default. Use a lower value for faster writing or a higher value for slower writing (1–2000).</small>
           </label>
@@ -689,12 +705,13 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
             <label className={contextLimitInputError(settings.mainEffectiveContextLimit) ? 'invalid' : ''}><span><strong>Story / Main context cap</strong><em>Effective input window</em></span><input type="text" value={settings.mainEffectiveContextLimit} onChange={(event) => update('mainEffectiveContextLimit', event.target.value)} placeholder="Model maximum" spellCheck={false} /><small>{contextLimitInputError(settings.mainEffectiveContextLimit) || 'Optional. Accepts tokens such as 32000, 32k, or 1m. The model hard maximum still wins.'}</small></label>
             <label className={contextLimitInputError(settings.codexEffectiveContextLimit) ? 'invalid' : ''}><span><strong>Codex model context cap</strong><em>Used when a Codex model is set</em></span><input type="text" value={settings.codexEffectiveContextLimit} onChange={(event) => update('codexEffectiveContextLimit', event.target.value)} placeholder="Model maximum" spellCheck={false} /><small>{contextLimitInputError(settings.codexEffectiveContextLimit) || (settings.codexModel.trim() ? 'Optional cap for the selected Codex model.' : 'Codex currently falls back to Main, so the Story / Main cap applies.')}</small></label>
           </div>
-          <div className="model-browser"><div className="model-search"><Search aria-hidden="true" /><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder="Search loaded models" /></div>{models.length ? <div className="model-list">{visibleModels.map((model) => <article key={model.id}><button className={`favorite ${settings.favorites.includes(model.id) ? 'active' : ''}`} type="button" onClick={() => toggleFavorite(model.id)} aria-label={`Favorite ${model.id}`}><Star fill={settings.favorites.includes(model.id) ? 'currentColor' : 'none'} aria-hidden="true" /></button><div><strong>{model.name || model.id}</strong>{model.name && model.name !== model.id && <small>{model.id}</small>}<p><span>{formatContext(model.context_length)}</span><span>{model.architecture?.modality || 'Text'}</span>{model.pricing?.prompt && <span>Pricing supplied</span>}</p></div><button className="use-model" type="button" onClick={() => selectModel('main', model.id)}>Use</button></article>)}</div> : <div className="model-empty"><Bot aria-hidden="true" /><strong>No models loaded</strong><p>Enter your key and reload the provider model list.</p></div>}</div>
+          </details><div className="model-browser"><div className="model-search"><Search aria-hidden="true" /><input value={modelSearch} onChange={(event) => { setModelSearch(event.target.value); setModelCount(8) }} placeholder="Search loaded models" /></div>{models.length ? <div className="model-list">{visibleModels.slice(0, modelCount).map((model) => <article key={model.id}><button className={`favorite ${settings.favorites.includes(model.id) ? 'active' : ''}`} type="button" onClick={() => toggleFavorite(model.id)} aria-pressed={settings.favorites.includes(model.id)} aria-label={`Favorite ${model.id}`}><Star fill={settings.favorites.includes(model.id) ? 'currentColor' : 'none'} aria-hidden="true" /></button><div><strong>{model.name || model.id}</strong>{model.name && model.name !== model.id && <small>{model.id}</small>}<p><span>{formatContext(model.context_length)}</span><span>{model.architecture?.modality || 'Text'}</span></p></div><button className="use-model" type="button" onClick={() => selectModel(modelRole, model.id)}>Use for {modelRole === 'main' ? 'Main' : modelRole === 'support' ? 'Support' : 'Codex'}</button></article>)}<div className="model-results" role="status">Showing {Math.min(modelCount, visibleModels.length)} of {visibleModels.length} matching models{visibleModels.length > modelCount && <button type="button" onClick={() => setModelCount(count => count + 8)}>Show more</button>}{!visibleModels.length && <span>Try a different search.</span>}</div></div> : <div className="model-empty"><Bot aria-hidden="true" /><strong>No models loaded</strong><p>Connect a provider to browse models, or enter a model ID above.</p><button type="button" onClick={() => setAiSection('connection')}>Set up connection</button></div>}</div>
         </section>
 
-        <section className="settings-card prompts-card">
-          <div className="card-heading"><div><span>03</span><h2>Request composition</h2></div><p>System prompt, ordered predefined messages, then Arc’s current instruction.</p></div>
-          <div className="prompt-tabs" role="tablist">{([['story', 'Story'], ['assistant', 'Chat'], ['lore', 'Codex'], ['summarize', 'Summary']] as const).map(([key, label]) => <button key={key} className={promptTab === key ? 'active' : ''} type="button" onClick={() => setPromptTab(key)}>{label}</button>)}</div>
+        <section hidden={aiSection !== 'prompts'} className="settings-card prompts-card">
+          <div className="card-heading"><div><span>03</span><h2>Prompts</h2></div><p>System prompt, ordered predefined messages, then Arc’s current instruction.</p></div>
+          <div className="prompt-tabs" role="tablist" aria-label="Prompt purpose">{([['story', 'Story'], ['assistant', 'Chat'], ['lore', 'Codex'], ['summarize', 'Summary']] as const).map(([key, label]) => <button key={key} className={promptTab === key ? 'active' : ''} role="tab" id={`prompt-tab-${key}`} aria-selected={promptTab === key} aria-controls="prompt-panel" tabIndex={promptTab === key ? 0 : -1} onKeyDown={event => { const keys = ['story', 'assistant', 'lore', 'summarize'] as const; const index = keys.indexOf(key); const next = event.key === 'ArrowRight' ? (index + 1) % 4 : event.key === 'ArrowLeft' ? (index + 3) % 4 : event.key === 'Home' ? 0 : event.key === 'End' ? 3 : -1; if (next >= 0) { event.preventDefault(); setPromptTab(keys[next]); document.getElementById(`prompt-tab-${keys[next]}`)?.focus() } }} type="button" onClick={() => setPromptTab(key)}>{label}</button>)}</div>
+          <div role="tabpanel" id="prompt-panel" aria-labelledby={`prompt-tab-${promptTab}`} key={promptTab}>
           <PromptPresetControls
             scope={promptPresetScope[promptTab]}
             composition={settings.promptCompositions[promptTab]}
@@ -704,6 +721,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
           {responseLengthScope && <div className="response-length-setting">
             <label htmlFor={`${responseLengthScope}-response-length`}><span><strong>Response length</strong><em>{promptTab === 'story' ? 'Story' : promptTab === 'lore' ? 'Codex' : 'Summary'}</em></span><textarea id={`${responseLengthScope}-response-length`} value={activeResponseLength} onChange={(event) => changeAiSettings((current) => ({ ...current, responseLengths: { ...current.responseLengths, [responseLengthScope]: event.target.value } }))} placeholder="Leave empty to let the model decide." /></label>
             <div className="response-length-presets" aria-label={`${responseLengthScope} response length presets`}>{activeResponseLengthPresets.map((preset) => <button type="button" key={preset.label} onClick={() => changeAiSettings((current) => ({ ...current, responseLengths: { ...current.responseLengths, [responseLengthScope]: preset.value } }))}>{preset.label}</button>)}</div>
+            {![activePrompt, ...settings.promptCompositions[promptTab].predefinedMessages.filter(message => message.enabled).map(message => message.template)].some(template => /{{\s*response\.length\s*}}/.test(template)) && <div className="response-length-warning" role="status"><strong>Not included in this prompt</strong><p>Response length has no effect until an enabled template includes it.</p><button type="button" onClick={() => changeAiSettings(current => withPromptSystemPrompt(current, promptTab, `${current.promptCompositions[promptTab].systemPrompt}\n\n{% if response.length %}\nResponse length: {{response.length}}\n{% endif %}`))}>Add to prompt</button></div>}
             <small>Available as <code>{'{{response.length}}'}</code> only in this generation scope. It is sent only where an enabled template references it.</small>
           </div>}
           <h3 className="prompt-section-label">System prompt</h3>
@@ -757,9 +775,9 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
               </div>
             })}{!availablePromptVariables.length && <p>No variables match that search.</p>}</div>
           </details>
-          <div className="prompt-footer"><button type="button" onClick={() => changeAiSettings((current) => resetPromptComposition(current, promptTab))}>Reset prompt composition</button></div>
+          <div className="prompt-footer"><button type="button" onClick={() => { if (window.confirm('Reset this prompt and all predefined messages to the Arc default?')) changeAiSettings((current) => resetPromptComposition(current, promptTab)) }}>Reset prompt composition</button></div></div>
         </section>
-        {book && <footer className="save-bar"><div><strong>{book.title}</strong><span>Changes save automatically</span></div><div className="save-actions"><button className="reset-settings" type="button" onClick={() => { void resetFromDefaults() }} disabled={settingsLoading}><RefreshCw aria-hidden="true" /> Reset from defaults</button></div></footer>}
+
         </> : settingsTab === 'context' ? (book ? (book.contextType === 'note'
           ? <NoteContextPlaceholder />
           : <ContextSettings bookId={book.id} bookTitle={book.title} bookPromptValues={book.promptValues} type={book.contextType ?? 'scene'} currentDocumentId={book.currentDocumentId} currentDocumentText={book.currentDocumentText} insertionPosition={book.insertionPosition} chatId={book.chatId} settings={settings} value={contextSettings} sources={contextSources} saved={contextSaved} onChange={updateContextDefaults} />)
@@ -796,6 +814,7 @@ function SummaryRequestPreview({ request, source, error, hasCurrentSummary, mode
 }
 
 function PredefinedMessages({ scope = 'story', messages, previewValues, onChange }: { scope?: PromptCompositionScope; messages: PredefinedMessage[]; previewValues?: Record<string, string>; onChange: (messages: PredefinedMessage[]) => void }) {
+  const [deletedMessage, setDeletedMessage] = useState<{ message: PredefinedMessage; index: number } | null>(null)
   const updateMessage = (id: string, patch: Partial<PredefinedMessage>) => onChange(messages.map((message) => message.id === id ? { ...message, ...patch } : message))
   const moveMessage = (index: number, direction: -1 | 1) => {
     const target = index + direction
@@ -807,6 +826,7 @@ function PredefinedMessages({ scope = 'story', messages, previewValues, onChange
   const scopeLabel = scope === 'story' ? 'Story' : scope === 'lore' ? 'Codex' : scope === 'summarize' ? 'Summary' : 'Chat'
   return <section className="story-predefined" aria-label={`${scopeLabel} predefined messages`}>
     <header><div><strong>Predefined messages</strong><span>Sent in this order between the System prompt and {scope === 'assistant' ? 'real Chat history' : 'Arc’s current instruction'}.</span></div><button type="button" onClick={() => onChange([...messages, makePredefinedMessage({ name: 'New message', role: 'user' })])}><Plus aria-hidden="true" /> Add message</button></header>
+    {deletedMessage && <div className="message-undo" role="status">Message deleted<button type="button" onClick={() => { const next = [...messages]; next.splice(Math.min(deletedMessage.index, next.length), 0, deletedMessage.message); onChange(next); setDeletedMessage(null) }}>Undo</button></div>}
     {messages.map((message, index) => {
       const diagnostics = promptTemplateDiagnostics(message.template, scope, previewValues)
       const errors = diagnostics.filter((diagnostic) => diagnostic.severity === 'error')
@@ -815,7 +835,7 @@ function PredefinedMessages({ scope = 'story', messages, previewValues, onChange
           <label><span>Name</span><input value={message.name ?? ''} onChange={(event) => updateMessage(message.id, { name: event.target.value })} placeholder="Optional label" /></label>
           <label><span>Role</span><select value={message.role} onChange={(event) => updateMessage(message.id, { role: event.target.value as PredefinedMessage['role'] })}><option value="system">System</option><option value="user">User</option><option value="assistant">Assistant</option></select></label>
           <label className="story-message-enabled"><input type="checkbox" checked={message.enabled} onChange={(event) => updateMessage(message.id, { enabled: event.target.checked })} /><span>Enabled</span></label>
-          <div className="story-message-actions"><button type="button" disabled={index === 0} onClick={() => moveMessage(index, -1)} aria-label={`Move ${message.name || 'message'} up`}>↑</button><button type="button" disabled={index === messages.length - 1} onClick={() => moveMessage(index, 1)} aria-label={`Move ${message.name || 'message'} down`}>↓</button><button type="button" onClick={() => onChange(messages.filter((candidate) => candidate.id !== message.id))} aria-label={`Delete ${message.name || 'message'}`}><Trash2 aria-hidden="true" /></button></div>
+          <div className="story-message-actions"><button type="button" disabled={index === 0} onClick={() => moveMessage(index, -1)} aria-label={`Move ${message.name || 'message'} up`}>↑</button><button type="button" disabled={index === messages.length - 1} onClick={() => moveMessage(index, 1)} aria-label={`Move ${message.name || 'message'} down`}>↓</button><button type="button" onClick={() => { setDeletedMessage({ message, index }); onChange(messages.filter((candidate) => candidate.id !== message.id)) }} aria-label={`Delete ${message.name || 'message'}`}><Trash2 aria-hidden="true" /></button></div>
         </div>
         <PromptTemplateEditor value={message.template} diagnostics={diagnostics} ariaLabel={`${message.name || `${scopeLabel} message ${index + 1}`} template`} onChange={(template) => updateMessage(message.id, { template })} />
         <small className={errors.length ? 'story-message-error' : ''}>{errors.length ? `${errors.length} error${errors.length === 1 ? '' : 's'} — generation is blocked` : message.enabled ? `Message ${index + 1} · ${message.role}` : `Message ${index + 1} · omitted while disabled`}</small>
