@@ -58,6 +58,7 @@ type ActiveSession = {
   peer?: RTCPeerConnection
   channel?: RTCDataChannel
   liveItems?: Map<string, { text: string; completed: boolean }>
+  liveCommitPending?: boolean
   liveStopRequested?: boolean
   liveSettleTimer?: number
   liveDeadlineTimer?: number
@@ -99,6 +100,10 @@ export function parseTranscriptionModelId(value: string): { provider: SttProvide
   const modelId = value.slice(separator + 1).trim()
   if ((provider !== 'openai' && provider !== 'nanogpt') || !modelId) return null
   return { provider, modelId }
+}
+
+function usesManualLiveCommit(modelId: string) {
+  return /^(?:gpt-live-transcribe|gpt-realtime-whisper)(?:-|$)/i.test(modelId)
 }
 
 export function openAiSupportsLiveTranscription(modelId: string) {
@@ -338,10 +343,10 @@ function clearLiveSettleTimer(session: ActiveSession) {
 }
 
 function scheduleLiveSettle(session: ActiveSession) {
-  if (!session.liveStopRequested || !sessionIsCurrent(session) || !allLiveItemsCompleted(session) || typeof window === 'undefined') return
+  if (!session.liveStopRequested || session.liveCommitPending || !sessionIsCurrent(session) || !allLiveItemsCompleted(session) || typeof window === 'undefined') return
   clearLiveSettleTimer(session)
   session.liveSettleTimer = window.setTimeout(() => {
-    if (!sessionIsCurrent(session) || !session.liveStopRequested || !allLiveItemsCompleted(session)) return
+    if (!sessionIsCurrent(session) || !session.liveStopRequested || session.liveCommitPending || !allLiveItemsCompleted(session)) return
     const transcript = liveCombinedText(session)
     if (!transcript) { failSession(session, new Error('The realtime transcription returned no text.')); return }
     void finalize(session, transcript).catch((error) => failSession(session, error))
@@ -353,7 +358,7 @@ function armLiveDeadline(session: ActiveSession) {
   session.liveDeadlineTimer = window.setTimeout(() => {
     if (!sessionIsCurrent(session) || !session.liveStopRequested) return
     const transcript = liveCombinedText(session)
-    if (!transcript) { failSession(session, new Error('Timed out waiting for the final realtime transcript.')); return }
+    if (!transcript || (usesManualLiveCommit(session.model.modelId) && (session.liveCommitPending || !allLiveItemsCompleted(session)))) { failSession(session, new Error('Timed out waiting for the final realtime transcript.')); return }
     void finalize(session, transcript).catch((error) => failSession(session, error))
   }, 10_000)
 }
@@ -369,6 +374,16 @@ function handleRealtimeEvent(session: ActiveSession, raw: unknown) {
   }
   if (!session.target.isValid()) {
     failSession(session, new Error('The original dictation target is no longer available.'))
+    return
+  }
+  if (type === 'input_audio_buffer.committed' && session.liveCommitPending) {
+    session.liveCommitPending = false
+    const committedId = stringValue(event.item_id)
+    if (committedId) {
+      if (!session.liveItems) session.liveItems = new Map()
+      if (!session.liveItems.has(committedId)) session.liveItems.set(committedId, { text: '', completed: false })
+    }
+    scheduleLiveSettle(session)
     return
   }
   const itemId = stringValue(event.item_id) || stringValue(event.itemId) || 'current'
@@ -412,7 +427,8 @@ async function startOpenAiRealtime(session: ActiveSession) {
     type: 'transcription',
     audio: {
       input: {
-        turn_detection: { type: 'server_vad' },
+        // Streaming-only models reject turn-based server VAD. Stop commits their audio.
+        turn_detection: usesManualLiveCommit(session.model.modelId) ? null : { type: 'server_vad' },
         transcription: {
           model: session.model.modelId,
           ...(session.settings.transcriptionLanguage !== 'auto' && session.settings.transcriptionLanguage.trim()
@@ -536,10 +552,18 @@ export function stopSttSession() {
     sessionState(session, 'finalizing')
     session.liveStopRequested = true
     session.stream?.getTracks().forEach((track) => track.stop())
-    // WebRTC microphone audio is carried by the media track, not the client input-audio
-    // buffer. Stopping the track lets the transcription session flush its final item.
-    // Wait for the provider's completed event, with a bounded fallback instead of
-    // finalizing after an arbitrary sub-second delay.
+    if (usesManualLiveCommit(session.model.modelId)) {
+      // With VAD disabled, ending the media track does not commit the input buffer.
+      // Keep the connection alive until the provider acknowledges and completes it.
+      try {
+        if (session.channel?.readyState !== 'open') throw new Error('The live dictation connection is not ready. Please try again.')
+        session.liveCommitPending = true
+        session.channel.send(JSON.stringify({ type: 'input_audio_buffer.commit' }))
+      } catch (error) {
+        failSession(session, error)
+        return
+      }
+    }
     armLiveDeadline(session)
     scheduleLiveSettle(session)
   }

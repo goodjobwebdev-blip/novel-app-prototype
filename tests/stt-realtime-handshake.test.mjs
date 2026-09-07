@@ -11,7 +11,7 @@ function harness(t, route) {
   let peer
   let stopped = 0
   class Peer {
-    channel = { close() {} }
+    channel = { readyState: 'open', sent: [], send(value) { this.sent.push(JSON.parse(value)) }, close() {} }
     closed = false
     addTrack() {}
     createDataChannel() { return this.channel }
@@ -57,7 +57,7 @@ test('live transcription configures the selected model with JSON then negotiates
   assert.equal(token.headers['Content-Type'], 'application/json')
   assert.equal(token.headers.Authorization, 'Bearer test-user-key')
   assert.deepEqual(JSON.parse(token.body).session, {
-    type: 'transcription', audio: { input: { turn_detection: { type: 'server_vad' }, transcription: { model: 'gpt-live-transcribe', languages: ['en'] } } },
+    type: 'transcription', audio: { input: { turn_detection: null, transcription: { model: 'gpt-live-transcribe', languages: ['en'] } } },
   })
   assert.equal(call.url, 'https://api.openai.com/v1/realtime/calls')
   assert.equal(call.headers['Content-Type'], 'application/sdp')
@@ -69,8 +69,13 @@ test('live transcription configures the selected model with JSON then negotiates
   event({ type: 'conversation.item.input_audio_transcription.delta', item_id: 'one', delta: 'Hello' })
   event({ type: 'conversation.item.input_audio_transcription.delta', item_id: 'one', delta: ' world' })
   assert.equal(provisional.at(-1), 'Hello world', 'delta whitespace must survive concatenation')
-  event({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'one', transcript: 'Hello world.' })
   stopSttSession()
+  stopSttSession()
+  assert.deepEqual(h.peer.channel.sent, [{ type: 'input_audio_buffer.commit' }])
+  await new Promise(resolve => setTimeout(resolve, 400))
+  assert.deepEqual(final, [], 'partial text must not finalize before commit and completion')
+  event({ type: 'input_audio_buffer.committed', item_id: 'one' })
+  event({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'one', transcript: 'Hello world.' })
   await new Promise(resolve => setTimeout(resolve, 400))
   assert.deepEqual(final, ['Hello world.'])
   assert.equal(getSttState().status, 'completed')
@@ -106,5 +111,30 @@ test('older transcription models retain the singular language field', async t =>
   t.after(() => { settings.transcriptionModel = previous })
   const h = harness(t, async url => url.endsWith('/client_secrets') ? json({ value: 'ephemeral' }) : new Response('answer'))
   await startSttSession(settings, target)
+  assert.deepEqual(JSON.parse(h.calls[0].body).session.audio.input.turn_detection, { type: 'server_vad' })
+  stopSttSession()
+  assert.deepEqual(h.peer.channel.sent, [])
   assert.deepEqual(JSON.parse(h.calls[0].body).session.audio.input.transcription, { model: 'gpt-4o-mini-transcribe', language: 'en' })
+})
+
+test('realtime-whisper also disables turn detection and commits on Stop', async t => {
+  const previous = settings.transcriptionModel
+  settings.transcriptionModel = 'openai:gpt-realtime-whisper'
+  t.after(() => { settings.transcriptionModel = previous })
+  const h = harness(t, async url => url.endsWith('/client_secrets') ? json({ value: 'ephemeral' }) : new Response('answer'))
+  await startSttSession(settings, target)
+  assert.equal(JSON.parse(h.calls[0].body).session.audio.input.turn_detection, null)
+  stopSttSession()
+  assert.deepEqual(h.peer.channel.sent, [{ type: 'input_audio_buffer.commit' }])
+})
+
+test('Stop handles a disconnected data channel without losing cleanup', async t => {
+  const h = harness(t, async url => url.endsWith('/client_secrets') ? json({ value: 'ephemeral' }) : new Response('answer'))
+  await startSttSession(settings, target)
+  h.peer.channel.readyState = 'closed'
+  stopSttSession()
+  assert.equal(getSttState().status, 'failed')
+  assert.match(getSttState().error, /not ready/)
+  assert.ok(h.stopped > 0)
+  assert.equal(h.peer.closed, true)
 })
