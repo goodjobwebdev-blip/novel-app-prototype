@@ -60,7 +60,7 @@
   animation: generation-pulse 1.7s ease-out infinite;
 }
 
-.generation-activity-strip.stopping > i {
+.generation-activity-strip.generation-phase-stopping > i {
   background: #d87a6e;
   animation: none;
 }
