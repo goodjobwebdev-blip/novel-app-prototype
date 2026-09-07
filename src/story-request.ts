@@ -140,6 +140,7 @@ export function assembleStoryGenerationRequest(input: StoryRequestInput): Normal
     dynamicSources: {
       'story.so_far': input.context.storySoFarSources ?? automatic.filter((source) => source.type === 'summary'),
       'scene.previous_text': automatic.filter((source) => source.sourceId === (input.context.previousSceneId || 'previous-scene')),
+      'scene.text': automatic.filter((source) => source.representation === 'Caret split'),
       'scene.before_cursor': automatic.filter((source) => source.representation === 'Caret split'),
       'scene.after_cursor': automatic.filter((source) => source.representation === 'Caret split'),
       'context.automatic': automatic,

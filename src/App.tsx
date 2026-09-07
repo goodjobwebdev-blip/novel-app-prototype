@@ -1,3 +1,5 @@
+import { ContextSourcePicker, ContextSourceInventory, ContextBudget } from './ContextControls'
+import './context-settings-ux.css'
 import { switchProviderProfile } from './provider-profiles'
 import { TextRevealPreview } from './TextRevealPreview'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -148,6 +150,9 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   const [contextSettings, setContextSettings] = useState<BookContextSettings>(defaultBookContextSettings)
   const [contextSources, setContextSources] = useState<ArcEntity[]>([])
   const [contextSaved, setContextSaved] = useState(true)
+  const [contextSaveError, setContextSaveError] = useState('')
+  const [contextReady, setContextReady] = useState(!book)
+  const [contextLoadVersion, setContextLoadVersion] = useState(0)
   const [leaveRecoveryOpen, setLeaveRecoveryOpen] = useState(false)
   const [leaveSaving, setLeaveSaving] = useState(false)
   const [summaryPreviewSource, setSummaryPreviewSource] = useState<SummarySource | null>(null)
@@ -252,23 +257,29 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   useEffect(() => {
     let cancelled = false
     if (!book) {
+      setContextSaveError('')
       setContextSettings(loadDefaultBookContextSettings())
       setContextSources([])
       setContextSaved(true)
+      setContextReady(true)
       return () => { cancelled = true }
     }
+    setContextReady(false)
+    setContextSaved(false)
+    setContextSaveError('')
     void Promise.all([getBookContextSettings(book.id), listEntitiesByBook(book.id), book.chatId ? getChat(book.chatId) : Promise.resolve(undefined)]).then(([value, entities, chat]) => {
       if (!cancelled) {
         const scopedValue = book.contextType === 'chat' && chat
           ? { ...value, profiles: { ...value.profiles, chat: chat.contextProfile } }
           : value
+        setContextReady(true)
         setContextSettings(scopedValue)
         setContextSources(entities)
         setContextSaved(true)
       }
-    })
+    }).catch(() => { if (!cancelled) { setContextSaved(false); setContextSaveError('Context settings could not be loaded. Reopen settings to try again.') } })
     return () => { cancelled = true }
-  }, [book?.id, book?.chatId, book?.contextType])
+  }, [book?.id, book?.chatId, book?.contextType, contextLoadVersion])
 
   const visibleModels = useMemo(() => {
     const query = modelSearch.trim().toLowerCase()
@@ -467,6 +478,9 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   }
 
   async function saveContextDefaults(): Promise<boolean> {
+    if (!contextReady) return true // No editable Context draft has been loaded.
+    setContextSaveError('')
+    setContextSaved(false)
     const value = contextSettings
     if (!book) {
       try {
@@ -476,6 +490,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
         return true
       } catch {
         setContextSaved(false)
+        setContextSaveError('Context could not be saved. Your selections are still here.')
         return false
       }
     }
@@ -488,7 +503,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
         setContextSaved(true)
         return true
       } catch {
-        if (version === contextSaveVersionRef.current) setContextSaved(false)
+        if (version === contextSaveVersionRef.current) { setContextSaved(false); setContextSaveError('Context could not be saved. Your selections are still here.') }
         return false
       }
     }
@@ -502,12 +517,14 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
       setContextSaved(true)
       return true
     } catch {
-      if (version === contextSaveVersionRef.current) setContextSaved(false)
+      if (version === contextSaveVersionRef.current) { setContextSaved(false); setContextSaveError('Context could not be saved. Your selections are still here.') }
       return false
     }
   }
 
   function updateContextDefaults(value: BookContextSettings) {
+    if (!contextReady) return
+    setContextSaveError('')
     setContextSettings(value)
     setContextSaved(false)
     if (!book) {
@@ -517,6 +534,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
         setContextSaved(true)
       } catch {
         setContextSaved(false)
+        setContextSaveError('Context could not be saved. Your selections are still here.')
       }
       return
     }
@@ -526,7 +544,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
         await saveChatContextProfile(book.chatId!, value.profiles.chat)
         if (version === contextSaveVersionRef.current) setContextSaved(true)
       }).catch(() => {
-        if (version === contextSaveVersionRef.current) setContextSaved(false)
+        if (version === contextSaveVersionRef.current) { setContextSaved(false); setContextSaveError('Context could not be saved. Your selections are still here.') }
       })
       return
     }
@@ -537,7 +555,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
         setContextSaved(true)
       }
     }).catch(() => {
-      if (version === contextSaveVersionRef.current) setContextSaved(false)
+      if (version === contextSaveVersionRef.current) { setContextSaved(false); setContextSaveError('Context could not be saved. Your selections are still here.') }
     })
   }
 
@@ -778,10 +796,10 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
           <div className="prompt-footer"><button type="button" onClick={() => { if (window.confirm('Reset this prompt and all predefined messages to the Arc default?')) changeAiSettings((current) => resetPromptComposition(current, promptTab)) }}>Reset prompt composition</button></div></div>
         </section>
 
-        </> : settingsTab === 'context' ? (book ? (book.contextType === 'note'
+        </> : settingsTab === 'context' ? (!contextReady ? <section className="settings-card"><h1 id="page-title">Context</h1><p role="status">{contextSaveError || 'Loading context settings…'}</p>{contextSaveError && <button type="button" onClick={() => setContextLoadVersion(version => version + 1)}>Retry loading</button>}</section> : book ? (book.currentSummary ? <SummaryContextSettings book={book} source={summaryPreviewSource} error={summaryPreviewError} settings={settings} /> : book.contextType === 'note'
           ? <NoteContextPlaceholder />
-          : <ContextSettings bookId={book.id} bookTitle={book.title} bookPromptValues={book.promptValues} type={book.contextType ?? 'scene'} currentDocumentId={book.currentDocumentId} currentDocumentText={book.currentDocumentText} insertionPosition={book.insertionPosition} chatId={book.chatId} settings={settings} value={contextSettings} sources={contextSources} saved={contextSaved} onChange={updateContextDefaults} />)
-          : <GlobalContextDefaults value={contextSettings} onChange={updateContextDefaults} />)
+          : <ContextSettings bookId={book.id} bookTitle={book.title} bookPromptValues={book.promptValues} type={book.contextType ?? 'scene'} currentDocumentId={book.currentDocumentId} currentDocumentText={book.currentDocumentText} insertionPosition={book.insertionPosition} chatId={book.chatId} settings={settings} value={contextSettings} sources={contextSources} saved={contextSaved} saveError={contextSaveError} onRetry={() => { void saveContextDefaults() }} onChange={updateContextDefaults} />)
+          : <GlobalContextDefaults value={contextSettings} saved={contextSaved} saveError={contextSaveError} onRetry={() => { void saveContextDefaults() }} onChange={updateContextDefaults} />)
           : settingsTab === 'speech' ? <SpeechSettingsPanel settings={settings} scope={isBookSettings ? 'book' : 'defaults'} onChange={(speech) => update('speech', speech)} />
           : <SettingsPlaceholder tab={settingsTab} scope={isBookSettings ? 'book' : 'defaults'} />}
       </section>
@@ -845,9 +863,27 @@ function PredefinedMessages({ scope = 'story', messages, previewValues, onChange
   </section>
 }
 
-function GlobalContextDefaults({ value, onChange }: { value: BookContextSettings; onChange: (value: BookContextSettings) => void }) {
+function ContextSaveStatus({ saved, error, onRetry }: { saved: boolean; error: string; onRetry: () => void }) {
+  return <div className={`context-save-status ${error ? 'error' : ''}`} role="status" aria-live="polite"><span>{error ? 'Save failed' : saved ? 'Saved' : 'Saving…'}</span>{error && <><small>{error}</small><button type="button" onClick={onRetry}>Retry saving</button></>}</div>
+}
+
+function SummaryContextSettings({ book, source, error, settings }: { book: NonNullable<AiSettingsProps['book']>; source: SummarySource | null; error: string; settings: AiSettings }) {
+  const summary = book.currentSummary!
+  const metadata = { ...(book.promptValues ?? { title: book.title, series: '', seriesOrder: '', overview: '', genre: '', style: '', pov: '', tense: '', language: '' }), responseLength: settings.responseLengths.summary }
+  const request = source ? assembleSummaryGenerationRequest({ composition: settings.promptCompositions.summarize, book: metadata, responseLength: settings.responseLengths.summary, summary: { id: summary.id, content: summary.content }, target: { id: source.source.id, type: source.source.type, title: source.source.title, source: source.content }, sourceDiagnostics: source.diagnostics }) : null
+  const promptErrors = [settings.promptCompositions.summarize.systemPrompt, ...settings.promptCompositions.summarize.predefinedMessages.filter(message => message.enabled).map(message => message.template)].flatMap(template => promptTemplateDiagnostics(template, 'summarize')).filter(diagnostic => diagnostic.severity === 'error')
+  const diagnostics = request && settings.supportModel.trim() && !promptErrors.length ? generationContextDiagnostics(settings.supportModel, settings.supportModelContextLength, '', normalizedRequestDiagnosticText(request)) : null
+  return <section className="context-defaults-settings"><header className="page-heading"><div><p>Summary source</p><h1 id="page-title">Summary context</h1><span>{source?.source.title || 'Loading source…'} · {book.title} · Read-only</span></div></header>
+    <p className="context-scope-banner">Summary generation builds its source from the entity being summarized. Story, Codex, and Chat selections do not change this source.</p>
+    <ContextBudget diagnostics={diagnostics} model={settings.supportModel} pending={!source && !error} error={error || promptErrors.map(item => item.message).join(' ')} />
+    <section className="settings-card"><h2>Source material</h2><p className="context-help">Scenes and Codex entries use their full body. Chapters and Acts use current child summaries where available, with full-source fallbacks for missing or outdated summaries.</p>{source?.diagnostics.map((item, index) => <article className="context-source-row" key={`${item.sourceId}-${index}`}><strong>{item.title || 'Untitled'}</strong><span>{item.representation}</span><small>{item.reason?.replace(/#77 hierarchy/g, 'summary hierarchy')}</small></article>)}{source && !source.diagnostics.length && <p>No child source material is available.</p>}</section>
+    <details className="settings-card context-inspector"><summary>Inspect summary request</summary><SummaryRequestPreview request={request} source={source} error={error} hasCurrentSummary model={settings.supportModel} modelContextLength={settings.supportModelContextLength} /></details>
+  </section>
+}
+
+function GlobalContextDefaults({ value, saved, saveError, onRetry, onChange }: { value: BookContextSettings; saved: boolean; saveError: string; onRetry: () => void; onChange: (value: BookContextSettings) => void }) {
   return <section className="context-defaults-settings">
-    <header className="page-heading"><div><p>Default Context</p><h1 id="page-title">Context defaults</h1><span>Copied into new books. Existing books keep their own Context settings.</span></div></header>
+    <header className="page-heading"><div><p>Default Context</p><h1 id="page-title">Context defaults</h1><span>Copied into new books. Existing books keep their own Context settings.</span></div><ContextSaveStatus saved={saved} error={saveError} onRetry={onRetry} /></header>
     <section className="settings-card context-defaults-card"><div className="card-heading"><div><span>01</span><h2>Automatic Codex</h2></div></div>
       <label className="context-trigger-window"><span><strong>Previous Scenes to scan for Codex triggers</strong><small>The current Scene is included in addition to this many immediately previous Scenes. 0 means current Scene only.</small></span><input type="number" min="0" step="1" value={value.previousScenesForCodexTriggers} onChange={(event) => onChange({ ...value, previousScenesForCodexTriggers: Math.max(0, Math.floor(Number(event.target.value) || 0)) })} /></label>
     </section>
@@ -858,12 +894,12 @@ function NoteContextPlaceholder() {
   return <section className="compact-settings-empty" aria-labelledby="page-title">
     <MessageCircle aria-hidden="true" />
     <h1 id="page-title">Context Management</h1>
-    <p>You can use Chat to generate notes!</p>
+    <p>Notes have no direct generation settings. Use Chat to create or revise a note, and choose its context in that conversation. Notes can also be selected as additional context for Story, Codex, and Chat.</p>
   </section>
 }
 
-function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDocumentId, currentDocumentText, insertionPosition, chatId, settings, value, sources, saved, onChange }: { bookId: string; bookTitle: string; bookPromptValues?: BookPromptValues; type: Exclude<GenerationContextType, 'note'>; currentDocumentId?: string; currentDocumentText?: string; insertionPosition?: number; chatId?: string; settings: AiSettings; value: BookContextSettings; sources: ArcEntity[]; saved: boolean; onChange: (value: BookContextSettings) => void }) {
-  const [query, setQuery] = useState('')
+function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDocumentId, currentDocumentText, insertionPosition, chatId, settings, value, sources, saved, saveError, onRetry, onChange }: { bookId: string; bookTitle: string; bookPromptValues?: BookPromptValues; type: Exclude<GenerationContextType, 'note'>; currentDocumentId?: string; currentDocumentText?: string; insertionPosition?: number; chatId?: string; settings: AiSettings; value: BookContextSettings; sources: ArcEntity[]; saved: boolean; saveError: string; onRetry: () => void; onChange: (value: BookContextSettings) => void }) {
+  const [previewPending, setPreviewPending] = useState(true)
   const [preview, setPreview] = useState<PreparedContextValues | null>(null)
   const [previewError, setPreviewError] = useState('')
   const [previewChat, setPreviewChat] = useState<ChatEntity | null>(null)
@@ -871,18 +907,13 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
   const profile = value.profiles[type]
   const updateProfile = (next: typeof profile) => onChange({ ...value, profiles: { ...value.profiles, [type]: next } })
   const toggle = (key: 'structuralIds' | 'noteIds' | 'codexEntryIds', id: string) => updateProfile({ ...profile, [key]: profile[key].includes(id) ? profile[key].filter((item) => item !== id) : [...profile[key], id] })
-  const normalized = query.trim().toLowerCase()
   const archivedSelectedCodex = sources.filter((item) => item.type === 'codexEntry' && isCodexEntryArchived(item) && profile.codexEntryIds.includes(item.id))
   const archivedSelectedIds = new Set(archivedSelectedCodex.map((item) => item.id))
-  const visible = sources.filter((item) => ['act', 'chapter', 'scene', 'note', 'codexEntry'].includes(item.type) && !(item.type === 'codexEntry' && isCodexEntryArchived(item)) && (type === 'chat' || item.id !== currentDocumentId) && (!normalized || `${item.title ?? ''} ${item.type} ${item.category ?? ''}`.toLowerCase().includes(normalized)))
-  const groups = [
-    ['Acts & chapters', visible.filter((item) => item.type === 'act' || item.type === 'chapter'), 'structuralIds'],
-    ['Scenes', visible.filter((item) => item.type === 'scene'), 'structuralIds'],
-    ['Notes', visible.filter((item) => item.type === 'note'), 'noteIds'],
-    ['Codex', visible.filter((item) => item.type === 'codexEntry'), 'codexEntryIds'],
-  ] as const
   useEffect(() => {
     let cancelled = false
+    setPreviewPending(true)
+    setPreview(null)
+    setPreviewError('')
     const currentSceneId = type === 'scene' ? currentDocumentId : value.lastOpenedSceneId || undefined
     ;(async () => {
       try {
@@ -895,6 +926,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
           history = loadedHistory
         }
         if (!cancelled) {
+          setPreviewPending(false)
           setPreview(prepared)
           setPreviewChat(chat)
           setPreviewHistory(history)
@@ -902,6 +934,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
         }
       } catch {
         if (!cancelled) {
+          setPreviewPending(false)
           setPreview(null)
           setPreviewChat(null)
           setPreviewHistory([])
@@ -913,6 +946,9 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
   }, [bookId, chatId, currentDocumentId, currentDocumentText, profile, sources, type, value.lastOpenedSceneId, value.previousScenesForCodexTriggers])
 
   const currentDocument = sources.find((item) => item.id === currentDocumentId)
+  const anchor = sources.find(item => item.id === (type === 'scene' ? currentDocumentId : value.lastOpenedSceneId) && item.type === 'scene')
+  const anchorLabel = anchor?.title || 'No reference scene'
+  const scopeLabel = type === 'chat' ? (chatId ? 'This chat only' : 'Chat defaults for this book') : type === 'scene' ? 'All scenes in this book' : 'All Codex entries in this book'
   const responseLength = type === 'codex' ? settings.responseLengths.codex : type === 'scene' ? settings.responseLengths.story : ''
   const metadata: BookPromptValues = { ...(bookPromptValues ?? { title: bookTitle, series: '', seriesOrder: '', overview: '', genre: '', style: '', pov: '', tense: '', language: '' }), responseLength }
   const typeLabel = type === 'scene' ? 'Story' : type === 'codex' ? 'Codex' : 'Chat'
@@ -1010,19 +1046,23 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
     : null
 
   return <section className="context-defaults-settings">
-    <header className="page-heading"><div><p>{typeLabel} generation</p><h1 id="page-title">Context Management</h1><span>Saved independently for {typeLabel.toLowerCase()} generation in “{bookTitle}”.</span></div><div className={`save-state ${saved ? 'saved' : ''}`}><i />{saved ? 'Saved' : 'Saving…'}</div></header>
+    <header className="page-heading"><div><p>{typeLabel} generation</p><h1 id="page-title">{typeLabel} context</h1><span>{scopeLabel} · {bookTitle}</span></div><ContextSaveStatus saved={saved} error={saveError} onRetry={onRetry} /></header>
+    <div className="context-scope-banner"><strong>Previewing: {type === 'chat' ? previewChat?.title || 'Chat' : currentDocument?.title || 'No document selected'}</strong><span>Reference scene: {anchorLabel}</span>{type !== 'scene' && <small>Opening another scene changes the reference scene for Chat and Codex. {type === 'codex' && !profile.includeLastScene ? 'Story context is off; Codex trigger scanning still uses this scene.' : ''}</small>}</div>
+    <ContextBudget diagnostics={diagnostics} model={selectedModel} pending={previewPending} error={previewError || (previewPromptErrors.length ? 'Fix the prompt errors before generating.' : '')} />
     <section className="settings-card context-defaults-card"><div className="card-heading"><div><span>01</span><h2>Automatic context</h2></div></div>
-      <label className="context-trigger-window"><span><strong>Previous Scenes to scan for Codex triggers</strong><small>The current/last-opened Scene is always scanned; this controls how many immediately previous Scenes join it.</small></span><input type="number" min="0" step="1" value={value.previousScenesForCodexTriggers} onChange={(event) => onChange({ ...value, previousScenesForCodexTriggers: Math.max(0, Math.floor(Number(event.target.value) || 0)) })} /></label>
+      <label className="context-trigger-window"><span><strong>Previous Scenes to scan for Codex triggers</strong><small>Book-wide setting. Scan “{anchorLabel}” plus this many preceding scenes. {type === 'chat' ? 'Change this from a Scene or Codex Context tab; it is read-only in Chat.' : 'Changes affect Story, Codex, and Chat in this book.'}</small></span><input type="number" min="0" step="1" disabled={type === 'chat'} value={value.previousScenesForCodexTriggers} onChange={(event) => onChange({ ...value, previousScenesForCodexTriggers: Math.max(0, Math.floor(Number(event.target.value) || 0)) })} /></label>
       {archivedSelectedCodex.length > 0 && <div className="context-inactive-source"><div><strong>{archivedSelectedCodex.length} archived Codex {archivedSelectedCodex.length === 1 ? 'selection is' : 'selections are'} inactive</strong><small>{archivedSelectedCodex.map((item) => item.title ?? 'Untitled').join(', ')}. Archived lore is skipped from requests.</small></div><button type="button" onClick={() => updateProfile({ ...profile, codexEntryIds: profile.codexEntryIds.filter((id) => !archivedSelectedIds.has(id)) })}>Remove inactive</button></div>}
-      <div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Book metadata</strong><small>Provided through the book prompt variables.</small></span><b>Required</b></div>
-      {type === 'scene' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current Scene</strong><small>The active editor content is always included.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} /><span><strong>Previous Scene when empty</strong><small>Use the immediately previous Scene only when the current Scene has no text.</small></span></label><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Earlier summaries</strong><small>Uses the highest completed Act or Chapter summary without exposing later material.</small></span><b>Automatic</b></div></> : type === 'codex' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current entry</strong><small>Title, category, full body, and the captured insertion point are available through <code>entry.*</code> variables.</small></span><b>Required</b></div><label><input type="checkbox" checked={profile.includeLastScene} onChange={(event) => updateProfile({ ...profile, includeLastScene: event.target.checked })} /><span><strong>Last-opened Scene</strong><small>Use the Book’s last-opened Scene and earlier story summaries as the Codex story anchor.</small></span></label><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} disabled={!profile.includeLastScene} /><span><strong>Previous Scene when anchor is empty</strong><small>Use the immediately previous Scene as the full anchor without duplicating its summary.</small></span></label></> : <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current Scene and earlier summaries</strong><small>Available through Chat composition variables from the book's last-opened Scene anchor.</small></span><b>Automatic</b></div><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} /><span><strong>Previous Scene when empty</strong><small>Expose the immediately previous Scene only when the anchor Scene has no text.</small></span></label></>}
+      <div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Book metadata</strong><small>Provided through the book prompt variables.</small></span><b>Available</b></div>
+      {type === 'scene' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current Scene</strong><small>The active editor content is available to the Story prompt. See Included sources below for what this template sends.</small></span><b>Available</b></div><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} /><span><strong>Previous Scene when empty</strong><small>Use the immediately previous Scene only when the current Scene has no text.</small></span></label><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Earlier summaries</strong><small>Uses the highest completed Act or Chapter summary without exposing later material.</small></span><b>Automatic</b></div></> : type === 'codex' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current entry</strong><small>Title, category, full body, and the captured insertion point are available through <code>entry.*</code> variables.</small></span><b>Available</b></div><label><input type="checkbox" checked={profile.includeLastScene} onChange={(event) => updateProfile({ ...profile, includeLastScene: event.target.checked })} /><span><strong>Story context from {anchorLabel}</strong><small>Use the Book’s last-opened Scene and earlier story summaries as the Codex story anchor.</small></span></label><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} disabled={!profile.includeLastScene} /><span><strong>Previous Scene when anchor is empty</strong><small>Use the immediately previous Scene as the full anchor without duplicating its summary.</small></span></label></> : <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>{anchorLabel} and earlier summaries</strong><small>Available through Chat composition variables from the book's last-opened Scene anchor.</small></span><b>Automatic</b></div><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} /><span><strong>Previous Scene when empty</strong><small>Expose the immediately previous Scene only when the anchor Scene has no text.</small></span></label></>}
     </section>
+    <ContextSourceInventory preview={preview} request={normalizedRequest} sources={sources} pending={previewPending} />
     <section className="settings-card context-sources-card"><div className="card-heading"><div><span>02</span><h2>Additional context</h2></div><p>Available as <code>{'{{context.additional}}'}</code>.</p></div>
-      <fieldset className="summary-range"><legend>Summaries</legend>{([['none','None'],['all','All summaries'],['before','Before current Scene'],['after','After current Scene']] as const).map(([range,label]) => <label key={range}><input type="radio" name="summary-range" checked={profile.summaryRange === range} onChange={() => updateProfile({ ...profile, summaryRange: range })}/><span>{label}</span></label>)}</fieldset>
-      <div className="context-source-search"><Search aria-hidden="true" /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find Acts, Chapters, Scenes, Notes, or Codex" /></div>
-      <div className="context-managed-list">{groups.map(([label, items, key]) => items.length > 0 && <section key={label}><h3>{label}</h3>{items.map((item) => <label key={item.id}><input type="checkbox" checked={profile[key].includes(item.id)} onChange={() => toggle(key, item.id)} /><span><strong>{item.title || 'Untitled'}</strong><small>{item.type}</small></span></label>)}</section>)}{!visible.length && <p>No matching sources.</p>}</div>
+      <fieldset className="summary-range"><legend>Additional summaries</legend>{([['none','None'],['all','All summaries'],['before',`Before ${anchorLabel}`],['after',`After ${anchorLabel}`]] as const).map(([range,label]) => <label key={range}><input type="radio" name="summary-range" disabled={!anchor && (range === 'before' || range === 'after')} checked={profile.summaryRange === range} onChange={() => updateProfile({ ...profile, summaryRange: range })}/><span>{label}</span></label>)}</fieldset>
+      <p className="context-help">None turns off additional summaries only. Automatic earlier-story summaries stay available. {(!anchor && (profile.summaryRange === 'before' || profile.summaryRange === 'after')) && 'Open a scene to resolve this range.'}</p>
+      {(profile.summaryRange === 'all' || profile.summaryRange === 'after') && <p className="context-caution" role="status">This range can include material later than the reference scene.</p>}
+      <ContextSourcePicker sources={sources} currentDocumentId={type === 'chat' ? undefined : currentDocumentId} anchorId={anchor?.id} profile={profile} onToggle={toggle} onClear={() => updateProfile({ ...profile, structuralIds: [], noteIds: [], codexEntryIds: [] })} />
     </section>
-    <section className="settings-card context-preview-card"><div className="card-heading"><div><span>03</span><h2>Request preview</h2></div><p>{selectedModel ? `Model: ${selectedModel}. ` : ''}Rendered message stack for the current {typeLabel.toLowerCase()} request.</p></div>
+    <details className="settings-card context-preview-card context-inspector"><summary>Inspect request</summary><div className="card-heading"><div><span>04</span><h2>Request details</h2></div><p>{selectedModel ? `Model: ${selectedModel}. ` : ''}Rendered message stack for the current {typeLabel.toLowerCase()} request.</p></div>
       {type !== 'chat' && <p className="context-preview-empty">The generation instruction below shows the fallback used when the generation drawer is empty. Custom drawer text replaces it when you generate.</p>}
       {type === 'scene' && <p className="context-preview-empty">Captured generation point: {(insertionPosition ?? currentDocumentText?.length ?? 0).toLocaleString()} of {(currentDocumentText?.length ?? 0).toLocaleString()} characters. Empty instruction fallback: “{STORY_CONTINUE_FALLBACK}”</p>}
       {type === 'codex' && <p className="context-preview-empty">Captured generation point: {(insertionPosition ?? currentDocumentText?.length ?? 0).toLocaleString()} of {(currentDocumentText?.length ?? 0).toLocaleString()} characters. Empty instruction fallback: “{CODEX_CONTINUE_FALLBACK}”</p>}
@@ -1039,7 +1079,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
         <div className="context-preview-rendered">{requestMessages.map((message) => <section key={message.key} className={message.omitted ? 'omitted' : ''}><header><h3>{message.title}</h3><span>{message.detail}</span></header>{message.content ? <div className="context-preview-copy">{message.content}</div> : <p className="context-preview-empty">This message is empty.</p>}{message.references?.length ? <p className="context-preview-empty">References: {message.references.map((reference) => `{{${reference}}}`).join(', ')}</p> : null}{message.diagnostics?.length ? <ul>{message.diagnostics.map((diagnostic) => <li key={diagnostic}>{diagnostic}</li>)}</ul> : null}{message.reasoning && <div className="context-preview-copy"><strong>Reasoning</strong>\n\n{message.reasoning}</div>}</section>)}</div>
         <details className="context-preview-raw"><summary>View message stack</summary><pre>{exactPreview || '[No messages would be sent yet.]'}</pre></details>
       </> : <p className="context-preview-empty">Preparing preview…</p>}
-    </section>
+    </details>
   </section>
 }
 
