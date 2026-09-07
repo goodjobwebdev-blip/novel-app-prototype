@@ -776,3 +776,23 @@
   .chat-thinking-toggle { transition: none; animation: none; }
   .generate-trigger.pressing .generate-hold-ring circle { animation: none; stroke-dashoffset: 0; }
 }
+
+/* Drawer status occupies the existing header, with a stable height in every phase. */
+.arc-drawer > .arc-generation-header { height: 44px; gap: 8px; }
+.arc-drawer > .arc-generation-header button.generation-activity-strip.drawer,
+.arc-drawer > .arc-generation-header button.arc-generation-ready {
+  min-width: 0; min-height: 44px; margin: 0; padding: 0 10px;
+  display: inline-flex; align-items: center; gap: 8px;
+  border: 0; border-radius: 10px; background: transparent; box-shadow: none;
+  color: var(--soft); font: 500 13px ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: normal; cursor: pointer;
+}
+.arc-drawer > .arc-generation-header button.arc-generation-ready > span { font: inherit; }
+.arc-drawer > .arc-generation-header :is(.arc-generation-ready, .generation-activity-strip) > svg { width: 16px; height: 16px; flex: none; color: var(--accent); margin-left: 4px; }
+.arc-drawer > .arc-generation-header :is(.arc-generation-ready, .generation-activity-strip):hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.arc-drawer > .arc-generation-header button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.arc-drawer > .arc-generation-header > button:last-child { width: 44px; height: 44px; flex: none; margin-left: auto; display: grid; place-items: center; }
+.arc-drawer > .arc-generation-header > button:last-child svg { width: 18px; height: 18px; }
+.arc-compose > .drawer-generation-stop { width: 48px; height: 48px; }
+.arc-compose > .drawer-generation-stop > button { width: 48px; height: 48px; padding: 0; display: grid; place-items: center; border-radius: 50%; }
+.arc-compose > .drawer-generation-stop > button svg { width: 18px; height: 18px; }
