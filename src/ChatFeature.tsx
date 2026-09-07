@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import { streamChatCompletion, type ChatCompletionUsage } from './chat-api'
 import ExpandableTextInput from './ExpandableTextInput'
+import GenerationActions from './GenerationActions'
 import PromptTemplateEditor from './PromptTemplateEditor'
 import PromptPresetControls from './PromptPresetControls'
 import { chatMatchesBookSelection, onlyChatsForBook, reloadMatchesBookSelection } from './chat-book-guard'
@@ -81,7 +82,7 @@ import {
 import { defaultChatPromptComposition } from './chat-default-composition'
 import { clonePromptComposition, likelyReusablePrefix, makePredefinedMessage, normalizeRuntimeMessagePart, type NormalizedAssembledRequest, type NormalizedRequestPart, type PredefinedMessage, type PromptComposition } from './prompt-composition'
 import { startTtsSession } from './tts-service'
-import { getSttState, normalizeTranscriptForInsertion, startSttSession, subscribeSttState, type SttState } from './stt-service'
+import { cancelSttSession, stopSttSession, getSttState, normalizeTranscriptForInsertion, startSttSession, subscribeSttState, type SttState } from './stt-service'
 import './chat.css'
 import './context-limit-settings.css'
 
@@ -1062,7 +1063,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
             void send()
           }
         }} placeholder="Ask about the book…" aria-label="Chat message" dialogTitle="Write chat message" />
-        <ChatGenerateButton generating={generating} phase={phase} elapsed={elapsed} thinking={chat.thinking} onGenerate={() => { void send() }} onStop={stop} onMicro={() => { void dictateMessage() }} onThinking={setThinking} />
+        <ChatGenerateButton sttState={sttState} generating={generating} phase={phase} elapsed={elapsed} thinking={chat.thinking} onGenerate={() => { void send() }} onStop={stop} onMicro={() => { void dictateMessage() }} onThinking={setThinking} />
       </div>
     </section>
 
@@ -1243,7 +1244,8 @@ function InlineMessageEdit({ value, onChange, onCancel, onSave, onSaveAndRegener
   return <div className="inline-edit chat-inline-edit"><ExpandableTextInput value={value} onChange={onChange} autoFocus aria-label="Edit chat message" dialogTitle="Edit chat message" /><div><button type="button" onClick={onCancel}>Cancel</button><button type="button" onClick={onSave}>Save</button>{onSaveAndRegenerate && <button type="button" onClick={onSaveAndRegenerate}>Save & regenerate</button>}</div></div>
 }
 
-function ChatGenerateButton({ generating, phase, elapsed, thinking, onGenerate, onStop, onMicro, onThinking }: {
+function ChatGenerateButton({ sttState, generating, phase, elapsed, thinking, onGenerate, onStop, onMicro, onThinking }: {
+  sttState: SttState
   generating: boolean
   phase: GenerationPhase | null
   elapsed: number
@@ -1253,36 +1255,21 @@ function ChatGenerateButton({ generating, phase, elapsed, thinking, onGenerate, 
   onMicro: () => void
   onThinking: (value: boolean) => void
 }) {
-  const [expanded, setExpanded] = useState(false)
-  const longPressRef = useRef(false)
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const cancelTimer = () => {
-    if (timerRef.current) clearTimeout(timerRef.current)
-    timerRef.current = null
-  }
-
   if (generating) return <div className="chat-generation-running"><span><i />{generationPhaseLabel(phase)} · {formatElapsed(elapsed)}</span><button className="play generating" type="button" onClick={onStop} aria-label="Stop chat generation"><Square aria-hidden="true" fill="currentColor" /></button></div>
 
-  if (expanded) return <div className="chat-generate-actions" role="toolbar" aria-label="Chat generation actions">
-    <button type="button" onClick={onMicro} title="Micro"><Mic aria-hidden="true" /><span>Dictate message</span></button>
-    <button type="button" className={thinking ? 'active' : ''} onClick={() => onThinking(!thinking)} title="Thinking"><Bot aria-hidden="true" /><span>Thinking {thinking ? 'on' : 'off'}</span></button>
-    <button type="button" onClick={() => setExpanded(false)} aria-label="Collapse chat generation actions"><X aria-hidden="true" /></button>
-  </div>
+  if (sttState.target === 'chat' && ['requesting-permission', 'recording', 'recording-live', 'stopping', 'transcribing', 'finalizing'].includes(sttState.status)) {
+    const recording = sttState.status === 'recording' || sttState.status === 'recording-live'
+    return <div className="chat-dictation-controls" role="status" aria-live="polite">
+      <span><Mic aria-hidden="true" />{recording ? 'Listening…' : sttState.status === 'requesting-permission' ? 'Connecting…' : 'Transcribing…'}</span>
+      {recording && <button type="button" onClick={stopSttSession} aria-label="Finish message dictation"><Square aria-hidden="true" /></button>}
+      <button type="button" onClick={cancelSttSession} aria-label="Cancel message dictation"><X aria-hidden="true" /></button>
+    </div>
+  }
 
-  return <button className="play chat-generate-trigger" type="button" aria-label="Send. Press and hold for more actions." onContextMenu={(event) => event.preventDefault()} onPointerDown={() => {
-    longPressRef.current = false
-    cancelTimer()
-    timerRef.current = setTimeout(() => {
-      longPressRef.current = true
-      setExpanded(true)
-    }, 450)
-  }} onPointerUp={cancelTimer} onPointerCancel={cancelTimer} onPointerLeave={cancelTimer} onClick={() => {
-    if (longPressRef.current) {
-      longPressRef.current = false
-      return
-    }
-    onGenerate()
-  }}><Play aria-hidden="true" fill="currentColor" /></button>
+  return <GenerationActions label="Send" onGenerate={onGenerate} actions={[
+    { id: 'dictate', label: 'Dictate message', icon: <Mic aria-hidden="true" />, onSelect: onMicro },
+    { id: 'thinking', label: 'Thinking', icon: <Bot aria-hidden="true" />, onSelect: () => onThinking(!thinking), pressed: thinking },
+  ]} />
 }
 
 export function ChatSidebar({ bookId, activeChatId, onOpen }: { bookId: string; activeChatId: string; onOpen: (chatId: string) => void }) {
@@ -1363,3 +1350,4 @@ function formatChatEdited(updatedAt: number) {
   if (hours < 24) return `${hours}h`
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(updatedAt)
 }
+

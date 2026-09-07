@@ -359,6 +359,7 @@ function armLiveDeadline(session: ActiveSession) {
 }
 
 function handleRealtimeEvent(session: ActiveSession, raw: unknown) {
+  if (!sessionIsCurrent(session)) return
   if (!raw || typeof raw !== 'object') return
   const event = raw as Record<string, unknown>
   const type = stringValue(event.type) ?? ''
@@ -375,7 +376,7 @@ function handleRealtimeEvent(session: ActiveSession, raw: unknown) {
   const current = session.liveItems.get(itemId) ?? { text: '', completed: false }
   if (type === 'conversation.item.input_audio_transcription.delta') {
     clearLiveSettleTimer(session)
-    const delta = stringValue(event.delta) ?? ''
+    const delta = typeof event.delta === 'string' ? event.delta : ''
     current.text += delta
     current.completed = false
     session.liveItems.set(itemId, current)
@@ -404,7 +405,9 @@ async function startOpenAiRealtime(session: ActiveSession) {
   }
   channel.onerror = () => failSession(session, new Error('The OpenAI realtime transcription connection failed.'))
   const offer = await peer.createOffer()
+  if (!sessionIsCurrent(session)) return
   await peer.setLocalDescription(offer)
+  if (!sessionIsCurrent(session)) return
   const sessionConfig: Record<string, unknown> = {
     type: 'transcription',
     audio: {
@@ -412,23 +415,44 @@ async function startOpenAiRealtime(session: ActiveSession) {
         turn_detection: { type: 'server_vad' },
         transcription: {
           model: session.model.modelId,
-          ...(session.settings.transcriptionLanguage !== 'auto' && session.settings.transcriptionLanguage.trim() ? { language: session.settings.transcriptionLanguage.trim() } : {}),
+          ...(session.settings.transcriptionLanguage !== 'auto' && session.settings.transcriptionLanguage.trim()
+            ? session.model.modelId.startsWith('gpt-live-transcribe')
+              ? { languages: [session.settings.transcriptionLanguage.trim()] }
+              : { language: session.settings.transcriptionLanguage.trim() }
+            : {}),
         },
       },
     },
   }
-  const response = await fetch(`${OPENAI_BASE}/realtime/calls`, {
+  // JSON config belongs on client_secrets; the WebRTC call accepts raw SDP.
+  // Arc is a device-local BYOK app: only the ephemeral token is used for the call.
+  const tokenResponse = await fetch(`${OPENAI_BASE}/realtime/client_secrets`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${session.settings.openaiApiKey.trim()}`, 'Content-Type': 'application/json', Accept: 'application/sdp' },
-    body: JSON.stringify({ sdp: offer.sdp, session: sessionConfig }),
+    headers: { Authorization: `Bearer ${session.settings.openaiApiKey.trim()}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session: sessionConfig }),
     signal: session.controller.signal,
   })
+  const tokenPayload = await tokenResponse.json().catch(() => null)
+  if (!sessionIsCurrent(session)) return
+  if (!tokenResponse.ok) throw new Error(safeError(tokenPayload, `OpenAI realtime session setup failed (${tokenResponse.status}).`))
+  const token = tokenPayload && typeof tokenPayload === 'object' ? stringValue(tokenPayload.value) : undefined
+  if (!token) throw new Error('OpenAI did not return a realtime session token.')
+  if (!offer.sdp) throw new Error('The browser did not create a microphone connection offer.')
+  const response = await fetch(`${OPENAI_BASE}/realtime/calls`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/sdp', Accept: 'application/sdp' },
+    body: offer.sdp,
+    signal: session.controller.signal,
+  })
+  if (!sessionIsCurrent(session)) return
   if (!response.ok) {
     const payload = await response.json().catch(() => null)
     throw new Error(safeError(payload, `OpenAI realtime transcription setup failed (${response.status}).`))
   }
   const answer = await response.text()
+  if (!sessionIsCurrent(session)) return
   await peer.setRemoteDescription({ type: 'answer', sdp: answer })
+  if (!sessionIsCurrent(session)) return
   sessionState(session, 'recording-live')
 }
 
@@ -531,3 +555,4 @@ export function cancelSttSession() {
   cleanupSession(session)
   emit({ status: 'cancelled', label: session.target.label, target: session.target.kind, provider: session.model.provider, model: session.model.modelId, live: session.model.supportsLive && session.settings.streamTranscription })
 }
+
