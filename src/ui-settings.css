@@ -671,3 +671,47 @@ select {
   .ui-custom-themes > header { align-items: flex-start; }
   .ui-custom-themes > header .create-theme { min-height: 38px; padding: 0 10px; }
 }
+
+/* Appearance controls keep a consistent shape across themes and viewport sizes. */
+.ui-settings-panel [hidden] { display: none !important; }
+.ui-appearance-tools { position: sticky; top: 0; z-index: 125; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 10px 0; margin-bottom: 18px; background: var(--canvas); }
+.ui-appearance-tools nav { display: flex; flex: 1; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); }
+.ui-appearance-tools nav button { flex: 1; border: 0; background: transparent; color: var(--soft); }
+.ui-settings-panel button { min-height: 44px; }
+.ui-settings-panel :is(.ui-draft-actions, .ui-customization-card, .ui-delete-notice, .save-state, .ui-appearance-tools) button,
+.ui-settings-panel .ui-secondary-action { padding: 9px 13px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-2); color: var(--ink); cursor: pointer; font-size: 13px; }
+.ui-appearance-tools nav button[aria-current] { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--ink); border-color: var(--accent); }
+/* Recovery must stay readable even when a custom palette has unusable contrast. */
+.ui-settings-panel .ui-safe-reset { background: #ffffff; color: #171717; border: 2px solid #171717; box-shadow: 0 0 0 1px #ffffff; }
+.ui-safe-reset:focus-visible { outline: 3px solid #0066cc; outline-offset: 3px; }
+.ui-settings-panel .save-state { flex-wrap: wrap; }
+.ui-save-error { padding: 14px; border: 1px solid var(--danger); border-radius: 12px; color: var(--danger); font-size: 13px; line-height: 1.5; }
+.ui-font-list > button[data-active="true"] { outline: 2px solid var(--accent); outline-offset: -2px; background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.ui-settings-panel :is(.ui-font-picker-trigger small, .ui-font-list small, .ui-theme-select small, .ui-theme-editor header small, .ui-custom-empty, .ui-range-setting b) { font-size: 12px; letter-spacing: normal; text-transform: none; color: var(--soft); }
+.ui-settings-panel .ui-theme-group h3 { font-size: 12px; }
+.ui-theme-actions { position: static; display: flex; justify-content: flex-end; padding: 0 10px 10px; }
+.ui-theme-actions button { min-width: 44px; min-height: 44px; border: 1px solid var(--line); }
+.ui-theme-actions svg { width: 17px; }
+.ui-theme-select { padding-right: 10px; }
+.ui-range-setting label { color: var(--soft); font-size: 13px; }
+.ui-range-number { display: flex; gap: 8px; align-items: center; }
+.ui-range-number input[type="range"] { min-width: 0; padding: 0; flex: 1; }
+.ui-range-number input[type="number"] { width: 82px; padding: 8px; flex: none; }
+.ui-range-number > span { color: var(--soft); font-size: 12px; }
+.ui-type-preview p { margin: 0 0 .8em; }.ui-type-preview p:last-child { margin-bottom: 0; }
+.ui-type-preview small { display: block; color: var(--soft); font: 12px/1.5 ui-sans-serif, system-ui; margin-bottom: 8px; }
+.ui-secondary-action { justify-self: start; }
+.ui-color-group { border: 0; padding: 0; margin: 20px 0; min-width: 0; }.ui-color-group legend { margin-bottom: 10px; color: var(--soft); font-size: 14px; }
+.ui-color-field { padding: 12px; border: 1px solid var(--line); border-radius: 12px; min-width: 0; }
+.ui-color-field > span { display: block; margin-bottom: 8px; color: var(--soft); font-size: 13px; }
+.ui-color-field > div { display: flex; align-items: center; gap: 8px; }.ui-color-field input[type="text"] { min-width: 0; font: 13px ui-monospace, monospace; }
+.ui-color-field input[aria-invalid="true"] { border-color: var(--danger); }.ui-color-field small { display: block; margin-top: 6px; color: var(--danger); font-size: 12px; }
+.ui-contrast-warning { padding: 14px; border: 1px solid var(--accent); border-radius: 12px; color: var(--soft); font-size: 13px; line-height: 1.5; }
+.ui-contrast-warning ul { margin-bottom: 0; padding-left: 18px; }
+.ui-draft-actions, .ui-delete-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+.ui-draft-actions button:first-child { border-color: var(--accent); color: var(--accent-bright); }
+.ui-customization-card > p, .ui-delete-notice { color: var(--soft); font-size: 13px; line-height: 1.5; }
+.ui-customization-card > button + button { margin-left: 8px; }
+@media (max-width: 759px) { .ui-appearance-tools { position: relative; }.ui-appearance-tools nav { flex-basis: 100%; }.ui-settings-panel .ui-safe-reset { width: 100%; }.ui-range-grid { grid-template-columns: 1fr; } }
+@media (min-width: 760px) and (max-width: 1120px) { .ui-range-grid { grid-template-columns: 1fr; } }
+.ui-scope-summary { flex-basis: 100%; color: var(--soft); font-size: 12px; }
