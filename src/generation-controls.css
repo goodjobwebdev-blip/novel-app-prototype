@@ -793,8 +793,8 @@
 .arc-drawer > .arc-generation-header button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .arc-drawer > .arc-generation-header > button:last-child { width: 44px; height: 44px; flex: none; margin-left: auto; display: grid; place-items: center; }
 .arc-drawer > .arc-generation-header > button:last-child svg { width: 18px; height: 18px; }
-.arc-compose > .drawer-generation-stop { width: 48px; height: 48px; }
-.arc-compose > .drawer-generation-stop > button { width: 48px; height: 48px; padding: 0; display: grid; place-items: center; border-radius: 50%; }
+.arc-compose > .drawer-generation-stop { width: 56px; height: 56px; }
+.arc-compose > .drawer-generation-stop > button { width: 56px; height: 56px; padding: 0; display: grid; place-items: center; border-radius: 50%; }
 .arc-compose > .drawer-generation-stop > button svg { width: 18px; height: 18px; }
 
 /* Independent status pill and circular Stop; elapsed time cannot resize either. */
@@ -813,17 +813,24 @@
 .generation-activity-strip .generation-phase { display: inline-block; width: 8ch; flex: none; text-align: left; }
 .arc-drawer > .arc-generation-header .generation-time,
 .generation-activity-strip .generation-time {
-  display: inline-block; width: 7ch; min-width: 7ch; flex: none;
-  font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums; text-align: right;
+  display: inline-block; width: 5ch; min-width: 5ch; flex: none;
+  font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums; text-align: left;
 }
 @media (prefers-reduced-motion: reduce) {
   .generate-control-shell .generation-stop-circle:active { transform: none; }
 }
 
 /* Compact instruction drawer: no character-count footer or settings shortcut. */
-.arc-drawer { padding-top: 0; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+.arc-drawer { padding-top: 8px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
 .arc-drawer > .arc-generation-header > .arc-generation-idle { color: var(--soft); font: 500 13px ui-sans-serif, system-ui, sans-serif; padding-left: 10px; }
-.arc-drawer .arc-compose { margin-top: 0; }
+.arc-drawer .arc-compose { margin-top: 8px; grid-template-columns: minmax(0, 1fr) 56px; column-gap: 12px; }
 .arc-drawer .arc-prompt-field { padding-bottom: 0; }
 .arc-drawer .arc-compose > .generate-control-shell { margin-bottom: 0; }
 .arc-drawer .arc-prompt-field textarea { display: block; }
+
+/* Reserve the same square footprint for Generate and Stop inside the drawer. */
+.arc-drawer .arc-compose > .generate-control-shell:not(.mode) { width: 56px; min-width: 56px; height: 56px; }
+.arc-drawer .generation-primary { min-width: 56px; padding: 0; flex: none; }
+.arc-drawer .generation-primary > span { display: none; }
+.arc-drawer > .arc-generation-header button.generation-activity-strip.drawer { gap: 6px; letter-spacing: .01em; }
+.generation-activity-strip { letter-spacing: .01em; }
