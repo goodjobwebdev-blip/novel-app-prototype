@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
-import { Check, MoreHorizontal, Play, X } from 'lucide-react'
+import { Check, Play, X } from 'lucide-react'
 
 type Action = {
   id: string
@@ -20,7 +20,7 @@ export default function GenerationActions({ label, onGenerate, actions }: {
   const [pressing, setPressing] = useState(false)
   const [selected, setSelected] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
-  const moreRef = useRef<HTMLButtonElement>(null)
+  const primaryRef = useRef<HTMLButtonElement>(null)
   const holdRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const feedbackRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const heldRef = useRef(false)
@@ -34,7 +34,7 @@ export default function GenerationActions({ label, onGenerate, actions }: {
 
   function close(restoreFocus = false) {
     setOpen(false)
-    if (restoreFocus) moreRef.current?.focus()
+    if (restoreFocus) primaryRef.current?.focus()
   }
 
   useEffect(() => () => {
@@ -79,11 +79,9 @@ export default function GenerationActions({ label, onGenerate, actions }: {
         {action.pressed !== undefined && <span className="generation-action-state">{action.pressed ? <Check aria-hidden="true" /> : 'Off'}</span>}
       </button>)}
     </div>}
-    <button ref={moreRef} type="button" className="generation-more" aria-label={`More ${label.toLowerCase()} actions`} aria-expanded={open} aria-controls={open ? panelId : undefined}
-      onClick={() => setOpen((value) => !value)} onKeyDown={(event) => {
-        if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); focusFirstAction() }
-      }}><MoreHorizontal aria-hidden="true" /></button>
-    <button type="button" className={`play generation-primary ${pressing ? 'pressing' : ''}`} aria-label={label}
+    <button ref={primaryRef} type="button" className={`play generation-primary ${pressing ? 'pressing' : ''}`} aria-label={label}
+      aria-expanded={open} aria-controls={open ? panelId : undefined}
+      aria-description="Hold or press Arrow Up for quick actions."
       onContextMenu={(event) => event.preventDefault()}
       onPointerDown={(event) => {
         if (event.button !== 0) return
