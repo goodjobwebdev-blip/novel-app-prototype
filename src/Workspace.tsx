@@ -1923,7 +1923,7 @@ function GenerationActivityStrip({ phase, elapsedSeconds, placement, onOpenDetai
   onOpenDetails: () => void
 }) {
   const label = generationPhaseLabel(phase)
-  return <button className={`generation-activity-strip ${placement} ${phase}`} type="button" onClick={onOpenDetails} aria-label={`${label}, ${formatGenerationTime(elapsedSeconds)} elapsed. Open generation details.`} title="Open generation details">
+  return <button className={`generation-activity-strip ${placement} generation-phase-${phase}`} type="button" onClick={onOpenDetails} aria-label={`${label}, ${formatGenerationTime(elapsedSeconds)} elapsed. Open generation details.`} title="Open generation details">
     <i aria-hidden="true" />
     <span className="generation-phase" role="status" aria-live="polite">{label}</span>
     <span className="generation-separator" aria-hidden="true">·</span>
