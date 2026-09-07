@@ -1965,13 +1965,11 @@ function GenerateControl({ inDrawer = false, isGenerating, phase, elapsedSeconds
     return () => window.clearInterval(timer)
   }, [sttActive, sttState.startedAt, sttState.status])
 
-  if (inDrawer && isGenerating && phase) return <div className="generate-control-shell drawer-generation-stop"><button className="play" type="button" onClick={onStop} aria-label="Stop generation"><Square aria-hidden="true" fill="currentColor" /></button></div>
+  if (inDrawer && isGenerating && phase) return <div className="generate-control-shell drawer-generation-stop"><button className="generation-stop-circle" type="button" onClick={onStop} aria-label="Stop generation"><Square aria-hidden="true" fill="currentColor" /></button></div>
 
-  if (isGenerating && phase) return <div className="generate-control-shell mode generation-mode">
-    <div className="generate-mode-card generation" role="status" aria-live="polite">
-      <GenerationActivityStrip phase={phase} elapsedSeconds={elapsedSeconds} placement="floating" onOpenDetails={onOpenDetails} />
-      <button className="generate-mode-stop" type="button" onClick={onStop} aria-label="Stop generation"><Square aria-hidden="true" fill="currentColor" /><span>Stop</span></button>
-    </div>
+  if (isGenerating && phase) return <div className="generate-control-shell generation-running">
+    <GenerationActivityStrip phase={phase} elapsedSeconds={elapsedSeconds} placement="floating" onOpenDetails={onOpenDetails} />
+    <button className="generation-stop-circle" type="button" onClick={onStop} aria-label="Stop generation"><Square aria-hidden="true" fill="currentColor" /></button>
   </div>
 
   if (sttActive) {

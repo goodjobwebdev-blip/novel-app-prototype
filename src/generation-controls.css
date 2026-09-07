@@ -796,3 +796,26 @@
 .arc-compose > .drawer-generation-stop { width: 48px; height: 48px; }
 .arc-compose > .drawer-generation-stop > button { width: 48px; height: 48px; padding: 0; display: grid; place-items: center; border-radius: 50%; }
 .arc-compose > .drawer-generation-stop > button svg { width: 18px; height: 18px; }
+
+/* Independent status pill and circular Stop; elapsed time cannot resize either. */
+.generate-control-shell.generation-running { align-items: center; gap: 8px; }
+.generation-running > .generation-activity-strip { flex: none; min-height: 44px; }
+.generate-control-shell .generation-stop-circle {
+  width: 56px; height: 56px; min-width: 56px; padding: 0; flex: none;
+  display: grid; place-items: center; border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: var(--accent); color: var(--deep); cursor: pointer;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .24); touch-action: manipulation;
+}
+.generate-control-shell .generation-stop-circle svg { width: 18px; height: 18px; }
+.generate-control-shell .generation-stop-circle:active { transform: scale(.96); }
+.generate-control-shell .generation-stop-circle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.generation-activity-strip .generation-phase { display: inline-block; width: 8ch; flex: none; text-align: left; }
+.arc-drawer > .arc-generation-header .generation-time,
+.generation-activity-strip .generation-time {
+  display: inline-block; width: 7ch; min-width: 7ch; flex: none;
+  font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums; text-align: right;
+}
+@media (prefers-reduced-motion: reduce) {
+  .generate-control-shell .generation-stop-circle:active { transform: none; }
+}
