@@ -819,3 +819,11 @@
 @media (prefers-reduced-motion: reduce) {
   .generate-control-shell .generation-stop-circle:active { transform: none; }
 }
+
+/* Compact instruction drawer: no character-count footer or settings shortcut. */
+.arc-drawer { padding-top: 0; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+.arc-drawer > .arc-generation-header > .arc-generation-idle { color: var(--soft); font: 500 13px ui-sans-serif, system-ui, sans-serif; padding-left: 10px; }
+.arc-drawer .arc-compose { margin-top: 0; }
+.arc-drawer .arc-prompt-field { padding-bottom: 0; }
+.arc-drawer .arc-compose > .generate-control-shell { margin-bottom: 0; }
+.arc-drawer .arc-prompt-field textarea { display: block; }
