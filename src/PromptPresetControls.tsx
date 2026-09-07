@@ -98,14 +98,14 @@ export default function PromptPresetControls({ scope, composition, arcDefault, o
 
   return <section className="prompt-preset-controls" aria-label={`${scopeLabels[scope]} prompt composition presets`}>
     <div className="prompt-preset-picker">
-      <label><span>Composition preset</span><select value={selected?.id ?? ''} onChange={(event) => { setSelectedId(event.target.value); setNotice('') }}>{presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}{preset.kind === 'built-in' ? ' · built-in' : ''}</option>)}</select></label>
+      <label><span>Prompt preset</span><select value={selected?.id ?? ''} onChange={(event) => { setSelectedId(event.target.value); setNotice('') }}>{presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}{preset.kind === 'built-in' ? ' · built-in' : ''}</option>)}</select></label>
       <button type="button" onClick={applySelected}>Apply preset</button>
-      <button type="button" onClick={saveCurrent}>Save current</button>
+      <button type="button" onClick={saveCurrent}>Save as preset</button>
     </div>
     <small>Selecting a preset does not change the composition. Apply replaces the complete System prompt and predefined-message list.</small>
     {notice && <p className="prompt-preset-notice" role="status">{notice}</p>}
     <details className="prompt-preset-library"><summary>Manage presets</summary><div>{presets.map((preset) => <article key={preset.id}>
-      <div><strong>{preset.name}</strong><span>{scopeLabels[preset.scope]} · {preset.kind === 'built-in' ? 'immutable built-in' : 'device-local user preset'} · {preset.predefinedMessages.length} message{preset.predefinedMessages.length === 1 ? '' : 's'}</span>{preset.updatedAt && <small>Updated {new Date(preset.updatedAt).toLocaleString()}</small>}</div>
+      <div><strong>{preset.name}</strong><span>{scopeLabels[preset.scope]} · {preset.kind === 'built-in' ? 'Built-in' : 'Saved on this device'} · {preset.predefinedMessages.length} message{preset.predefinedMessages.length === 1 ? '' : 's'}</span>{preset.updatedAt && <small>Updated {new Date(preset.updatedAt).toLocaleString()}</small>}</div>
       <div><button type="button" onClick={() => duplicate(preset)}>Duplicate</button>{preset.kind === 'user' && <><button type="button" onClick={() => rename(preset)}>Rename</button><button type="button" onClick={() => remove(preset)}>Delete</button></>}</div>
     </article>)}</div></details>
   </section>
