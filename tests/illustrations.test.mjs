@@ -156,3 +156,69 @@ test('failed multi-table import rolls back the entire new book', async () => {
   assert.equal(await p.getEntity(copy.bookId), undefined)
   assert.equal(await p.getIllustration(copy.data.illustrations[0].entryId), undefined)
 })
+
+test('zoomed thumbnail geometry crops the intended source region', () => {
+  assert.deepEqual(images.cropRectangle(800, 400, 50, 50, 2), { x: 300, y: 100, size: 200 })
+  assert.deepEqual(images.cropRectangle(800, 400, 100, 0, 4), { x: 700, y: 0, size: 100 })
+})
+
+test('undo restores replaced image bytes and metadata without changing current text', async () => {
+  const { entry, illustration } = await bookFixture()
+  await p.saveIllustration(entry.id, pixels, { ...details, caption: 'Replacement', cropZoom: 2 }, illustration.id)
+  const undo = await p.getIllustrationUndo(entry.id)
+  await p.saveDocumentContent(entry.id, 'Text edited after replacement')
+  await p.undoIllustration(entry.id, undo.id)
+  const restored = await p.getIllustration(entry.id)
+  assert.equal(restored.caption, details.caption)
+  assert.equal(restored.cropX, details.cropX)
+  assert.deepEqual(await restored.image.arrayBuffer(), await illustration.image.arrayBuffer())
+  assert.equal((await p.getEntity(entry.id)).content, 'Text edited after replacement')
+  assert.equal(await p.getIllustrationUndo(entry.id), undefined)
+})
+
+test('undo removal survives a fresh read, and undo initial upload removes only its image', async () => {
+  const { entry, illustration, other } = await bookFixture()
+  await p.removeIllustration(entry.id, illustration.id)
+  const undo = await p.getIllustrationUndo(entry.id)
+  assert.equal(await p.getIllustration(entry.id), undefined)
+  await p.undoIllustration(entry.id, undo.id)
+  assert.equal((await p.getIllustration(entry.id)).alt, details.alt)
+  await p.saveIllustration(other.id, pixels, details)
+  await p.undoIllustration(other.id, (await p.getIllustrationUndo(other.id)).id)
+  assert.equal(await p.getIllustration(other.id), undefined)
+  assert.equal((await p.getEntity(other.id)).title, 'Keeper')
+})
+
+test('stale undo/dismiss cannot affect a later change, including two removals', async () => {
+  const { entry, illustration } = await bookFixture()
+  await p.removeIllustration(entry.id, illustration.id)
+  const stale = await p.getIllustrationUndo(entry.id)
+  const newImage = await p.saveIllustration(entry.id, pixels, details)
+  await p.removeIllustration(entry.id, newImage.id)
+  const latest = await p.getIllustrationUndo(entry.id)
+  await assert.rejects(p.undoIllustration(entry.id, stale.id), /changed/)
+  await p.dismissIllustrationUndo(entry.id, stale.id)
+  assert.equal((await p.getIllustrationUndo(entry.id)).id, latest.id)
+  await p.dismissIllustrationUndo(entry.id, latest.id)
+  assert.equal(await p.getIllustrationUndo(entry.id), undefined)
+})
+
+test('archive guards undo, and permanent deletion removes retained undo blobs', async () => {
+  const { book, entry } = await bookFixture()
+  const undo = await p.getIllustrationUndo(entry.id)
+  await p.archiveCodexEntry(entry.id)
+  await assert.rejects(p.undoIllustration(entry.id, undo.id), /Restore/)
+  await p.deleteEntityTree(book.id)
+  assert.equal(await p.getIllustrationUndo(entry.id), undefined)
+  await assert.rejects(p.undoIllustration(entry.id, undo.id), /no longer exists/)
+})
+
+test('backup round trip retains crop zoom and rejects invalid zoom', async () => {
+  const { book, entry, illustration } = await bookFixture()
+  await p.saveIllustration(entry.id, pixels, { ...details, cropZoom: 2.5 }, illustration.id)
+  const data = await p.readBookArchive(book.id)
+  const decoded = await archive.decodeBookArchive(archive.encodeBookArchive(data))
+  assert.equal(decoded.illustrations[0].cropZoom, 2.5)
+  data.illustrations[0].cropZoom = 9
+  await assert.rejects(archive.decodeBookArchive(archive.encodeBookArchive(data)), /invalid/)
+})

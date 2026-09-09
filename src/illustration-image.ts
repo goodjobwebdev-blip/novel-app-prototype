@@ -1,7 +1,7 @@
 /** Image processing stays outside database transactions. Only optimized pixels are kept. */
 export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 export const MAX_IMAGE_PIXELS = 40_000_000
-export type ImageDetails = { caption: string; alt: string; cropX: number; cropY: number }
+export type ImageDetails = { caption: string; alt: string; cropX: number; cropY: number; cropZoom?: number }
 export type ImagePixels = { image: Blob; thumbnail: Blob; width: number; height: number }
 
 export function fitImage(width: number, height: number, longest = 1600) {
@@ -12,8 +12,8 @@ export function fitImage(width: number, height: number, longest = 1600) {
   return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) }
 }
 
-export function cropRectangle(width: number, height: number, x: number, y: number) {
-  const size = Math.min(width, height)
+export function cropRectangle(width: number, height: number, x: number, y: number, zoom = 1) {
+  const size = Math.min(width, height) / Math.max(1, Math.min(4, zoom))
   return { x: (width - size) * Math.max(0, Math.min(100, x)) / 100, y: (height - size) * Math.max(0, Math.min(100, y)) / 100, size }
 }
 
@@ -30,10 +30,10 @@ function canvasBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
   return new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Could not encode this image.')), 'image/webp', quality))
 }
 
-export async function makeThumbnail(blob: Blob, cropX = 50, cropY = 50): Promise<Blob> {
+export async function makeThumbnail(blob: Blob, cropX = 50, cropY = 50, cropZoom = 1): Promise<Blob> {
   const bitmap = await createImageBitmap(blob)
   try {
-    const crop = cropRectangle(bitmap.width, bitmap.height, cropX, cropY)
+    const crop = cropRectangle(bitmap.width, bitmap.height, cropX, cropY, cropZoom)
     const canvas = document.createElement('canvas')
     canvas.width = canvas.height = 160
     const ctx = canvas.getContext('2d')

@@ -84,6 +84,7 @@ export async function decodeBookArchive(file: Blob): Promise<BookArchiveData> {
     usedEntries.add(record.entryId)
     valid(byId.get(record.entryId)?.primaryImageId === record.id)
     valid(typeof record.caption === 'string' && typeof record.alt === 'string' && record.caption.length <= 2000 && record.alt.length <= 2000)
+    valid(record.cropZoom === undefined || (Number.isFinite(record.cropZoom) && record.cropZoom >= 1 && record.cropZoom <= 4))
     valid([record.cropX, record.cropY].every((n) => Number.isFinite(n) && n >= 0 && n <= 100))
     valid(Number.isInteger(record.width) && Number.isInteger(record.height) && record.width > 0 && record.height > 0 && record.width <= 1600 && record.height <= 1600)
     for (const size of [record.imageSize, record.thumbnailSize]) valid(Number.isSafeInteger(size) && size > 0 && size <= 20 * 1024 * 1024)
