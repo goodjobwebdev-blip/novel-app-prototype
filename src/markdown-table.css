@@ -1,0 +1,28 @@
+.markdown-table-scroll {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  margin: .8em 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  font: .85em/1.5 var(--input-font-family, ui-sans-serif, system-ui, sans-serif);
+}
+.markdown-table-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.markdown-table-scroll > table { width: max-content; min-width: 100%; max-width: none; border-collapse: collapse; }
+.markdown-table-scroll th,
+.markdown-table-scroll td {
+  min-width: 7rem;
+  max-width: 28rem;
+  padding: .55em .75em;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.markdown-table-scroll th { background: color-mix(in srgb, var(--ink) 5%, transparent); color: var(--ink); font-weight: 600; }
+.markdown-table-scroll td { color: var(--ink); }
+.markdown-table-scroll code { font-size: .9em; }
+.markdown-table-scroll img { max-width: min(100%, 20rem); height: auto; }
