@@ -1,4 +1,5 @@
 import type { ChatToolCall, ChatToolDefinition } from './chat-api'
+import { applyChatManagementProposal } from './chat-management-tools'
 import { loadProposalTargetOrMarkStale } from './chat-proposal-target'
 import {
   claimChatMessageProposal,
@@ -282,10 +283,11 @@ async function setActionStatus(messageId: string, proposalId: string, patch: Par
   return transitionChatMessageProposal(messageId, 'entityActions', proposalId, ['applying'], patch)
 }
 
-export async function applyChatEntityAction(messageId: string, proposalId: string) {
+export async function applyChatEntityAction(messageId: string, proposalId: string, signal: AbortSignal = new AbortController().signal) {
   const claimed = await claimChatMessageProposal(messageId, 'entityActions', proposalId)
   const message = claimed.message
   const proposal = claimed.proposal as ChatEntityActionProposal
+  if (proposal.operation) return applyChatManagementProposal(message, proposal, signal)
 
   if (proposal.action === 'create_note') {
     const title = proposal.newTitle || proposal.entityTitle
@@ -356,3 +358,4 @@ export async function applyChatEntityAction(messageId: string, proposalId: strin
 export async function rejectChatEntityAction(messageId: string, proposalId: string) {
   await transitionChatMessageProposal(messageId, 'entityActions', proposalId, ['proposed'], { status: 'rejected' })
 }
+

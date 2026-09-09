@@ -1,3 +1,4 @@
+import { metadataValues, validateMetadataPatch, type ChatManagementOperation } from './chat-management-schema'
 import {
   copyAiSettings,
   toBookAiSettings,
@@ -678,11 +679,17 @@ export async function getOrCreateSummary(source: StructuralEntity | CodexEntryEn
   return summary
 }
 
-export async function saveSummaryContent(summaryIdValue: string, content: string, sourceRevision: number): Promise<SummaryEntity> {
+export async function saveSummaryContent(summaryIdValue: string, content: string, sourceRevision: number, expected?: Pick<SummaryEntity, 'updatedAt' | 'content'>, approval?: { messageId: string; proposalId: string }): Promise<SummaryEntity> {
   const db = await database()
   return db.transaction('rw', db.table('entities'), async () => {
     const current = await db.table('entities').get(summaryIdValue) as SummaryEntity | undefined
     if (!current || current.type !== 'summary') throw new Error(`Cannot save missing summary ${summaryIdValue}`)
+    if (approval) {
+      const message = await db.table('entities').get(approval.messageId) as ArcEntity | undefined
+      const proposals = message?.entityActions as Array<{ id: string; status: string }> | undefined
+      if (message?.type !== 'chatMessage' || message.bookId !== current.bookId || !proposals?.some((item) => item.id === approval.proposalId && item.status === 'applying')) throw new Error('The summary approval is no longer active. The previous summary was kept.')
+    }
+    if (expected && (current.updatedAt !== expected.updatedAt || current.content !== expected.content)) throw new Error('The summary changed during generation. Its newer content was kept.')
     const updated: SummaryEntity = { ...current, content, summarizedSourceRevision: sourceRevision, updatedAt: Date.now() }
     await db.table('entities').put(updated)
     await touchAncestors(db, current.bookId, updated.updatedAt)
@@ -1042,6 +1049,51 @@ export async function pruneSnapshots(entityId: string, now = Date.now()) {
 }
 
 
+// Approval-time checks and writes share a transaction so stale cards cannot
+// overwrite metadata, triggers or dependency settings changed elsewhere.
+export async function applyChatManagementChange(bookId: string, entityId: string, operation: ChatManagementOperation): Promise<void> {
+  const db = await database()
+  await db.transaction('rw', db.table('entities'), db.table('codexDependencies'), async () => {
+    const entity = await db.table('entities').get(entityId) as ArcEntity | undefined
+    if (!entity) throw new Error('The proposed item no longer exists.')
+    const now = Date.now()
+    if (operation.kind === 'metadata') {
+      if (entity.type !== 'book' || entity.id !== bookId) throw new Error('The Book is no longer available.')
+      const current = metadataValues(entity as BookEntity)
+      const patch = validateMetadataPatch(operation.patch)
+      for (const key of Object.keys(patch) as Array<keyof BookMetadata>) {
+        if (current[key] !== operation.before[key]) throw new Error(`Book ${key} changed since this proposal. Read metadata again.`)
+      }
+      const seriesId = patch.seriesId ?? current.seriesId
+      if (seriesId) {
+        const series = await db.table('entities').get(seriesId) as SeriesEntity | undefined
+        if (series?.type !== 'series') throw new Error('The selected Series no longer exists.')
+      } else if (patch.seriesOrder) throw new Error('A standalone Book cannot have a Series order.')
+      await db.table('entities').update(entityId, { ...patch, ...(!seriesId ? { seriesOrder: '' } : {}), updatedAt: now })
+      return
+    }
+    if (entity.type !== 'codexEntry' || entity.bookId !== bookId || isCodexEntryArchived(entity)) throw new Error('The Codex entry is unavailable or archived.')
+    if (operation.kind === 'triggers') {
+      if (JSON.stringify(entity.autoIncludeTriggers ?? []) !== JSON.stringify(operation.before)) throw new Error('The triggers changed since this proposal. Read settings again.')
+      await db.table('entities').update(entityId, { autoIncludeTriggers: normalizeCodexTriggerList(operation.triggers), sourceRevision: typeof entity.sourceRevision === 'number' ? entity.sourceRevision : entity.updatedAt, updatedAt: now })
+      await touchAncestors(db, bookId, now)
+      return
+    }
+    if (operation.kind !== 'dependency') throw new Error('Unsupported management operation.')
+    const target = await db.table('entities').get(operation.targetId) as CodexEntryEntity | undefined
+    if (!target || target.type !== 'codexEntry' || target.bookId !== bookId || target.id === entityId || (operation.action !== 'remove' && isCodexEntryArchived(target))) throw new Error('The dependency target is unavailable.')
+    const current = await db.table('codexDependencies').where('[sourceId+targetId]').equals([entityId, target.id]).first() as CodexDependencyEdge | undefined
+    if (operation.action === 'create') {
+      if (current) throw new Error('This dependency already exists.')
+      await db.table('codexDependencies').put({ id: makeId('codex-dependency'), bookId, sourceId: entityId, targetId: target.id, relationLabel: operation.relationLabel, includeWithSource: operation.includeWithSource, createdAt: now, updatedAt: now })
+    } else {
+      const before = operation.before
+      if (!current || current.bookId !== bookId || !before || current.id !== before.id || current.updatedAt !== before.updatedAt || current.relationLabel !== before.relationLabel || current.includeWithSource !== before.includeWithSource) throw new Error('The dependency changed since this proposal. Read settings again.')
+      if (operation.action === 'remove') await db.table('codexDependencies').delete(current.id)
+      else await db.table('codexDependencies').update(current.id, { relationLabel: operation.relationLabel, includeWithSource: operation.includeWithSource, updatedAt: now })
+    }
+  })
+}
 export type Illustration = ImageDetails & ImagePixels & {
   id: string
   bookId: string

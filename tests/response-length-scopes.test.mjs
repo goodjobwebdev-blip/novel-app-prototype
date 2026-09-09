@@ -89,5 +89,6 @@ test('settings UI edits exactly the active scope and previews the same rendered 
   assert.match(app, /normalizedRequestDiagnosticText\(request\)/)
   assert.match(workspace, /settings\.responseLengths\.story/)
   assert.match(workspace, /settings\.responseLengths\.codex/)
-  assert.match(workspace, /settings\.responseLengths\.summary/)
+  assert.match(readFileSync(new URL('../src/summary-generation.ts', import.meta.url), 'utf8'), /settings\.responseLengths\.summary/)
 })
+

@@ -73,6 +73,7 @@ test('Summary variable catalog excludes cursor and context namespaces', () => {
 })
 
 test('Summary source hierarchy, settings migration, preview, and provider dispatch use the shared normalized request', () => {
+  const generation = readFileSync(new URL('../src/summary-generation.ts', import.meta.url), 'utf8')
   const service = readFileSync(new URL('../src/summary-service.ts', import.meta.url), 'utf8')
   const settings = readFileSync(new URL('../src/ai-settings.ts', import.meta.url), 'utf8')
   const workspace = readFileSync(new URL('../src/Workspace.tsx', import.meta.url), 'utf8')
@@ -82,10 +83,12 @@ test('Summary source hierarchy, settings migration, preview, and provider dispat
   assert.match(service, /Full Codex body \+ metadata/)
   assert.match(settings, /summarize: clonePromptComposition\(defaultSummaryPromptComposition\)/)
   assert.match(settings, /storedSummaryCompositionWasHistoricalDefault/)
-  assert.match(workspace, /assembleSummaryGenerationRequest\(\{[\s\S]*sourceDiagnostics: source\.diagnostics/)
-  assert.match(workspace, /textProviderRequestText\(\{ systemPrompt: '', contextMessage: '', userMessage: '', messages \}\)/)
+  assert.match(workspace, /await prepareSummaryGeneration\(/)
+  assert.match(generation, /assembleSummaryGenerationRequest\(\{[\s\S]*sourceDiagnostics: source\.diagnostics/)
+  assert.match(generation, /textProviderRequestText\(\{ systemPrompt: '', contextMessage: '', userMessage: '', messages \}\)/)
   assert.match(workspace, /task: 'summary',[\s\S]*messages,/)
   assert.doesNotMatch(workspace, /renderSummaryPrompt/)
   assert.match(app, /Summary request preview/)
   assert.match(app, /Authoritative source construction/)
 })
+

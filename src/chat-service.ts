@@ -46,9 +46,12 @@ export type ChatCodexCreationProposal = {
 }
 export type ChatEntityActionProposal = {
   id: string
-  action: 'create_note' | 'rename' | 'delete' | 'set_codex_category'
+  action: 'create_note' | 'rename' | 'delete' | 'set_codex_category' | 'update_metadata' | 'update_dependency' | 'update_triggers' | 'regenerate_summary'
   entityId?: string
-  entityType: 'book' | 'note' | 'codexEntry'
+  entityType: 'book' | 'note' | 'codexEntry' | 'act' | 'chapter' | 'scene'
+  operation?: import('./chat-management-schema').ChatManagementOperation
+  changes?: Array<{ field: string; before: string; after: string }>
+  error?: string
   entityTitle: string
   newTitle?: string
   content?: string
@@ -393,3 +396,4 @@ export async function getChatBookAiSettings(bookId: string) {
   const defaults = loadAiSettings()
   return getBookAiSettings(bookId, defaults.favorites)
 }
+
