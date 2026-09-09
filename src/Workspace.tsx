@@ -60,7 +60,7 @@ import { assertPromptTemplateValid, type BookPromptValues } from './prompt-templ
 import { assembleStoryGenerationRequest, STORY_CONTINUE_FALLBACK } from './story-request'
 import { assembleCodexGenerationRequest, CODEX_CONTINUE_FALLBACK } from './codex-request'
 import { replaceGenerationInstruction } from './regeneration-instruction'
-import { assembleSummaryGenerationRequest } from './summary-request'
+import { prepareSummaryGeneration } from './summary-generation'
 import type { NormalizedProviderMessage } from './prompt-composition'
 import { buildContextValues, generationContextDiagnostics } from './context-service'
 import {
@@ -1494,70 +1494,8 @@ export default function Workspace() {
         return
       }
 
-      let settings: AiSettings
-      try {
-        const defaults = loadAiSettings()
-        settings = await getBookAiSettings(owner.bookId, defaults.favorites)
-      } catch {
-        if (cancelledDuringPreflight()) return
-        status = 'error'
-        showToast('This book’s AI settings could not be loaded.')
-        return
-      }
+      const { settings, source, action, messages, diagnostics } = await prepareSummaryGeneration(book, summary, controller.signal, toBookPromptValues(book, seriesList))
       if (cancelledDuringPreflight()) return
-      if ((settings.provider !== 'nanogpt' && settings.provider !== 'fake') || (settings.provider === 'nanogpt' && !settings.apiKey.trim()) || !settings.supportModel.trim()) {
-        status = 'error'
-        showToast('Choose NanoGPT or Fake (testing) and a Support model in Book settings before summarizing.')
-        return
-      }
-      try {
-        const composition = settings.promptCompositions.summarize
-        assertPromptTemplateValid(composition.systemPrompt, 'summarize')
-        composition.predefinedMessages.filter((message) => message.enabled).forEach((message) => assertPromptTemplateValid(message.template, 'summarize'))
-      } catch (error) {
-        status = 'error'
-        showToast(error instanceof Error ? error.message : 'Fix the invalid summarize prompt in Book AI settings.')
-        return
-      }
-
-      const source = await buildSummarySource(summary.sourceEntityId)
-      if (cancelledDuringPreflight()) return
-      if (source.source.type === 'codexEntry' && isCodexEntryArchived(source.source)) {
-        status = 'error'
-        showToast('Restore this Codex entry before updating its summary.')
-        return
-      }
-
-      const responseLength = settings.responseLengths.summary
-      const action = summary.content.trim() ? 'resummarize' : 'summarize'
-      const normalizedRequest = assembleSummaryGenerationRequest({
-        composition: settings.promptCompositions.summarize,
-        book: { ...toBookPromptValues(book, seriesList), responseLength },
-        responseLength,
-        summary: { id: summary.id, content: summary.content },
-        target: { id: source.source.id, type: source.source.type, title: source.source.title, source: source.content },
-        sourceDiagnostics: source.diagnostics,
-        action,
-      })
-      const modelContextLength = settings.supportModelContextLength
-        ?? await fetchTextProviderModelContextLength({ provider: settings.provider, apiKey: settings.apiKey.trim(), baseUrl: settings.baseUrl, model: settings.supportModel }).catch(() => undefined)
-      if (cancelledDuringPreflight()) return
-      if (modelContextLength && modelContextLength !== settings.supportModelContextLength) {
-        settings = await saveBookAiSettings(owner.bookId, { ...settings, supportModelContextLength: modelContextLength })
-        if (cancelledDuringPreflight()) return
-      }
-      const messages = normalizedRequest.providerMessages
-      const diagnostics = generationContextDiagnostics(
-        settings.supportModel,
-        modelContextLength,
-        '',
-        textProviderRequestText({ systemPrompt: '', contextMessage: '', userMessage: '', messages }),
-      )
-      if (!diagnostics.fits) {
-        status = 'error'
-        showToast(`Summary source is too large: ~${diagnostics.requestTokens.toLocaleString()} input tokens for a ${diagnostics.usableInputTokens.toLocaleString()}-token usable budget. Arc will not trim or replace authoritative source material.`)
-        return
-      }
       if (diagnostics.warning) showToast(`Summary context is near the model limit (${Math.round(diagnostics.usageRatio * 100)}%).`)
 
       setGenerationDetails({
@@ -1603,7 +1541,7 @@ export default function Workspace() {
         status = 'cancelled'
         return
       }
-      const saved = await saveSummaryContent(summary.id, generated, source.sourceRevision)
+      const saved = await saveSummaryContent(summary.id, generated, source.sourceRevision, summary)
       const nextSummaryStates = await getSummaryStateMap(owner.bookId)
 
       // Persistence is safely scoped to the captured Summary. Active UI is mutated only
@@ -2563,4 +2501,5 @@ function Codex({ entries, activeId, summaryStates, onCreate, onOpen, onOpenSumma
 }
 function ChatList({onOpen,activeChat,onSettings}:{onOpen:(title:string)=>void;activeChat:string;onSettings:()=>void}) { return <section><div className="panel-title"><div><small>Conversations</small><h2>Chats</h2></div><button type="button" aria-label="Start new chat"><Plus aria-hidden="true" /></button></div>{activeChat && <button className="current-chat" onClick={onSettings}><Settings2 aria-hidden="true" /><span><small>Current chat</small>{activeChat} settings</span><ChevronRight aria-hidden="true" /></button>}<input className="panel-search" placeholder="Search chats"/>{chats.map(([title,preview,time]) => <button className="chat-row" key={title} onClick={() => onOpen(title)}><i><MessageCircle aria-hidden="true" /></i><span><strong>{title}</strong><small>{preview}</small></span><em>{time}</em></button>)}</section> }
 function ChatSettings({title,onBack}:{title:string;onBack:()=>void}) { return <section><button className="back-list" onClick={onBack}><ArrowLeft aria-hidden="true" /> All chats</button><div className="panel-title"><div><small>Current chat</small><h2>{title}</h2></div></div><label className="panel-field"><span>System prompt</span><textarea defaultValue="You are a thoughtful story collaborator. Use only selected book context."/></label><label className="panel-field"><span>Model</span><select><option>Claude 3.7 Sonnet</option><option>GPT-4.1</option></select></label><label className="thinking"><span>Thinking<small>Allow longer internal reasoning</small></span><input type="checkbox" defaultChecked/></label><label className="panel-field"><span>Context</span><div className="chips"><button>Chapter 7 <X aria-hidden="true" /></button><button>Codex <X aria-hidden="true" /></button><button><Plus aria-hidden="true" /> Add</button></div></label></section> }
+
 
