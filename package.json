@@ -33,7 +33,8 @@
     "react": "19.1.1",
     "react-dom": "19.1.1",
     "react-markdown": "10.1.0",
-    "remark-gfm": "4.0.1"
+    "remark-gfm": "4.0.1",
+    "dexie": "4.4.5"
   },
   "devDependencies": {
     "@types/react": "19.1.10",
@@ -41,7 +42,6 @@
     "@vitejs/plugin-react": "5.0.2",
     "typescript": "5.9.2",
     "vite": "7.1.3",
-    "dexie": "4.4.5",
     "fake-indexeddb": "6.2.5"
   }
 }

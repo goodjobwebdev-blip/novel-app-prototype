@@ -95,9 +95,9 @@ The application should feel like a quiet writing workspace, not a general-purpos
 - UI typography, active theme, custom themes, and model favorites are global device preferences.
 - Editing autosaves locally.
 - Local snapshots provide recovery/version history but are not backups because they live on the same device.
-- Manual export/import is still required for reliable backup and transfer between devices, but is not implemented yet.
+- Manual book export/import is available as `.arcbook` backups containing text, settings (without API keys), history, and illustrations. Imports create new books. See [CODEX_ILLUSTRATIONS.md](CODEX_ILLUSTRATIONS.md).
 - Destructive or bulk operations should create a recovery point when practical.
-- Large binary libraries such as extensive images, audio, or PDFs are not an initial storage goal.
+- Codex entries support one optimized primary illustration plus a thumbnail, with local storage usage and backup controls. Extensive media galleries, audio, and PDF libraries remain outside the initial storage goal.
 
 ## AI constraints and decisions
 
@@ -192,18 +192,18 @@ Implemented only as placeholders or still incomplete:
 
 - dedicated Note generation/context request flow;
 - Speech settings and speech-generation features beyond browser read-aloud in Chat;
-- Image settings/generation;
+- AI image settings/generation (manual Codex image uploads are implemented);
 - dedicated Titles & names generation UI despite the prompt contract being present;
-- export/import and cross-device transfer;
+- automatic cross-device transfer (manual book backup export/import is implemented);
 - automatic cloud synchronization;
 - Chat context-history trimming and non-abort partial-response persistence tracked in #29.
 
-The prototype is not yet an MVP; its main missing product-quality work is recovery/transfer, more complete offline packaging, remaining AI edge cases, and unfinished settings/generation surfaces.
+The prototype is not yet an MVP; its main missing product-quality work is broader recovery/transfer validation, more complete offline packaging, remaining AI edge cases, and unfinished settings/generation surfaces.
 
 ## Not decided yet
 
 - Snapshot retention/cleanup rules.
-- Export/import file format and compatibility policy.
+- Future archive format migrations beyond `.arcbook` version 1.
 - Cloud synchronization or backend architecture.
 - Provider-specific capability normalization beyond the metadata currently exposed.
 - Whether the simple prompt renderer should remain intentionally limited or be replaced with a richer templating system.

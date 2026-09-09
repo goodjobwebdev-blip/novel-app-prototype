@@ -1,0 +1,143 @@
+import type { ArcEntity, BookArchiveData, Illustration } from './persistence'
+import { assertImageFile } from './illustration-image'
+
+const MAGIC = 'ARCBK001'
+const MAX_MANIFEST = 64 * 1024 * 1024
+const MAX_ARCHIVE = 2_000_000_000
+const TYPES = new Set(['book', 'series', 'act', 'chapter', 'scene', 'note', 'codexEntry', 'summary', 'chat', 'chatMessage', 'settings'])
+const REF_KEYS = new Set(['bookId', 'entryId', 'parentId', 'seriesId', 'sourceEntityId', 'entityId', 'sourceId', 'targetId', 'primaryImageId', 'lastOpenedSceneId', 'sourceParentId', 'targetParentId', 'beforeId'])
+const REF_ARRAYS = new Set(['structuralIds', 'noteIds', 'codexEntryIds'])
+
+type StoredImage = Omit<Illustration, 'image' | 'thumbnail'> & { imageSize: number; imageType: string; thumbnailSize: number; thumbnailType: string }
+
+function withoutKeys(value: unknown): any {
+  if (Array.isArray(value)) return value.map(withoutKeys)
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, /(apiKey$|^accessToken$|^refreshToken$|^authorization$)/i.test(key) ? '' : withoutKeys(item)]))
+  return value
+}
+
+/** A versioned binary archive: JSON metadata followed by image blobs (no base64 overhead). */
+export function encodeBookArchive(data: BookArchiveData): Blob {
+  const images: StoredImage[] = data.illustrations.map(({ image, thumbnail, ...rest }) => ({ ...rest, imageSize: image.size, imageType: image.type, thumbnailSize: thumbnail.size, thumbnailType: thumbnail.type }))
+  const entities = data.entities.map((entity) => entity.type === 'settings' ? withoutKeys(entity) : entity)
+  const manifest = new TextEncoder().encode(JSON.stringify({ format: 'arc-book', version: 1, entities, snapshots: data.snapshots, dependencies: data.dependencies, illustrations: images }))
+  if (manifest.length > MAX_MANIFEST) throw new Error('Book metadata is too large for this archive version.')
+  const header = new Uint8Array(12)
+  header.set(new TextEncoder().encode(MAGIC))
+  new DataView(header.buffer).setUint32(8, manifest.length)
+  const archive = new Blob([header, manifest, ...data.illustrations.flatMap((image) => [image.image, image.thumbnail])], { type: 'application/octet-stream' })
+  if (archive.size > MAX_ARCHIVE) throw new Error('This backup exceeds the current 2 GB archive limit.')
+  return archive
+}
+
+function valid(condition: unknown): asserts condition {
+  if (!condition) throw new Error('This book backup is incomplete or invalid. Nothing was imported.')
+}
+
+export async function decodeBookArchive(file: Blob): Promise<BookArchiveData> {
+  valid(file.size >= 12 && file.size <= MAX_ARCHIVE)
+  const header = new Uint8Array(await file.slice(0, 12).arrayBuffer())
+  valid(new TextDecoder().decode(header.slice(0, 8)) === MAGIC)
+  const length = new DataView(header.buffer).getUint32(8)
+  valid(length > 0 && length <= MAX_MANIFEST && 12 + length <= file.size)
+  let manifest: any
+  try { manifest = JSON.parse(await file.slice(12, 12 + length).text()) } catch { throw new Error('This book backup could not be read. Nothing was imported.') }
+  valid(manifest?.format === 'arc-book' && manifest.version === 1)
+  for (const key of ['entities', 'snapshots', 'dependencies', 'illustrations']) valid(Array.isArray(manifest[key]))
+  valid(manifest.entities.length <= 100_000 && manifest.illustrations.length <= 20_000)
+  const entities: ArcEntity[] = manifest.entities
+  valid(entities.every((entity) => entity && typeof entity.id === 'string' && entity.id.length > 0 && TYPES.has(entity.type) && Number.isFinite(entity.createdAt) && Number.isFinite(entity.updatedAt)))
+  const byId = new Map(entities.map((entity) => [entity.id, entity]))
+  valid(byId.size === entities.length)
+  const books = entities.filter((entity) => entity.type === 'book')
+  valid(books.length === 1 && typeof books[0].title === 'string')
+  const book = books[0]
+  valid(!book.parentId && !book.bookId)
+  for (const entity of entities) {
+    if (entity.type === 'series') { valid(!entity.parentId && !entity.bookId); continue }
+    if (entity.type === 'book') continue
+    if (['act', 'chapter', 'scene', 'note', 'codexEntry', 'summary', 'chat'].includes(entity.type)) valid(typeof entity.title === 'string')
+    if (['note', 'codexEntry', 'summary', 'chatMessage'].includes(entity.type)) valid(typeof entity.content === 'string')
+    if (entity.type === 'codexEntry') valid(typeof entity.category === 'string')
+    if (entity.type === 'settings') valid(['ai', 'context-book'].includes(String(entity.settingsType)) && entity.value && typeof entity.value === 'object')
+    valid(entity.bookId === book.id && typeof entity.parentId === 'string' && byId.has(entity.parentId))
+    const visited = new Set([entity.id])
+    let parent = byId.get(entity.parentId)
+    while (parent && parent.id !== book.id) {
+      valid(!visited.has(parent.id) && parent.type !== 'series')
+      visited.add(parent.id)
+      parent = byId.get(parent.parentId ?? '')
+    }
+    valid(parent?.id === book.id)
+    if (entity.type === 'summary') valid(typeof entity.sourceEntityId === 'string' && ['act', 'chapter', 'scene', 'codexEntry'].includes(byId.get(entity.sourceEntityId)?.type ?? ''))
+  }
+  if (book.seriesId) valid(typeof book.seriesId === 'string' && byId.get(book.seriesId)?.type === 'series')
+  const unique = (rows: any[]) => rows.every((row) => row && typeof row.id === 'string' && row.id.length > 0) && new Set(rows.map((row) => row.id)).size === rows.length
+  valid(unique(manifest.snapshots) && unique(manifest.dependencies) && unique(manifest.illustrations))
+  for (const snapshot of manifest.snapshots) valid(byId.has(snapshot.entityId) && typeof snapshot.content === 'string' && Number.isFinite(snapshot.createdAt))
+  for (const edge of manifest.dependencies) valid(edge.bookId === book.id && byId.get(edge.sourceId)?.type === 'codexEntry' && byId.get(edge.targetId)?.type === 'codexEntry' && edge.sourceId !== edge.targetId)
+  let offset = 12 + length
+  const illustrations: Illustration[] = []
+  const usedEntries = new Set<string>()
+  for (const record of manifest.illustrations as StoredImage[]) {
+    valid(record.bookId === book.id && byId.get(record.entryId)?.type === 'codexEntry' && !usedEntries.has(record.entryId))
+    usedEntries.add(record.entryId)
+    valid(byId.get(record.entryId)?.primaryImageId === record.id)
+    valid(typeof record.caption === 'string' && typeof record.alt === 'string' && record.caption.length <= 2000 && record.alt.length <= 2000)
+    valid([record.cropX, record.cropY].every((n) => Number.isFinite(n) && n >= 0 && n <= 100))
+    valid(Number.isInteger(record.width) && Number.isInteger(record.height) && record.width > 0 && record.height > 0 && record.width <= 1600 && record.height <= 1600)
+    for (const size of [record.imageSize, record.thumbnailSize]) valid(Number.isSafeInteger(size) && size > 0 && size <= 20 * 1024 * 1024)
+    valid(offset + record.imageSize + record.thumbnailSize <= file.size)
+    valid(['image/webp', 'image/png', 'image/jpeg'].includes(record.imageType) && ['image/webp', 'image/png', 'image/jpeg'].includes(record.thumbnailType))
+    const image = file.slice(offset, offset += record.imageSize, record.imageType)
+    const thumbnail = file.slice(offset, offset += record.thumbnailSize, record.thumbnailType)
+    await assertImageFile(image)
+    await assertImageFile(thumbnail)
+    const { imageSize: _i, imageType: _it, thumbnailSize: _t, thumbnailType: _tt, ...details } = record
+    illustrations.push({ ...details, image, thumbnail })
+  }
+  valid(offset === file.size)
+  for (const entity of entities) if (entity.primaryImageId) valid(illustrations.some((image) => image.id === entity.primaryImageId && image.entryId === entity.id))
+  return { entities, snapshots: manifest.snapshots, dependencies: manifest.dependencies, illustrations }
+}
+
+/** Import as a new book; preserve text verbatim while remapping structural references. */
+export function copyBookArchive(data: BookArchiveData, newId = () => crypto.randomUUID()): { data: BookArchiveData; bookId: string } {
+  const ids = new Map<string, string>()
+  for (const entity of data.entities) if (entity.type !== 'settings' && entity.type !== 'summary') ids.set(entity.id, `${entity.type}-${newId()}`)
+  for (const entity of data.entities) {
+    if (entity.type === 'settings') {
+      const kind = entity.settingsType === 'ai' ? 'ai' : entity.settingsType === 'context-book' ? 'context-book' : String(entity.settingsType)
+      ids.set(entity.id, `settings-${kind}-${ids.get(entity.bookId!)}`)
+    }
+    if (entity.type === 'summary') ids.set(entity.id, `summary-${ids.get(String(entity.sourceEntityId))}`)
+  }
+  for (const image of data.illustrations) ids.set(image.id, `image-${newId()}`)
+  const remap = (value: any, key = '', depth = 0): any => {
+    if (depth > 80) throw new Error('This backup contains excessively nested data.')
+    if (Array.isArray(value)) return REF_ARRAYS.has(key) ? value.map((id) => ids.get(id)).filter(Boolean) : value.map((item) => remap(item, '', depth + 1))
+    if (value && typeof value === 'object') {
+      if (value instanceof Blob) return value
+      return Object.fromEntries(Object.entries(value).map(([name, item]) => [name, remap(item, name, depth + 1)]))
+    }
+    if (typeof value === 'string' && (REF_KEYS.has(key) || key === 'id')) return ids.get(value) ?? (key === 'id' ? value : '')
+    return value
+  }
+  const entities = data.entities.map((entity) => {
+    const copy = remap(entity) as ArcEntity
+    // Old chat proposals cannot safely apply to a newly imported book.
+    if (copy.type === 'chatMessage') for (const key of ['documentEdits', 'codexCreations', 'outlineActions', 'entityActions']) {
+      if (Array.isArray(copy[key])) copy[key] = (copy[key] as any[]).map((proposal) => ({ ...proposal, status: 'stale' }))
+    }
+    return copy.type === 'settings' ? withoutKeys(copy) : copy
+  })
+  const book = entities.find((entity) => entity.type === 'book')!
+  book.title = `${book.title} (imported)`
+  book.updatedAt = Date.now()
+  return { bookId: book.id, data: {
+    entities,
+    snapshots: data.snapshots.map((row) => ({ ...remap(row), id: `snapshot-${newId()}` })),
+    dependencies: data.dependencies.map((row) => ({ ...remap(row), id: `dependency-${newId()}` })),
+    illustrations: data.illustrations.map((row) => remap(row)),
+  } }
+}

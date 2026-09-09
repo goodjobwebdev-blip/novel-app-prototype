@@ -8,10 +8,9 @@ import 'fake-indexeddb/auto'
 const storage = new Map()
 globalThis.localStorage = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)), removeItem: (key) => storage.delete(key) }
 
-// Keep the browser's persistence module unchanged: use its exact Dexie version
-// against IndexedDB in memory and resolve the app's bundler-style TS imports.
+// Run the app's bundled Dexie against IndexedDB in memory, resolving its
+// bundler-style TypeScript imports for Node.
 registerHooks({ resolve(specifier, context, nextResolve) {
-  if (specifier === 'https://esm.sh/dexie@4.4.5') return nextResolve('dexie', context)
   if (specifier.startsWith('.') && context.parentURL?.startsWith('file:')) {
     const url = new URL(specifier + '.ts', context.parentURL)
     if (existsSync(fileURLToPath(url))) return nextResolve(url.href, context)
