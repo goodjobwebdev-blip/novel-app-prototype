@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import MarkdownTable from './MarkdownTable'
 import {
   Bot,
   Check,
@@ -1158,7 +1159,7 @@ function ChatPredefinedMessages({ messages, previewValues, onChange }: { message
 }
 
 function MarkdownMessage({ content }: { content: string }) {
-  return <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown></div>
+  return <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ table: MarkdownTable }}>{content}</ReactMarkdown></div>
 }
 
 function ChatModelPicker({ value, models, onChange }: { value: string; models: ChatModel[]; onChange: (modelId: string) => void }) {

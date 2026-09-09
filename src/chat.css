@@ -133,9 +133,6 @@
 .chat-markdown pre code { padding: 0; border-radius: 0; background: transparent; color: #d9d3c8; font-size: .78em; white-space: pre; }
 .chat-markdown a { color: var(--accent-bright); text-decoration-color: rgba(224,200,143,.45); text-underline-offset: 2px; }
 .chat-markdown hr { margin: 1em 0; border: 0; border-top: 1px solid var(--line); }
-.chat-markdown table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; font: .78em/1.45 ui-sans-serif,system-ui; }
-.chat-markdown table th,.chat-markdown table td { padding: .48em .62em; border: 1px solid var(--line); text-align: left; vertical-align: top; }
-.chat-markdown table th { background: rgba(255,255,255,.04); color: var(--ink); }
 .chat-markdown .contains-task-list { padding-left: .2em; list-style: none; }
 .chat-markdown .task-list-item { display: flex; align-items: flex-start; gap: .45em; }
 .chat-markdown .task-list-item input { width: auto; min-height: 0; margin-top: .28em; accent-color: var(--accent); }

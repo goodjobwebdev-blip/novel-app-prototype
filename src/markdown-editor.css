@@ -108,3 +108,10 @@
   .markdown-editor { font-size: 17px; line-height: 1.72; }
   .markdown-editor .cm-content { padding-right: 1px; }
 }
+
+.markdown-editor .cm-table-preview { width: 100%; min-width: 0; max-width: 100%; margin: .6em 0; }
+.markdown-editor .cm-table-preview > div { min-width: 0; max-width: 100%; }
+.markdown-editor .cm-table-preview blockquote { margin-inline: 0; padding-left: .8em; border-left: 2px solid var(--line); }
+.markdown-editor .cm-table-edit { display: block; margin: 0 0 .3em auto; padding: .4em .7em; color: var(--soft); background: transparent; border: 1px solid var(--line); border-radius: 5px; font: 12px/1.4 var(--input-font-family, ui-sans-serif, system-ui, sans-serif); cursor: pointer; }
+.markdown-editor .cm-table-edit:hover { color: var(--ink); border-color: var(--accent); }
+.markdown-editor .cm-table-edit:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

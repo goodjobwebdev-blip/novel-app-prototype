@@ -1,6 +1,8 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import { defaultKeymap, history, historyKeymap, isolateHistory, redo, redoDepth, undo, undoDepth } from '@codemirror/commands'
-import { markdown } from '@codemirror/lang-markdown'
+import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
+import { markdownTablePreview } from './MarkdownTablePreview'
+import { markdownTableRanges } from './markdown-tables'
 import { syntaxTree } from '@codemirror/language'
 import { Annotation, Compartment, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state'
 import { findTriggerRanges, type CodexMentionTerm } from './codex-trigger-service'
@@ -196,6 +198,7 @@ const generationHighlightField = StateField.define<DecorationSet>({
 
 function buildLivePreviewDecorations(state: EditorState): DecorationSet {
   const activeLine = state.doc.lineAt(state.selection.main.head).number
+  const tables = markdownTableRanges(state)
   const ranges: any[] = []
   const hide = (from: number, to: number) => {
     if (to > from) ranges.push(Decoration.replace({}).range(from, to))
@@ -208,6 +211,7 @@ function buildLivePreviewDecorations(state: EditorState): DecorationSet {
     if (lineNumber === activeLine) continue
     const line = state.doc.line(lineNumber)
     const text = line.text
+    if (tables.some((table) => line.from >= table.from && line.from <= table.to)) continue
 
     const heading = text.match(/^(#{1,6})\s+/)
     if (heading) {
@@ -252,6 +256,7 @@ function buildLivePreviewDecorations(state: EditorState): DecorationSet {
 
   syntaxTree(state).iterate({
     enter(node) {
+      if (node.name === 'Table' || tables.some((table) => node.from >= table.from && node.to <= table.to)) return false
       const line = state.doc.lineAt(node.from)
       if (line.number === activeLine || node.to > line.to) return
 
@@ -295,7 +300,7 @@ const livePreview = ViewPlugin.fromClass(class {
   }
 
   update(update: ViewUpdate) {
-    if (update.docChanged || update.selectionSet || update.viewportChanged) {
+    if (update.docChanged || update.selectionSet || update.viewportChanged || syntaxTree(update.startState) !== syntaxTree(update.state)) {
       this.decorations = buildLivePreviewDecorations(update.state)
     }
   }
@@ -591,7 +596,8 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     const state = EditorState.create({
       doc: value,
       extensions: [
-        markdown(),
+        markdown({ base: markdownLanguage }),
+        markdownTablePreview,
         EditorState.readOnly.of(readOnly),
         editableCompartmentRef.current.of(EditorView.editable.of(!readOnly)),
         history(),
