@@ -1,3 +1,5 @@
+import { executeImageProposal } from './image-tools'
+import ImageProposalCard from './ImageProposalCard'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -537,7 +539,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     let historyInvalidated = false
     let activeRoundContent = ''
     let activeRoundThoughts = ''
-    let activeRoundExtras: Pick<ChatMessageEntity, 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions'> = {}
+    let activeRoundExtras: Pick<ChatMessageEntity, 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations'> = {}
     let activeRoundPersisted = false
     let activeRoundStartedAt = Date.now()
 
@@ -552,15 +554,16 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     async function persistAssistantRound(
       roundContent: string,
       roundThoughts: string,
-      extras: Pick<ChatMessageEntity, 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions'> = {},
+      extras: Pick<ChatMessageEntity, 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations'> = {},
       status: ChatMessageStatus = 'complete',
     ) {
-      const hasWorkspaceProposal = Boolean(extras.documentEdits?.length || extras.codexCreations?.length || extras.outlineActions?.length || extras.entityActions?.length)
+      const hasWorkspaceProposal = Boolean(extras.imageGenerations?.length || extras.documentEdits?.length || extras.codexCreations?.length || extras.outlineActions?.length || extras.entityActions?.length)
       if (roundContent || roundThoughts || hasWorkspaceProposal) await ensureSourceHistoryStillCurrent()
       if (!roundContent && !roundThoughts && !hasWorkspaceProposal) return null
       return createChatMessage(activeChat, 'assistant', roundContent, {
         thoughts: roundThoughts || undefined,
         status,
+        imageGenerations: extras.imageGenerations,
         documentEdits: extras.documentEdits,
         codexCreations: extras.codexCreations,
         outlineActions: extras.outlineActions,
@@ -568,8 +571,9 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       })
     }
 
-    function workspaceProposalIds(extras: Pick<ChatMessageEntity, 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions'>) {
+    function workspaceProposalIds(extras: Pick<ChatMessageEntity, 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations'>) {
       return [
+        ...(extras.imageGenerations ?? []).map((p) => `image:${p.id}`),
         ...(extras.documentEdits ?? []).map((proposal) => `document:${proposal.id}`),
         ...(extras.codexCreations ?? []).map((proposal) => `codex:${proposal.id}`),
         ...(extras.outlineActions ?? []).map((proposal) => `outline:${proposal.id}`),
@@ -676,7 +680,11 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           const roundEntityActions: ChatEntityActionProposal[] = []
           for (const call of result.toolCalls) {
             controller.signal.throwIfAborted()
-            if (chatManagementToolNames.has(call.function.name)) {
+            if (call.function.name === 'propose_image_generation') {
+              const execution = executeImageProposal(call)
+              if (execution.imageGeneration) activeRoundExtras.imageGenerations = [...(activeRoundExtras.imageGenerations ?? []), execution.imageGeneration]
+              runtimeParts.push(normalizeRuntimeMessagePart({ id: `chat-tool-${call.id}`, sourceKind: 'app-managed', ownership: 'app-managed', name: call.function.name, message: { role: 'tool', tool_call_id: call.id, content: execution.content } }))
+            } else if (chatManagementToolNames.has(call.function.name)) {
               const execution = await executeChatManagementTool(sourceBookId, call)
               if (execution.entityAction) {
                 roundEntityActions.push(execution.entityAction)
@@ -1057,7 +1065,8 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           {message.role === 'assistant' ? <div className="chat-message-stack">
             {editingId === message.id ? <InlineMessageEdit value={editingValue} onChange={setEditingValue} onCancel={() => setEditingId('')} onSave={() => { void saveEdit(message, false) }} /> : <>
               {message.thoughts && <details className="chat-thoughts" open={openThoughtMessageIds.has(message.id)} onToggle={(event) => setPersistedThoughtsOpen(message.id, event.currentTarget.open)}><summary>Thoughts</summary><div>{message.thoughts}</div></details>}
-              <div className="chat-assistant-body">{message.content ? <MarkdownMessage content={message.content} /> : (message.documentEdits?.length || message.codexCreations?.length || message.outlineActions?.length || message.entityActions?.length ? <em>Workspace proposal</em> : <em>No final answer returned.</em>)}</div>
+              <div className="chat-assistant-body">{message.content ? <MarkdownMessage content={message.content} /> : (message.imageGenerations?.length || message.documentEdits?.length || message.codexCreations?.length || message.outlineActions?.length || message.entityActions?.length ? <em>Workspace proposal</em> : <em>No final answer returned.</em>)}</div>
+              {message.imageGenerations?.map((proposal) => <ImageProposalCard key={proposal.id} message={message} proposal={proposal} />)}
               {message.documentEdits?.length ? <div className="chat-document-edits">{message.documentEdits.map((proposal) => <DocumentEditCard key={proposal.id} proposal={proposal} onApply={() => { void applyProposal(message, proposal) }} onReject={() => { void rejectProposal(message, proposal) }} />)}</div> : null}
               {message.codexCreations?.length ? <div className="chat-document-edits">{message.codexCreations.map((proposal) => <CodexCreationCard key={proposal.id} proposal={proposal} onCreate={() => { void createCodexProposal(message, proposal) }} onReject={() => { void rejectCodexProposal(message, proposal) }} />)}</div> : null}
               {message.outlineActions?.length ? <div className="chat-document-edits">{message.outlineActions.map((proposal) => <OutlineActionCard key={proposal.id} proposal={proposal} onApply={() => { void applyOutlineProposal(message, proposal) }} onReject={() => { void rejectOutlineProposal(message, proposal) }} />)}</div> : null}

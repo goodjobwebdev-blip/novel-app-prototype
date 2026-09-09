@@ -1,3 +1,4 @@
+import type { GalleryImage, ImageJob } from './image-generation-types'
 import type { ArcEntity, BookArchiveData, Illustration } from './persistence'
 import { assertImageFile } from './illustration-image'
 
@@ -5,9 +6,10 @@ const MAGIC = 'ARCBK001'
 const MAX_MANIFEST = 64 * 1024 * 1024
 const MAX_ARCHIVE = 2_000_000_000
 const TYPES = new Set(['book', 'series', 'act', 'chapter', 'scene', 'note', 'codexEntry', 'summary', 'chat', 'chatMessage', 'settings'])
-const REF_KEYS = new Set(['bookId', 'entryId', 'parentId', 'seriesId', 'sourceEntityId', 'entityId', 'sourceId', 'targetId', 'primaryImageId', 'lastOpenedSceneId', 'sourceParentId', 'targetParentId', 'beforeId'])
+const REF_KEYS = new Set(['bookId', 'entryId', 'parentId', 'seriesId', 'sourceEntityId', 'entityId', 'sourceId', 'targetId', 'primaryImageId', 'assetId', 'messageId', 'chatId', 'lastOpenedSceneId', 'sourceParentId', 'targetParentId', 'beforeId'])
 const REF_ARRAYS = new Set(['structuralIds', 'noteIds', 'codexEntryIds'])
 
+type StoredGalleryImage = Omit<GalleryImage, 'image' | 'thumbnail'> & { imageSize: number; imageType: string; thumbnailSize: number; thumbnailType: string }
 type StoredImage = Omit<Illustration, 'image' | 'thumbnail'> & { imageSize: number; imageType: string; thumbnailSize: number; thumbnailType: string }
 
 function withoutKeys(value: unknown): any {
@@ -19,13 +21,14 @@ function withoutKeys(value: unknown): any {
 /** A versioned binary archive: JSON metadata followed by image blobs (no base64 overhead). */
 export function encodeBookArchive(data: BookArchiveData): Blob {
   const images: StoredImage[] = data.illustrations.map(({ image, thumbnail, ...rest }) => ({ ...rest, imageSize: image.size, imageType: image.type, thumbnailSize: thumbnail.size, thumbnailType: thumbnail.type }))
+  const gallery: StoredGalleryImage[] = (data.galleryImages ?? []).map(({ image, thumbnail, ...rest }) => ({ ...rest, imageSize: image.size, imageType: image.type, thumbnailSize: thumbnail.size, thumbnailType: thumbnail.type }))
   const entities = data.entities.map((entity) => entity.type === 'settings' ? withoutKeys(entity) : entity)
-  const manifest = new TextEncoder().encode(JSON.stringify({ format: 'arc-book', version: 1, entities, snapshots: data.snapshots, dependencies: data.dependencies, illustrations: images }))
+  const manifest = new TextEncoder().encode(JSON.stringify({ format: 'arc-book', version: 2, entities, snapshots: data.snapshots, dependencies: data.dependencies, illustrations: images, galleryImages: gallery, imageJobs: data.imageJobs ?? [] }))
   if (manifest.length > MAX_MANIFEST) throw new Error('Book metadata is too large for this archive version.')
   const header = new Uint8Array(12)
   header.set(new TextEncoder().encode(MAGIC))
   new DataView(header.buffer).setUint32(8, manifest.length)
-  const archive = new Blob([header, manifest, ...data.illustrations.flatMap((image) => [image.image, image.thumbnail])], { type: 'application/octet-stream' })
+  const archive = new Blob([header, manifest, ...[...data.illustrations, ...(data.galleryImages ?? [])].flatMap((image) => [image.image, image.thumbnail])], { type: 'application/octet-stream' })
   if (archive.size > MAX_ARCHIVE) throw new Error('This backup exceeds the current 2 GB archive limit.')
   return archive
 }
@@ -42,7 +45,7 @@ export async function decodeBookArchive(file: Blob): Promise<BookArchiveData> {
   valid(length > 0 && length <= MAX_MANIFEST && 12 + length <= file.size)
   let manifest: any
   try { manifest = JSON.parse(await file.slice(12, 12 + length).text()) } catch { throw new Error('This book backup could not be read. Nothing was imported.') }
-  valid(manifest?.format === 'arc-book' && manifest.version === 1)
+  valid(manifest?.format === 'arc-book' && [1, 2].includes(manifest.version))
   for (const key of ['entities', 'snapshots', 'dependencies', 'illustrations']) valid(Array.isArray(manifest[key]))
   valid(manifest.entities.length <= 100_000 && manifest.illustrations.length <= 20_000)
   const entities: ArcEntity[] = manifest.entities
@@ -97,9 +100,36 @@ export async function decodeBookArchive(file: Blob): Promise<BookArchiveData> {
     const { imageSize: _i, imageType: _it, thumbnailSize: _t, thumbnailType: _tt, ...details } = record
     illustrations.push({ ...details, image, thumbnail })
   }
+  const galleryImages: GalleryImage[] = []
+  const storedGallery = manifest.galleryImages ?? []
+  valid(Array.isArray(storedGallery) && storedGallery.length <= 20000 && unique(storedGallery))
+  for (const record of storedGallery as StoredGalleryImage[]) {
+    valid(record.entryId === undefined && record.illustrationId === undefined)
+    valid(record.provider === undefined || ['openai', 'nanogpt', 'pruna'].includes(record.provider))
+    valid([record.model, record.modelAlias, record.bookTitle, record.requestedSize, record.revisedPrompt].every((value) => value === undefined || typeof value === 'string'))
+    valid([record.seed, record.cost, record.durationMs].every((value) => value === undefined || Number.isFinite(value)))
+    valid(record.bookId === book.id && record.kept === true && typeof record.prompt === 'string' && record.prompt.length <= 32000 && Number.isFinite(record.createdAt))
+    valid(Number.isInteger(record.width) && Number.isInteger(record.height) && record.width > 0 && record.height > 0 && record.width * record.height <= 40_000_000)
+    for (const size of [record.imageSize, record.thumbnailSize]) valid(Number.isSafeInteger(size) && size > 0 && size <= 20 * 1024 * 1024)
+    valid(offset + record.imageSize + record.thumbnailSize <= file.size)
+    valid(['image/webp', 'image/png', 'image/jpeg'].includes(record.imageType) && ['image/webp', 'image/png', 'image/jpeg'].includes(record.thumbnailType))
+    const image = file.slice(offset, offset += record.imageSize, record.imageType)
+    const thumbnail = file.slice(offset, offset += record.thumbnailSize, record.thumbnailType)
+    await assertImageFile(image); await assertImageFile(thumbnail)
+    const { imageSize: _i, imageType: _it, thumbnailSize: _t, thumbnailType: _tt, ...details } = record
+    galleryImages.push({ ...details, image, thumbnail })
+  }
+  const imageJobs: ImageJob[] = manifest.imageJobs ?? []
+  valid(Array.isArray(imageJobs) && imageJobs.length <= 100000 && unique(imageJobs))
+  for (const job of imageJobs) {
+    valid(job.bookId === book.id && job.status === 'completed' && job.decision === 'kept' && galleryImages.some((a) => a.id === job.assetId))
+    valid(typeof job.prompt === 'string' && typeof job.modelAlias === 'string' && typeof job.model === 'string' && ['openai', 'nanogpt', 'pruna'].includes(job.provider) && typeof job.size?.value === 'string' && Number.isFinite(job.size.width) && Number.isFinite(job.size.height) && Number.isFinite(job.createdAt))
+    if (job.messageId) valid(byId.get(job.messageId)?.type === 'chatMessage' && byId.get(job.messageId)?.parentId === job.chatId)
+    delete job.providerJobId; delete job.owner; delete job.heartbeat
+  }
   valid(offset === file.size)
   for (const entity of entities) if (entity.primaryImageId) valid(illustrations.some((image) => image.id === entity.primaryImageId && image.entryId === entity.id))
-  return { entities, snapshots: manifest.snapshots, dependencies: manifest.dependencies, illustrations }
+  return { entities, snapshots: manifest.snapshots, dependencies: manifest.dependencies, illustrations, galleryImages, imageJobs }
 }
 
 /** Import as a new book; preserve text verbatim while remapping structural references. */
@@ -113,6 +143,8 @@ export function copyBookArchive(data: BookArchiveData, newId = () => crypto.rand
     }
     if (entity.type === 'summary') ids.set(entity.id, `summary-${ids.get(String(entity.sourceEntityId))}`)
   }
+  for (const asset of data.galleryImages ?? []) ids.set(asset.id, `generated-${newId()}`)
+  for (const job of data.imageJobs ?? []) ids.set(job.id, `image-job-${newId()}`)
   for (const image of data.illustrations) ids.set(image.id, `image-${newId()}`)
   const remap = (value: any, key = '', depth = 0): any => {
     if (depth > 80) throw new Error('This backup contains excessively nested data.')
@@ -127,7 +159,7 @@ export function copyBookArchive(data: BookArchiveData, newId = () => crypto.rand
   const entities = data.entities.map((entity) => {
     const copy = remap(entity) as ArcEntity
     // Old chat proposals cannot safely apply to a newly imported book.
-    if (copy.type === 'chatMessage') for (const key of ['documentEdits', 'codexCreations', 'outlineActions', 'entityActions']) {
+    if (copy.type === 'chatMessage') for (const key of ['documentEdits', 'codexCreations', 'outlineActions', 'entityActions', 'imageGenerations']) {
       if (Array.isArray(copy[key])) copy[key] = (copy[key] as any[]).map((proposal) => ({ ...proposal, status: 'stale' }))
     }
     return copy.type === 'settings' ? withoutKeys(copy) : copy
@@ -140,5 +172,7 @@ export function copyBookArchive(data: BookArchiveData, newId = () => crypto.rand
     snapshots: data.snapshots.map((row) => ({ ...remap(row), id: `snapshot-${newId()}` })),
     dependencies: data.dependencies.map((row) => ({ ...remap(row), id: `dependency-${newId()}` })),
     illustrations: data.illustrations.map((row) => remap(row)),
+    galleryImages: data.galleryImages?.map((row) => remap(row)),
+    imageJobs: data.imageJobs?.map((row) => remap(row)),
   } }
 }

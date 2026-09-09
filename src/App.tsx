@@ -1,3 +1,4 @@
+import ImagePanel from './ImagePanel'
 import { ContextSourcePicker, ContextSourceInventory, ContextBudget } from './ContextControls'
 import './context-settings-ux.css'
 import { switchProviderProfile } from './provider-profiles'
@@ -122,13 +123,14 @@ function isAbortError(error: unknown) {
 }
 
 type AiSettingsProps = {
+  initialTab?: SettingsTab
   onHome?: () => void
   onBack?: () => void
   onSaved?: (settings: AiSettings) => void
   book?: { id: string; title: string; contextType?: GenerationContextType; currentDocumentId?: string; currentDocumentText?: string; insertionPosition?: number; promptValues?: BookPromptValues; chatId?: string; currentSummary?: { id: string; sourceEntityId: string; sourceType: SummarySourceType; content: string } }
 }
 
-export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) {
+export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }: AiSettingsProps) {
   const [settings, setSettings] = useState<AiSettings>(initialAiSettings)
   const [fakeTrace, setFakeTrace] = useState(() => getFakeProviderTrace())
   const [models, setModels] = useState<ProviderModel[]>([])
@@ -145,7 +147,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
   const [status, setStatus] = useState('Add an API key, then reload the model list.')
   const [statusKind, setStatusKind] = useState<'quiet' | 'success' | 'error'>('quiet')
   const [saveState, setSaveState] = useState<SaveState>(book ? 'loading' : 'saved')
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>('ai')
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>(initialTab)
   const [settingsLoading, setSettingsLoading] = useState(Boolean(book))
   const [contextSettings, setContextSettings] = useState<BookContextSettings>(defaultBookContextSettings)
   const [contextSources, setContextSources] = useState<ArcEntity[]>([])
@@ -800,6 +802,7 @@ export default function App({ onHome, onBack, onSaved, book }: AiSettingsProps) 
           ? <NoteContextPlaceholder />
           : <ContextSettings bookId={book.id} bookTitle={book.title} bookPromptValues={book.promptValues} type={book.contextType ?? 'scene'} currentDocumentId={book.currentDocumentId} currentDocumentText={book.currentDocumentText} insertionPosition={book.insertionPosition} chatId={book.chatId} settings={settings} value={contextSettings} sources={contextSources} saved={contextSaved} saveError={contextSaveError} onRetry={() => { void saveContextDefaults() }} onChange={updateContextDefaults} />)
           : <GlobalContextDefaults value={contextSettings} saved={contextSaved} saveError={contextSaveError} onRetry={() => { void saveContextDefaults() }} onChange={updateContextDefaults} />)
+          : settingsTab === 'images' ? <ImagePanel bookId={book?.id} ai={settings} />
           : settingsTab === 'speech' ? <SpeechSettingsPanel settings={settings} scope={isBookSettings ? 'book' : 'defaults'} onChange={(speech) => update('speech', speech)} />
           : <SettingsPlaceholder tab={settingsTab} scope={isBookSettings ? 'book' : 'defaults'} />}
       </section>
