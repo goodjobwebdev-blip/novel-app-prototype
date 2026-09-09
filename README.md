@@ -26,13 +26,15 @@ The prototype is still intentionally single-user and local to one browser/device
 
 - Open issue [#29](https://github.com/goodjobwebdev-blip/novel-app-prototype/issues/29) is mostly implemented, but Chat still needs graceful trimming of older history when a request exceeds the model context window and persistence of partial assistant output after non-cancellation provider/network failures.
 - Dedicated Note generation is not implemented; Note work can currently be done through Chat.
-- Speech and image settings are still placeholders.
-- Manual export/import and cross-device transfer are not implemented yet.
+- Image generation settings remain placeholders; Codex illustrations now support local uploads, captions, cropping, and previews.
+- Book backup export/import is available as `.arcbook` files, including illustrations. Import creates a new book; automatic cross-device sync is not implemented.
 - Offline behavior is prototype-grade: local manuscript data is device-local, while provider calls and uncached external runtime resources still require network access.
+
+For illustration storage, supported image sizes, and the backup format, see [docs/CODEX_ILLUSTRATIONS.md](docs/CODEX_ILLUSTRATIONS.md).
 
 ## Data model
 
-Structured content is stored in IndexedDB through Dexie. The entity model currently includes books, series, Acts, Chapters, Scenes, Notes, Codex entries, summaries, Chats, Chat messages, and book-scoped settings. Document snapshots are stored separately for local recovery/history.
+Structured content is stored in IndexedDB through Dexie. The entity model currently includes books, series, Acts, Chapters, Scenes, Notes, Codex entries, summaries, Chats, Chat messages, and book-scoped settings. Document snapshots are stored separately for local recovery/history. Codex image Blobs and thumbnails are stored in a separate illustrations table, linked to their entries.
 
 Small global preferences such as default AI settings, model favorites, typography, and themes are stored in `localStorage` on the current device.
 
