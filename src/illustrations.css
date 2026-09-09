@@ -1,0 +1,41 @@
+.codex-illustration { margin: 16px 0 24px; border: 1px solid var(--line); border-radius: 14px; font: 13px/1.5 Inter, sans-serif; color: var(--ink); overflow: hidden; }
+.codex-illustration > summary { padding: 12px 14px; cursor: pointer; display: flex; align-items: center; gap: 8px; min-height: 48px; }
+.codex-illustration > summary::after { content: '+'; margin-left: auto; }
+.codex-illustration[open] > summary::after { content: '−'; }
+.codex-illustration summary svg { width: 17px; height: 17px; color: var(--accent); }
+.codex-illustration summary small { color: var(--soft); }
+.illustration-body { padding: 0 14px 14px; }
+.illustration-body figure { margin: 0 0 12px; }
+.illustration-preview { position: relative; display: block; width: 100%; padding: 0; border: 0; background: var(--surface); border-radius: 10px; overflow: hidden; cursor: zoom-in; }
+.illustration-preview img { display: block; width: 100%; height: auto; max-height: 340px; object-fit: contain; }
+.illustration-preview span { position: absolute; bottom: 8px; right: 8px; display: flex; align-items: center; gap: 5px; padding: 5px 8px; border-radius: 7px; background: #000b; color: white; font-size: 11px; }
+.illustration-preview svg { width: 14px; height: 14px; }
+.illustration-body figcaption { padding-top: 7px; color: var(--soft); overflow-wrap: anywhere; }
+.illustration-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.illustration-actions button, .illustration-confirm button, .book-backup-import > button { min-height: 42px; padding: 8px 12px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; color: var(--ink); cursor: pointer; font-size: 12px; }
+.illustration-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.illustration-actions button svg { width: 15px; height: 15px; }
+.illustration-actions button:disabled, .illustration-confirm button:disabled { opacity: .5; cursor: default; }
+.illustration-help { font: 12px/1.6 Inter, sans-serif; color: var(--soft); overflow-wrap: anywhere; }
+.illustration-error { font: 12px/1.6 Inter, sans-serif; color: var(--danger); overflow-wrap: anywhere; }
+.illustration-confirm, .illustration-details { margin: 14px 0 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+.illustration-confirm button { margin-right: 8px; }
+.illustration-details label { display: grid; gap: 6px; margin: 8px 0; color: var(--soft); font-size: 12px; }
+.illustration-details input:not([type=range]), .illustration-details textarea { width: 100%; padding: 10px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; }
+.illustration-details input[type=range] { width: 100%; accent-color: var(--accent); min-height: 32px; }
+.illustration-crop { display: flex; gap: 16px; align-items: center; margin: 12px 0; }
+.illustration-crop > img { width: 96px; height: 96px; object-fit: cover; border-radius: 9px; flex: none; }
+.illustration-crop > div { flex: 1; min-width: 0; }
+.illustration-dialog { background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 16px; padding: 52px 16px 16px; max-width: min(1000px, 94vw); max-height: 94dvh; }
+.illustration-dialog::backdrop { background: #000c; }
+.illustration-dialog > img { display: block; max-width: 100%; max-height: 73dvh; object-fit: contain; margin: auto; }
+.illustration-dialog > p { text-align: center; overflow-wrap: anywhere; }
+.illustration-close { position: absolute; top: 8px; right: 8px; border: 1px solid var(--line); border-radius: 50%; background: var(--surface-2); width: 40px; height: 40px; display: grid; place-items: center; cursor: pointer; }
+.content-open .codex-thumbnail, .codex-thumbnail { display: inline-grid; place-items: center; width: 44px; height: 44px; flex: none; overflow: hidden; border-radius: 9px; }
+.codex-thumbnail img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.codex-mention-preview-heading { display: flex; gap: 10px; align-items: center; }
+.book-storage { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
+.book-storage h3 { font: 500 18px var(--serif); }
+.storage-meter-label { display: grid; gap: 8px; font: 12px/1.5 Inter, sans-serif; color: var(--soft); }
+.storage-meter-label meter { width: 100%; height: 14px; }
+@media (max-width: 480px) { .illustration-preview img { max-height: 240px; } .codex-illustration summary small { font-size: 10px; } }

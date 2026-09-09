@@ -6,10 +6,11 @@ import {
   type BookAiSettings,
 } from './ai-settings'
 import { normalizeCodexTriggerList } from './codex-trigger-service'
+import type { ImageDetails, ImagePixels } from './illustration-image'
 
 type DexieModule = { default: new (name: string) => any }
 
-const dexieUrl = 'https://esm.sh/dexie@4.4.5'
+// Bundle the database runtime so saved illustrations can open offline.
 
 export type EntityType = 'book' | 'series' | 'act' | 'chapter' | 'scene' | 'note' | 'codexEntry' | 'summary' | 'chat' | 'chatMessage' | 'settings'
 export type SnapshotReason = 'autosave' | 'generation' | 'manual' | 'navigation' | 'lifecycle'
@@ -64,7 +65,7 @@ export type BookMetadata = {
 export type BookEntity = ArcEntity & { type: 'book'; title: string } & Partial<Omit<BookMetadata, 'title'>>
 export type SeriesEntity = ArcEntity & { type: 'series'; title: string }
 export type NoteEntity = ArcEntity & { type: 'note'; bookId: string; parentId: string; title: string; content: string }
-export type CodexEntryEntity = ArcEntity & { type: 'codexEntry'; bookId: string; parentId: string; title: string; category: string; content: string; archivedAt?: number; preferSummaryForContext?: boolean; sourceRevision?: number; autoIncludeTriggers?: string[] }
+export type CodexEntryEntity = ArcEntity & { type: 'codexEntry'; bookId: string; parentId: string; title: string; category: string; content: string; primaryImageId?: string; archivedAt?: number; preferSummaryForContext?: boolean; sourceRevision?: number; autoIncludeTriggers?: string[] }
 export type SummaryEntity = ArcEntity & {
   type: 'summary'
   bookId: string
@@ -177,7 +178,7 @@ let databasePromise: Promise<any> | null = null
 
 async function database() {
   if (!databasePromise) {
-    databasePromise = import(/* @vite-ignore */ dexieUrl).then((module: DexieModule) => {
+    databasePromise = import('dexie').then((module: DexieModule) => {
       const db = new module.default('arc-novel-local-v1')
       db.version(1).stores({
         entities: 'id,type,bookId,parentId,[parentId+order],updatedAt',
@@ -196,6 +197,9 @@ async function database() {
         codexDependencies: 'id,bookId,sourceId,targetId,[bookId+sourceId],[bookId+targetId],[sourceId+targetId],updatedAt',
         meta: 'key',
       }).upgrade((transaction: any) => transaction.table('entities').filter((entity: ArcEntity) => entity.type === 'chat' || entity.type === 'chatMessage').delete())
+      db.version(4).stores({
+        illustrations: 'id,bookId,&entryId,updatedAt',
+      })
       return db.open().then(() => db)
     })
   }
@@ -903,9 +907,10 @@ export async function collectEntityTreeIds(id: string): Promise<string[]> {
 export async function deleteEntityTree(id: string): Promise<string[]> {
   const db = await database()
   let deletedIds: string[] = []
-  await db.transaction('rw', db.table('entities'), db.table('snapshots'), db.table('codexDependencies'), async () => {
+  await db.transaction('rw', db.table('entities'), db.table('snapshots'), db.table('codexDependencies'), db.table('illustrations'), async () => {
     const { root, ids } = await collectEntityTreeIdsWithDb(db, id)
     deletedIds = ids
+    await db.table('illustrations').where('entryId').anyOf(ids).delete()
     const removedIds = new Set(ids)
     await db.table('entities').bulkDelete(ids)
     const snapshots: DocumentSnapshot[] = await db.table('snapshots').toArray()
@@ -921,7 +926,9 @@ export async function deleteEntityTree(id: string): Promise<string[]> {
 
 export async function deleteEntity(id: string) {
   const db = await database()
-  await db.transaction('rw', db.table('entities'), db.table('codexDependencies'), async () => {
+  await db.transaction('rw', db.table('entities'), db.table('codexDependencies'), db.table('illustrations'), async () => {
+    await db.table('illustrations').where('entryId').equals(id).delete()
+    await db.table('illustrations').where('bookId').equals(id).delete()
     await db.table('entities').delete(id)
     const dependencies = await db.table('codexDependencies').toArray() as CodexDependencyEdge[]
     const dependencyIds = dependencies.filter((edge) => edge.sourceId === id || edge.targetId === id).map((edge) => edge.id)
@@ -1032,4 +1039,85 @@ export async function pruneSnapshots(entityId: string, now = Date.now()) {
 
   const remove = snapshots.filter((snapshot) => !keep.has(snapshot.id)).map((snapshot) => snapshot.id)
   if (remove.length) await db.table('snapshots').bulkDelete(remove)
+}
+
+
+export type Illustration = ImageDetails & ImagePixels & {
+  id: string
+  bookId: string
+  entryId: string
+  createdAt: number
+  updatedAt: number
+}
+
+export async function getIllustration(entryId: string): Promise<Illustration | undefined> {
+  const db = await database()
+  return db.table('illustrations').where('entryId').equals(entryId).first()
+}
+
+export async function saveIllustration(entryId: string, pixels: ImagePixels, details: ImageDetails, expectedImageId?: string): Promise<Illustration> {
+  const db = await database()
+  return db.transaction('rw', db.table('entities'), db.table('illustrations'), async () => {
+    const entry = await db.table('entities').get(entryId) as CodexEntryEntity | undefined
+    if (entry?.type !== 'codexEntry') throw new Error('This Codex entry no longer exists.')
+    if (isCodexEntryArchived(entry)) throw new Error('Restore this archived entry before changing its illustration.')
+    const existing = await db.table('illustrations').where('entryId').equals(entryId).first() as Illustration | undefined
+    if (expectedImageId !== existing?.id) throw new Error('The illustration changed in another window. Reopen the entry and try again.')
+    const now = Date.now()
+    const image: Illustration = { ...pixels, ...details, id: makeId('image'), entryId, bookId: entry.bookId, createdAt: existing?.createdAt ?? now, updatedAt: now }
+    if (existing) await db.table('illustrations').delete(existing.id)
+    await db.table('illustrations').add(image)
+    await db.table('entities').update(entryId, { primaryImageId: image.id })
+    await db.table('entities').update(entry.bookId, { updatedAt: now })
+    return image
+  })
+}
+
+export async function removeIllustration(entryId: string, expectedImageId: string): Promise<void> {
+  const db = await database()
+  await db.transaction('rw', db.table('entities'), db.table('illustrations'), async () => {
+    const entry = await db.table('entities').get(entryId) as CodexEntryEntity | undefined
+    if (entry?.type !== 'codexEntry') throw new Error('This Codex entry no longer exists.')
+    if (isCodexEntryArchived(entry)) throw new Error('Restore this archived entry before changing its illustration.')
+    const existing = await db.table('illustrations').where('entryId').equals(entryId).first() as Illustration | undefined
+    if (existing?.id !== expectedImageId) throw new Error('The illustration changed. Reopen the entry and try again.')
+    await db.table('illustrations').delete(existing.id)
+    await db.table('entities').update(entryId, { primaryImageId: undefined })
+    await db.table('entities').update(entry.bookId, { updatedAt: Date.now() })
+  })
+}
+
+export type BookArchiveData = {
+  entities: ArcEntity[]
+  snapshots: DocumentSnapshot[]
+  dependencies: CodexDependencyEdge[]
+  illustrations: Illustration[]
+}
+
+export async function readBookArchive(bookId: string): Promise<BookArchiveData> {
+  const db = await database()
+  return db.transaction('r', db.table('entities'), db.table('snapshots'), db.table('codexDependencies'), db.table('illustrations'), async () => {
+    const book = await db.table('entities').get(bookId) as BookEntity | undefined
+    if (book?.type !== 'book') throw new Error('This book no longer exists.')
+    const entries = await db.table('entities').where('bookId').equals(bookId).toArray() as ArcEntity[]
+    const series = book.seriesId ? await db.table('entities').get(book.seriesId) : undefined
+    const ids = [bookId, ...entries.map((entry) => entry.id)]
+    return {
+      entities: [book, ...entries, ...(series ? [series] : [])],
+      snapshots: await db.table('snapshots').where('entityId').anyOf(ids).toArray(),
+      dependencies: await db.table('codexDependencies').where('bookId').equals(bookId).toArray(),
+      illustrations: await db.table('illustrations').where('bookId').equals(bookId).toArray(),
+    }
+  })
+}
+
+/** Import only a validated, remapped archive. All records commit together or none do. */
+export async function writeBookArchive(data: BookArchiveData): Promise<void> {
+  const db = await database()
+  await db.transaction('rw', db.table('entities'), db.table('snapshots'), db.table('codexDependencies'), db.table('illustrations'), async () => {
+    await db.table('entities').bulkAdd(data.entities)
+    await db.table('snapshots').bulkAdd(data.snapshots)
+    await db.table('codexDependencies').bulkAdd(data.dependencies)
+    await db.table('illustrations').bulkAdd(data.illustrations)
+  })
 }
