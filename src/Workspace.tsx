@@ -57,8 +57,9 @@ import MarkdownEditor, { type CodexMentionClick, type GenerationContext, type Ma
 import type { NanoGPTStreamMetadata } from './nanogpt'
 import { fetchTextProviderModelContextLength, streamTextProviderCompletion, textProviderRequestText } from './text-provider'
 import { assertPromptTemplateValid, type BookPromptValues } from './prompt-template'
-import { assembleStoryGenerationRequest } from './story-request'
-import { assembleCodexGenerationRequest } from './codex-request'
+import { assembleStoryGenerationRequest, STORY_CONTINUE_FALLBACK } from './story-request'
+import { assembleCodexGenerationRequest, CODEX_CONTINUE_FALLBACK } from './codex-request'
+import { replaceGenerationInstruction } from './regeneration-instruction'
 import { assembleSummaryGenerationRequest } from './summary-request'
 import type { NormalizedProviderMessage } from './prompt-composition'
 import { buildContextValues, generationContextDiagnostics } from './context-service'
@@ -151,6 +152,7 @@ type GenerationRequestSnapshot = {
   messages?: NormalizedProviderMessage[]
   estimatedRequestTokens?: number
   modelContextTokens?: number
+  effectiveContextLimit?: string
 }
 type GenerationDetails = NanoGPTStreamMetadata & {
   task: 'Story' | 'Codex' | 'Summary'
@@ -1265,7 +1267,31 @@ export default function Workspace() {
 
     let requestSnapshot: GenerationRequestSnapshot
     if (mode === 'regenerate' && previousRequest) {
-      requestSnapshot = previousRequest
+      try {
+        requestSnapshot = {
+          ...previousRequest,
+          messages: replaceGenerationInstruction(
+            previousRequest.messages,
+            isCodex ? lorePrompt : arcPrompt,
+            isCodex ? CODEX_CONTINUE_FALLBACK : STORY_CONTINUE_FALLBACK,
+          ),
+        }
+        // Only the current instruction changes; retain the saved model and context cap.
+        const diagnostics = generationContextDiagnostics(
+          requestSnapshot.model,
+          requestSnapshot.modelContextTokens,
+          requestSnapshot.effectiveContextLimit,
+          textProviderRequestText(requestSnapshot),
+        )
+        if (!diagnostics.fits) {
+          throw new Error(`The revised instruction makes this request too large: ~${diagnostics.requestTokens.toLocaleString()} input tokens for a ${diagnostics.usableInputTokens.toLocaleString()}-token usable budget. Shorten the instruction or start a new generation with different context settings.`)
+        }
+        requestSnapshot.estimatedRequestTokens = diagnostics.requestTokens
+      } catch (error) {
+        editor.finishGeneration('error')
+        showToast(error instanceof Error ? error.message : 'The regeneration instruction could not be prepared.')
+        return
+      }
     } else {
       try {
         const contextSettings = await getBookContextSettings(currentBook.id)
@@ -1342,6 +1368,7 @@ export default function Workspace() {
           ...(messages ? { messages } : {}),
           estimatedRequestTokens: diagnostics.requestTokens,
           modelContextTokens: diagnostics.modelContextTokens,
+          effectiveContextLimit: effectiveLimit,
         }
       } catch (error) {
         editor.finishGeneration('error')
