@@ -26,7 +26,7 @@ The prototype is still intentionally single-user and local to one browser/device
 
 - Open issue [#29](https://github.com/goodjobwebdev-blip/novel-app-prototype/issues/29) is mostly implemented, but Chat still needs graceful trimming of older history when a request exceeds the model context window and persistence of partial assistant output after non-cancellation provider/network failures.
 - Dedicated Note generation is not implemented; Note work can currently be done through Chat.
-- Image generation settings remain placeholders; Codex illustrations now support local uploads, captions, cropping, and previews.
+- Image generation settings remain placeholders; Codex illustrations support local uploads, mobile action sheets, touch cropping, full-screen zoom, captions, draft recovery, and undo.
 - Book backup export/import is available as `.arcbook` files, including illustrations. Import creates a new book; automatic cross-device sync is not implemented.
 - Offline behavior is prototype-grade: local manuscript data is device-local, while provider calls and uncached external runtime resources still require network access.
 

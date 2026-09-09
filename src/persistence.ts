@@ -201,6 +201,7 @@ async function database() {
       db.version(4).stores({
         illustrations: 'id,bookId,&entryId,updatedAt',
       })
+      db.version(5).stores({ illustrationUndo: 'entryId,bookId' })
       return db.open().then(() => db)
     })
   }
@@ -914,8 +915,9 @@ export async function collectEntityTreeIds(id: string): Promise<string[]> {
 export async function deleteEntityTree(id: string): Promise<string[]> {
   const db = await database()
   let deletedIds: string[] = []
-  await db.transaction('rw', db.table('entities'), db.table('snapshots'), db.table('codexDependencies'), db.table('illustrations'), async () => {
+  await db.transaction('rw', db.table('entities'), db.table('snapshots'), db.table('codexDependencies'), db.table('illustrations'), db.table('illustrationUndo'), async () => {
     const { root, ids } = await collectEntityTreeIdsWithDb(db, id)
+    await db.table('illustrationUndo').bulkDelete(ids)
     deletedIds = ids
     await db.table('illustrations').where('entryId').anyOf(ids).delete()
     const removedIds = new Set(ids)
@@ -933,9 +935,11 @@ export async function deleteEntityTree(id: string): Promise<string[]> {
 
 export async function deleteEntity(id: string) {
   const db = await database()
-  await db.transaction('rw', db.table('entities'), db.table('codexDependencies'), db.table('illustrations'), async () => {
+  await db.transaction('rw', db.table('entities'), db.table('codexDependencies'), db.table('illustrations'), db.table('illustrationUndo'), async () => {
     await db.table('illustrations').where('entryId').equals(id).delete()
     await db.table('illustrations').where('bookId').equals(id).delete()
+    await db.table('illustrationUndo').delete(id)
+    await db.table('illustrationUndo').where('bookId').equals(id).delete()
     await db.table('entities').delete(id)
     const dependencies = await db.table('codexDependencies').toArray() as CodexDependencyEdge[]
     const dependencyIds = dependencies.filter((edge) => edge.sourceId === id || edge.targetId === id).map((edge) => edge.id)
@@ -1109,7 +1113,7 @@ export async function getIllustration(entryId: string): Promise<Illustration | u
 
 export async function saveIllustration(entryId: string, pixels: ImagePixels, details: ImageDetails, expectedImageId?: string): Promise<Illustration> {
   const db = await database()
-  return db.transaction('rw', db.table('entities'), db.table('illustrations'), async () => {
+  return db.transaction('rw', db.table('entities'), db.table('illustrations'), db.table('illustrationUndo'), async () => {
     const entry = await db.table('entities').get(entryId) as CodexEntryEntity | undefined
     if (entry?.type !== 'codexEntry') throw new Error('This Codex entry no longer exists.')
     if (isCodexEntryArchived(entry)) throw new Error('Restore this archived entry before changing its illustration.')
@@ -1117,6 +1121,7 @@ export async function saveIllustration(entryId: string, pixels: ImagePixels, det
     if (expectedImageId !== existing?.id) throw new Error('The illustration changed in another window. Reopen the entry and try again.')
     const now = Date.now()
     const image: Illustration = { ...pixels, ...details, id: makeId('image'), entryId, bookId: entry.bookId, createdAt: existing?.createdAt ?? now, updatedAt: now }
+    await db.table('illustrationUndo').put({ id: makeId('image-undo'), entryId, bookId: entry.bookId, before: existing, expectedImageId: image.id })
     if (existing) await db.table('illustrations').delete(existing.id)
     await db.table('illustrations').add(image)
     await db.table('entities').update(entryId, { primaryImageId: image.id })
@@ -1127,12 +1132,13 @@ export async function saveIllustration(entryId: string, pixels: ImagePixels, det
 
 export async function removeIllustration(entryId: string, expectedImageId: string): Promise<void> {
   const db = await database()
-  await db.transaction('rw', db.table('entities'), db.table('illustrations'), async () => {
+  await db.transaction('rw', db.table('entities'), db.table('illustrations'), db.table('illustrationUndo'), async () => {
     const entry = await db.table('entities').get(entryId) as CodexEntryEntity | undefined
     if (entry?.type !== 'codexEntry') throw new Error('This Codex entry no longer exists.')
     if (isCodexEntryArchived(entry)) throw new Error('Restore this archived entry before changing its illustration.')
     const existing = await db.table('illustrations').where('entryId').equals(entryId).first() as Illustration | undefined
     if (existing?.id !== expectedImageId) throw new Error('The illustration changed. Reopen the entry and try again.')
+    await db.table('illustrationUndo').put({ id: makeId('image-undo'), entryId, bookId: entry.bookId, before: existing, expectedImageId: undefined })
     await db.table('illustrations').delete(existing.id)
     await db.table('entities').update(entryId, { primaryImageId: undefined })
     await db.table('entities').update(entry.bookId, { updatedAt: Date.now() })
@@ -1171,5 +1177,39 @@ export async function writeBookArchive(data: BookArchiveData): Promise<void> {
     await db.table('snapshots').bulkAdd(data.snapshots)
     await db.table('codexDependencies').bulkAdd(data.dependencies)
     await db.table('illustrations').bulkAdd(data.illustrations)
+  })
+}
+
+
+export type IllustrationUndo = { id: string; entryId: string; bookId: string; before?: Illustration; expectedImageId?: string }
+
+export async function getIllustrationUndo(entryId: string): Promise<IllustrationUndo | undefined> {
+  const db = await database()
+  return db.table('illustrationUndo').get(entryId)
+}
+
+export async function undoIllustration(entryId: string, expectedUndoId: string): Promise<void> {
+  const db = await database()
+  await db.transaction('rw', db.table('entities'), db.table('illustrations'), db.table('illustrationUndo'), async () => {
+    const entry = await db.table('entities').get(entryId) as CodexEntryEntity | undefined
+    if (entry?.type !== 'codexEntry') throw new Error('This Codex entry no longer exists.')
+    if (isCodexEntryArchived(entry)) throw new Error('Restore this archived entry before undoing its illustration change.')
+    const undo = await db.table('illustrationUndo').get(entryId) as IllustrationUndo | undefined
+    const current = await db.table('illustrations').where('entryId').equals(entryId).first() as Illustration | undefined
+    if (!undo || undo.expectedImageId !== current?.id || undo.id !== expectedUndoId) throw new Error('The illustration changed. Reopen the entry before undoing.')
+    if (current) await db.table('illustrations').delete(current.id)
+    const restored = undo.before ? { ...undo.before, id: makeId('image'), updatedAt: Date.now() } : undefined
+    if (restored) await db.table('illustrations').add(restored)
+    await db.table('entities').update(entryId, { primaryImageId: restored?.id })
+    await db.table('entities').update(entry.bookId, { updatedAt: Date.now() })
+    await db.table('illustrationUndo').delete(entryId)
+  })
+}
+
+export async function dismissIllustrationUndo(entryId: string, expectedUndoId: string): Promise<void> {
+  const db = await database()
+  await db.transaction('rw', db.table('illustrationUndo'), async () => {
+    const undo = await db.table('illustrationUndo').get(entryId) as IllustrationUndo | undefined
+    if (undo?.id === expectedUndoId) await db.table('illustrationUndo').delete(entryId)
   })
 }
