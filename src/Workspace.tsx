@@ -44,6 +44,7 @@ import {
 import AiSettingsScreen from './App'
 import CodexIllustration, { CodexThumbnail } from './CodexIllustration'
 import BookStorage, { BookBackupImport } from './BookStorage'
+import { useBookLibrary } from './useBookLibrary'
 import { generationWordDelayMs, loadAiSettings, textAiIsConfigured, type AiSettings } from './ai-settings'
 import { createBufferedWordRenderer } from './buffered-word-renderer'
 import { applyIfStillCurrent } from './async-state-guard'
@@ -67,7 +68,6 @@ import type { NormalizedProviderMessage } from './prompt-composition'
 import { buildContextValues, generationContextDiagnostics } from './context-service'
 import {
   PROTOTYPE_BOOK_ID,
-  PROTOTYPE_SCENE_ID,
   archiveCodexEntry,
   createBook,
   createCodexEntry,
@@ -79,8 +79,6 @@ import {
   collectEntityTreeIds,
   deleteEntityTree,
   ensureBookAiSettings,
-  ensurePrototypeSeed,
-  ensureSeriesLibrary,
   getEntity,
   getBookAiSettings,
   getBookContextSettings,
@@ -217,8 +215,8 @@ export default function Workspace() {
   const [editorHistory, setEditorHistory] = useState({ canUndo: false, canRedo: false })
   const [autotitle, setAutotitle] = useState<AutotitleUiState | null>(null)
   const [loreMention, setLoreMention] = useState<LoreMentionPopupState | null>(null)
-  const [bookList, setBookList] = useState<BookEntity[]>([])
-  const [seriesList, setSeriesList] = useState<SeriesEntity[]>([])
+  const { books: bookList, setBooks: setBookList, series: seriesList, setSeries: setSeriesList, state: libraryState, error: libraryError, slow: librarySlow, retry: retryLibrary } = useBookLibrary(initialStoryMarkdown)
+  const [creatingBook, setCreatingBook] = useState(false)
   const [currentBook, setCurrentBook] = useState<BookEntity | null>(null)
   const [outlineEntities, setOutlineEntities] = useState<StructuralEntity[]>([])
   const [notes, setNotes] = useState<NoteEntity[]>([])
@@ -347,53 +345,9 @@ export default function Workspace() {
   }, [generationActive])
 
   useEffect(() => {
-    let cancelled = false
-    const initialBookIntent = bookOpenIntentRef.current.begin()
-    ;(async () => {
-      try {
-        await ensurePrototypeSeed(initialStoryMarkdown)
-        const availableSeries = await ensureSeriesLibrary()
-        const books = await listBooks()
-        const defaults = loadAiSettings()
-        await Promise.all(books.map((existingBook) => ensureBookAiSettings(existingBook.id, defaults)))
-        const book = books.find((candidate) => candidate.id === PROTOTYPE_BOOK_ID) ?? books[0]
-        const entities = book ? await listEntitiesByBook(book.id) : []
-        const initialCodexDependencies = book ? await listCodexDependencies(book.id) : []
-        const structural = entities.filter((entity): entity is StructuralEntity => ['act', 'chapter', 'scene'].includes(entity.type))
-        const scene = entities.find((entity) => entity.id === PROTOTYPE_SCENE_ID && entity.type === 'scene')
-          ?? entities.find((entity) => entity.type === 'scene')
-        const initialSummaryStates = book ? await getSummaryStateMap(book.id) : {}
-        if (book && scene) await rememberLastOpenedScene(book.id, scene.id)
-        if (cancelled || !bookOpenIntentRef.current.isCurrent(initialBookIntent)) return
-        currentBookIdRef.current = book?.id ?? null
-        documentLoadIntentRef.current.invalidate()
-        bookRefreshIntentRef.current.invalidate()
-        setBookList(books)
-        setSeriesList(availableSeries)
-        setCurrentBook(book ?? null)
-        setOutlineEntities(structural)
-        setNotes(entities.filter((entity): entity is NoteEntity => entity.type === 'note'))
-        setCodexEntries(entities.filter((entity): entity is CodexEntryEntity => entity.type === 'codexEntry'))
-        setCodexDependencies(initialCodexDependencies)
-        setSummaryStates(initialSummaryStates)
-        activeDocumentIdRef.current = scene?.id ?? null
-        activeSceneIdRef.current = scene?.id ?? null
-        setActiveSceneId(scene?.id ?? null)
-        setActiveDocument((scene as StructuralEntity | undefined) ?? null)
-        scenePovRef.current = typeof scene?.pov === 'string' ? scene.pov : ''
-        const content = typeof scene?.content === 'string' ? scene.content : ''
-        storyRef.current = content
-        setStoryMarkdown(content)
-        setExpandedIds(new Set(structural.filter((entity) => entity.type !== 'scene').map((entity) => entity.id)))
-        storageReadyRef.current = true
-        setSaveState('saved')
-      } catch (error) {
-        console.error('Failed to initialize local persistence', error)
-        if (!cancelled) setSaveState('error')
-      }
-    })()
-    return () => { cancelled = true }
-  }, [])
+    storageReadyRef.current = libraryState === 'ready'
+    if (libraryState === 'ready') setSaveState('saved')
+  }, [libraryState])
 
   async function flushDocument(reason: SnapshotReason = 'autosave', snapshot = false): Promise<boolean> {
     const documentId = activeDocumentIdRef.current
@@ -628,6 +582,8 @@ export default function Workspace() {
     }
     if (!bookOpenIntentRef.current.isCurrent(intent)) return
 
+    await ensureBookAiSettings(bookId, loadAiSettings())
+    if (!bookOpenIntentRef.current.isCurrent(intent)) return
     const [book, content] = await Promise.all([
       getEntity<BookEntity>(bookId),
       readBookContent(bookId),
@@ -690,12 +646,16 @@ export default function Workspace() {
   }
 
   async function makeBook() {
+    if (creatingBook || libraryState !== 'ready') return
+    setCreatingBook(true)
     try {
       const created = await createBook(loadAiSettings())
       setBookList(await listBooks())
       await openBook(created.book.id, created.scene.id)
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Could not create the book.')
+    } finally {
+      setCreatingBook(false)
     }
   }
 
@@ -1708,13 +1668,17 @@ export default function Workspace() {
   if (screen === 'home') return (
     <main className="library-screen">
       {autotitleOverlay}
+      {toast && <div className="app-toast" role="alert" key={toast.id}><span>{toast.message}</span><button type="button" onClick={() => setToast(null)} aria-label="Dismiss notification"><X aria-hidden="true" /></button></div>}
       <header className="library-top"><div className="arc-brand"><Feather aria-hidden="true" /> ARC</div><button type="button" onClick={() => openSettings('home')} aria-label="Open default settings"><Settings2 aria-hidden="true" /></button></header>
       <section className="library-content">
-        <div className="library-title"><div><small>Your library</small><h1>Books</h1></div><button type="button" disabled={saveState === 'loading'} onClick={() => { void makeBook() }}><Plus aria-hidden="true" /><span>New book</span></button></div>
+        <div className="library-title"><div><small>Your library</small><h1>Books</h1></div><button type="button" aria-label="New book" disabled={libraryState !== 'ready' || creatingBook} onClick={() => { void makeBook() }}><Plus aria-hidden="true" /><span>{creatingBook ? 'Creating…' : 'New book'}</span></button></div>
         {!aiReady && <div className="setup-warning"><Bot aria-hidden="true" /><div><strong>Text AI is not set up</strong><p>Choose a provider and models before using generation or chat.</p></div><button type="button" onClick={() => openSettings('home')}>Set up AI <ChevronRight aria-hidden="true" /></button></div>}
+        {libraryState === 'loading' && <div className="library-storage-status" role="status"><p>Loading your books…</p>{librarySlow && <><p>Storage is taking longer to open. Close other tabs or windows of this app so a pending update can finish. Keep this tab open and do not clear browser data.</p><button type="button" onClick={() => window.location.reload()}>Reload app</button></>}</div>}
+        {libraryError && <div className="library-storage-status" role="alert"><strong>{libraryState === 'error' ? 'Your library could not be loaded' : 'Your books loaded, but series information could not be updated'}</strong><p>{libraryError}</p><p>Keep your browser data. This error does not mean your books were deleted.</p><button type="button" onClick={retryLibrary}>Retry loading books</button><button type="button" onClick={() => window.location.reload()}>Reload app</button></div>}
+        {libraryState === 'ready' && !bookList.length && <p>Your library is empty. Create a new book or import a backup.</p>}
         <BookBackupImport onImported={importedBook} />
         <div className="library-grid">{bookList.map((book, index) => <article className="library-book-card" key={book.id}>
-          <button type="button" className="library-book" onClick={() => { void openBook(book.id) }}><i className={`mock-cover ${['tide', 'orchard', 'fires'][index % 3]}`}>{book.title.slice(0,1)}</i><span><small>{formatSeries(book, seriesList)}</small><strong>{book.title}</strong><em>{formatEdited(book.updatedAt)}</em></span></button>
+          <button type="button" className="library-book" onClick={() => { void openBook(book.id).catch((error) => showToast(error instanceof Error ? error.message : 'Could not open the book.')) }}><i className={`mock-cover ${['tide', 'orchard', 'fires'][index % 3]}`}>{book.title.slice(0,1)}</i><span><small>{formatSeries(book, seriesList)}</small><strong>{book.title}</strong><em>{formatEdited(book.updatedAt)}</em></span></button>
           <div className="library-book-actions"><button className="autotitle-trigger" type="button" onClick={() => { void startAutotitle(book) }} aria-label={`Autotitle ${book.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></button><button type="button" onClick={() => { void editBookTitle(book) }} aria-label={`Rename ${book.title}`}><Pencil aria-hidden="true" /></button><button type="button" onClick={() => { void removeBook(book) }} aria-label={`Delete ${book.title}`}><Trash2 aria-hidden="true" /></button></div>
         </article>)}</div>
       </section>

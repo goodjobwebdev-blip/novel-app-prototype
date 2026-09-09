@@ -9,7 +9,7 @@ import {
 import { normalizeCodexTriggerList } from './codex-trigger-service'
 import type { ImageDetails, ImagePixels } from './illustration-image'
 
-type DexieModule = { default: new (name: string) => any }
+import Dexie from 'dexie'
 
 // Bundle the database runtime so saved illustrations can open offline.
 
@@ -179,8 +179,8 @@ let databasePromise: Promise<any> | null = null
 
 async function database() {
   if (!databasePromise) {
-    databasePromise = import('dexie').then((module: DexieModule) => {
-      const db = new module.default('arc-novel-local-v1')
+    databasePromise = Promise.resolve().then(() => {
+      const db = new Dexie('arc-novel-local-v1')
       db.version(1).stores({
         entities: 'id,type,bookId,parentId,[parentId+order],updatedAt',
         snapshots: 'id,entityId,entityType,createdAt,[entityId+createdAt],reason',
@@ -203,6 +203,10 @@ async function database() {
       })
       db.version(5).stores({ illustrationUndo: 'entryId,bookId' })
       return db.open().then(() => db)
+    }).catch((error) => {
+      // A temporary open failure must not poison every later read and write.
+      databasePromise = null
+      throw error
     })
   }
   return databasePromise
