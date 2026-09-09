@@ -1,16 +1,23 @@
-import { bookTemplateValues, type BookPromptValues } from './prompt-template'
+import { bookTemplateValues, type BookPromptValues } from './prompt-template.ts'
 import {
   assembleCompositionRequest,
+  clonePromptComposition,
   dedupeDynamicSources,
   normalizeAppManagedPart,
   providerMessagesFromNormalized,
   type DynamicContextSource,
   type NormalizedAssembledRequest,
   type PromptComposition,
-} from './prompt-composition'
+} from './prompt-composition.ts'
 import type { PreparedContextValues } from './context-service'
 
 export const STORY_CONTINUE_FALLBACK = 'Continue the story naturally from the generation point.'
+
+const previousStoryContextTemplate = `{% if context.automatic %}{{context.automatic}}{% endif %}
+
+{% if context.additional %}# Additional context
+
+{{context.additional}}{% endif %}`
 
 export const defaultStoryPromptComposition: PromptComposition = {
   systemPrompt: `You are a fiction writer. Your output is inserted directly into the manuscript.
@@ -52,11 +59,30 @@ Do not rush toward resolution, revelation, or a scene ending unless the instruct
       name: 'Story context',
       role: 'user',
       enabled: true,
-      template: `{% if context.automatic %}{{context.automatic}}{% endif %}
+      // Keep reusable references before the manuscript that changes each generation.
+      template: `{% if story.so_far %}# Story so far
+
+{{story.so_far}}{% endif %}
+
+{% if scene.previous_text %}# Previous scene
+
+{{scene.previous_text}}{% endif %}
+
+{% if context.automatic_codex %}# Automatic Codex
+
+{{context.automatic_codex}}{% endif %}
 
 {% if context.additional %}# Additional context
 
-{{context.additional}}{% endif %}`,
+{{context.additional}}{% endif %}
+
+{% if scene.before_cursor %}# Before generation point
+
+{{scene.before_cursor}}{% endif %}
+
+{% if scene.after_cursor %}# After generation point
+
+{{scene.after_cursor}}{% endif %}`,
     },
     {
       id: 'story-response-length',
@@ -68,6 +94,25 @@ Do not rush toward resolution, revelation, or a scene ending unless the instruct
 {{response.length}}{% endif %}`,
     },
   ],
+}
+
+/** Upgrade only unchanged defaults, including copies applied through a preset. */
+export function upgradeDefaultStoryPromptComposition(composition: PromptComposition): PromptComposition {
+  const previousMessages = defaultStoryPromptComposition.predefinedMessages.map((message) => (
+    message.id === 'story-context' ? { ...message, template: previousStoryContextTemplate } : message
+  ))
+  const isPreviousDefault = composition.systemPrompt === defaultStoryPromptComposition.systemPrompt
+    && composition.predefinedMessages.length === previousMessages.length
+    && composition.predefinedMessages.every((message, index) => {
+      const previous = previousMessages[index]
+      // Preset application assigns new IDs, so compare the authored fields only.
+      return message.name === previous.name && message.role === previous.role
+        && message.enabled === previous.enabled && message.template === previous.template
+    })
+  if (!isPreviousDefault) return composition
+  const upgraded = clonePromptComposition(composition)
+  upgraded.predefinedMessages[1].template = defaultStoryPromptComposition.predefinedMessages[1].template
+  return upgraded
 }
 
 export type StoryRequestInput = {
