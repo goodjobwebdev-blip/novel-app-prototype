@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const editor = readFileSync(new URL('../src/PromptTemplateEditor.tsx', import.meta.url), 'utf8')
 const workspace = readFileSync(new URL('../src/Workspace.tsx', import.meta.url), 'utf8')
+const summaryGeneration = readFileSync(new URL('../src/summary-generation.ts', import.meta.url), 'utf8')
 const chat = readFileSync(new URL('../src/ChatFeature.tsx', import.meta.url), 'utf8')
 
 test('prompt settings use the CodeMirror editor with live diagnostics and caret insertion', () => {
@@ -22,9 +23,11 @@ test('invalid templates remain editable but block every current text-generation 
   assert.match(workspace, /const compositionScope = isCodex \? 'lore' : 'story'/)
   assert.match(workspace, /assertPromptTemplateValid\(composition\.systemPrompt, compositionScope\)/)
   assert.match(workspace, /composition\.predefinedMessages\.filter/)
-  assert.match(workspace, /const composition = settings\.promptCompositions\.summarize/)
-  assert.match(workspace, /assertPromptTemplateValid\(composition\.systemPrompt, 'summarize'\)/)
+  assert.match(workspace, /await prepareSummaryGeneration\(/)
+  assert.match(summaryGeneration, /const composition = settings\.promptCompositions\.summarize/)
+  assert.match(summaryGeneration, /assertPromptTemplateValid\(composition\.systemPrompt, 'summarize'\)/)
   assert.match(workspace, /composition\.predefinedMessages\.filter/)
   assert.match(chat, /promptTemplateDiagnostics\(template, 'assistant'\)/)
   assert.match(chat, /Fix the invalid Chat composition/)
 })
+

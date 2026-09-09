@@ -67,6 +67,7 @@ import {
 import { buildContextValues, contextLimitInputError, generationContextDiagnostics } from './context-service'
 import { bookTemplateValues, promptTemplateDiagnostics, promptVariables, type BookPromptValues } from './prompt-template'
 import { applyChatDocumentEdit, createChatCodexEntry, executeChatWorkspaceTool, rejectChatCodexEntry, rejectChatDocumentEdit } from './chat-tools'
+import { chatManagementToolNames, executeChatManagementTool } from './chat-management-tools'
 import { applyChatEntityAction, chatEntityToolNames, executeChatEntityTool, rejectChatEntityAction } from './chat-entity-tools'
 import { applyChatOutlineAction, chatOutlineToolNames, executeChatOutlineTool, rejectChatOutlineAction } from './chat-outline-tools'
 import {
@@ -127,6 +128,8 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   const [editingValue, setEditingValue] = useState('')
   const [copiedMessageId, setCopiedMessageId] = useState('')
   const [generating, setGenerating] = useState(false)
+  const [summaryProposalId, setSummaryProposalId] = useState('')
+  const summaryProposalOwnerRef = useRef<{ id: string; controller: AbortController } | null>(null)
   const [phase, setPhase] = useState<GenerationPhase | null>(null)
   const [elapsed, setElapsed] = useState(0)
   const [streamedContent, setStreamedContent] = useState('')
@@ -163,6 +166,9 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   useEffect(() => {
     let cancelled = false
     abortChatGenerationsOutsideSelection(generationOwnersRef.current, bookId, chatId)
+    summaryProposalOwnerRef.current?.controller.abort()
+    summaryProposalOwnerRef.current = null
+    setSummaryProposalId('')
     setGenerating(false)
     setPhase(null)
     setStreamedContent('')
@@ -247,6 +253,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
 
   useEffect(() => () => {
     abortAllChatGenerations(generationOwnersRef.current)
+    summaryProposalOwnerRef.current?.controller.abort()
     if (copyResetRef.current) clearTimeout(copyResetRef.current)
   }, [])
 
@@ -667,7 +674,15 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           const roundOutlineActions: ChatOutlineActionProposal[] = []
           const roundEntityActions: ChatEntityActionProposal[] = []
           for (const call of result.toolCalls) {
-            if (chatOutlineToolNames.has(call.function.name)) {
+            controller.signal.throwIfAborted()
+            if (chatManagementToolNames.has(call.function.name)) {
+              const execution = await executeChatManagementTool(sourceBookId, call)
+              if (execution.entityAction) {
+                roundEntityActions.push(execution.entityAction)
+                activeRoundExtras.entityActions = roundEntityActions
+              }
+              runtimeParts.push(normalizeRuntimeMessagePart({ id: `chat-tool-${call.id}`, sourceKind: 'app-managed', ownership: 'app-managed', name: call.function.name, message: { role: 'tool', tool_call_id: call.id, content: execution.content } }))
+            } else if (chatOutlineToolNames.has(call.function.name)) {
               const execution = await executeChatOutlineTool(sourceBookId, call)
               if (execution.outlineAction) {
                 roundOutlineActions.push(execution.outlineAction)
@@ -798,6 +813,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   }
 
   async function deleteFrom(message: ChatMessageEntity) {
+    if (summaryProposalOwnerRef.current) { onToast('Stop summary generation before changing Chat history.'); return }
     if (generating) { onToast('Stop the current response before deleting Chat history.'); return }
     if (!chat || !isCurrentChat(chat) || !window.confirm('Delete this message and everything after it in this chat?')) return
     const sourceChat = chat
@@ -810,12 +826,14 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   }
 
   function beginEdit(message: ChatMessageEntity) {
+    if (summaryProposalOwnerRef.current) { onToast('Stop summary generation before changing Chat history.'); return }
     if (generating) { onToast('Stop the current response before editing Chat history.'); return }
     setEditingId(message.id)
     setEditingValue(message.content)
   }
 
   async function saveEdit(message: ChatMessageEntity, regenerate: boolean) {
+    if (summaryProposalOwnerRef.current) { onToast('Stop summary generation before changing Chat history.'); return }
     if (generating) { onToast('Stop the current response before saving a Chat history edit.'); return }
     if (!chat || !isCurrentChat(chat) || !editingValue.trim()) return
     const sourceChat = chat
@@ -838,6 +856,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   }
 
   async function regenerate(message: ChatMessageEntity) {
+    if (summaryProposalOwnerRef.current) { onToast('Stop summary generation before changing Chat history.'); return }
     if (!chat || !isCurrentChat(chat) || message.role !== 'assistant' || generating) return
     const sourceChat = chat
     try {
@@ -903,14 +922,29 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   }
 
   async function applyEntityProposal(message: ChatMessageEntity, proposal: ChatEntityActionProposal) {
+    if (!isCurrentChat({ id: message.parentId, bookId: message.bookId })) return
+    const owner = { id: proposal.id, controller: new AbortController() }
+    const isSummary = proposal.operation?.kind === 'summary'
+    if (isSummary) {
+      if (summaryProposalOwnerRef.current) return
+      summaryProposalOwnerRef.current = owner
+      setSummaryProposalId(proposal.id)
+    }
     try {
-      await applyChatEntityAction(message.id, proposal.id)
+      await applyChatEntityAction(message.id, proposal.id, owner.controller.signal)
+      if (!isCurrentChat({ id: message.parentId, bookId: message.bookId })) return
       await reloadMessages()
-      const verb = proposal.action === 'create_note' ? 'Created' : proposal.action === 'rename' ? 'Renamed' : proposal.action === 'delete' ? 'Deleted' : 'Updated'
+      const verb = isSummary ? 'Regenerated summary for' : proposal.action === 'create_note' ? 'Created' : proposal.action === 'rename' ? 'Renamed' : proposal.action === 'delete' ? 'Deleted' : 'Updated'
       onToast(`${verb} “${proposal.entityTitle}”.`)
     } catch (error) {
+      if (!isCurrentChat({ id: message.parentId, bookId: message.bookId })) return
       await reloadMessages().catch(() => undefined)
-      onToast(error instanceof Error ? error.message : 'Could not apply the entity proposal.')
+      onToast(owner.controller.signal.aborted ? 'Summary generation stopped.' : error instanceof Error ? error.message : 'Could not apply the entity proposal.')
+    } finally {
+      if (summaryProposalOwnerRef.current === owner) {
+        summaryProposalOwnerRef.current = null
+        setSummaryProposalId('')
+      }
     }
   }
 
@@ -1026,13 +1060,13 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
               {message.documentEdits?.length ? <div className="chat-document-edits">{message.documentEdits.map((proposal) => <DocumentEditCard key={proposal.id} proposal={proposal} onApply={() => { void applyProposal(message, proposal) }} onReject={() => { void rejectProposal(message, proposal) }} />)}</div> : null}
               {message.codexCreations?.length ? <div className="chat-document-edits">{message.codexCreations.map((proposal) => <CodexCreationCard key={proposal.id} proposal={proposal} onCreate={() => { void createCodexProposal(message, proposal) }} onReject={() => { void rejectCodexProposal(message, proposal) }} />)}</div> : null}
               {message.outlineActions?.length ? <div className="chat-document-edits">{message.outlineActions.map((proposal) => <OutlineActionCard key={proposal.id} proposal={proposal} onApply={() => { void applyOutlineProposal(message, proposal) }} onReject={() => { void rejectOutlineProposal(message, proposal) }} />)}</div> : null}
-              {message.entityActions?.length ? <div className="chat-document-edits">{message.entityActions.map((proposal) => <EntityActionCard key={proposal.id} proposal={proposal} onApply={() => { void applyEntityProposal(message, proposal) }} onReject={() => { void rejectEntityProposal(message, proposal) }} />)}</div> : null}
+              {message.entityActions?.length ? <div className="chat-document-edits">{message.entityActions.map((proposal) => <EntityActionCard key={proposal.id} proposal={proposal} running={summaryProposalId === proposal.id} summaryBusy={Boolean(summaryProposalId)} onStop={() => summaryProposalOwnerRef.current?.controller.abort()} onApply={() => { void applyEntityProposal(message, proposal) }} onReject={() => { void rejectEntityProposal(message, proposal) }} />)}</div> : null}
               {message.status && message.status !== 'complete' && <small className="chat-message-status">{message.status === 'failed' ? 'Interrupted' : 'Stopped'}</small>}
-              <div className="message-tools"><button type="button" onClick={() => { void copyMessage(message) }}>{copiedMessageId === message.id ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />} {copiedMessageId === message.id ? 'Copied' : 'Copy'}</button><button type="button" disabled={generating} title={generating ? 'Stop the current response before editing history' : undefined} onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" onClick={() => { void fork(message) }}><GitFork aria-hidden="true" /> Fork</button><button type="button" onClick={() => { void readAloud(message) }}><Volume2 aria-hidden="true" /> Read aloud</button><button type="button" onClick={() => { void regenerate(message) }}><RefreshCw aria-hidden="true" /> Regenerate</button><button type="button" disabled={generating} title={generating ? 'Stop the current response before deleting history' : undefined} onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
+              <div className="message-tools"><button type="button" onClick={() => { void copyMessage(message) }}>{copiedMessageId === message.id ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />} {copiedMessageId === message.id ? 'Copied' : 'Copy'}</button><button type="button" disabled={generating || Boolean(summaryProposalId)} title={summaryProposalId ? 'Stop summary generation before changing history' : generating ? 'Stop the current response before editing history' : undefined} onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" onClick={() => { void fork(message) }}><GitFork aria-hidden="true" /> Fork</button><button type="button" onClick={() => { void readAloud(message) }}><Volume2 aria-hidden="true" /> Read aloud</button><button type="button" disabled={generating || Boolean(summaryProposalId)} onClick={() => { void regenerate(message) }}><RefreshCw aria-hidden="true" /> Regenerate</button><button type="button" disabled={generating || Boolean(summaryProposalId)} title={summaryProposalId ? 'Stop summary generation before changing history' : generating ? 'Stop the current response before deleting history' : undefined} onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
             </>}
           </div> : editingId === message.id ? <InlineMessageEdit value={editingValue} onChange={setEditingValue} onCancel={() => setEditingId('')} onSave={() => { void saveEdit(message, false) }} onSaveAndRegenerate={() => { void saveEdit(message, true) }} /> : <>
             <div className="bubble chat-markdown-bubble"><MarkdownMessage content={message.content} /></div>
-            <div className="message-tools"><button type="button" onClick={() => { void copyMessage(message) }}>{copiedMessageId === message.id ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />} {copiedMessageId === message.id ? 'Copied' : 'Copy'}</button><button type="button" disabled={generating} title={generating ? 'Stop the current response before editing history' : undefined} onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" disabled={generating} title={generating ? 'Stop the current response before deleting history' : undefined} onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
+            <div className="message-tools"><button type="button" onClick={() => { void copyMessage(message) }}>{copiedMessageId === message.id ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />} {copiedMessageId === message.id ? 'Copied' : 'Copy'}</button><button type="button" disabled={generating || Boolean(summaryProposalId)} title={summaryProposalId ? 'Stop summary generation before changing history' : generating ? 'Stop the current response before editing history' : undefined} onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" disabled={generating || Boolean(summaryProposalId)} title={summaryProposalId ? 'Stop summary generation before changing history' : generating ? 'Stop the current response before deleting history' : undefined} onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
           </>}
         </article>)}
         {generating && <article className="message assistant streaming"><div className="chat-message-stack chat-live-generation">
@@ -1178,20 +1212,24 @@ function ChatModelPicker({ value, models, onChange }: { value: string; models: C
   </div>
 }
 
-function EntityActionCard({ proposal, onApply, onReject }: { proposal: ChatEntityActionProposal; onApply: () => void; onReject: () => void }) {
-  const actionLabel = proposal.action === 'create_note' ? 'Create' : proposal.action === 'rename' ? 'Rename' : proposal.action === 'delete' ? 'Delete' : 'Change category'
-  const typeLabel = proposal.entityType === 'book' ? 'Book' : proposal.entityType === 'codexEntry' ? 'Codex' : 'Note'
-  const statusLabel = proposal.status === 'proposed' ? 'Needs approval' : proposal.status === 'applying' ? 'Applying…' : proposal.status === 'applied' ? 'Applied' : proposal.status === 'stale' ? 'Item changed' : 'Rejected'
+function EntityActionCard({ proposal, onApply, onReject, running = false, summaryBusy = false, onStop }: { proposal: ChatEntityActionProposal; onApply: () => void; onReject: () => void; running?: boolean; summaryBusy?: boolean; onStop?: () => void }) {
+  const actionLabels: Record<ChatEntityActionProposal['action'], string> = { create_note: 'Create', rename: 'Rename', delete: 'Delete', set_codex_category: 'Change category', update_metadata: 'Update metadata', update_dependency: 'Update dependency', update_triggers: 'Update triggers', regenerate_summary: 'Regenerate summary' }
+  const actionLabel = actionLabels[proposal.action]
+  const typeLabel = proposal.entityType === 'codexEntry' ? 'Codex' : proposal.entityType.charAt(0).toUpperCase() + proposal.entityType.slice(1)
+  const statusLabel = running ? 'Generating summary…' : proposal.status === 'proposed' ? 'Needs approval' : proposal.status === 'applying' ? 'Applying…' : proposal.status === 'applied' ? 'Applied' : proposal.status === 'stale' ? 'Item changed' : 'Rejected'
   return <section className={`chat-document-edit chat-entity-action ${proposal.action} ${proposal.status}`}>
-    <header><div><small>{actionLabel} {typeLabel}</small><strong>{proposal.entityTitle}</strong></div><span>{statusLabel}</span></header>
+    <header><div><small>{actionLabel} · {typeLabel}</small><strong>{proposal.entityTitle}</strong></div><span role="status">{statusLabel}</span></header>
     {proposal.summary && <p>{proposal.summary}</p>}
     <div className="chat-entity-action-body">
       {proposal.action === 'create_note' && <><p>Create a new Note.</p>{proposal.content && <details><summary>View initial content</summary><pre>{proposal.content}</pre></details>}</>}
       {proposal.action === 'rename' && <p><span>{proposal.entityTitle}</span><b>→</b><strong>{proposal.newTitle}</strong></p>}
       {proposal.action === 'set_codex_category' && <p><span>{proposal.previousCategory || 'Other'}</span><b>→</b><strong>{proposal.category}</strong></p>}
       {proposal.action === 'delete' && <p>Delete this {typeLabel.toLowerCase()} and its stored content ({proposal.contentLength ?? 0} characters).</p>}
+      {proposal.changes?.map((change) => <div className="chat-management-change" key={change.field}><strong>{change.field}</strong><div><span>Before</span><pre>{change.before || '(empty)'}</pre></div><div><span>After</span><pre>{change.after || '(empty)'}</pre></div></div>)}
+      {proposal.action === 'regenerate_summary' && <p>Uses the summary prompt and Support model currently selected in Book AI settings. The previous summary is saved in version history.</p>}
+      {proposal.error && <p role="alert">{proposal.error}</p>}
     </div>
-    {proposal.status === 'proposed' && <footer><button type="button" onClick={onReject}>Reject</button><button className={proposal.action === 'delete' ? 'danger' : 'primary'} type="button" onClick={onApply}>{actionLabel}</button></footer>}
+    {running ? <footer><button type="button" onClick={onStop}>Stop</button></footer> : proposal.status === 'proposed' && <footer><button type="button" onClick={onReject}>Reject</button><button disabled={proposal.action === 'regenerate_summary' && summaryBusy} className={proposal.action === 'delete' ? 'danger' : 'primary'} type="button" onClick={onApply}>{actionLabel}</button></footer>}
   </section>
 }
 
@@ -1350,3 +1388,4 @@ function formatChatEdited(updatedAt: number) {
   if (hours < 24) return `${hours}h`
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(updatedAt)
 }
+

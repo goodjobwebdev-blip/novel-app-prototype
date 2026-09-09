@@ -166,3 +166,10 @@
 .chat-entity-action-body summary,.chat-outline-action-body details > summary { cursor: pointer; color: var(--muted); font-size: .76rem; }
 .chat-entity-action-body pre,.chat-outline-action-body pre { max-height: 18rem; margin: .5rem 0 0; padding: .65rem .7rem; overflow: auto; border: 1px solid var(--border); border-radius: .65rem; background: rgba(255,255,255,.025); white-space: pre-wrap; overflow-wrap: anywhere; font: .76rem/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; }
 .chat-document-edit.chat-entity-action.delete > header > span { color: var(--danger); }
+
+
+.chat-management-change { margin: 12px 0; min-width: 0; }
+.chat-management-change > strong { display: block; margin-bottom: 6px; }
+.chat-management-change > div { margin: 6px 0; }
+.chat-management-change > div > span { font-size: 12px; opacity: .7; }
+.chat-management-change pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; margin: 4px 0; }

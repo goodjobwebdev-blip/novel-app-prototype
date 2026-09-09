@@ -1,4 +1,6 @@
 import type { ChatToolCall, ChatToolDefinition } from './chat-api'
+import { searchBookEntities } from './chat-search'
+import { entitySearchProperties } from './chat-management-tools'
 import { isActiveCodexTitleDuplicate } from './chat-codex-duplicate'
 import { loadProposalTargetOrMarkStale } from './chat-proposal-target'
 import {
@@ -22,7 +24,6 @@ import {
 
 const editableTypes = ['scene', 'note', 'codexEntry'] as const
 const editableTypeSet = new Set<string>(editableTypes)
-const MAX_SEARCH_RESULTS = 12
 const MAX_REPLACEMENTS = 12
 const CODEX_CATEGORIES = ['Character', 'Place', 'Object', 'Event', 'Group', 'Other'] as const
 
@@ -31,16 +32,12 @@ export const chatWorkspaceTools: ChatToolDefinition[] = [
     type: 'function',
     function: {
       name: 'search_entities',
-      description: 'Search Scenes, Notes, and Codex entries in the current book. Use this when the user refers to a document that is not already obvious from context.',
+      description: 'Search Scenes, Notes, Codex entries, Chapters and Acts in the current book. Returns matching snippets and paginated results; use next_offset until null.',
       parameters: {
         type: 'object',
         properties: {
           query: { type: 'string', description: 'Title, category, or content text to search for.' },
-          types: {
-            type: 'array',
-            items: { type: 'string', enum: editableTypes },
-            description: 'Optional entity types to include.',
-          },
+          ...entitySearchProperties,
         },
         required: ['query'],
         additionalProperties: false,
@@ -201,24 +198,7 @@ export async function executeChatWorkspaceTool(bookId: string, call: ChatToolCal
   try {
     const args = parseArguments(call)
     if (call.function.name === 'search_entities') {
-      const query = typeof args.query === 'string' ? args.query.trim().toLowerCase() : ''
-      if (!query) return { content: toolResult({ ok: false, error: 'Search query is empty.' }) }
-      const requestedTypes = Array.isArray(args.types)
-        ? new Set(args.types.filter((value): value is string => typeof value === 'string' && editableTypeSet.has(value)))
-        : null
-      const entities = (await listEntitiesByBook(bookId))
-        .filter((entity) => editableTypeSet.has(entity.type) && !isCodexEntryArchived(entity) && (!requestedTypes?.size || requestedTypes.has(entity.type)))
-        .filter((entity) => `${entity.title ?? ''} ${entity.category ?? ''} ${entity.content ?? ''}`.toLowerCase().includes(query))
-        .slice(0, MAX_SEARCH_RESULTS)
-        .map((entity) => ({
-          id: entity.id,
-          type: entity.type,
-          title: titleFor(entity),
-          category: entity.type === 'codexEntry' ? String(entity.category ?? 'Other') : undefined,
-          updatedAt: entity.updatedAt,
-          preview: String(entity.content ?? '').replace(/\s+/g, ' ').slice(0, 240),
-        }))
-      return { content: toolResult({ ok: true, results: entities }) }
+      return { content: toolResult(searchBookEntities(await listEntitiesByBook(bookId), args)) }
     }
 
     if (call.function.name === 'read_entity') {
@@ -400,3 +380,4 @@ export async function createChatCodexEntry(messageId: string, proposalId: string
 export async function rejectChatCodexEntry(messageId: string, proposalId: string) {
   await transitionChatMessageProposal(messageId, 'codexCreations', proposalId, ['proposed'], { status: 'rejected' })
 }
+

@@ -32,12 +32,12 @@ test('opened Codex metadata exposes Dependencies and read-only Needed by without
   assert.match(workspace, /!isCodexEntryArchived\(entry\)/)
 })
 
-test('Chat explicit Codex reads expose dependency metadata but dependency tools are not added', () => {
+test('Chat explicit Codex reads expose both dependency directions', () => {
   assert.match(chatTools, /dependencies: edges\.filter\(\(edge\) => edge\.sourceId === entity\.id\)/)
   assert.match(chatTools, /neededBy: edges\.filter\(\(edge\) => edge\.targetId === entity\.id\)/)
-  assert.doesNotMatch(chatTools, /propose_codex_dependency|create_codex_dependency|remove_codex_dependency/)
 })
 
 test('issue 85 alone does not change automatic context cascade', () => {
   assert.doesNotMatch(contextService, /listOutgoingCodexDependencies|includeWithSource|dependency of/i)
 })
+
