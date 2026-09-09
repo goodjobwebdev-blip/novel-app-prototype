@@ -1,6 +1,6 @@
 import type { ProviderProfile } from './provider-profiles'
 import { PROMPT_COMPOSITION_SCHEMA_VERSION, clonePromptComposition, compositionsFromLegacyPrompts, legacyPromptMirror, normalizePromptCompositions, withSystemPrompt, type PromptComposition, type PromptCompositions, type PromptCompositionScope } from './prompt-composition'
-import { defaultStoryPromptComposition } from './story-request'
+import { defaultStoryPromptComposition, upgradeDefaultStoryPromptComposition } from './story-request'
 import { defaultChatPromptComposition } from './chat-default-composition'
 import { defaultCodexPromptComposition } from './codex-request'
 import { defaultSummaryPromptComposition } from './summary-request'
@@ -379,6 +379,7 @@ export function normalizeAiSettings(value?: StoredAiSettings): AiSettings {
         ? clonePromptComposition(defaultStoryPromptComposition)
         : { systemPrompt: storedPrompts!.story!, predefinedMessages: [] }
       : promptCompositions.story
+  promptCompositions.story = upgradeDefaultStoryPromptComposition(promptCompositions.story)
   const storedAssistantComposition = value?.promptCompositions?.assistant
   const storedAssistantCompositionWasHistoricalDefault = Boolean(storedAssistantComposition
     && storedAssistantComposition.predefinedMessages?.length === 0
