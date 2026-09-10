@@ -26,11 +26,11 @@ The prototype is still intentionally single-user and local to one browser/device
 
 - Open issue [#29](https://github.com/goodjobwebdev-blip/novel-app-prototype/issues/29) is mostly implemented, but Chat still needs graceful trimming of older history when a request exceeds the model context window and persistence of partial assistant output after non-cancellation provider/network failures.
 - Dedicated Note generation is not implemented; Note work can currently be done through Chat.
-- Image generation settings remain placeholders; Codex illustrations support local uploads, mobile action sheets, touch cropping, full-screen zoom, captions, draft recovery, and undo.
-- Book backup export/import is available as `.arcbook` files, including illustrations. Import creates a new book; automatic cross-device sync is not implemented.
+- Text-to-image generation supports NanoGPT, OpenAI GPT Image, and Pruna P-Image, with chat proposals, editable favorites, a persistent device queue, and a shared gallery. Image editing/reference inputs and server background workers are not implemented. Codex illustrations also support uploads, mobile cropping, zoom, captions, recovery, and undo.
+- Book backup export/import is available as `.arcbook` files, including illustrations and kept generated images. Import creates a new book; automatic cross-device sync is not implemented.
 - Offline behavior is prototype-grade: local manuscript data is device-local, while provider calls and uncached external runtime resources still require network access.
 
-For illustration storage, supported image sizes, and the backup format, see [docs/CODEX_ILLUSTRATIONS.md](docs/CODEX_ILLUSTRATIONS.md).
+For illustration storage, supported image sizes, and the backup format, see [docs/CODEX_ILLUSTRATIONS.md](docs/CODEX_ILLUSTRATIONS.md). For AI providers, the queue, gallery, and setup, see [docs/IMAGE_GENERATION.md](docs/IMAGE_GENERATION.md).
 
 ## Data model
 

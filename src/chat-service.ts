@@ -1,3 +1,4 @@
+import type { ChatImageProposal, ImageJob } from './image-generation-types'
 import { loadAiSettings, type AiSettings } from './ai-settings'
 import { clonePromptComposition, normalizePromptComposition, type PromptComposition } from './prompt-composition'
 import { getCachedModelCatalog } from './model-catalog'
@@ -6,6 +7,7 @@ import { KeyedAsyncQueue } from './keyed-async-queue'
 import { transitionProposalList } from './chat-proposal-transition'
 import { snapshotProposalListForFork } from './chat-fork-proposals'
 import {
+  database,
   deleteEntityTree,
   getBookAiSettings,
   getBookContextSettings,
@@ -108,6 +110,7 @@ export type ChatMessageEntity = ArcEntity & {
   content: string
   thoughts?: string
   status?: ChatMessageStatus
+  imageGenerations?: ChatImageProposal[]
   documentEdits?: ChatDocumentEditProposal[]
   codexCreations?: ChatCodexCreationProposal[]
   outlineActions?: ChatOutlineActionProposal[]
@@ -271,7 +274,7 @@ async function touchFromMessages(bookId: string, chatId: string, autoTitle?: str
   })
 }
 
-export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntity['role'], content: string, extra: Pick<ChatMessageEntity, 'thoughts' | 'status' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions'> = {}): Promise<ChatMessageEntity> {
+export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntity['role'], content: string, extra: Pick<ChatMessageEntity, 'thoughts' | 'status' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations'> = {}): Promise<ChatMessageEntity> {
   const messages = await listChatMessages(chat.bookId, chat.id)
   const now = Date.now()
   const message: ChatMessageEntity = {
@@ -284,6 +287,7 @@ export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntit
     content,
     thoughts: extra.thoughts,
     status: extra.status ?? 'complete',
+    imageGenerations: extra.imageGenerations?.map((proposal) => ({ ...proposal })),
     documentEdits: extra.documentEdits?.map((proposal) => ({ ...proposal, edits: proposal.edits?.map((edit) => ({ ...edit })) })),
     codexCreations: extra.codexCreations?.map((proposal) => ({ ...proposal })),
     outlineActions: extra.outlineActions?.map((proposal) => ({ ...proposal })),
@@ -301,7 +305,7 @@ export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntit
   return message
 }
 
-export async function updateChatMessage(messageId: string, patch: Partial<Pick<ChatMessageEntity, 'content' | 'thoughts' | 'status' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions'>>): Promise<ChatMessageEntity> {
+export async function updateChatMessage(messageId: string, patch: Partial<Pick<ChatMessageEntity, 'content' | 'thoughts' | 'status' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations'>>): Promise<ChatMessageEntity> {
   const current = await getEntity<ArcEntity>(messageId)
   if (!current || current.type !== 'chatMessage') throw new Error('Message is no longer available.')
   const next = { ...current, ...patch, updatedAt: Date.now() } as ChatMessageEntity
@@ -310,8 +314,8 @@ export async function updateChatMessage(messageId: string, patch: Partial<Pick<C
   return next
 }
 
-export type ChatProposalField = 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions'
-type AnyChatProposal = ChatDocumentEditProposal | ChatCodexCreationProposal | ChatOutlineActionProposal | ChatEntityActionProposal
+export type ChatProposalField = 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations'
+type AnyChatProposal = ChatImageProposal | ChatDocumentEditProposal | ChatCodexCreationProposal | ChatOutlineActionProposal | ChatEntityActionProposal
 
 export async function transitionChatMessageProposal(
   messageId: string,
@@ -364,16 +368,29 @@ export async function forkChat(source: ChatEntity, throughOrder: number): Promis
   await putEntity(fork)
   const messages = (await listChatMessages(source.bookId, source.id)).filter((message) => message.order <= throughOrder)
   for (const message of messages) {
+    const messageId = makeId('chat-message')
     await putEntity({
       ...message,
-      id: makeId('chat-message'),
+      id: messageId,
       parentId: fork.id,
+      imageGenerations: message.imageGenerations?.map((p) => ({ ...p, status: 'stale' })),
       documentEdits: snapshotProposalListForFork(message.documentEdits),
       codexCreations: snapshotProposalListForFork(message.codexCreations),
       outlineActions: snapshotProposalListForFork(message.outlineActions),
       entityActions: snapshotProposalListForFork(message.entityActions),
       createdAt: Date.now(),
       updatedAt: Date.now(),
+    })
+    // Share kept originals, but never copy an active paid request into the fork.
+    const db = await database()
+    await db.transaction('rw', db.table('entities'), db.table('imageJobs'), db.table('galleryImages'), async () => {
+      if (!await db.table('entities').get(messageId)) return
+      const jobs: ImageJob[] = await db.table('imageJobs').where('messageId').equals(message.id).toArray()
+      for (const job of jobs) {
+        if (job.status !== 'completed' || job.decision !== 'kept' || job.hiddenInChat || !job.assetId || !(await db.table('galleryImages').get(job.assetId))?.kept) continue
+        const { providerJobId: _p, owner: _o, heartbeat: _h, ...attachment } = job
+        await db.table('imageJobs').add({ ...attachment, id: makeId('image-job'), chatId: fork.id, messageId })
+      }
     })
   }
   await touchFromMessages(fork.bookId, fork.id)

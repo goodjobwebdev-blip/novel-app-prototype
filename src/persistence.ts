@@ -1,3 +1,4 @@
+import type { GalleryImage, ImageJob } from './image-generation-types'
 import { metadataValues, validateMetadataPatch, type ChatManagementOperation } from './chat-management-schema'
 import {
   copyAiSettings,
@@ -177,7 +178,7 @@ export const PROTOTYPE_SCENE_ID = 'scene-ch7-2'
 
 let databasePromise: Promise<any> | null = null
 
-async function database() {
+export async function database() {
   if (!databasePromise) {
     databasePromise = Promise.resolve().then(() => {
       const db = new Dexie('arc-novel-local-v1')
@@ -202,6 +203,7 @@ async function database() {
         illustrations: 'id,bookId,&entryId,updatedAt',
       })
       db.version(5).stores({ illustrationUndo: 'entryId,bookId' })
+      db.version(6).stores({ imageJobs: 'id,bookId,chatId,messageId,status,provider,createdAt', galleryImages: 'id,bookId,createdAt' })
       return db.open().then(() => db)
     }).catch((error) => {
       // A temporary open failure must not poison every later read and write.
@@ -919,10 +921,11 @@ export async function collectEntityTreeIds(id: string): Promise<string[]> {
 export async function deleteEntityTree(id: string): Promise<string[]> {
   const db = await database()
   let deletedIds: string[] = []
-  await db.transaction('rw', db.table('entities'), db.table('snapshots'), db.table('codexDependencies'), db.table('illustrations'), db.table('illustrationUndo'), async () => {
+  await db.transaction('rw', db.table('entities'), db.table('snapshots'), db.table('codexDependencies'), db.table('illustrations'), db.table('illustrationUndo'), db.table('imageJobs'), db.table('galleryImages'), async () => {
     const { root, ids } = await collectEntityTreeIdsWithDb(db, id)
     await db.table('illustrationUndo').bulkDelete(ids)
     deletedIds = ids
+    await deleteImageJobsWithDb(db, ids)
     await db.table('illustrations').where('entryId').anyOf(ids).delete()
     const removedIds = new Set(ids)
     await db.table('entities').bulkDelete(ids)
@@ -939,7 +942,8 @@ export async function deleteEntityTree(id: string): Promise<string[]> {
 
 export async function deleteEntity(id: string) {
   const db = await database()
-  await db.transaction('rw', db.table('entities'), db.table('codexDependencies'), db.table('illustrations'), db.table('illustrationUndo'), async () => {
+  await db.transaction('rw', db.table('entities'), db.table('codexDependencies'), db.table('illustrations'), db.table('illustrationUndo'), db.table('imageJobs'), db.table('galleryImages'), async () => {
+    await deleteImageJobsWithDb(db, [id])
     await db.table('illustrations').where('entryId').equals(id).delete()
     await db.table('illustrations').where('bookId').equals(id).delete()
     await db.table('illustrationUndo').delete(id)
@@ -1154,17 +1158,23 @@ export type BookArchiveData = {
   snapshots: DocumentSnapshot[]
   dependencies: CodexDependencyEdge[]
   illustrations: Illustration[]
+  galleryImages?: GalleryImage[]
+  imageJobs?: ImageJob[]
 }
 
 export async function readBookArchive(bookId: string): Promise<BookArchiveData> {
   const db = await database()
-  return db.transaction('r', db.table('entities'), db.table('snapshots'), db.table('codexDependencies'), db.table('illustrations'), async () => {
+  return db.transaction('r', db.table('entities'), db.table('snapshots'), db.table('codexDependencies'), db.table('illustrations'), db.table('galleryImages'), db.table('imageJobs'), async () => {
     const book = await db.table('entities').get(bookId) as BookEntity | undefined
     if (book?.type !== 'book') throw new Error('This book no longer exists.')
     const entries = await db.table('entities').where('bookId').equals(bookId).toArray() as ArcEntity[]
     const series = book.seriesId ? await db.table('entities').get(book.seriesId) : undefined
     const ids = [bookId, ...entries.map((entry) => entry.id)]
+    const galleryImages = (await db.table('galleryImages').where('bookId').equals(bookId).toArray() as GalleryImage[]).filter((a) => a.kept)
+    const keptIds = new Set(galleryImages.map((a) => a.id))
+    const imageJobs = (await db.table('imageJobs').where('bookId').equals(bookId).toArray() as ImageJob[]).filter((j) => j.status === 'completed' && j.assetId && keptIds.has(j.assetId)).map(({ providerJobId: _p, owner: _o, heartbeat: _h, ...j }) => j)
     return {
+      galleryImages, imageJobs,
       entities: [book, ...entries, ...(series ? [series] : [])],
       snapshots: await db.table('snapshots').where('entityId').anyOf(ids).toArray(),
       dependencies: await db.table('codexDependencies').where('bookId').equals(bookId).toArray(),
@@ -1176,7 +1186,9 @@ export async function readBookArchive(bookId: string): Promise<BookArchiveData> 
 /** Import only a validated, remapped archive. All records commit together or none do. */
 export async function writeBookArchive(data: BookArchiveData): Promise<void> {
   const db = await database()
-  await db.transaction('rw', db.table('entities'), db.table('snapshots'), db.table('codexDependencies'), db.table('illustrations'), async () => {
+  await db.transaction('rw', db.table('entities'), db.table('snapshots'), db.table('codexDependencies'), db.table('illustrations'), db.table('galleryImages'), db.table('imageJobs'), async () => {
+    await db.table('galleryImages').bulkAdd(data.galleryImages ?? [])
+    await db.table('imageJobs').bulkAdd(data.imageJobs ?? [])
     await db.table('entities').bulkAdd(data.entities)
     await db.table('snapshots').bulkAdd(data.snapshots)
     await db.table('codexDependencies').bulkAdd(data.dependencies)
@@ -1216,4 +1228,16 @@ export async function dismissIllustrationUndo(entryId: string, expectedUndoId: s
     const undo = await db.table('illustrationUndo').get(entryId) as IllustrationUndo | undefined
     if (undo?.id === expectedUndoId) await db.table('illustrationUndo').delete(entryId)
   })
+}
+
+async function deleteImageJobsWithDb(db: any, ids: string[]) {
+  const removed = new Set(ids)
+  const jobs = await db.table('imageJobs').toArray()
+  for (const job of jobs) if (removed.has(job.bookId) || removed.has(job.chatId) || removed.has(job.messageId)) {
+    if (job.assetId) {
+      const asset = await db.table('galleryImages').get(job.assetId)
+      if (asset && !asset.kept) await db.table('galleryImages').delete(asset.id)
+    }
+    await db.table('imageJobs').delete(job.id)
+  }
 }

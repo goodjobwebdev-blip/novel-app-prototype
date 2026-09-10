@@ -1,3 +1,5 @@
+import { chatImageTools } from './image-tools'
+import { imageModelInstructions } from './image-settings'
 import type { ChatToolDefinition } from './chat-api'
 import { chatWorkspaceTools } from './chat-tools'
 import { chatEntityTools } from './chat-entity-tools'
@@ -24,13 +26,14 @@ export const CHAT_WORKSPACE_INSTRUCTIONS = `# Workspace tools
 
 You can inspect and propose edits to Scenes, Notes, and Codex entries in this book. You can propose renaming the current Book, creating Notes and Codex entries, renaming or deleting Notes/Codex entries, and changing a Codex category. For the outline, use read_outline before structural changes; you may propose creating, renaming, moving/reordering, or deleting Acts, Chapters, and Scenes, and a newly created Scene may include initial Markdown content. Mutating tools only create approval proposals: never claim an edit, creation, rename, move, reorder, category change, or deletion happened until the user approves the card in Chat. Outline deletion is allowed only when the target and every descendant Scene have empty content. Search/read tools are read-only and can run automatically. Use search_entities and read_entity when a document target is not already known. Use read_book_metadata before proposing any Book metadata changes; it also lists valid Series IDs. Use list_entities for browsing and search_entities for text search; follow next_offset to retrieve additional pages. Use read_codex_settings before proposing directional dependency or trigger changes. Use read_summary to inspect stored summaries and freshness. propose_summary_regeneration creates an approval card; after approval Arc runs the existing summarize workflow with the Book’s selected Support model, summary prompt, response length and hierarchical source selection. Notes and Books do not support summaries. Never write a replacement summary yourself in place of this workflow. For localized document changes, prefer propose_document_edit with exact old_text copied from read_entity. Use propose_document_replacement only for whole-document rewrites.`
 
-export const CHAT_TOOL_DEFINITIONS = [...chatWorkspaceTools, ...chatEntityTools, ...chatOutlineTools, ...chatManagementTools]
+export const CHAT_TOOL_DEFINITIONS = [...chatWorkspaceTools, ...chatEntityTools, ...chatOutlineTools, ...chatManagementTools, ...chatImageTools]
 
 export type ChatRequestHistoryItem = {
   id?: string
   role: 'user' | 'assistant'
   content: string
   thoughts?: string
+  imageGenerations?: Array<{ prompt: string; status: string; modelAlias: string; size: string }>
   documentEdits?: Array<{ entityTitle: string; status: string }>
   codexCreations?: Array<{ title: string; status: string }>
   outlineActions?: Array<{ action: string; entityTitle: string; status: string }>
@@ -59,7 +62,8 @@ export function chatHistoryContent(message: ChatRequestHistoryItem) {
     ? `\n\n[Outline proposals: ${message.outlineActions.map((proposal) => `${proposal.action} ${proposal.entityTitle}: ${proposal.status}`).join('; ')}]` : ''
   const entityActionState = message.role === 'assistant' && message.entityActions?.length
     ? `\n\n[Entity proposals: ${message.entityActions.map((proposal) => `${proposal.action} ${proposal.entityTitle}: ${proposal.status}`).join('; ')}]` : ''
-  return stabilizeProposalHistory(`${message.content}${editState}${creationState}${outlineState}${entityActionState}`)
+  const imageState = message.imageGenerations?.length ? `\n\n[Image proposals (generation requires user action): ${JSON.stringify(message.imageGenerations.map((p) => ({ prompt: p.prompt, status: p.status, modelAlias: p.modelAlias, size: p.size })))}]` : ''
+  return stabilizeProposalHistory(`${imageState}${message.content}${editState}${creationState}${outlineState}${entityActionState}`)
 }
 
 function section(title: string, content: string) {
@@ -91,7 +95,7 @@ export function chatRequestValues(book: BookPromptValues, context: PreparedConte
     'context.automatic_codex': automaticCodex,
     'context.automatic': automatic,
     'context.additional': '',
-    'chat.workspace_instructions': CHAT_WORKSPACE_INSTRUCTIONS,
+    'chat.workspace_instructions': CHAT_WORKSPACE_INSTRUCTIONS + imageModelInstructions(),
   }
 }
 

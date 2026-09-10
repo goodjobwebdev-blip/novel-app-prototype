@@ -1,3 +1,4 @@
+import { startImageQueue } from './image-queue'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -20,6 +21,7 @@ import {
   FileText,
   GitFork,
   MessageCircle,
+  Image as ImageIcon,
   Mic,
   NotebookPen,
   PanelBottomOpen,
@@ -190,6 +192,8 @@ Then the voice on the other side whispered, _Mara Vale_, and every compass in he
 
 export default function Workspace() {
   const [screen, setScreen] = useState<Screen>('home')
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'ai' | 'images'>('ai')
+  useEffect(() => startImageQueue(), [])
   const [returnScreen, setReturnScreen] = useState<Screen>('home')
   const [rightOpen, setRightOpen] = useState(false)
   const [rightTab, setRightTab] = useState<RightTab>('outline')
@@ -935,7 +939,7 @@ export default function Workspace() {
     }
   }
 
-  function openSettings(from: Screen) {
+  function openSettings(from: Screen, tab: 'ai' | 'images' = 'ai') {
     if (from === 'editor' && !canUnmountEditor(Boolean(generationAbortRef.current))) {
       showToast('Stop generation before opening Settings.')
       return
@@ -944,6 +948,7 @@ export default function Workspace() {
       ? editorRef.current?.captureGenerationContext() ?? { sceneText: storyRef.current, insertionPosition: storyRef.current.length }
       : null
     if (from === 'editor' && changedSinceSnapshotRef.current) void flushDocument('navigation', true)
+    setSettingsInitialTab(tab)
     setReturnScreen(from)
     setScreen('settings')
     setRightOpen(false)
@@ -1656,7 +1661,7 @@ export default function Workspace() {
   const contextType: GenerationContextType = screen === 'chat' || (screen === 'settings' && returnScreen === 'chat') ? 'chat' : activeDocument?.type === 'codexEntry' ? 'codex' : activeDocument?.type === 'note' ? 'note' : 'scene'
   const autotitleOverlay = autotitle && <AutotitlePanel state={autotitle} onAccept={() => { void acceptAutotitle() }} onRegenerate={() => { void regenerateAutotitle() }} onStop={stopAutotitle} onCancel={() => { autotitleAbortRef.current?.abort(); setAutotitle(null) }} />
 
-  if (screen === 'settings') return <AiSettingsScreen
+  if (screen === 'settings') return <AiSettingsScreen initialTab={settingsInitialTab}
     book={returnScreen === 'home' || !currentBook ? undefined : { id: currentBook.id, title: currentBook.title, contextType, currentDocumentId: activeDocument?.id, currentDocumentText: settingsGenerationContextRef.current?.sceneText ?? storyMarkdown, insertionPosition: settingsGenerationContextRef.current?.insertionPosition, promptValues: toBookPromptValues(currentBook, seriesList), chatId: contextType === 'chat' ? activeChatId || undefined : undefined, ...(activeDocument?.type === 'summary' ? { currentSummary: { id: activeDocument.id, sourceEntityId: activeDocument.sourceEntityId, sourceType: activeDocument.sourceType, content: activeDocument.content } } : {}) }}
     onHome={() => setScreen('home')}
     onBack={() => setScreen(returnScreen)}
@@ -1669,7 +1674,7 @@ export default function Workspace() {
     <main className="library-screen">
       {autotitleOverlay}
       {toast && <div className="app-toast" role="alert" key={toast.id}><span>{toast.message}</span><button type="button" onClick={() => setToast(null)} aria-label="Dismiss notification"><X aria-hidden="true" /></button></div>}
-      <header className="library-top"><div className="arc-brand"><Feather aria-hidden="true" /> ARC</div><button type="button" onClick={() => openSettings('home')} aria-label="Open default settings"><Settings2 aria-hidden="true" /></button></header>
+      <header className="library-top"><div className="arc-brand"><Feather aria-hidden="true" /> ARC</div><button type="button" onClick={() => openSettings('home', 'images')} aria-label="Open images and gallery"><ImageIcon aria-hidden="true" /></button><button type="button" onClick={() => openSettings('home')} aria-label="Open default settings"><Settings2 aria-hidden="true" /></button></header>
       <section className="library-content">
         <div className="library-title"><div><small>Your library</small><h1>Books</h1></div><button type="button" aria-label="New book" disabled={libraryState !== 'ready' || creatingBook} onClick={() => { void makeBook() }}><Plus aria-hidden="true" /><span>{creatingBook ? 'Creating…' : 'New book'}</span></button></div>
         {!aiReady && <div className="setup-warning"><Bot aria-hidden="true" /><div><strong>Text AI is not set up</strong><p>Choose a provider and models before using generation or chat.</p></div><button type="button" onClick={() => openSettings('home')}>Set up AI <ChevronRight aria-hidden="true" /></button></div>}
@@ -1689,7 +1694,7 @@ export default function Workspace() {
     <main className={`workspace-screen ${screen === 'chat' ? 'chat-active' : ''}`}>
       <header className="floating-controls">
         <button type="button" onClick={() => openSettings(screen)} aria-label="Open current book settings"><ChevronsRight aria-hidden="true" /></button>
-        <span className={`save-state ${saveState}`} title={saveState === 'error' ? 'Local save failed; your current editor text remains in memory.' : undefined}><i /> {saveState === 'loading' ? 'Loading' : saveState === 'saving' ? 'Saving' : saveState === 'error' ? 'Save failed' : 'Saved'}</span>
+        <button type="button" onClick={() => openSettings(screen, 'images')} aria-label="Open images and gallery"><ImageIcon aria-hidden="true" /></button><span className={`save-state ${saveState}`} title={saveState === 'error' ? 'Local save failed; your current editor text remains in memory.' : undefined}><i /> {saveState === 'loading' ? 'Loading' : saveState === 'saving' ? 'Saving' : saveState === 'error' ? 'Save failed' : 'Saved'}</span>
         <button type="button" onClick={() => setRightOpen(true)} aria-label="Open book workspace"><ChevronsLeft aria-hidden="true" /></button>
       </header>
 
