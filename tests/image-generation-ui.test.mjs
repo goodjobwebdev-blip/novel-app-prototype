@@ -142,3 +142,35 @@ test('image settings save selected model aliases and enabled sizes; invalid defa
     assert.ok(settings.loadImageSettings().favorites[0].enabledSizes.length > 0)
   } finally { await act(async () => root.unmount()) }
 })
+
+
+test('OpenAI favorite quality and moderation controls default to low and persist edits', async () => {
+  configure()
+  let root = createRoot(document.getElementById('root'))
+  const selectIn = (article, text) => [...article.querySelectorAll('label')].find((label) => label.textContent.startsWith(text))?.querySelector('select')
+  try {
+    await act(async () => root.render(h(Panel, { ai: initialAiSettings })))
+    await click('Settings')
+    const [openai, pruna] = document.querySelectorAll('.image-favorite')
+    const quality = selectIn(openai, 'Image quality'), moderation = selectIn(openai, 'Image moderation')
+    assert.equal(quality.value, 'low')
+    assert.equal(moderation.value, 'low')
+    assert.deepEqual([...quality.options].map((o) => o.value), ['low', 'medium', 'high', 'auto'])
+    assert.deepEqual([...moderation.options].map((o) => o.value), ['low', 'auto'])
+    assert.equal(selectIn(pruna, 'Image quality'), undefined)
+    assert.equal(selectIn(pruna, 'Image moderation'), undefined)
+    await act(async () => { quality.value = 'medium'; quality.dispatchEvent(new dom.window.Event('change', { bubbles: true })) })
+    await act(async () => { moderation.value = 'auto'; moderation.dispatchEvent(new dom.window.Event('change', { bubbles: true })) })
+    await click('Save image settings *')
+    await act(async () => root.unmount())
+    root = createRoot(document.getElementById('root'))
+    await act(async () => root.render(h(Panel, { ai: initialAiSettings })))
+    await click('Settings')
+    const favorite = document.querySelector('.image-favorite')
+    assert.equal(selectIn(favorite, 'Image quality').value, 'medium')
+    assert.equal(selectIn(favorite, 'Image moderation').value, 'auto')
+    const queued = await store.enqueueImageJob(settings.resolveImageSpec('Configured illustration'))
+    assert.equal(queued.quality, 'medium')
+    assert.equal(queued.moderation, 'auto')
+  } finally { await act(async () => root.unmount()) }
+})

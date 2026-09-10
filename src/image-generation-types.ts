@@ -1,9 +1,13 @@
 export type ImageProvider = 'nanogpt' | 'openai' | 'pruna'
+export type OpenAIImageQuality = 'low' | 'medium' | 'high' | 'auto'
+export type OpenAIImageModeration = 'low' | 'auto'
+// Optional for favorites and jobs saved before these controls were added.
+export type OpenAIImageOptions = { quality?: OpenAIImageQuality; moderation?: OpenAIImageModeration }
 export type ImageSize = { value: string; width: number; height: number }
 export type ImageModel = { id: string; name: string; provider: ImageProvider; sizes: ImageSize[]; source: string }
-export type FavoriteImageModel = ImageModel & { alias: string; enabledSizes: string[]; defaultSize: string }
+export type FavoriteImageModel = ImageModel & OpenAIImageOptions & { alias: string; enabledSizes: string[]; defaultSize: string }
 export type ImageSettings = { keys: Record<ImageProvider, string>; favorites: FavoriteImageModel[]; defaultAlias: string }
-export type ImageGenerationSpec = { prompt: string; modelAlias: string; provider: ImageProvider; model: string; size: ImageSize }
+export type ImageGenerationSpec = OpenAIImageOptions & { prompt: string; modelAlias: string; provider: ImageProvider; model: string; size: ImageSize }
 export type ChatImageProposal = {
   id: string; prompt: string; modelAlias: string; size: string
   status: 'proposed' | 'accepted' | 'rejected' | 'stale'; createdAt: number
