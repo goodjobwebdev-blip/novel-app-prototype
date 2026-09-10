@@ -174,3 +174,33 @@ test('OpenAI favorite quality and moderation controls default to low and persist
     assert.equal(queued.moderation, 'auto')
   } finally { await act(async () => root.unmount()) }
 })
+
+
+test('image choices keep compact checkbox geometry under shared settings styles', async () => {
+  configure()
+  const style = document.createElement('style')
+  // Match the app's cascade: component styles load before global form rules.
+  style.textContent = ['image-generation.css', 'styles.css', 'ui-settings.css', 'mobile-control-hardening.css', 'ai-settings-ux.css']
+    .map((file) => readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8')).join('\n')
+  document.head.append(style)
+  const root = createRoot(document.getElementById('root'))
+  try {
+    await act(async () => root.render(h(Panel, { ai: initialAiSettings })))
+    await click('Settings')
+    const favorite = document.querySelector('.image-favorite')
+    for (const control of favorite.querySelectorAll('input[type=checkbox], input[type=radio]')) {
+      const geometry = dom.window.getComputedStyle(control)
+      assert.equal(geometry.width, '20px')
+      assert.equal(geometry.height, '20px')
+      assert.equal(geometry.flexShrink, '0')
+      assert.equal(parseFloat(geometry.minHeight), 0)
+    }
+    const tile = favorite.querySelector('.image-size-option')
+    const checkbox = tile.querySelector('input')
+    assert.ok(checkbox.checked)
+    await act(async () => tile.querySelector('strong').click())
+    assert.equal(checkbox.checked, false)
+    assert.match(favorite.querySelector('legend').textContent, /2 selected/)
+    assert.match(document.querySelector('.image-settings-save').textContent, /Unsaved changes/)
+  } finally { await act(async () => root.unmount()); style.remove() }
+})

@@ -4,12 +4,14 @@ Open **Images** using the image icon on the library/editor or the settings sideb
 
 ## Set up and generate
 
-1. In Images → Settings, configure provider keys. An explicit image key takes priority. NanoGPT and OpenAI otherwise use the matching provider key in the originating book’s saved AI settings, then global AI defaults. Switching the text provider does not send that provider’s key to an unrelated image service. Pruna has a separate key.
-2. Refresh models (NanoGPT/OpenAI) or load documented Pruna models. Favorite models, give them unique chat aliases, enable their supported dimensions, choose each default size, and choose a default model. For OpenAI favorites, choose **Image quality** (Low, Medium, High, Auto) and **Image moderation** (Low, Auto). Both default to **Low**, including existing favorites without saved values. Save image settings.
+1. In Images → Settings, expand **Provider API keys** to configure provider keys. An explicit image key takes priority. NanoGPT and OpenAI otherwise use the matching provider key in the originating book’s saved AI settings, then global AI defaults. Switching the text provider does not send that provider’s key to an unrelated image service. Pruna has a separate key.
+2. Expand **Add a favorite model**, then refresh models (NanoGPT/OpenAI) or load documented Pruna models. Favorite models, give them unique chat aliases, enable their supported dimensions, choose each default size, and choose a default model. For OpenAI favorites, choose **Image quality** (Low, Medium, High, Auto) and **Image moderation** (Low, Auto). Both default to **Low**, including existing favorites without saved values. Save image settings.
 3. Ask Chat for an illustration. `propose_image_generation` accepts required `prompt` and optional string `ratio`, `size`, `model_alias`. The model sees favorite aliases and enabled dimensions, never API keys. Only text-to-image is supported.
 4. Edit the prompt, search favorites in the compact model picker, and select dimensions. **Accept proposal** approves it; **Reject** dismisses it. Acceptance does not contact the image provider.
 5. Each **Generate** tap saves an independent request with the current prompt, model, size, OpenAI quality/moderation, and source chat/book. Changing a favorite later does not change queued requests. A direct Generate form is also available in Images.
 6. **Keep image** saves it to the shared gallery. **Discard** removes the unkept result. Close the tool and the result stays at its original chat position. Tap it for touch zoom, prompt, original download, and provider metadata.
+
+Each favorite shows selectable size tiles with the aspect ratio and dimensions. The default-model choice, generation defaults, and maintenance actions are grouped separately. Provider setup and model discovery can be collapsed once favorites are configured.
 
 The square default is 1024×1024 when the model supports it; otherwise its first supported dimension is used. Ratios are derived from dimensions. Disabled/unsupported combinations and unknown aliases are rejected rather than silently changing the request. Refreshing the catalog does not silently replace saved favorite capabilities; use **Update supported sizes**.
 
