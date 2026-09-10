@@ -40,6 +40,12 @@ export function validateImageSettings(settings: ImageSettings): ImageSettings {
     const validSizes = f.sizes.map((s) => imageSize(s.value)).filter((s): s is ImageSize => Boolean(s))
     const enabled = [...new Set(f.enabledSizes)].filter((s) => validSizes.some((v) => v.value === s))
     if (!enabled.length || !enabled.includes(f.defaultSize)) throw new Error(`Enable at least one size and a valid default for ${alias}.`)
+    if (f.provider === 'openai') {
+      const quality = f.quality ?? 'low', moderation = f.moderation ?? 'low'
+      if (!['low', 'medium', 'high', 'auto'].includes(quality)) throw new Error(`Choose a valid image quality for ${alias}.`)
+      if (!['low', 'auto'].includes(moderation)) throw new Error(`Choose a valid image moderation level for ${alias}.`)
+      return { ...f, alias, sizes: validSizes, enabledSizes: enabled, quality, moderation }
+    }
     return { ...f, alias, sizes: validSizes, enabledSizes: enabled }
   })
   return { keys: Object.fromEntries(IMAGE_PROVIDERS.map((p) => [p, String(settings.keys[p] || '').trim()])) as ImageSettings['keys'], favorites, defaultAlias: favorites.some((f) => f.alias === settings.defaultAlias) ? settings.defaultAlias : favorites[0]?.alias || '' }
@@ -68,14 +74,14 @@ export function resolveImageSpec(prompt: string, alias?: string, size?: string, 
   if (size && !explicit) throw new Error('Use a size such as 1024x1024.')
   const chosen = explicit ? enabled.find((s) => s.value === explicit) : ratio ? enabled.find((s) => imageRatio(s) === ratio) : enabled.find((s) => s.value === model.defaultSize)
   if (!chosen || (ratio && imageRatio(chosen) !== ratio)) throw new Error('That size or ratio is not enabled for the selected model.')
-  return { prompt: prompt.trim(), modelAlias: model.alias, provider: model.provider, model: model.id, size: { ...chosen } }
+  return { prompt: prompt.trim(), modelAlias: model.alias, provider: model.provider, model: model.id, size: { ...chosen }, ...(model.provider === 'openai' ? { quality: model.quality ?? 'low', moderation: model.moderation ?? 'low' } : {}) }
 }
 export function imageFavorite(model: ImageModel, used: FavoriteImageModel[]): FavoriteImageModel {
   const base = `${model.provider}/${model.id}`.slice(0, 58)
   let alias = base, suffix = 2
   while (used.some((f) => f.alias.toLowerCase() === alias.toLowerCase())) alias = `${base}-${suffix++}`
   const defaultSize = model.sizes.find((s) => s.value === '1024x1024')?.value ?? model.sizes[0]?.value ?? ''
-  return { ...model, alias, enabledSizes: model.sizes.map((s) => s.value), defaultSize }
+  return { ...model, alias, enabledSizes: model.sizes.map((s) => s.value), defaultSize, ...(model.provider === 'openai' ? { quality: 'low', moderation: 'low' } : {}) }
 }
 export function imageModelInstructions() {
   const settings = loadImageSettings()

@@ -5,10 +5,10 @@ Open **Images** using the image icon on the library/editor or the settings sideb
 ## Set up and generate
 
 1. In Images → Settings, configure provider keys. An explicit image key takes priority. NanoGPT and OpenAI otherwise use the matching provider key in the originating book’s saved AI settings, then global AI defaults. Switching the text provider does not send that provider’s key to an unrelated image service. Pruna has a separate key.
-2. Refresh models (NanoGPT/OpenAI) or load documented Pruna models. Favorite models, give them unique chat aliases, enable their supported dimensions, choose each default size, and choose a default model. Save image settings.
+2. Refresh models (NanoGPT/OpenAI) or load documented Pruna models. Favorite models, give them unique chat aliases, enable their supported dimensions, choose each default size, and choose a default model. For OpenAI favorites, choose **Image quality** (Low, Medium, High, Auto) and **Image moderation** (Low, Auto). Both default to **Low**, including existing favorites without saved values. Save image settings.
 3. Ask Chat for an illustration. `propose_image_generation` accepts required `prompt` and optional string `ratio`, `size`, `model_alias`. The model sees favorite aliases and enabled dimensions, never API keys. Only text-to-image is supported.
 4. Edit the prompt, search favorites in the compact model picker, and select dimensions. **Accept proposal** approves it; **Reject** dismisses it. Acceptance does not contact the image provider.
-5. Each **Generate** tap saves an independent request with the current prompt, model, size, and source chat/book. A direct Generate form is also available in Images.
+5. Each **Generate** tap saves an independent request with the current prompt, model, size, OpenAI quality/moderation, and source chat/book. Changing a favorite later does not change queued requests. A direct Generate form is also available in Images.
 6. **Keep image** saves it to the shared gallery. **Discard** removes the unkept result. Close the tool and the result stays at its original chat position. Tap it for touch zoom, prompt, original download, and provider metadata.
 
 The square default is 1024×1024 when the model supports it; otherwise its first supported dimension is used. Ratios are derived from dimensions. Disabled/unsupported combinations and unknown aliases are rejected rather than silently changing the request. Refreshing the catalog does not silently replace saved favorite capabilities; use **Update supported sizes**.
@@ -18,7 +18,7 @@ The square default is 1024×1024 when the model supports it; otherwise its first
 | Provider | Discovery and initial scope | Generation |
 | --- | --- | --- |
 | NanoGPT | Public `/api/v1/image-models?detailed=true`; text-to-image models advertising numeric resolutions and single-image output | `/v1/images/generations`, `n: 1`, numeric size, `b64_json` preferred |
-| OpenAI | `/v1/models` filtered to GPT Image; documented presets available without a key. Common sizes: 1024×1024, 1536×1024, 1024×1536 | `/v1/images/generations`, `n: 1`, PNG output |
+| OpenAI | `/v1/models` filtered to GPT Image; documented presets available without a key. Common sizes: 1024×1024, 1536×1024, 1024×1536 | `/v1/images/generations`, `n: 1`, PNG output, saved `quality` and `moderation` (both default to `low`) |
 | Pruna | Documented P-Image presets; other Pruna model input schemas are not enabled yet | `/v1/predictions`, model header and custom dimensions, then status polling and authenticated delivery |
 
 Sources: [NanoGPT image models](https://docs.nano-gpt.com/api-reference/endpoint/image-models), [OpenAI image generation](https://developers.openai.com/api/docs/guides/image-generation), [Pruna quickstart](https://docs.api.pruna.ai/guides/quickstart), [Pruna P-Image](https://docs.api.pruna.ai/guides/models/p-image).

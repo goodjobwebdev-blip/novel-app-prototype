@@ -72,7 +72,7 @@ export async function generateProviderImage(job: ImageJob, key: string, signal: 
   if (job.provider !== 'pruna') {
     const url = job.provider === 'nanogpt' ? 'https://nano-gpt.com/v1/images/generations' : 'https://api.openai.com/v1/images/generations'
     const data = await jsonResponse(await fetcher(url, { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, credentials: 'omit', redirect: 'error', signal,
-      body: JSON.stringify({ model: job.model, prompt: job.prompt, size: job.size.value, n: 1, ...(job.provider === 'nanogpt' ? { response_format: 'b64_json' } : { output_format: 'png' }) }),
+      body: JSON.stringify({ model: job.model, prompt: job.prompt, size: job.size.value, n: 1, ...(job.provider === 'nanogpt' ? { response_format: 'b64_json' } : { output_format: 'png', quality: job.quality ?? 'low', moderation: job.moderation ?? 'low' }) }),
     }), key)
     return decodeOutput(data, job.provider, key, signal, fetcher)
   }

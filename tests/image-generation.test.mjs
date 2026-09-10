@@ -207,6 +207,8 @@ test('NanoGPT and OpenAI submit one output with the correct fields and decode or
     assert.equal(calls[0].init.headers.Authorization, 'Bearer key')
     const body = JSON.parse(calls[0].init.body)
     assert.equal(body.n, 1); assert.equal(body.size, '1024x1024')
+    assert.equal(body.quality, provider === 'openai' ? 'low' : undefined)
+    assert.equal(body.moderation, provider === 'openai' ? 'low' : undefined)
     assert.equal(body[provider === 'openai' ? 'output_format' : 'response_format'], provider === 'openai' ? 'png' : 'b64_json')
     assert.deepEqual(await result.image.arrayBuffer(), await png.arrayBuffer())
     assert.equal(result.revisedPrompt, 'A revised gate')
@@ -282,4 +284,65 @@ test('chat forks share kept attachments without cloning queued requests or reaut
   assert.ok(await store.getGalleryImage(jobs[0].assetId))
   await store.deleteGalleryImage(jobs[0].assetId)
   assert.equal((await store.listImageJobs()).find((j) => j.id === jobs[0].id).decision, 'discarded')
+})
+
+
+test('OpenAI favorites default to low, migrate older settings, and validate saved choices', () => {
+  const settings = configure()
+  assert.equal(settings.favorites[0].quality, 'low')
+  assert.equal(settings.favorites[0].moderation, 'low')
+  assert.equal(settings.favorites[1].quality, undefined)
+  assert.equal(settings.favorites[1].moderation, undefined)
+  delete settings.favorites[0].quality
+  delete settings.favorites[0].moderation
+  localStorage.setItem(s.IMAGE_SETTINGS_KEY, JSON.stringify(settings))
+  const loaded = s.loadImageSettings()
+  assert.equal(loaded.favorites[0].quality, 'low')
+  assert.equal(loaded.favorites[0].moderation, 'low')
+  loaded.favorites[0].quality = 'high'
+  loaded.favorites[0].moderation = 'auto'
+  s.saveImageSettings(loaded)
+  assert.equal(s.loadImageSettings().favorites[0].quality, 'high')
+  assert.equal(s.loadImageSettings().favorites[0].moderation, 'auto')
+  loaded.favorites[0].quality = 'invalid'
+  assert.throws(() => s.saveImageSettings(loaded), /quality/)
+  loaded.favorites[0].quality = 'medium'
+  loaded.favorites[0].moderation = 'invalid'
+  assert.throws(() => s.saveImageSettings(loaded), /moderation/)
+  configure()
+})
+
+test('queued OpenAI requests keep saved choices after favorites change, including API submission', async () => {
+  await clearJobs()
+  const settings = configure()
+  settings.favorites[0].quality = 'high'
+  settings.favorites[0].moderation = 'auto'
+  s.saveImageSettings(settings)
+  const queued = await enqueue(undefined)
+  configure() // Later favorite changes must not alter the queued request.
+  const [saved] = await store.listImageJobs()
+  assert.equal(saved.id, queued.id)
+  assert.equal(saved.quality, 'high')
+  assert.equal(saved.moderation, 'auto')
+  const bodies = []
+  await runImageQueue('openai', { ...deps, generate: (j, key, signal, onSubmitted) => providers.generateProviderImage(j, key, signal, onSubmitted, async (_, init) => {
+    bodies.push(JSON.parse(init.body))
+    return response({ data: [{ b64_json: png64 }] })
+  }) })
+  assert.equal(bodies.length, 1)
+  assert.equal(bodies[0].quality, 'high')
+  assert.equal(bodies[0].moderation, 'auto')
+  assert.equal(s.resolveImageSpec('Next image').quality, 'low')
+})
+
+test('OpenAI adapter supports every quality choice and defaults legacy jobs to low', async () => {
+  for (const quality of [undefined, 'low', 'medium', 'high', 'auto']) {
+    const moderation = quality === undefined ? undefined : 'auto'
+    await providers.generateProviderImage(job('openai', { quality, moderation }), 'key', new AbortController().signal, async () => {}, async (_, init) => {
+      const body = JSON.parse(init.body)
+      assert.equal(body.quality, quality ?? 'low')
+      assert.equal(body.moderation, moderation ?? 'low')
+      return response({ data: [{ b64_json: png64 }] })
+    })
+  }
 })
