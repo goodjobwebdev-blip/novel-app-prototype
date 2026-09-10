@@ -53,3 +53,7 @@
   .image-ui .image-favorite-actions .image-remove-favorite { margin-left:0; }
   .image-favorite-actions a { justify-content:center; }
 }
+
+.image-queue-actions { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px 12px; padding:12px 0; border-bottom:1px solid var(--line); }
+.image-queue-actions>span { color:var(--soft); font-size:14px; }
+.image-queue-actions>small { flex-basis:100%; }
