@@ -16,7 +16,7 @@ export type ImageJob = ImageGenerationSpec & {
   id: string; bookId?: string; bookTitle?: string; chatId?: string; messageId?: string; proposalId?: string
   status: 'queued' | 'running' | 'completed' | 'failed' | 'interrupted' | 'cancelled'
   createdAt: number; startedAt?: number; completedAt?: number; error?: string
-  assetId?: string; decision?: 'kept' | 'discarded'; hiddenInChat?: boolean
+  assetId?: string; decision?: 'kept' | 'discarded'; hiddenInChat?: boolean; hiddenInQueue?: boolean
   providerJobId?: string; owner?: string; heartbeat?: number
 }
 export type GalleryImage = {

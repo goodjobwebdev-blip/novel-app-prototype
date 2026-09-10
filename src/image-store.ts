@@ -96,6 +96,33 @@ export async function hideImageFromChat(id: string) {
   await (await database()).table('imageJobs').update(id, { hiddenInChat: true })
   notifyImageStore()
 }
+export async function clearImageQueue(ids: string[]) {
+  const db = await database()
+  await db.transaction('rw', db.table('imageJobs'), db.table('galleryImages'), async () => {
+    // Clear only the selected snapshot, so newly queued jobs are left alone.
+    const jobs: (ImageJob | undefined)[] = await db.table('imageJobs').bulkGet([...new Set(ids)])
+    for (const job of jobs) {
+      if (!job || job.hiddenInQueue) continue
+      const patch: Partial<ImageJob> = { hiddenInQueue: true }
+      if (['queued', 'running'].includes(job.status)) {
+        patch.status = 'cancelled'
+        patch.completedAt = Date.now()
+      }
+      if (job.assetId) {
+        const asset: GalleryImage | undefined = await db.table('galleryImages').get(job.assetId)
+        if (!asset?.kept) {
+          await db.table('galleryImages').delete(job.assetId)
+          patch.assetId = undefined
+          patch.decision = 'discarded'
+        }
+      }
+      // Retain job metadata for chat references and kept-image backups.
+      await db.table('imageJobs').update(job.id, patch)
+    }
+  })
+  // The queue manager aborts local waiting; late responses cannot restore cancelled jobs.
+  notifyImageStore()
+}
 export async function deleteGalleryImage(id: string) {
   const db = await database()
   await db.transaction('rw', db.table('galleryImages'), db.table('imageJobs'), async () => {
@@ -120,7 +147,7 @@ export async function retryImageJob(id: string) {
   if (job.provider === 'pruna' && job.providerJobId) {
     await db.transaction('rw', db.table('imageJobs'), async () => {
       const current = await db.table('imageJobs').get(id)
-      if (current && ['failed', 'interrupted', 'cancelled'].includes(current.status)) await db.table('imageJobs').update(id, { status: 'queued', error: undefined })
+      if (current && ['failed', 'interrupted', 'cancelled'].includes(current.status)) await db.table('imageJobs').update(id, { status: 'queued', error: undefined, hiddenInQueue: false })
     })
     notifyImageStore()
   } else await enqueueImageJob(job, { bookId: job.bookId, chatId: job.chatId, messageId: job.messageId, proposalId: job.proposalId })

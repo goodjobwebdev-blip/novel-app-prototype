@@ -204,3 +204,80 @@ test('image choices keep compact checkbox geometry under shared settings styles'
     assert.match(document.querySelector('.image-settings-save').textContent, /Unsaved changes/)
   } finally { await act(async () => root.unmount()); style.remove() }
 })
+
+
+test('remove and clear queue cover earlier history and stay cleared after reopening', async () => {
+  configure()
+  const db = await p.database()
+  await db.table('imageJobs').clear()
+  await db.table('galleryImages').clear()
+  const spec = settings.resolveImageSpec('Failed illustration')
+  await db.table('imageJobs').bulkPut(Array.from({ length: 33 }, (_, i) => ({ ...spec, id: `failed-${i}`, createdAt: i, status: 'failed', error: 'Rejected' })))
+  let root = createRoot(document.getElementById('root'))
+  const originalConfirm = window.confirm
+  window.confirm = () => { throw new Error('Failed-only cleanup should not need confirmation') }
+  try {
+    await act(async () => root.render(h(Panel, { ai: initialAiSettings })))
+    await settle(() => document.querySelectorAll('.image-job').length === 30)
+    await click('Remove from queue')
+    await settle(() => document.querySelector('.image-queue-actions').textContent.includes('32 generations'))
+    await click('Clear queue')
+    await settle(() => document.body.textContent.includes('Your generation queue is empty.'))
+    assert.equal(button('Show earlier generations'), undefined)
+    assert.ok((await store.listImageJobs()).every((j) => j.hiddenInQueue))
+    await act(async () => root.unmount())
+    root = createRoot(document.getElementById('root'))
+    await act(async () => root.render(h(Panel, { ai: initialAiSettings })))
+    await settle(() => document.body.textContent.includes('Your generation queue is empty.'))
+    assert.equal(document.querySelectorAll('.image-job').length, 0)
+  } finally { window.confirm = originalConfirm; await act(async () => root.unmount()) }
+})
+
+test('clear queue requires confirmation for active work and preserves kept gallery results', async () => {
+  configure()
+  const db = await p.database()
+  await db.table('imageJobs').clear()
+  await db.table('galleryImages').clear()
+  const kept = await store.enqueueImageJob(settings.resolveImageSpec('Keep this illustration'))
+  await store.enqueueImageJob(settings.resolveImageSpec('Unwanted illustration'))
+  await runImageQueue('openai', deps)
+  await store.decideImageJob(kept.id, true)
+  const queued = await store.enqueueImageJob(settings.resolveImageSpec('Still queued'))
+  const expectedGalleryCount = (await store.listGalleryImages()).length
+  const originalConfirm = window.confirm
+  let accepted = false, confirmations = 0
+  window.confirm = () => { confirmations++; return accepted }
+  const root = createRoot(document.getElementById('root'))
+  try {
+    await act(async () => root.render(h(Panel, { ai: initialAiSettings })))
+    await settle(() => document.querySelectorAll('.image-job').length === 3)
+    await click('Clear queue')
+    assert.equal(confirmations, 1)
+    assert.equal(document.querySelectorAll('.image-job').length, 3)
+    accepted = true
+    await click('Clear queue')
+    await settle(() => document.body.textContent.includes('Your generation queue is empty.'))
+    assert.equal((await store.listImageJobs()).find((j) => j.id === queued.id).status, 'cancelled')
+    assert.equal(await db.table('galleryImages').count(), 1)
+    await click('Gallery')
+    await settle(() => document.querySelectorAll('.image-gallery-grid article').length === expectedGalleryCount)
+    assert.match(document.querySelector('.image-gallery-grid').textContent, /Keep this illustration/)
+  } finally { window.confirm = originalConfirm; await act(async () => root.unmount()) }
+})
+
+test('discard removes an unwanted result from the generation queue immediately', async () => {
+  configure()
+  const db = await p.database()
+  await db.table('imageJobs').clear()
+  await db.table('galleryImages').clear()
+  await store.enqueueImageJob(settings.resolveImageSpec('Unwanted illustration'))
+  await runImageQueue('openai', deps)
+  const root = createRoot(document.getElementById('root'))
+  try {
+    await act(async () => root.render(h(Panel, { ai: initialAiSettings })))
+    await settle(() => Boolean(button('Discard')))
+    await click('Discard')
+    await settle(() => document.body.textContent.includes('Your generation queue is empty.'))
+    assert.equal(await db.table('galleryImages').count(), 0)
+  } finally { await act(async () => root.unmount()) }
+})
