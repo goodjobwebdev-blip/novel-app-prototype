@@ -7,7 +7,7 @@ export type SummaryGenerationOwner = {
 export type SummaryGenerationUiState = {
   bookId: string | null
   documentId: string | null
-  screen: 'home' | 'editor' | 'chat' | 'settings'
+  screen: 'home' | 'editor' | 'chat' | 'images' | 'settings'
 }
 
 export function summaryGenerationOwnsUi(

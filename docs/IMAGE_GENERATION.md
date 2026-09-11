@@ -1,15 +1,17 @@
 # AI image generation
 
-Open **Images** using the image icon on the library/editor or the settings sidebar. Its tabs are **Generate**, **Gallery**, and **Settings**. All images/settings are local to this browser and origin; “all books” does not mean other devices.
+Open the standalone **Images** workspace with the image button in the Library, editor, or Chat. Its workspace tabs are **Generate** and **Gallery**. The gear opens the main **Settings > Images** screen, where provider keys, favorite models, sizes, and generation defaults remain configured. Returning from Settings restores the Images tab, generation draft, and Gallery search, scope, and pagination state held by Workspace.
+
+Images opened from the Library have no book context. Opening from the editor or Chat carries the current book into Images: its title is shown, new direct generations are attributed to it, and Gallery offers **This book** filtering and **Use in Codex** for that book. The queue, the **All** Gallery scope, and image settings are device-global for this browser origin; they are not cross-device or cloud data.
 
 ## Set up and generate
 
-1. In Images → Settings, expand **Provider API keys** to configure provider keys. An explicit image key takes priority. NanoGPT and OpenAI otherwise use the matching provider key in the originating book’s saved AI settings, then global AI defaults. Switching the text provider does not send that provider’s key to an unrelated image service. Pruna has a separate key.
+1. Open the Images gear, then in **Settings > Images** expand **Provider API keys**. An explicit image key takes priority. NanoGPT and OpenAI otherwise use the matching provider key in the originating book’s saved AI settings, then global AI defaults. Switching the text provider does not send that provider’s key to an unrelated image service. Pruna has a separate key.
 2. Expand **Add a favorite model**, then refresh models (NanoGPT/OpenAI) or load documented Pruna models. Favorite models, give them unique chat aliases, enable their supported dimensions, choose each default size, and choose a default model. For OpenAI favorites, choose **Image quality** (Low, Medium, High, Auto) and **Image moderation** (Low, Auto). Both default to **Low**, including existing favorites without saved values. Save image settings.
 3. Ask Chat for an illustration. `propose_image_generation` accepts required `prompt` and optional string `ratio`, `size`, `model_alias`. The model sees favorite aliases and enabled dimensions, never API keys. Only text-to-image is supported.
 4. Edit the prompt, search favorites in the compact model picker, and select dimensions. **Accept proposal** approves it; **Reject** dismisses it. Acceptance does not contact the image provider.
-5. Each **Generate** tap saves an independent request with the current prompt, model, size, OpenAI quality/moderation, and source chat/book. Changing a favorite later does not change queued requests. A direct Generate form is also available in Images.
-6. **Keep image** saves it to the shared gallery. **Discard** removes the unkept result. Close the tool and the result stays at its original chat position. Tap it for touch zoom, prompt, original download, and provider metadata.
+5. Each **Generate** tap saves an independent request with the current prompt, model, size, OpenAI quality/moderation, and source chat/book. Changing a favorite later does not change queued requests. The standalone **Generate** tab provides the direct form and the device-wide queue.
+6. **Keep image** saves a queue or Chat result to the shared gallery. **Discard** removes the unkept result. A Chat result stays at its original message position when the tool is closed. Open an image to zoom, inspect its prompt and provider metadata, and download the original.
 
 Each favorite shows selectable size tiles with the aspect ratio and dimensions. The default-model choice, generation defaults, and maintenance actions are grouped separately. Provider setup and model discovery can be collapsed once favorites are configured.
 
@@ -31,9 +33,13 @@ Sources: [NanoGPT image models](https://docs.nano-gpt.com/api-reference/endpoint
 
 Requests go directly from the browser to the selected provider. Provider CORS policy, account/model access, API changes, and balance still apply. Automated tests use provider fixtures; they do not make paid requests or prove live account access.
 
-## Queue lifetime and recovery
+## Queue, badges, and recovery
 
-The workspace owns one queue manager outside chat and settings screens. Jobs and results are in IndexedDB, so navigation between books/chats cannot move or lose a job. Each provider runs one request at a time; providers can run concurrently. Queue position and elapsed generation seconds are displayed. Browser Web Locks and transactional claims coordinate multiple tabs. Without Web Locks, transactional claims and stale heartbeat recovery prevent reusing an active claim.
+The standalone Generate view groups device-wide jobs as **Active** (queued/running), **Needs review** (completed but not kept or discarded), **Attention** (failed, interrupted, or cancelled), and **Earlier** (completed and already decided, or completed without a result). Queue cards retain their source book label when applicable.
+
+The Images buttons in the Library and book workspace show queue badges. An exclamation mark takes priority when failed or interrupted jobs need attention; otherwise the badge shows the number needing review, then the number active (counts above nine display as `9+`). Open Images for the full grouped queue and controls.
+
+Workspace starts and owns the in-browser queue coordination while the app is open. Jobs and results are in IndexedDB, so moving between books, Chat, Images, and Settings does not move or lose them. Each provider runs one request at a time; providers can run concurrently. Queue position and elapsed generation seconds are displayed. Browser Web Locks and transactional claims coordinate multiple tabs. Without Web Locks, transactional claims and stale heartbeat recovery prevent reusing an active claim.
 
 **Clear queue** removes all listed generations, including earlier history, from the Generate view. It cancels queued work, stops local waiting for running jobs, and discards unkept images (also from their chat results). Kept gallery images and their chat attachments remain available. You are asked to confirm if there is active work or an unkept result. **Remove from queue** clears one finished job; **Discard** also removes an unwanted result from this view. Clearing persists across reloads and does not affect new jobs added after you click.
 
@@ -43,7 +49,9 @@ Provider errors remain visible with explicit retry controls and key redaction. S
 
 ## Gallery, deletion, and backups
 
-The Gallery includes kept generations from all books plus current uploaded Codex illustrations. **Only this book** filters by source book. Images generated from the library have no source book. **Use in Codex** creates the existing optimized illustration for a selected entry in the current book; the gallery original remains intact.
+The **All** Gallery scope includes kept generations from all books plus current uploaded Codex illustrations on this device. When Images has book context, **This book** filters by that source book. Images generated from the Library have no source book.
+
+Open a Gallery thumbnail to access actions in the full-screen viewer. **Download image** is always available. With book context, **Use in Codex** creates the existing optimized illustration for a selected entry in that book while leaving the gallery original intact. **Delete image** is also in the viewer and confirms the effect before removal.
 
 Removing a result from chat hides only that attachment. Deleting a chat/book removes its jobs and unkept outputs, but kept generated images remain in the gallery. Deleting a generated image from the gallery removes its chat attachments too. Uploaded Codex illustrations retain their existing entry ownership and undo behavior. Forked chats share visible kept images; they do not copy running requests or authorize new generation.
 

@@ -1,4 +1,7 @@
 import { startImageQueue } from './image-queue'
+import ImageWorkspace, { createImageWorkspaceState, type ImageWorkspaceState } from './ImageWorkspace'
+import { useImageQuery } from './image-hooks'
+import { listImageJobs } from './image-store'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -135,7 +138,8 @@ import './codex-triggers.css'
 import './codex-mentions.css'
 import './codex-dependencies.css'
 
-type Screen = 'home' | 'editor' | 'chat' | 'settings'
+type Screen = 'home' | 'editor' | 'chat' | 'images' | 'settings'
+type ContentScreen = Exclude<Screen, 'images' | 'settings'>
 type RightTab = 'book' | 'outline' | 'notes' | 'codex' | 'chat'
 type ChatPanel = 'list' | 'settings'
 type SaveState = 'loading' | 'saving' | 'saved' | 'error'
@@ -177,6 +181,13 @@ const chats = [
   ['Ideas for Act II', 'Three possible costs for crossing…', 'Aug 31'],
 ]
 
+function ImageActivityBadge({ active, review, attention }: { active: number; review: number; attention: number }) {
+  if (attention) return <span className="image-activity-badge attention" aria-label={`${attention} image ${attention === 1 ? 'generation needs' : 'generations need'} attention`}>!</span>
+  if (review) return <span className="image-activity-badge review" aria-label={`${review} generated ${review === 1 ? 'image needs' : 'images need'} review`}>{review > 9 ? '9+' : review}</span>
+  if (active) return <span className="image-activity-badge active" aria-label={`${active} image ${active === 1 ? 'generation is' : 'generations are'} active`}>{active > 9 ? '9+' : active}</span>
+  return null
+}
+
 const initialStoryMarkdown = `# The City Beneath the Tide
 
 _Chapter Seven · The Cartographer's Door_
@@ -196,6 +207,8 @@ export default function Workspace() {
   const [settingsInitialTab, setSettingsInitialTab] = useState<'ai' | 'images'>('ai')
   useEffect(() => startImageQueue(), [])
   const [returnScreen, setReturnScreen] = useState<Screen>('home')
+  const [imageReturnScreen, setImageReturnScreen] = useState<ContentScreen>('home')
+  const [imageWorkspaceState, setImageWorkspaceState] = useState<ImageWorkspaceState>(createImageWorkspaceState)
   const [rightOpen, setRightOpen] = useState(false)
   const [rightTab, setRightTab] = useState<RightTab>('outline')
   const [chatPanel, setChatPanel] = useState<ChatPanel>('list')
@@ -221,6 +234,11 @@ export default function Workspace() {
   const [autotitle, setAutotitle] = useState<AutotitleUiState | null>(null)
   const [loreMention, setLoreMention] = useState<LoreMentionPopupState | null>(null)
   const { books: bookList, setBooks: setBookList, series: seriesList, setSeries: setSeriesList, state: libraryState, error: libraryError, slow: librarySlow, retry: retryLibrary } = useBookLibrary(initialStoryMarkdown)
+  const { data: imageJobs } = useImageQuery(listImageJobs, [], [])
+  const visibleImageJobs = imageJobs.filter((job) => !job.hiddenInQueue)
+  const activeImageJobs = visibleImageJobs.filter((job) => job.status === 'queued' || job.status === 'running').length
+  const reviewImageJobs = visibleImageJobs.filter((job) => job.status === 'completed' && Boolean(job.assetId) && !job.decision).length
+  const attentionImageJobs = visibleImageJobs.filter((job) => ['failed', 'interrupted'].includes(job.status)).length
   const [creatingBook, setCreatingBook] = useState(false)
   const [currentBook, setCurrentBook] = useState<BookEntity | null>(null)
   const [outlineEntities, setOutlineEntities] = useState<StructuralEntity[]>([])
@@ -938,6 +956,23 @@ export default function Workspace() {
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Could not restore the Codex entry.')
     }
+  }
+
+  async function openImages(from: ContentScreen) {
+    if (from === 'editor' && !canUnmountEditor(Boolean(generationAbortRef.current))) {
+      showToast('Stop generation before opening Images.')
+      return
+    }
+    const opened = await navigateAfterRequiredSave(
+      from === 'editor' && changedSinceSnapshotRef.current,
+      () => flushDocument('navigation', true),
+      () => {
+        setImageReturnScreen(from)
+        setScreen('images')
+        setRightOpen(false)
+      },
+    )
+    if (!opened) showToast('Could not save the current document. Images was not opened because its book context could be stale.')
   }
 
   function openSettings(from: Screen, tab: 'ai' | 'images' = 'ai') {
@@ -1659,23 +1694,35 @@ export default function Workspace() {
         ? openSummaryState === 'current' ? 'AI context · Summary preferred' : `AI context · Full entry · summary ${openSummaryState === 'missing' ? 'missing' : 'outdated'}`
         : 'AI context · Full entry'
     : ''
-  const contextType: GenerationContextType = screen === 'chat' || (screen === 'settings' && returnScreen === 'chat') ? 'chat' : activeDocument?.type === 'codexEntry' ? 'codex' : activeDocument?.type === 'note' ? 'note' : 'scene'
+  const contextType: GenerationContextType = screen === 'chat' || (screen === 'images' && imageReturnScreen === 'chat') || (screen === 'settings' && (returnScreen === 'chat' || (returnScreen === 'images' && imageReturnScreen === 'chat'))) ? 'chat' : activeDocument?.type === 'codexEntry' ? 'codex' : activeDocument?.type === 'note' ? 'note' : 'scene'
   const autotitleOverlay = autotitle && <AutotitlePanel state={autotitle} onAccept={() => { void acceptAutotitle() }} onRegenerate={() => { void regenerateAutotitle() }} onStop={stopAutotitle} onCancel={() => { autotitleAbortRef.current?.abort(); setAutotitle(null) }} />
 
   if (screen === 'settings') return <AiSettingsScreen initialTab={settingsInitialTab}
-    book={returnScreen === 'home' || !currentBook ? undefined : { id: currentBook.id, title: currentBook.title, contextType, currentDocumentId: activeDocument?.id, currentDocumentText: settingsGenerationContextRef.current?.sceneText ?? storyMarkdown, insertionPosition: settingsGenerationContextRef.current?.insertionPosition, promptValues: toBookPromptValues(currentBook, seriesList), chatId: contextType === 'chat' ? activeChatId || undefined : undefined, ...(activeDocument?.type === 'summary' ? { currentSummary: { id: activeDocument.id, sourceEntityId: activeDocument.sourceEntityId, sourceType: activeDocument.sourceType, content: activeDocument.content } } : {}) }}
+    book={returnScreen === 'home' || (returnScreen === 'images' && imageReturnScreen === 'home') || !currentBook ? undefined : { id: currentBook.id, title: currentBook.title, contextType, currentDocumentId: activeDocument?.id, currentDocumentText: settingsGenerationContextRef.current?.sceneText ?? storyMarkdown, insertionPosition: settingsGenerationContextRef.current?.insertionPosition, promptValues: toBookPromptValues(currentBook, seriesList), chatId: contextType === 'chat' ? activeChatId || undefined : undefined, ...(activeDocument?.type === 'summary' ? { currentSummary: { id: activeDocument.id, sourceEntityId: activeDocument.sourceEntityId, sourceType: activeDocument.sourceType, content: activeDocument.content } } : {}) }}
     onHome={() => setScreen('home')}
     onBack={() => setScreen(returnScreen)}
     onSaved={(settings) => {
-      if (returnScreen === 'home') setAiReady(textAiIsConfigured(settings))
+      if (returnScreen === 'home' || (returnScreen === 'images' && imageReturnScreen === 'home')) setAiReady(textAiIsConfigured(settings))
     }}
   />
+
+  if (screen === 'images') {
+    const imageBook = imageReturnScreen === 'home' ? undefined : currentBook ?? undefined
+    return <ImageWorkspace
+      bookId={imageBook?.id}
+      bookTitle={imageBook?.title}
+      state={imageWorkspaceState}
+      onStateChange={setImageWorkspaceState}
+      onBack={() => setScreen(imageReturnScreen)}
+      onSettings={() => openSettings('images', 'images')}
+    />
+  }
 
   if (screen === 'home') return (
     <main className="library-screen">
       {autotitleOverlay}
       {toast && <div className="app-toast" role="alert" key={toast.id}><span>{toast.message}</span><button type="button" onClick={() => setToast(null)} aria-label="Dismiss notification"><X aria-hidden="true" /></button></div>}
-      <header className="library-top"><div className="arc-brand"><Feather aria-hidden="true" /> ARC</div><button type="button" onClick={() => openSettings('home', 'images')} aria-label="Open images and gallery"><ImageIcon aria-hidden="true" /></button><button type="button" onClick={() => openSettings('home')} aria-label="Open default settings"><Settings2 aria-hidden="true" /></button></header>
+      <header className="library-top"><div className="arc-brand"><Feather aria-hidden="true" /> ARC</div><button className="image-destination-button" type="button" onClick={() => { void openImages('home') }} aria-label="Open images and gallery"><ImageIcon aria-hidden="true" /><ImageActivityBadge active={activeImageJobs} review={reviewImageJobs} attention={attentionImageJobs} /></button><button type="button" onClick={() => openSettings('home')} aria-label="Open default settings"><Settings2 aria-hidden="true" /></button></header>
       <section className="library-content">
         <div className="library-title"><div><small>Your library</small><h1>Books</h1></div><button type="button" aria-label="New book" disabled={libraryState !== 'ready' || creatingBook} onClick={() => { void makeBook() }}><Plus aria-hidden="true" /><span>{creatingBook ? 'Creating…' : 'New book'}</span></button></div>
         {!aiReady && <div className="setup-warning"><Bot aria-hidden="true" /><div><strong>Text AI is not set up</strong><p>Choose a provider and models before using generation or chat.</p></div><button type="button" onClick={() => openSettings('home')}>Set up AI <ChevronRight aria-hidden="true" /></button></div>}
@@ -1694,7 +1741,7 @@ export default function Workspace() {
   return (
     <main className={`workspace-screen ${screen === 'chat' ? 'chat-active' : ''}`}>
       <header className="floating-controls">
-        <button type="button" onClick={() => openSettings(screen)} aria-label="Open current book settings"><ChevronsRight aria-hidden="true" /></button>
+        <div className="floating-control-group"><button type="button" onClick={() => openSettings(screen)} aria-label="Open current book settings"><ChevronsRight aria-hidden="true" /></button><button className="image-destination-button" type="button" onClick={() => { void openImages(screen) }} aria-label="Open images and gallery"><ImageIcon aria-hidden="true" /><ImageActivityBadge active={activeImageJobs} review={reviewImageJobs} attention={attentionImageJobs} /></button></div>
         <span className={`save-state ${saveState}`} title={saveState === 'error' ? 'Local save failed; your current editor text remains in memory.' : undefined}><i /> {saveState === 'loading' ? 'Loading' : saveState === 'saving' ? 'Saving' : saveState === 'error' ? 'Save failed' : 'Saved'}</span>
         <button type="button" onClick={() => setRightOpen(true)} aria-label="Open book workspace"><ChevronsLeft aria-hidden="true" /></button>
       </header>
