@@ -507,18 +507,87 @@
 
 .expandable-text-dialog footer {
   justify-content: flex-end;
+  gap: 9px;
 }
 
 .expandable-text-dialog footer button {
-  min-width: 96px;
   min-height: 44px;
   padding: 0 18px;
-  border: 1px solid rgba(245, 226, 185, 0.35);
   border-radius: 999px;
-  background: var(--accent);
-  color: #1a1813;
   font-weight: 700;
   cursor: pointer;
+}
+
+.expandable-text-dialog footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.expandable-text-dialog footer button svg {
+  width: 17px;
+  height: 17px;
+}
+
+.expandable-text-apply {
+  min-width: 96px;
+  border: 1px solid rgba(245, 226, 185, 0.35);
+  background: var(--accent);
+  color: #1a1813;
+}
+
+.expandable-dictation-start {
+  min-width: 126px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.expandable-dictation-start:hover:not(:disabled),
+.expandable-dictation-start:focus-visible {
+  border-color: rgba(245, 226, 185, 0.35);
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.expandable-dictation-status {
+  min-width: 0;
+  margin-right: auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.expandable-dictation-status > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.expandable-dictation-status button {
+  width: 44px;
+  min-width: 44px;
+  padding: 0;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink);
+  display: grid;
+  place-items: center;
+}
+
+.expandable-dictation-status > span svg,
+.expandable-dictation-status.recording > span svg {
+  flex: none;
+}
+
+.expandable-dictation-cancel:hover,
+.expandable-dictation-cancel:focus-visible {
+  color: var(--danger);
 }
 
 @media (max-width: 520px) {
@@ -528,6 +597,14 @@
 
   .expandable-text-dialog textarea {
     min-height: 55svh;
+  }
+
+  .expandable-text-dialog footer {
+    flex-wrap: wrap;
+  }
+
+  .expandable-dictation-status {
+    flex: 1 0 100%;
   }
 }
 

@@ -24,7 +24,7 @@ import {
   X,
 } from 'lucide-react'
 import { streamChatCompletion, type ChatCompletionUsage } from './chat-api'
-import ExpandableTextInput from './ExpandableTextInput'
+import ExpandableTextInput, { type ExpandableTextInputDictationTarget } from './ExpandableTextInput'
 import GenerationActions from './GenerationActions'
 import PromptTemplateEditor from './PromptTemplateEditor'
 import PromptPresetControls from './PromptPresetControls'
@@ -364,36 +364,47 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     }
   }
 
-  async function dictateMessage() {
-    if (!chat || generating || !isCurrentChat(chat)) return
+  async function dictateMessage(target?: ExpandableTextInputDictationTarget) {
+    if (!chat || generating || !isCurrentChat(chat)) return false
     const sourceChat = chat
-    const input = inputRef.current
-    const base = draft
-    const start = input?.selectionStart ?? base.length
-    const end = input?.selectionEnd ?? start
+    const input = target?.element ?? inputRef.current
+    const base = target?.value ?? draft
+    const start = target?.selectionStart ?? input?.selectionStart ?? base.length
+    const end = target?.selectionEnd ?? input?.selectionEnd ?? start
+    const targetIsValid = () => isCurrentChat(sourceChat) && (target ? target.isValid() : Boolean(inputRef.current))
+    const setTargetValue = (nextValue: string) => {
+      if (!targetIsValid()) return false
+      if (target) return target.setValue(nextValue)
+      setDraft(nextValue)
+      return true
+    }
     const render = (transcript: string) => {
       const insertion = normalizeTranscriptForInsertion(transcript, base.slice(0, start), base.slice(end))
       return { value: `${base.slice(0, start)}${insertion}${base.slice(end)}`, cursor: start + insertion.length }
     }
     try {
       const settings = await getChatBookAiSettings(sourceChat.bookId)
-      if (!isCurrentChat(sourceChat)) return
+      if (!targetIsValid()) return false
       await startSttSession(settings.speech, {
         kind: 'chat',
         label: 'Dictate message',
-        isValid: () => isCurrentChat(sourceChat) && Boolean(inputRef.current),
-        onProvisional: (transcript) => { if (isCurrentChat(sourceChat)) setDraft(render(transcript).value) },
-        onFinal: (transcript) => {
-          if (!isCurrentChat(sourceChat)) throw new Error('The original Chat composer is no longer available.')
-          const next = render(transcript)
-          setDraft(next.value)
-          requestAnimationFrame(() => { inputRef.current?.focus(); inputRef.current?.setSelectionRange(next.cursor, next.cursor) })
+        isValid: targetIsValid,
+        onProvisional: (transcript) => {
+          if (!setTargetValue(render(transcript).value)) throw new Error('The original Chat composer is no longer available.')
         },
-        onCancel: () => { if (isCurrentChat(sourceChat)) setDraft(base) },
+        onFinal: (transcript) => {
+          const next = render(transcript)
+          if (!setTargetValue(next.value)) throw new Error('The original Chat composer is no longer available.')
+          if (target) target.focus(next.cursor)
+          else requestAnimationFrame(() => { inputRef.current?.focus(); inputRef.current?.setSelectionRange(next.cursor, next.cursor) })
+        },
+        onCancel: () => { setTargetValue(base) },
       })
+      return true
     } catch (error) {
-      if (isCurrentChat(sourceChat)) setDraft(base)
+      setTargetValue(base)
       onToast(error instanceof Error ? error.message : 'Could not start message dictation.')
+      return false
     }
   }
 
@@ -1106,7 +1117,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
             event.preventDefault()
             void send()
           }
-        }} placeholder="Ask about the book…" aria-label="Chat message" dialogTitle="Write chat message" />
+        }} placeholder="Ask about the book…" aria-label="Chat message" dialogTitle="Write chat message" onDictate={dictateMessage} dictationStatus={sttState.target === 'chat' ? sttState.status : 'idle'} dictationDisabled={generating} onStopDictation={stopSttSession} onCancelDictation={cancelSttSession} />
         <ChatGenerateButton sttState={sttState} generating={generating} phase={phase} elapsed={elapsed} thinking={chat.thinking} onGenerate={() => { void send() }} onStop={stop} onMicro={() => { void dictateMessage() }} onThinking={setThinking} />
       </div>
     </section>
