@@ -101,7 +101,7 @@ test('proposal and acceptance never generate; origin and approval are enforced',
   assert.equal(propose({ prompt: 'gate', model_alias: 'unknown' }).imageGeneration, undefined)
   assert.equal((await store.listImageJobs()).length, 0)
   await assert.rejects(enqueue(f), /Accept/)
-  await store.setImageProposal(f.message.id, f.proposal.id, 'accepted', { prompt: 'Edited prompt', alias: 'fast', size: '1280x720' })
+  await store.setImageProposal(f.message.id, f.proposal.id, 'accepted', { prompt: 'Edited prompt', alias: 'fast', size: '1344x768' })
   assert.equal((await store.listImageJobs()).length, 0)
   assert.equal((await p.getEntity(f.message.id)).imageGenerations[0].prompt, 'Edited prompt')
   await assert.rejects(store.setImageProposal(f.message.id, f.proposal.id, 'accepted'), /handled/)
@@ -215,19 +215,53 @@ test('NanoGPT and OpenAI submit one output with the correct fields and decode or
   }
 })
 
-test('Pruna persists the prediction before polling and resumes without another POST', async () => {
+test('Pruna catalog hardcodes supported text-to-image models, sizes, and flat costs', () => {
+  assert.deepEqual(s.prunaImageModels.map((m) => m.id), ['flux-dev', 'qwen-image', 'qwen-image-fast', 'z-image-turbo', 'flux-2-klein-4b', 'wan-image-small', 'p-image'])
+  assert.equal(s.prunaImageModels.find((m) => m.id === 'qwen-image').cost, 0.025)
+  assert.equal(s.prunaImageModels.find((m) => m.id === 'flux-2-klein-4b').cost, 0.0001)
+  assert.equal(s.prunaImageModels.find((m) => m.id === 'p-image').ratios.includes('16:9'), true)
+  assert.equal(s.prunaImageModels.find((m) => m.id === 'z-image-turbo').sizeMode, 'dimensions')
+})
+
+test('Pruna submits an aspect ratio, persists async predictions, and decodes output arrays', async () => {
   for (const resume of [false, true]) {
     const calls = [], submitted = []
     const result = await providers.generateProviderImage(job('pruna', resume ? { providerJobId: 'existing-id' } : {}), 'pruna-key', new AbortController().signal, async (id) => submitted.push(id), async (url, init) => {
       calls.push({ url, init })
-      if (init.method === 'POST') { assert.equal(init.headers.Model, 'p-image'); assert.equal(JSON.parse(init.body).input.aspect_ratio, 'custom'); return response({ id: 'existing-id' }) }
-      if (url.includes('/status/')) { if (!resume) assert.deepEqual(submitted, ['existing-id']); return response({ status: 'succeeded', generation_url: '/v1/predictions/delivery/existing-id' }) }
+      if (init.method === 'POST') {
+        assert.equal(init.headers.Model, 'p-image'); assert.equal(init.headers['Try-Sync'], 'true')
+        assert.deepEqual(JSON.parse(init.body), { input: { prompt: 'A gate', aspect_ratio: '1:1' } })
+        return response({ id: 'existing-id' })
+      }
+      if (url.includes('/status/')) { if (!resume) assert.deepEqual(submitted, ['existing-id']); return response({ status: 'complete', output: ['/v1/predictions/delivery/existing-id'] }) }
       assert.equal(init.headers.apikey, 'pruna-key'); assert.equal(init.redirect, 'error')
       return new Response(png)
     })
     assert.equal(calls.filter((c) => c.init.method === 'POST').length, resume ? 0 : 1)
     assert.equal(result.image.size, png.size)
+    assert.equal(result.cost, 0.005)
   }
+})
+
+test('Pruna submits dimensions for Z-Image Turbo and decodes synchronous generation URL arrays', async () => {
+  const calls = []
+  const result = await providers.generateProviderImage(job('pruna', { model: 'z-image-turbo', size: s.imageSize('1344x768') }), 'pruna-key', new AbortController().signal, async () => assert.fail('A synchronous result has no prediction to persist.'), async (url, init) => {
+    calls.push({ url, init })
+    if (init.method === 'POST') {
+      assert.deepEqual(JSON.parse(init.body), { input: { prompt: 'A gate', width: 1344, height: 768 } })
+      return response({ status: 'success', generation_url: ['/v1/predictions/delivery/sync-id'] })
+    }
+    return new Response(png)
+  })
+  assert.equal(calls.length, 2)
+  assert.equal(result.cost, 0.005)
+})
+
+test('Pruna rejects unknown models and reports detail errors without leaking keys', async () => {
+  let calls = 0
+  await assert.rejects(providers.generateProviderImage(job('pruna', { model: 'unknown' }), 'key', new AbortController().signal, async () => {}, async () => { calls++; return response({}) }), /Unsupported Pruna/)
+  assert.equal(calls, 0)
+  await assert.rejects(providers.generateProviderImage(job('pruna'), 'secret', new AbortController().signal, async () => {}, async () => response({ detail: 'Bad secret' }, 400)), (error) => error.message.includes('Bad [redacted]') && !error.message.includes('secret'))
 })
 
 test('delivery rejects unsafe authenticated URLs and errors redact keys', async () => {

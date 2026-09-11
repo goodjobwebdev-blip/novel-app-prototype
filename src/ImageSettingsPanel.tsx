@@ -9,7 +9,7 @@ export default function ImageSettingsPanel({ ai }: { ai: AiSettings }) {
   const [catalogs, setCatalogs] = useState<Partial<Record<ImageProvider, ImageModel[]>>>(() => { try { const data = JSON.parse(localStorage.getItem('arc-image-catalog-v1') || '{}'); return Object.fromEntries(IMAGE_PROVIDERS.filter((p) => Array.isArray(data?.[p])).map((p) => [p, data[p].filter((m: ImageModel) => m?.provider === p && typeof m.id === 'string' && typeof m.name === 'string' && Array.isArray(m.sizes) && m.sizes.length && m.sizes.every((s) => typeof s?.value === 'string' && imageSize(s.value)))])) } catch { return {} } })
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [message, setMessage] = useState(''), [dirty, setDirty] = useState(false)
   const change = (value: ImageSettings) => { setSettings(value); setDirty(true); setMessage('') }
-  const models = catalogs[provider] ?? documentedImageModels.filter((m) => m.provider === provider)
+  const models = provider === 'pruna' ? documentedImageModels.filter((m) => m.provider === provider) : catalogs[provider] ?? documentedImageModels.filter((m) => m.provider === provider)
   const refresh = async () => {
     setBusy(true); setError('')
     const selectedProvider = provider
@@ -18,7 +18,7 @@ export default function ImageSettingsPanel({ ai }: { ai: AiSettings }) {
       const next = { ...catalogs, [selectedProvider]: models }
       setCatalogs(next)
       try { localStorage.setItem('arc-image-catalog-v1', JSON.stringify(next)) } catch { /* Favorites can still be saved separately. */ }
-      setMessage(selectedProvider === 'pruna' ? 'P-Image presets use Pruna’s documented dimensions.' : `${models.length} text-to-image models with supported sizes loaded.`)
+      setMessage(selectedProvider === 'pruna' ? `${models.length} documented Pruna text-to-image models loaded.` : `${models.length} text-to-image models with supported sizes loaded.`)
     } catch (e) { setError(e instanceof Error ? e.message : 'Models could not be loaded.') }
     finally { setBusy(false) }
   }
@@ -42,15 +42,15 @@ export default function ImageSettingsPanel({ ai }: { ai: AiSettings }) {
       </div>
       <label>Find a model<input type="search" placeholder="Search models" value={query} onChange={(e) => setQuery(e.target.value)} /></label>
       <div className="image-catalog">{models.filter((m) => `${m.id} ${m.name}`.toLowerCase().includes(query.toLowerCase())).slice(0, 100).map((m) => <div key={m.id}>
-        <span>{m.name}<small>{m.id}</small></span>
+        <span>{m.name}<small>{m.id}{m.cost != null ? ` · $${m.cost.toFixed(4)} per image` : ''}</small>{m.description && <small>{m.description}</small>}</span>
         <button type="button" disabled={settings.favorites.some((f) => f.provider === m.provider && f.id === m.id)} onClick={() => change({ ...settings, favorites: [...settings.favorites, imageFavorite(m, settings.favorites)] })}>Favorite</button>
       </div>)}{!models.length && <p>Refresh models to discover supported image sizes.</p>}</div>
     </details>
     {settings.favorites.map((f, index) => {
       const update = (patch: Partial<typeof f>) => change({ ...settings, favorites: settings.favorites.map((m, i) => i === index ? { ...m, ...patch } : m) })
-      const discovered = catalogs[f.provider]?.find((m) => m.id === f.id)
+      const discovered = (f.provider === 'pruna' ? documentedImageModels : catalogs[f.provider])?.find((m) => m.id === f.id)
       return <article className="image-favorite" key={`${f.provider}/${f.id}`}>
-        <header className="image-favorite-heading"><small>{imageProviderNames[f.provider]}</small><h3>{f.name}</h3></header>
+        <header className="image-favorite-heading"><small>{imageProviderNames[f.provider]}{(discovered?.cost ?? f.cost) != null ? ` · $${(discovered?.cost ?? f.cost)!.toFixed(4)} per image` : ''}</small><h3>{f.name}</h3>{(discovered?.description ?? f.description) && <small>{discovered?.description ?? f.description}</small>}</header>
         <label>Chat model alias<input maxLength={64} value={f.alias} onChange={(e) => { const alias = e.target.value; change({ ...settings, defaultAlias: settings.defaultAlias === f.alias ? alias : settings.defaultAlias, favorites: settings.favorites.map((m, i) => i === index ? { ...m, alias } : m) }) }} /></label>
         <label className="image-check image-default-choice"><input type="radio" name="default-image-model" checked={settings.defaultAlias === f.alias || (!settings.defaultAlias && index === 0)} onChange={() => change({ ...settings, defaultAlias: f.alias })} /><span>Default image model</span></label>
         <fieldset className="image-size-options">
@@ -72,7 +72,7 @@ export default function ImageSettingsPanel({ ai }: { ai: AiSettings }) {
           </>}
         </div>
         <div className="image-favorite-actions">
-          {discovered && <button type="button" onClick={() => { const enabledSizes = discovered.sizes.map((s) => s.value).filter((s) => f.enabledSizes.includes(s)); const active = enabledSizes.length ? enabledSizes : [discovered.sizes[0].value]; update({ sizes: discovered.sizes, enabledSizes: active, defaultSize: active.includes(f.defaultSize) ? f.defaultSize : active[0] }) }}>Update supported sizes</button>}
+          {discovered && <button type="button" onClick={() => { const enabledSizes = discovered.sizes.map((s) => s.value).filter((s) => f.enabledSizes.includes(s)); const active = enabledSizes.length ? enabledSizes : [discovered.sizes[0].value]; update({ name: discovered.name, source: discovered.source, cost: discovered.cost, description: discovered.description, sizes: discovered.sizes, enabledSizes: active, defaultSize: active.includes(f.defaultSize) ? f.defaultSize : active[0] }) }}>Update supported sizes</button>}
           <a href={f.source} target="_blank" rel="noreferrer">Provider documentation</a>
           <button className="image-remove-favorite" type="button" onClick={() => change({ ...settings, favorites: settings.favorites.filter((_, i) => i !== index) })}>Remove favorite</button>
         </div>
