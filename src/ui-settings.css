@@ -675,12 +675,10 @@ select {
 /* Appearance controls keep a consistent shape across themes and viewport sizes. */
 .ui-settings-panel [hidden] { display: none !important; }
 .ui-appearance-tools { position: sticky; top: 0; z-index: 125; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 10px 0; margin-bottom: 18px; background: var(--canvas); }
-.ui-appearance-tools nav { display: flex; flex: 1; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); }
-.ui-appearance-tools nav button { flex: 1; border: 0; background: transparent; color: var(--soft); }
+
 .ui-settings-panel button { min-height: 44px; }
-.ui-settings-panel :is(.ui-draft-actions, .ui-customization-card, .ui-delete-notice, .save-state, .ui-appearance-tools) button,
-.ui-settings-panel .ui-secondary-action { padding: 9px 13px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-2); color: var(--ink); cursor: pointer; font-size: 13px; }
-.ui-appearance-tools nav button[aria-current] { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--ink); border-color: var(--accent); }
+.ui-settings-panel :is(.ui-draft-actions, .ui-customization-card, .ui-delete-notice, .save-state) button,
+.ui-settings-panel :is(.ui-secondary-action, .ui-safe-reset) { padding: 9px 13px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-2); color: var(--ink); cursor: pointer; font-size: 13px; }
 /* Recovery must stay readable even when a custom palette has unusable contrast. */
 .ui-settings-panel .ui-safe-reset { background: #ffffff; color: #171717; border: 2px solid #171717; box-shadow: 0 0 0 1px #ffffff; }
 .ui-safe-reset:focus-visible { outline: 3px solid #0066cc; outline-offset: 3px; }
