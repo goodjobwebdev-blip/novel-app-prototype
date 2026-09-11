@@ -11,7 +11,7 @@ Working behavior on `main` includes:
 - local books, shared series, Acts, Chapters, Scenes, Notes, Codex entries, summaries, Chats, and Chat messages persisted in IndexedDB;
 - Markdown editing with autosave, local document snapshots, and editor undo/redo integration;
 - book-scoped AI settings plus global defaults for OpenRouter, nano-gpt.com, OpenAI, and OpenAI-compatible endpoints;
-- Main, Support, and optional Codex model selection, cached provider model lists, favorites, editable prompts, and configurable streamed-writing pace;
+- Main, Support, optional Codex, and optional Chat model selection (new chats use Chat when selected, otherwise Main), cached provider model lists, favorites, editable prompts, and configurable streamed-writing pace;
 - Scene continuation, summary generation, and whole-body Codex generation;
 - generation-type-specific Context Management with automatic context, explicit additional context, model-budget checks, and a rendered request preview for Story, Codex, and Chat;
 - persisted book Chat with streaming responses, Stop, edit, Save & regenerate, assistant regenerate/delete/fork/read-aloud actions, per-chat model/system prompt/context settings, and approval-based workspace edit proposals;

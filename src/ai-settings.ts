@@ -54,6 +54,8 @@ export type AiSettings = {
   mainEffectiveContextLimit: string
   supportModel: string
   supportModelContextLength?: number
+  chatModel: string
+  chatModelContextLength?: number
   codexModel: string
   codexModelContextLength?: number
   codexEffectiveContextLimit: string
@@ -305,6 +307,7 @@ export const initialAiSettings: AiSettings = {
   mainModel: '',
   mainEffectiveContextLimit: '',
   supportModel: '',
+  chatModel: '',
   codexModel: '',
   codexEffectiveContextLimit: '',
   generationWordDelayMs: String(DEFAULT_GENERATION_WORD_DELAY_MS),
@@ -433,6 +436,8 @@ export function normalizeAiSettings(value?: StoredAiSettings): AiSettings {
     codexEffectiveContextLimit: typeof value?.codexEffectiveContextLimit === 'string' ? value.codexEffectiveContextLimit : '',
     favorites: Array.isArray(value?.favorites) ? [...value.favorites] : [],
     generationWordDelayMs: normalizeGenerationWordDelay(value?.generationWordDelayMs),
+    chatModel: typeof value?.chatModel === 'string' ? value.chatModel : '',
+    chatModelContextLength: Number.isFinite(value?.chatModelContextLength) ? value?.chatModelContextLength : undefined,
     mainModelContextLength: Number.isFinite(value?.mainModelContextLength) ? value?.mainModelContextLength : undefined,
     supportModelContextLength: Number.isFinite(value?.supportModelContextLength) ? value?.supportModelContextLength : undefined,
     codexModelContextLength: Number.isFinite(value?.codexModelContextLength) ? value?.codexModelContextLength : undefined,
