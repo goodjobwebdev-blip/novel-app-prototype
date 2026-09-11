@@ -7,7 +7,7 @@ const MAX_MANIFEST = 64 * 1024 * 1024
 const MAX_ARCHIVE = 2_000_000_000
 const TYPES = new Set(['book', 'series', 'act', 'chapter', 'scene', 'note', 'codexEntry', 'summary', 'chat', 'chatMessage', 'settings'])
 const REF_KEYS = new Set(['bookId', 'entryId', 'parentId', 'seriesId', 'sourceEntityId', 'entityId', 'sourceId', 'targetId', 'primaryImageId', 'assetId', 'messageId', 'chatId', 'lastOpenedSceneId', 'sourceParentId', 'targetParentId', 'beforeId'])
-const REF_ARRAYS = new Set(['structuralIds', 'noteIds', 'codexEntryIds'])
+const REF_ARRAYS = new Set(['structuralIds', 'noteIds', 'codexEntryIds', 'sourceIds'])
 
 type StoredGalleryImage = Omit<GalleryImage, 'image' | 'thumbnail'> & { imageSize: number; imageType: string; thumbnailSize: number; thumbnailType: string }
 type StoredImage = Omit<Illustration, 'image' | 'thumbnail'> & { imageSize: number; imageType: string; thumbnailSize: number; thumbnailType: string }
@@ -23,7 +23,9 @@ export function encodeBookArchive(data: BookArchiveData): Blob {
   const images: StoredImage[] = data.illustrations.map(({ image, thumbnail, ...rest }) => ({ ...rest, imageSize: image.size, imageType: image.type, thumbnailSize: thumbnail.size, thumbnailType: thumbnail.type }))
   const gallery: StoredGalleryImage[] = (data.galleryImages ?? []).map(({ image, thumbnail, ...rest }) => ({ ...rest, imageSize: image.size, imageType: image.type, thumbnailSize: thumbnail.size, thumbnailType: thumbnail.type }))
   const entities = data.entities.map((entity) => entity.type === 'settings' ? withoutKeys(entity) : entity)
-  const manifest = new TextEncoder().encode(JSON.stringify({ format: 'arc-book', version: 2, entities, snapshots: data.snapshots, dependencies: data.dependencies, illustrations: images, galleryImages: gallery, imageJobs: data.imageJobs ?? [] }))
+  const version = (data.galleryImages ?? []).some((asset) => asset.kind === 'video') ? 3 : 2
+  const jobs = (data.imageJobs ?? []).map(({ sources: _sources, providerJobId: _providerJobId, owner: _owner, heartbeat: _heartbeat, ...job }) => job)
+  const manifest = new TextEncoder().encode(JSON.stringify({ format: 'arc-book', version, entities, snapshots: data.snapshots, dependencies: data.dependencies, illustrations: images, galleryImages: gallery, imageJobs: jobs }))
   if (manifest.length > MAX_MANIFEST) throw new Error('Book metadata is too large for this archive version.')
   const header = new Uint8Array(12)
   header.set(new TextEncoder().encode(MAGIC))
@@ -36,6 +38,12 @@ export function encodeBookArchive(data: BookArchiveData): Blob {
 function valid(condition: unknown): asserts condition {
   if (!condition) throw new Error('This book backup is incomplete or invalid. Nothing was imported.')
 }
+async function assertArchivedVideo(video: Blob) {
+  const bytes = new Uint8Array(await video.slice(0, 12).arrayBuffer())
+  const mp4 = bytes.length >= 8 && new TextDecoder().decode(bytes.slice(4, 8)) === 'ftyp'
+  const webm = bytes.length >= 4 && bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3
+  valid(mp4 || webm)
+}
 
 export async function decodeBookArchive(file: Blob): Promise<BookArchiveData> {
   valid(file.size >= 12 && file.size <= MAX_ARCHIVE)
@@ -45,7 +53,7 @@ export async function decodeBookArchive(file: Blob): Promise<BookArchiveData> {
   valid(length > 0 && length <= MAX_MANIFEST && 12 + length <= file.size)
   let manifest: any
   try { manifest = JSON.parse(await file.slice(12, 12 + length).text()) } catch { throw new Error('This book backup could not be read. Nothing was imported.') }
-  valid(manifest?.format === 'arc-book' && [1, 2].includes(manifest.version))
+  valid(manifest?.format === 'arc-book' && [1, 2, 3].includes(manifest.version))
   for (const key of ['entities', 'snapshots', 'dependencies', 'illustrations']) valid(Array.isArray(manifest[key]))
   valid(manifest.entities.length <= 100_000 && manifest.illustrations.length <= 20_000)
   const entities: ArcEntity[] = manifest.entities
@@ -110,12 +118,16 @@ export async function decodeBookArchive(file: Blob): Promise<BookArchiveData> {
     valid([record.seed, record.cost, record.durationMs].every((value) => value === undefined || Number.isFinite(value)))
     valid(record.bookId === book.id && record.kept === true && typeof record.prompt === 'string' && record.prompt.length <= 32000 && Number.isFinite(record.createdAt))
     valid(Number.isInteger(record.width) && Number.isInteger(record.height) && record.width > 0 && record.height > 0 && record.width * record.height <= 40_000_000)
-    for (const size of [record.imageSize, record.thumbnailSize]) valid(Number.isSafeInteger(size) && size > 0 && size <= 20 * 1024 * 1024)
+    const kind = record.kind ?? 'image'
+    valid(kind === 'image' || (manifest.version >= 3 && kind === 'video'))
+    valid(Number.isSafeInteger(record.imageSize) && record.imageSize > 0 && record.imageSize <= (kind === 'video' ? 200 : 20) * 1024 * 1024)
+    valid(Number.isSafeInteger(record.thumbnailSize) && record.thumbnailSize > 0 && record.thumbnailSize <= 20 * 1024 * 1024)
     valid(offset + record.imageSize + record.thumbnailSize <= file.size)
-    valid(['image/webp', 'image/png', 'image/jpeg'].includes(record.imageType) && ['image/webp', 'image/png', 'image/jpeg'].includes(record.thumbnailType))
+    valid((kind === 'video' ? ['video/mp4', 'video/webm'] : ['image/webp', 'image/png', 'image/jpeg']).includes(record.imageType) && ['image/webp', 'image/png', 'image/jpeg'].includes(record.thumbnailType))
     const image = file.slice(offset, offset += record.imageSize, record.imageType)
     const thumbnail = file.slice(offset, offset += record.thumbnailSize, record.thumbnailType)
-    await assertImageFile(image); await assertImageFile(thumbnail)
+    if (kind === 'video') await assertArchivedVideo(image); else await assertImageFile(image)
+    await assertImageFile(thumbnail)
     const { imageSize: _i, imageType: _it, thumbnailSize: _t, thumbnailType: _tt, ...details } = record
     galleryImages.push({ ...details, image, thumbnail })
   }
@@ -125,7 +137,9 @@ export async function decodeBookArchive(file: Blob): Promise<BookArchiveData> {
     valid(job.bookId === book.id && job.status === 'completed' && job.decision === 'kept' && galleryImages.some((a) => a.id === job.assetId))
     valid(typeof job.prompt === 'string' && typeof job.modelAlias === 'string' && typeof job.model === 'string' && ['openai', 'nanogpt', 'pruna'].includes(job.provider) && typeof job.size?.value === 'string' && Number.isFinite(job.size.width) && Number.isFinite(job.size.height) && Number.isFinite(job.createdAt))
     if (job.messageId) valid(byId.get(job.messageId)?.type === 'chatMessage' && byId.get(job.messageId)?.parentId === job.chatId)
-    delete job.providerJobId; delete job.owner; delete job.heartbeat
+    valid(job.task === undefined || ['text-to-image', 'image-to-image', 'text-to-video', 'image-to-video'].includes(job.task))
+    valid(job.sources === undefined)
+    delete job.providerJobId; delete job.owner; delete job.heartbeat; delete job.sources
   }
   valid(offset === file.size)
   for (const entity of entities) if (entity.primaryImageId) valid(illustrations.some((image) => image.id === entity.primaryImageId && image.entryId === entity.id))

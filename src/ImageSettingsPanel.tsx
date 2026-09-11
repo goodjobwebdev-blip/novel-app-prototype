@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react'
 import type { AiSettings } from './ai-settings'
-import type { ImageModel, ImageProvider, ImageSettings, OpenAIImageQuality, OpenAIImageModeration } from './image-generation-types'
-import { documentedImageModels, imageSize, imageFavorite, imageProviderNames, imageRatio, IMAGE_PROVIDERS, loadImageSettings, resolveImageKey, saveImageSettings } from './image-settings'
+import { modelTasks, type ImageModel, type ImageProvider, type ImageSettings, type OpenAIImageQuality, type OpenAIImageModeration } from './image-generation-types'
+import { documentedImageModels, generationTaskNames, imageSize, imageFavorite, imageProviderNames, imageRatio, IMAGE_PROVIDERS, loadImageSettings, resolveImageKey, saveImageSettings } from './image-settings'
 import { fetchImageModels } from './image-providers'
 export type ImageSettingsPanelRef = { save(): boolean; discard(): void; isDirty(): boolean }
 export type ImageSettingsPanelProps = { ai: AiSettings; onDirtyChange?: (dirty: boolean) => void }
@@ -23,7 +23,7 @@ const ImageSettingsPanel = forwardRef<ImageSettingsPanelRef, ImageSettingsPanelP
       const next = { ...catalogs, [selectedProvider]: models }
       setCatalogs(next)
       try { localStorage.setItem('arc-image-catalog-v1', JSON.stringify(next)) } catch { /* Favorites can still be saved separately. */ }
-      setMessage(selectedProvider === 'pruna' ? `${models.length} documented Pruna text-to-image models loaded.` : `${models.length} text-to-image models with supported sizes loaded.`)
+      setMessage(`${models.length} generation models with verified capabilities loaded.`)
     } catch (e) { setError(e instanceof Error ? e.message : 'Models could not be loaded.') }
     finally { setBusy(false) }
   }
@@ -34,8 +34,8 @@ const ImageSettingsPanel = forwardRef<ImageSettingsPanelRef, ImageSettingsPanelP
   const discard = () => { const saved = loadImageSettings(); setSettings(saved); setDirty(false); setError(''); setMessage('Changes discarded'); setEditingFavorite(saved.favorites.length ? 0 : null) }
   useImperativeHandle(ref, () => ({ save, discard, isDirty: () => dirty }), [dirty, settings])
   return <section className="image-settings image-ui">
-    <h1 id="page-title">Image generation</h1>
-    <p className="image-help">Configure device-global image providers and favorite models. These settings apply to every book on this device. Save changes before generating.</p>
+    <h1 id="page-title">Image & video generation</h1>
+    <p className="image-help">Configure device-global visual providers and favorite models. Source images are sent to the selected provider only when generation starts. These settings apply to every book on this device.</p>
     <details className="image-settings-section" open={!settings.favorites.length}>
       <summary>Provider API keys</summary>
       <div className="image-provider-fields">{IMAGE_PROVIDERS.map((p) => <label key={p}>
@@ -53,15 +53,15 @@ const ImageSettingsPanel = forwardRef<ImageSettingsPanelRef, ImageSettingsPanelP
       </div>
       <label>Find a model<input type="search" placeholder="Search models" value={query} onChange={(e) => setQuery(e.target.value)} /></label>
       <div className="image-catalog">{models.filter((m) => `${m.id} ${m.name}`.toLowerCase().includes(query.toLowerCase())).slice(0, 100).map((m) => <div key={m.id}>
-        <span>{m.name}<small>{m.id}{m.cost != null ? ` · $${m.cost.toFixed(4)} per image` : ''}</small>{m.description && <small>{m.description}</small>}</span>
+        <span>{m.name}<small>{m.id}{m.cost != null ? ` · estimated $${m.cost.toFixed(4)} per output` : ''}</small><small>{modelTasks(m).map((task) => generationTaskNames[task]).join(' · ')}</small>{m.description && <small>{m.description}</small>}</span>
         <button type="button" disabled={settings.favorites.some((f) => f.provider === m.provider && f.id === m.id)} onClick={() => change({ ...settings, favorites: [...settings.favorites, imageFavorite(m, settings.favorites)] })}>Favorite</button>
-      </div>)}{!models.length && <p>Refresh models to discover supported image sizes.</p>}</div>
+      </div>)}{!models.length && <p>Refresh models to discover supported generation capabilities.</p>}</div>
     </details>
     {settings.favorites.map((f, index) => {
       const update = (patch: Partial<typeof f>) => change({ ...settings, favorites: settings.favorites.map((m, i) => i === index ? { ...m, ...patch } : m) })
       const discovered = (f.provider === 'pruna' ? documentedImageModels : catalogs[f.provider])?.find((m) => m.id === f.id)
       return <details className="image-favorite" open={editingFavorite === index} onToggle={(event) => { if (event.currentTarget.open && editingFavorite !== index) setEditingFavorite(index); else if (!event.currentTarget.open && editingFavorite === index) setEditingFavorite(null) }} key={`${f.provider}/${f.id}`}>
-        <summary className="image-favorite-heading"><span><small>{imageProviderNames[f.provider]}{(discovered?.cost ?? f.cost) != null ? ` · $${(discovered?.cost ?? f.cost)!.toFixed(4)} per image` : ''}</small><strong>{f.name}</strong>{(discovered?.description ?? f.description) && <small>{discovered?.description ?? f.description}</small>}</span></summary>
+        <summary className="image-favorite-heading"><span><small>{imageProviderNames[f.provider]}{(discovered?.cost ?? f.cost) != null ? ` · estimated $${(discovered?.cost ?? f.cost)!.toFixed(4)} per output` : ''}</small><strong>{f.name}</strong><small>{modelTasks(f).map((task) => generationTaskNames[task]).join(' · ')}</small>{(discovered?.description ?? f.description) && <small>{discovered?.description ?? f.description}</small>}</span></summary>
         <label>Chat model alias<input maxLength={64} value={f.alias} onChange={(e) => { const alias = e.target.value; change({ ...settings, defaultAlias: settings.defaultAlias === f.alias ? alias : settings.defaultAlias, favorites: settings.favorites.map((m, i) => i === index ? { ...m, alias } : m) }) }} /></label>
         <label className="image-check image-default-choice"><input type="radio" name="default-image-model" checked={settings.defaultAlias === f.alias || (!settings.defaultAlias && index === 0)} onChange={() => change({ ...settings, defaultAlias: f.alias })} /><span>Default image model</span></label>
         <fieldset className="image-size-options">
@@ -75,7 +75,7 @@ const ImageSettingsPanel = forwardRef<ImageSettingsPanelRef, ImageSettingsPanelP
           <label className="image-default-size">Default size<select value={f.defaultSize} onChange={(e) => update({ defaultSize: e.target.value })}>{f.sizes.filter((s) => f.enabledSizes.includes(s.value)).map((s) => <option key={s.value} value={s.value}>{s.value}</option>)}</select></label>
           {f.provider === 'openai' && <>
             <label>Image quality<select value={f.quality ?? 'low'} onChange={(e) => update({ quality: e.target.value as OpenAIImageQuality })}>
-              <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="auto">Auto</option>
+              <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>{/^gpt-image-2\.5-/.test(f.id) && <><option value="xhigh">Extra high</option><option value="max">Maximum</option></>}<option value="auto">Auto</option>
             </select><small>Higher quality can take longer and cost more.</small></label>
             <label>Image moderation<select value={f.moderation ?? 'low'} onChange={(e) => update({ moderation: e.target.value as OpenAIImageModeration })}>
               <option value="low">Low</option><option value="auto">Auto</option>
@@ -83,7 +83,7 @@ const ImageSettingsPanel = forwardRef<ImageSettingsPanelRef, ImageSettingsPanelP
           </>}
         </div>
         <div className="image-favorite-actions">
-          {discovered && <button type="button" onClick={() => { const enabledSizes = discovered.sizes.map((s) => s.value).filter((s) => f.enabledSizes.includes(s)); const active = enabledSizes.length ? enabledSizes : [discovered.sizes[0].value]; update({ name: discovered.name, source: discovered.source, cost: discovered.cost, description: discovered.description, sizes: discovered.sizes, enabledSizes: active, defaultSize: active.includes(f.defaultSize) ? f.defaultSize : active[0] }) }}>Update supported sizes</button>}
+          {discovered && <button type="button" onClick={() => { const enabledSizes = discovered.sizes.map((s) => s.value).filter((s) => f.enabledSizes.includes(s)); const active = enabledSizes.length ? enabledSizes : [discovered.sizes[0].value]; update({ name: discovered.name, source: discovered.source, cost: discovered.cost, description: discovered.description, tasks: discovered.tasks, maxSourceImages: discovered.maxSourceImages, videoResolutions: discovered.videoResolutions, videoDurations: discovered.videoDurations, aspectRatios: discovered.aspectRatios, sizes: discovered.sizes, enabledSizes: active, defaultSize: active.includes(f.defaultSize) ? f.defaultSize : active[0] }) }}>Update capabilities</button>}
           <a href={f.source} target="_blank" rel="noreferrer">Provider documentation</a>
           <button className="image-remove-favorite" type="button" onClick={() => { change({ ...settings, favorites: settings.favorites.filter((_, i) => i !== index) }); setEditingFavorite(null) }}>Remove favorite</button>
         </div>

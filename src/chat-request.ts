@@ -33,7 +33,7 @@ export type ChatRequestHistoryItem = {
   role: 'user' | 'assistant'
   content: string
   thoughts?: string
-  imageGenerations?: Array<{ prompt: string; status: string; modelAlias: string; size: string }>
+  imageGenerations?: Array<{ prompt: string; status: string; modelAlias: string; size: string; task?: string }>
   documentEdits?: Array<{ entityTitle: string; status: string }>
   codexCreations?: Array<{ title: string; status: string }>
   outlineActions?: Array<{ action: string; entityTitle: string; status: string }>
@@ -62,7 +62,7 @@ export function chatHistoryContent(message: ChatRequestHistoryItem) {
     ? `\n\n[Outline proposals: ${message.outlineActions.map((proposal) => `${proposal.action} ${proposal.entityTitle}: ${proposal.status}`).join('; ')}]` : ''
   const entityActionState = message.role === 'assistant' && message.entityActions?.length
     ? `\n\n[Entity proposals: ${message.entityActions.map((proposal) => `${proposal.action} ${proposal.entityTitle}: ${proposal.status}`).join('; ')}]` : ''
-  const imageState = message.imageGenerations?.length ? `\n\n[Image proposals (generation requires user action): ${JSON.stringify(message.imageGenerations.map((p) => ({ prompt: p.prompt, status: p.status, modelAlias: p.modelAlias, size: p.size })))}]` : ''
+  const imageState = message.imageGenerations?.length ? `\n\n[Visual proposals (generation requires user action): ${JSON.stringify(message.imageGenerations.map((proposal) => ({ prompt: proposal.prompt, status: proposal.status, modelAlias: proposal.modelAlias, size: proposal.size, task: proposal.task ?? 'text-to-image' })))}]` : ''
   return stabilizeProposalHistory(`${imageState}${message.content}${editState}${creationState}${outlineState}${entityActionState}`)
 }
 

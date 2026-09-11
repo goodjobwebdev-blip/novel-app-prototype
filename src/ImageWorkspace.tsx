@@ -7,7 +7,7 @@ import { availableImageCodex, deleteGalleryImage, enqueueImageJob, listGalleryIm
 import { loadImageSettings, resolveImageSpec } from './image-settings'
 import { checkStorageHeadroom, prepareIllustration } from './illustration-image'
 import { getIllustration, removeIllustration, saveIllustration } from './persistence'
-import type { GalleryImage } from './image-generation-types'
+import { generationTask, type GalleryImage } from './image-generation-types'
 import './image-generation.css'
 
 export type ImageWorkspaceTab = 'generate' | 'gallery'
@@ -23,7 +23,7 @@ export function createImageWorkspaceState(): ImageWorkspaceState {
   const favorite = settings.favorites.find((model) => model.alias === settings.defaultAlias) ?? settings.favorites[0]
   return {
     tab: 'generate',
-    draft: { prompt: '', alias: favorite?.alias ?? '', size: favorite?.defaultSize ?? '1024x1024' },
+    draft: { prompt: '', alias: favorite?.alias ?? '', size: favorite?.defaultSize ?? '1024x1024', task: 'text-to-image', sources: [] },
     gallery: { query: '', scope: 'all', limit: 40 },
   }
 }
@@ -40,16 +40,19 @@ export function ImageGenerateView({ bookId, state, onStateChange, onSettings }: 
   const [error, setError] = useState('')
   const [status, setStatus] = useState('')
   const [busy, setBusy] = useState(false)
+  const { data: sourceAssets } = useImageQuery(() => listGalleryImages(), [], [])
   const favorite = settings.favorites.find((model) => model.alias === state.draft.alias)
   const validSize = Boolean(favorite?.enabledSizes.includes(state.draft.size) && favorite.sizes.some((size) => size.value === state.draft.size))
-  const canGenerate = Boolean(state.draft.prompt.trim() && favorite && validSize)
+  const task = generationTask(state.draft)
+  const needsSource = task === 'image-to-image' || task === 'image-to-video'
+  const canGenerate = Boolean(state.draft.prompt.trim() && favorite && validSize && (!needsSource || state.draft.sources?.length))
   const setDraft = (draft: ImageDraft) => onStateChange({ ...state, draft })
   const generate = async () => {
     setBusy(true)
     setError('')
     setStatus('Queued')
     try {
-      await enqueueImageJob(resolveImageSpec(state.draft.prompt, state.draft.alias, state.draft.size), { bookId })
+      await enqueueImageJob(resolveImageSpec(state.draft.prompt, state.draft.alias, state.draft.size, undefined, undefined, task, state.draft.sources ?? [], { resolution: state.draft.resolution, duration: state.draft.duration, aspectRatio: state.draft.aspectRatio, fps: state.draft.fps, numFrames: state.draft.numFrames, seed: state.draft.seed, draft: state.draft.draftVideo }), { bookId })
     } catch (reason) {
       setStatus('')
       setError(reason instanceof Error ? reason.message : 'Could not queue image.')
@@ -57,8 +60,8 @@ export function ImageGenerateView({ bookId, state, onStateChange, onSettings }: 
   }
   return <section className="image-generate-view" aria-labelledby="image-generate-heading">
     <div className="image-composer">
-      <h2 id="image-generate-heading">Create an image</h2>
-      <ImageGenerationControls value={state.draft} onChange={setDraft} disabled={busy} />
+      <h2 id="image-generate-heading">Create visual media</h2>
+      <ImageGenerationControls value={state.draft} onChange={setDraft} disabled={busy} sourceAssets={sourceAssets} />
 
       {!settings.favorites.length && <button type="button" onClick={onSettings}>Set up image models</button>}
       <div className="image-generate-actions">
@@ -67,7 +70,7 @@ export function ImageGenerateView({ bookId, state, onStateChange, onSettings }: 
       </div>
       <p className="image-queue-status" role="status" aria-live="polite">{status}</p>
       {error && <p role="alert">{error}</p>}
-      <p className="image-help">Each tap queues one image. Your draft stays here and the queue continues while you switch chats or books. Keep the app open while generating; interrupted requests are never automatically resubmitted.</p>
+      <p className="image-help">Each tap queues one output. Source images are frozen with the request. Your draft stays here and the queue continues while you switch chats or books. Keep the app open while generating; interrupted requests are never automatically resubmitted.</p>
     </div>
     <div className="image-queue-pane"><h2>Generation queue</h2><ImageJobs /></div>
   </section>
@@ -90,6 +93,7 @@ export function ImageGalleryView({ bookId, state, onStateChange }: Omit<ImageWor
     if (!entryId) return false
     const previous = await getIllustration(entryId)
     if (previous && !window.confirm('Replace this Codex entry’s illustration? You can undo it from the entry.')) return false
+    if ((asset.kind ?? 'image') !== 'image') throw new Error('Only still images can be used as Codex illustrations.')
     const pixels = await prepareIllustration(asset.image)
     await checkStorageHeadroom(pixels.image.size + pixels.thumbnail.size)
     await saveIllustration(entryId, pixels, { caption: asset.prompt.slice(0, 2000), alt: '', cropX: 50, cropY: 50 }, previous?.id)
@@ -119,14 +123,14 @@ export function ImageGalleryView({ bookId, state, onStateChange }: Omit<ImageWor
     {(error || message) && <p role="status">{error || message}</p>}
     <div className="image-gallery-grid">{visible.slice(0, state.gallery.limit).map((asset) => <article key={asset.id}>
       <ImageAssetPreview asset={asset} onOpen={() => { setEntryId(''); setMessage('') }} renderViewerActions={(close) => <div className="image-gallery-viewer-actions">
-        {bookId && <div className="image-codex-action"><label>Codex entry<select value={entryId} onChange={(event) => setEntryId(event.target.value)}><option value="">Choose an entry</option>{entries.map((entry) => <option key={entry.id} value={entry.id}>{entry.title}</option>)}</select></label>{!entries.length && <p>Create a Codex entry in this book first.</p>}<button type="button" disabled={!entryId || busy} onClick={() => { void action(async () => { if (await attach(asset)) close() }) }}>Use in Codex</button></div>}
-        <button className="image-danger-action" type="button" disabled={busy} onClick={() => { const confirmed = window.confirm(asset.entryId ? 'Remove this illustration from its Codex entry? You can undo it from the entry.' : 'Delete this image from the gallery and its chat results? Download it first if you want a backup.'); if (confirmed) void action(async () => { await remove(asset); close() }) }}>Delete image</button>
+        {bookId && (asset.kind ?? 'image') === 'image' && <div className="image-codex-action"><label>Codex entry<select value={entryId} onChange={(event) => setEntryId(event.target.value)}><option value="">Choose an entry</option>{entries.map((entry) => <option key={entry.id} value={entry.id}>{entry.title}</option>)}</select></label>{!entries.length && <p>Create a Codex entry in this book first.</p>}<button type="button" disabled={!entryId || busy} onClick={() => { void action(async () => { if (await attach(asset)) close() }) }}>Use in Codex</button></div>}
+        <button className="image-danger-action" type="button" disabled={busy} onClick={() => { const kind = asset.kind ?? 'image'; const confirmed = window.confirm(asset.entryId ? 'Remove this illustration from its Codex entry? You can undo it from the entry.' : `Delete this ${kind} from the gallery and its chat results? Download it first if you want a backup.`); if (confirmed) void action(async () => { await remove(asset); close() }) }}>Delete {asset.kind ?? 'image'}</button>
         {message && <p role="alert">{message}</p>}
       </div>} />
       <p className="image-prompt-preview">{asset.prompt || 'Codex illustration'}</p>
       <small>{asset.modelAlias || 'Uploaded illustration'}</small>
     </article>)}</div>
-    {!visible.length && <p>No images match. Generate and keep an image, or upload a Codex illustration.</p>}
+    {!visible.length && <p>No media match. Generate and keep an image or video, or upload a Codex illustration.</p>}
     {visible.length > state.gallery.limit && <button type="button" onClick={() => updateGallery({ limit: state.gallery.limit + 40 })}>Show more images</button>}
   </section>
 }
