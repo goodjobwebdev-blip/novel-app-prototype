@@ -1,0 +1,37 @@
+.settings-section-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  margin: 0 0 22px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface-2);
+  scrollbar-width: none;
+}
+
+.settings-section-tabs.settings-section-tabs button {
+  flex: 1 0 auto;
+  min-height: 42px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--soft);
+  font: 600 13px var(--sans);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.settings-section-tabs.settings-section-tabs button:hover { color: var(--ink); }
+.settings-section-tabs.settings-section-tabs button[aria-selected="true"] {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .12);
+}
+.settings-section-tabs.settings-section-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+@media (max-width: 560px) {
+  .settings-section-tabs.settings-section-tabs button { flex-basis: auto; padding-inline: 13px; }
+}

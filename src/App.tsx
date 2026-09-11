@@ -1,9 +1,10 @@
 import ImageSettingsPanel, { type ImageSettingsPanelRef } from './ImageSettingsPanel'
+import SettingsSectionTabs from './SettingsSectionTabs'
 import { ContextSourcePicker, ContextSourceInventory, ContextBudget } from './ContextControls'
 import './context-settings-ux.css'
 import { switchProviderProfile } from './provider-profiles'
 import { TextRevealPreview } from './TextRevealPreview'
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bot,
   Check,
@@ -698,8 +699,8 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
 
         <div className="ai-scope-row"><span>{isBookSettings ? `This book only · ${book?.title}` : 'Defaults for new books'}</span>{book && <details className="ai-settings-menu"><summary>More options</summary><button type="button" onClick={() => { void resetFromDefaults() }} disabled={settingsLoading}>Reset from defaults</button></details>}</div>
         {saveError && <div className="status error" role="alert">{saveError}<button type="button" onClick={() => { void flushAiSettings() }}>Retry saving</button></div>}
-        <nav className="ai-section-nav" aria-label="AI sections">{(['connection', 'models', 'prompts'] as const).map(section => <button key={section} type="button" aria-current={aiSection === section ? 'page' : undefined} onClick={() => setAiSection(section)}>{section[0].toUpperCase() + section.slice(1)}</button>)}</nav>
-        <section hidden={aiSection !== 'connection'} className="settings-card provider-card">
+        <SettingsSectionTabs tabs={aiSections} active={aiSection} onChange={setAiSection} idPrefix="ai" label="AI sections" />
+        <section hidden={aiSection !== 'connection'} className="settings-card provider-card" role="tabpanel" id="ai-panel-connection" aria-labelledby="ai-tab-connection">
           <div className="card-heading"><div><span>01</span><h2>Provider</h2></div><p>Connection details stay in this browser.</p></div>
           <p className="connection-summary">{providerLabels[settings.provider]} · {settings.provider === 'fake' ? 'Local testing' : settings.apiKey ? 'Key saved on this device' : 'Setup required'}</p><details open={connectionExpanded || (!settings.apiKey && settings.provider !== 'fake')} onToggle={event => setConnectionExpanded(event.currentTarget.open)}><summary>Edit connection</summary><div className="provider-grid">{(Object.keys(providerLabels) as AiProvider[]).map((provider) => <button key={provider} className={settings.provider === provider ? 'selected' : ''} type="button" aria-pressed={settings.provider === provider} onClick={() => selectProvider(provider)}><i>{provider === 'fake' ? 'T' : provider === 'nanogpt' ? 'N' : provider === 'openrouter' ? 'O' : provider === 'openai' ? 'AI' : '{ }'}</i><span><strong>{providerLabels[provider]}</strong><small>{provider === 'fake' ? 'Local · no network' : provider === 'compatible' ? 'Custom endpoint' : 'Managed endpoint'}</small></span><b>{settings.provider === provider ? '✓' : ''}</b></button>)}</div>
           <div className="connection-fields">
@@ -730,7 +731,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
           <details><summary>{fakeTrace.length ? `${fakeTrace.length} request${fakeTrace.length === 1 ? '' : 's'}` : 'No Fake requests yet'}</summary><pre>{fakeTrace.length ? JSON.stringify(fakeTrace, null, 2) : 'Generate, summarize, autotitle, or chat with Fake (testing) to inspect the exact provider-boundary request.'}</pre></details>
         </section>}
 
-        <section hidden={aiSection !== 'models'} className="settings-card models-card">
+        <section hidden={aiSection !== 'models'} className="settings-card models-card" role="tabpanel" id="ai-panel-models" aria-labelledby="ai-tab-models">
           <div className="card-heading"><div><span>02</span><h2>Models</h2></div><p>{isBookSettings ? 'Favorites are shared; model choices belong to this book.' : 'Main writes; Support summarizes; Codex builds your world; Chat assists.'}</p></div>
           <div className="model-pickers">{(['main', 'support', 'codex', 'chat'] as const).map(role => {
             const id = settings[`${role}Model`]
@@ -754,7 +755,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
           </details><div className="model-browser"><div className="model-search"><Search aria-hidden="true" /><input value={modelSearch} onChange={(event) => { setModelSearch(event.target.value); setModelCount(8) }} placeholder="Search loaded models" /></div>{models.length ? <div className="model-list">{visibleModels.slice(0, modelCount).map((model) => <article key={model.id}><button className={`favorite ${settings.favorites.includes(model.id) ? 'active' : ''}`} type="button" onClick={() => toggleFavorite(model.id)} aria-pressed={settings.favorites.includes(model.id)} aria-label={`Favorite ${model.id}`}><Star fill={settings.favorites.includes(model.id) ? 'currentColor' : 'none'} aria-hidden="true" /></button><div><strong>{model.name || model.id}</strong>{model.name && model.name !== model.id && <small>{model.id}</small>}<p><span>{formatContext(model.context_length)}</span><span>{model.architecture?.modality || 'Text'}</span></p></div><button className="use-model" type="button" onClick={() => selectModel(modelRole, model.id)}>Use for {modelRole === 'main' ? 'Main' : modelRole === 'support' ? 'Support' : modelRole === 'chat' ? 'Chat' : 'Codex'}</button></article>)}<div className="model-results" role="status">Showing {Math.min(modelCount, visibleModels.length)} of {visibleModels.length} matching models{visibleModels.length > modelCount && <button type="button" onClick={() => setModelCount(count => count + 8)}>Show more</button>}{!visibleModels.length && <span>Try a different search.</span>}</div></div> : <div className="model-empty"><Bot aria-hidden="true" /><strong>No models loaded</strong><p>Connect a provider to browse models, or enter a model ID above.</p><button type="button" onClick={() => setAiSection('connection')}>Set up connection</button></div>}</div>
         </section>
 
-        <section hidden={aiSection !== 'prompts'} className="settings-card prompts-card">
+        <section hidden={aiSection !== 'prompts'} className="settings-card prompts-card" role="tabpanel" id="ai-panel-prompts" aria-labelledby="ai-tab-prompts">
           <div className="card-heading"><div><span>03</span><h2>Prompts</h2></div><p>System prompt, ordered predefined messages, then Arc’s current instruction.</p></div>
           <div className="prompt-tabs" role="tablist" aria-label="Prompt purpose">{([['story', 'Story'], ['assistant', 'Chat'], ['lore', 'Codex'], ['summarize', 'Summary']] as const).map(([key, label]) => <button key={key} className={promptTab === key ? 'active' : ''} role="tab" id={`prompt-tab-${key}`} aria-selected={promptTab === key} aria-controls="prompt-panel" tabIndex={promptTab === key ? 0 : -1} onKeyDown={event => { const keys = ['story', 'assistant', 'lore', 'summarize'] as const; const index = keys.indexOf(key); const next = event.key === 'ArrowRight' ? (index + 1) % 4 : event.key === 'ArrowLeft' ? (index + 3) % 4 : event.key === 'Home' ? 0 : event.key === 'End' ? 3 : -1; if (next >= 0) { event.preventDefault(); setPromptTab(keys[next]); document.getElementById(`prompt-tab-${keys[next]}`)?.focus() } }} type="button" onClick={() => setPromptTab(key)}>{label}</button>)}</div>
           <div role="tabpanel" id="prompt-panel" aria-labelledby={`prompt-tab-${promptTab}`} key={promptTab}>
@@ -825,7 +826,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
         </section>
 
         </> : settingsTab === 'context' ? (!contextReady ? <section className="settings-card"><h1 id="page-title">Context</h1><p role="status">{contextSaveError || 'Loading context settings…'}</p>{contextSaveError && <button type="button" onClick={() => setContextLoadVersion(version => version + 1)}>Retry loading</button>}</section> : book ? <>
-          <ContextSectionTabs active={contextSection} onChange={setContextSection} />
+          <SettingsSectionTabs tabs={contextSections} active={contextSection} onChange={setContextSection} idPrefix="context" label="Context type" />
           <div role="tabpanel" id={`context-panel-${contextSection}`} aria-labelledby={`context-tab-${contextSection}`}>
             {contextSection === 'summary'
               ? book.currentSummary ? <SummaryContextSettings book={book} source={summaryPreviewSource} error={summaryPreviewError} settings={settings} /> : <SummaryContextPlaceholder />
@@ -842,6 +843,8 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
   )
 }
 
+const aiSections = [['connection', 'Connection'], ['models', 'Models'], ['prompts', 'Prompts']] as const
+
 const contextSections: ReadonlyArray<readonly [ContextSection, string]> = [
   ['scene', 'Story'],
   ['codex', 'Codex'],
@@ -850,23 +853,6 @@ const contextSections: ReadonlyArray<readonly [ContextSection, string]> = [
   ['note', 'Note'],
 ]
 
-function ContextSectionTabs({ active, onChange }: { active: ContextSection; onChange: (section: ContextSection) => void }) {
-  const selectFromKeyboard = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
-    const next = event.key === 'ArrowRight' ? (index + 1) % contextSections.length
-      : event.key === 'ArrowLeft' ? (index + contextSections.length - 1) % contextSections.length
-        : event.key === 'Home' ? 0
-          : event.key === 'End' ? contextSections.length - 1
-            : -1
-    if (next < 0) return
-    event.preventDefault()
-    const section = contextSections[next][0]
-    onChange(section)
-    document.getElementById(`context-tab-${section}`)?.focus()
-  }
-  return <div className="context-section-tabs" role="tablist" aria-label="Context type">
-    {contextSections.map(([section, label], index) => <button key={section} type="button" role="tab" id={`context-tab-${section}`} aria-controls={`context-panel-${section}`} aria-selected={active === section} tabIndex={active === section ? 0 : -1} className={active === section ? 'active' : ''} onClick={() => onChange(section)} onKeyDown={(event) => selectFromKeyboard(event, index)}>{label}</button>)}
-  </div>
-}
 
 function SummaryRequestPreview({ request, source, error, hasCurrentSummary, model, modelContextLength }: {
   request: NormalizedAssembledRequest | null

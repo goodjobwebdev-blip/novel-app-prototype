@@ -3,14 +3,15 @@ import test from 'node:test'
 import { readFileSync } from 'node:fs'
 
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
-const styles = readFileSync(new URL('../src/context-settings-ux.css', import.meta.url), 'utf8')
+const tabs = readFileSync(new URL('../src/SettingsSectionTabs.tsx', import.meta.url), 'utf8')
+const styles = readFileSync(new URL('../src/settings-section-tabs.css', import.meta.url), 'utf8')
 
 test('Context Management exposes explicit accessible tabs for every existing context mode', () => {
   assert.match(app, /const contextSections:[\s\S]*\['scene', 'Story'\][\s\S]*\['codex', 'Codex'\][\s\S]*\['chat', 'Chat'\][\s\S]*\['summary', 'Summary'\][\s\S]*\['note', 'Note'\]/)
-  assert.match(app, /className="context-section-tabs" role="tablist"/)
-  assert.match(app, /role="tab"[\s\S]*aria-controls=\{`context-panel-[\s\S]*aria-selected=\{active === section\}/)
+  assert.match(app, /<SettingsSectionTabs tabs=\{contextSections\}[\s\S]*idPrefix="context" label="Context type"/)
+  assert.match(tabs, /role="tab"[\s\S]*aria-controls=\{`\$\{idPrefix\}-panel-\$\{tab\}`\}[\s\S]*aria-selected=\{active === tab\}/)
   assert.match(app, /role="tabpanel"[\s\S]*aria-labelledby=\{`context-tab-/)
-  assert.match(styles, /\.context-section-tabs button\.active/)
+  assert.match(styles, /\.settings-section-tabs[\s\S]*button\[aria-selected="true"\]/)
 })
 
 test('selected Context tab controls rendering and persistence without overwriting per-Chat profiles', () => {

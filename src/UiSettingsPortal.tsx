@@ -19,6 +19,7 @@ import {
 } from './ui-settings'
 
 import { contrastWarnings } from './appearance-utils'
+import SettingsSectionTabs from './SettingsSectionTabs'
 
 // Preserve failed saves and unapplied palette edits when the settings portal remounts.
 let pendingSettings: UiSettings | null = null
@@ -147,6 +148,8 @@ function ThemeEditor({ theme, onChange, onApply, onCancel }: { theme: CustomUiTh
   </section>
 }
 
+const appearanceSections = [['theme', 'Theme'], ['typography', 'Typography'], ['customization', 'Customization']] as const
+
 function UiSettingsPanel() {
   const [settings, setSettings] = useState<UiSettings>(() => pendingSettings ?? loadUiSettings())
   const [section, setSection] = useState<'theme' | 'typography' | 'customization'>('theme')
@@ -207,12 +210,13 @@ function UiSettingsPanel() {
     <header className="page-heading"><div><p>Global UI</p><h1 id="page-title">Appearance</h1><span>Applies to every book on this device. UI settings are global and cannot be overridden by a book.</span></div><div className={`save-state ${saveError ? 'error' : 'saved'}`} role="status" aria-live="polite"><i />{saveError ? 'Not saved' : 'Saved'}{saveError && <button type="button" onClick={() => persist(pendingSettings ?? settings)}>Retry</button>}</div></header>
 
     {saveError && <p className="ui-save-error" role="alert">Changes could not be saved on this device. They are kept here for retry; a reload will use the last saved appearance.</p>}
-    <div className="ui-appearance-tools"><span className="ui-scope-summary">All books on this device · {saveError ? 'Not saved' : 'Saved automatically'}</span><nav aria-label="Appearance sections">{(['theme', 'typography', 'customization'] as const).map(tab => <button type="button" key={tab} aria-current={section === tab ? 'page' : undefined} onClick={() => setSection(tab)}>{tab[0].toUpperCase() + tab.slice(1)}{tab === 'customization' && draft ? ' · Draft' : ''}</button>)}</nav><button type="button" className="ui-safe-reset" onClick={resetTheme}>Reset to readable theme</button></div>
-    <div hidden={section !== 'typography'}>
+    <div className="ui-appearance-tools"><span className="ui-scope-summary">All books on this device · {saveError ? 'Not saved' : 'Saved automatically'}</span><button type="button" className="ui-safe-reset" onClick={resetTheme}>Reset to readable theme</button></div>
+    <SettingsSectionTabs tabs={appearanceSections.map(([tab, label]) => [tab, tab === 'customization' && draft ? `${label} · Draft` : label] as const)} active={section} onChange={setSection} idPrefix="appearance" label="Appearance sections" />
+    <div hidden={section !== 'typography'} role="tabpanel" id="appearance-panel-typography" aria-labelledby="appearance-tab-typography">
     <TypographySection onReset={() => commit(current => ({ ...current, editor: { ...defaultUiSettings.editor } }))} number="01" title="Main editor" description="Typography for Scenes, Notes, Codex entries, and summaries." value={settings.editor} onChange={(editor) => commit((current) => ({ ...current, editor }))} />
     <TypographySection onReset={() => commit(current => ({ ...current, inputs: { ...defaultUiSettings.inputs } }))} number="02" title="Expandable inputs" description="Typography for scalable drawer and chat/context text inputs." value={settings.inputs} onChange={(inputs) => commit((current) => ({ ...current, inputs }))} />
 
-    </div><section hidden={section !== 'theme'} className="settings-card ui-themes-card">
+    </div><section hidden={section !== 'theme'} className="settings-card ui-themes-card" role="tabpanel" id="appearance-panel-theme" aria-labelledby="appearance-tab-theme">
       <div className="card-heading"><div><span>03</span><h2>Themes</h2></div><p>Typography stays independent when the theme changes.</p></div>
       <div className="ui-theme-group"><h3>Built in</h3><div className="ui-theme-grid">
         {builtInThemes.map((theme) => <ThemeOption key={theme.id} id={theme.id} name={theme.name} palette={theme.palette} active={settings.activeThemeId === theme.id} onSelect={() => selectTheme(theme.id)} onDuplicate={() => duplicate(theme.id)} />)}
@@ -224,7 +228,7 @@ function UiSettingsPanel() {
 
     </section>
     {deleted && <div className="ui-delete-notice" role="status">Deleted “{deleted.theme.name}”<button type="button" onClick={() => { commit(current => ({ ...current, customThemes: [...current.customThemes.filter(theme => theme.id !== deleted.theme.id), deleted.theme], activeThemeId: deleted.wasActive ? deleted.theme.id : current.activeThemeId })); setDeleted(null) }}>Undo</button></div>}
-    <section hidden={section !== 'customization'} className="settings-card ui-customization-card"><h2>Customization</h2>{draft ? <ThemeEditor key={draft.id} theme={draft} onChange={editDraft} onApply={applyDraft} onCancel={() => editDraft(null)} /> : <><p>Edit a copy of a built-in palette, or customize the active custom theme.</p>{activeCustom && <button type="button" onClick={() => beginEdit(activeCustom)}>Edit {activeCustom.name}</button>}<button type="button" onClick={() => duplicate(activeTheme.id)}>Create from {activeTheme.name}</button></>}</section>
+    <section hidden={section !== 'customization'} className="settings-card ui-customization-card" role="tabpanel" id="appearance-panel-customization" aria-labelledby="appearance-tab-customization"><h2>Customization</h2>{draft ? <ThemeEditor key={draft.id} theme={draft} onChange={editDraft} onApply={applyDraft} onCancel={() => editDraft(null)} /> : <><p>Edit a copy of a built-in palette, or customize the active custom theme.</p>{activeCustom && <button type="button" onClick={() => beginEdit(activeCustom)}>Edit {activeCustom.name}</button>}<button type="button" onClick={() => duplicate(activeTheme.id)}>Create from {activeTheme.name}</button></>}</section>
   </section>
 }
 

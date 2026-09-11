@@ -14,9 +14,7 @@
 .ai-settings-shell .status.error { color: var(--danger); }
 .ai-scope-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; color: var(--soft); font-size: 13px; }
 .ai-settings-menu summary { cursor: pointer; }
-.ai-section-nav { display: flex; gap: 6px; padding: 5px; margin-bottom: 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
-.ai-section-nav button { flex: 1; min-height: 44px; border: 0; border-radius: 10px; background: transparent; color: var(--soft); }
-.ai-section-nav button[aria-current], .ai-settings-shell button[aria-pressed="true"] { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--ink); border-color: var(--accent); }
+.ai-settings-shell button[aria-pressed="true"] { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--ink); border-color: var(--accent); }
 .ai-settings-shell .model-pickers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .ai-settings-shell .model-role-card { padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-2); text-align: left; display: grid; gap: 8px; min-width: 0; }
 .model-role-card strong { font-size: 13px; }.model-role-card span { overflow-wrap: anywhere; font-size: 14px; }.model-role-card small { color: var(--soft); }
