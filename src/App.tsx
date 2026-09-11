@@ -138,7 +138,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
   const [promptVariableQuery, setPromptVariableQuery] = useState('')
   const [modelSearch, setModelSearch] = useState('')
   const [aiSection, setAiSection] = useState<'connection' | 'models' | 'prompts'>('models')
-  const [modelRole, setModelRole] = useState<'main' | 'support' | 'codex'>('main')
+  const [modelRole, setModelRole] = useState<'main' | 'support' | 'codex' | 'chat'>('main')
   const [modelCount, setModelCount] = useState(8)
   const [connectionExpanded, setConnectionExpanded] = useState(false)
   const [saveError, setSaveError] = useState('')
@@ -376,11 +376,11 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
     changeAiSettings(() => next)
     setModels(provider === 'fake' ? [FAKE_PROVIDER_MODEL] : []); setStatus(provider === 'fake' ? 'Fake Test Model is available locally. Reload never contacts a network.' : 'Provider changed. Reload its model list when ready.'); setStatusKind(provider === 'fake' ? 'success' : 'quiet')
   }
-  function selectModel(kind: 'main' | 'support' | 'codex', id: string) {
+  function selectModel(kind: 'main' | 'support' | 'codex' | 'chat', id: string) {
     const contextLength = models.find((model) => model.id === id)?.context_length
     changeAiSettings((current) => kind === 'main'
       ? { ...current, mainModel: id, mainModelContextLength: contextLength }
-      : kind === 'support' ? { ...current, supportModel: id, supportModelContextLength: contextLength } : { ...current, codexModel: id, codexModelContextLength: contextLength })
+      : kind === 'support' ? { ...current, supportModel: id, supportModelContextLength: contextLength } : kind === 'chat' ? { ...current, chatModel: id, chatModelContextLength: contextLength } : { ...current, codexModel: id, codexModelContextLength: contextLength })
   }
   async function refreshModels() {
     const requestSettings = latestAiSettingsRef.current
@@ -390,6 +390,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
       changeAiSettings((current) => ({
         ...current,
         mainModelContextLength: current.mainModel === FAKE_PROVIDER_MODEL.id ? FAKE_PROVIDER_MODEL.context_length : undefined,
+        chatModelContextLength: current.chatModel === FAKE_PROVIDER_MODEL.id ? FAKE_PROVIDER_MODEL.context_length : undefined,
         supportModelContextLength: current.supportModel === FAKE_PROVIDER_MODEL.id ? FAKE_PROVIDER_MODEL.context_length : undefined,
         codexModelContextLength: current.codexModel === FAKE_PROVIDER_MODEL.id ? FAKE_PROVIDER_MODEL.context_length : undefined,
       }))
@@ -415,6 +416,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
       changeAiSettings((current) => ({
         ...current,
         mainModelContextLength: nextModels.find((model) => model.id === current.mainModel)?.context_length ?? current.mainModelContextLength,
+        chatModelContextLength: nextModels.find((model) => model.id === current.chatModel)?.context_length ?? current.chatModelContextLength,
         supportModelContextLength: nextModels.find((model) => model.id === current.supportModel)?.context_length ?? current.supportModelContextLength,
         codexModelContextLength: nextModels.find((model) => model.id === current.codexModel)?.context_length ?? current.codexModelContextLength,
       }))
@@ -706,14 +708,15 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
         </section>}
 
         <section hidden={aiSection !== 'models'} className="settings-card models-card">
-          <div className="card-heading"><div><span>02</span><h2>Models</h2></div><p>{isBookSettings ? 'Favorites are shared; model choices belong to this book.' : 'Main writes; Support handles summaries and autotitles.'}</p></div>
-          <div className="model-pickers">{(['main', 'support', 'codex'] as const).map(role => {
+          <div className="card-heading"><div><span>02</span><h2>Models</h2></div><p>{isBookSettings ? 'Favorites are shared; model choices belong to this book.' : 'Main writes; Support summarizes; Codex builds your world; Chat assists.'}</p></div>
+          <div className="model-pickers">{(['main', 'support', 'codex', 'chat'] as const).map(role => {
             const id = settings[`${role}Model`]
             const model = models.find(item => item.id === id)
-            return <button className="model-role-card" type="button" key={role} aria-pressed={modelRole === role} onClick={() => { setModelRole(role); setModelSearch(''); setModelCount(8) }}><strong>{role === 'main' ? 'Main · Story writing' : role === 'support' ? 'Support · Summaries & titles' : 'Codex · Worldbuilding'}</strong><span>{model?.name || id || (role === 'codex' ? `Use Main · ${settings.mainModel || 'not selected'}` : 'Choose a model')}</span><small>{formatContext(model?.context_length ?? settings[`${role}ModelContextLength`])}</small></button>
+            return <button className="model-role-card" type="button" key={role} aria-pressed={modelRole === role} onClick={() => { setModelRole(role); setModelSearch(''); setModelCount(8) }}><strong>{role === 'main' ? 'Main · Story writing' : role === 'support' ? 'Support · Summaries & titles' : role === 'chat' ? 'Chat · Assistant' : 'Codex · Worldbuilding'}</strong><span>{model?.name || id || ((role === 'codex' || role === 'chat') ? `Use Main · ${settings.mainModel || 'not selected'}` : 'Choose a model')}</span><small>{formatContext(model?.context_length ?? settings[`${role}ModelContextLength`])}</small></button>
           })}</div>
-          <h3>Choose {modelRole === 'main' ? 'Main' : modelRole === 'support' ? 'Support' : 'Codex'} model</h3>
-          <label><span>Model ID <em>Choose below or enter a custom ID</em></span><input value={settings[`${modelRole}Model`]} onChange={event => selectModel(modelRole, event.target.value)} placeholder={modelRole === 'codex' ? 'Leave empty to use Main' : 'Enter model ID'} /></label>
+          <h3>Choose {modelRole === 'main' ? 'Main' : modelRole === 'support' ? 'Support' : modelRole === 'chat' ? 'Chat' : 'Codex'} model</h3>
+          <label><span>Model ID <em>Choose below or enter a custom ID</em></span><input value={settings[`${modelRole}Model`]} onChange={event => selectModel(modelRole, event.target.value)} placeholder={(modelRole === 'codex' || modelRole === 'chat') ? 'Leave empty to use Main' : 'Enter model ID'} /></label>
+          {modelRole === 'chat' && <p>Used for new chats. Leave empty to use Main. You can change the model inside each chat.</p>}
           <div className="reveal-setting"><h3>Text reveal speed</h3><p>Controls how quickly generated words appear.</p><div className="speed-presets">{([['Slow', '120'], ['Normal', '40'], ['Fast', '10']] as const).map(([label, delay]) => <button type="button" key={label} aria-pressed={settings.generationWordDelayMs === delay} onClick={() => update('generationWordDelayMs', delay)}>{label}</button>)}</div><TextRevealPreview delay={Number(settings.generationWordDelayMs)} /></div>
           <details className="ai-advanced"><summary>Advanced · Speed & context limits</summary>
           <label className="generation-speed-setting">
@@ -725,7 +728,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
             <label className={contextLimitInputError(settings.mainEffectiveContextLimit) ? 'invalid' : ''}><span><strong>Story / Main context cap</strong><em>Effective input window</em></span><input type="text" value={settings.mainEffectiveContextLimit} onChange={(event) => update('mainEffectiveContextLimit', event.target.value)} placeholder="Model maximum" spellCheck={false} /><small>{contextLimitInputError(settings.mainEffectiveContextLimit) || 'Optional. Accepts tokens such as 32000, 32k, or 1m. The model hard maximum still wins.'}</small></label>
             <label className={contextLimitInputError(settings.codexEffectiveContextLimit) ? 'invalid' : ''}><span><strong>Codex model context cap</strong><em>Used when a Codex model is set</em></span><input type="text" value={settings.codexEffectiveContextLimit} onChange={(event) => update('codexEffectiveContextLimit', event.target.value)} placeholder="Model maximum" spellCheck={false} /><small>{contextLimitInputError(settings.codexEffectiveContextLimit) || (settings.codexModel.trim() ? 'Optional cap for the selected Codex model.' : 'Codex currently falls back to Main, so the Story / Main cap applies.')}</small></label>
           </div>
-          </details><div className="model-browser"><div className="model-search"><Search aria-hidden="true" /><input value={modelSearch} onChange={(event) => { setModelSearch(event.target.value); setModelCount(8) }} placeholder="Search loaded models" /></div>{models.length ? <div className="model-list">{visibleModels.slice(0, modelCount).map((model) => <article key={model.id}><button className={`favorite ${settings.favorites.includes(model.id) ? 'active' : ''}`} type="button" onClick={() => toggleFavorite(model.id)} aria-pressed={settings.favorites.includes(model.id)} aria-label={`Favorite ${model.id}`}><Star fill={settings.favorites.includes(model.id) ? 'currentColor' : 'none'} aria-hidden="true" /></button><div><strong>{model.name || model.id}</strong>{model.name && model.name !== model.id && <small>{model.id}</small>}<p><span>{formatContext(model.context_length)}</span><span>{model.architecture?.modality || 'Text'}</span></p></div><button className="use-model" type="button" onClick={() => selectModel(modelRole, model.id)}>Use for {modelRole === 'main' ? 'Main' : modelRole === 'support' ? 'Support' : 'Codex'}</button></article>)}<div className="model-results" role="status">Showing {Math.min(modelCount, visibleModels.length)} of {visibleModels.length} matching models{visibleModels.length > modelCount && <button type="button" onClick={() => setModelCount(count => count + 8)}>Show more</button>}{!visibleModels.length && <span>Try a different search.</span>}</div></div> : <div className="model-empty"><Bot aria-hidden="true" /><strong>No models loaded</strong><p>Connect a provider to browse models, or enter a model ID above.</p><button type="button" onClick={() => setAiSection('connection')}>Set up connection</button></div>}</div>
+          </details><div className="model-browser"><div className="model-search"><Search aria-hidden="true" /><input value={modelSearch} onChange={(event) => { setModelSearch(event.target.value); setModelCount(8) }} placeholder="Search loaded models" /></div>{models.length ? <div className="model-list">{visibleModels.slice(0, modelCount).map((model) => <article key={model.id}><button className={`favorite ${settings.favorites.includes(model.id) ? 'active' : ''}`} type="button" onClick={() => toggleFavorite(model.id)} aria-pressed={settings.favorites.includes(model.id)} aria-label={`Favorite ${model.id}`}><Star fill={settings.favorites.includes(model.id) ? 'currentColor' : 'none'} aria-hidden="true" /></button><div><strong>{model.name || model.id}</strong>{model.name && model.name !== model.id && <small>{model.id}</small>}<p><span>{formatContext(model.context_length)}</span><span>{model.architecture?.modality || 'Text'}</span></p></div><button className="use-model" type="button" onClick={() => selectModel(modelRole, model.id)}>Use for {modelRole === 'main' ? 'Main' : modelRole === 'support' ? 'Support' : modelRole === 'chat' ? 'Chat' : 'Codex'}</button></article>)}<div className="model-results" role="status">Showing {Math.min(modelCount, visibleModels.length)} of {visibleModels.length} matching models{visibleModels.length > modelCount && <button type="button" onClick={() => setModelCount(count => count + 8)}>Show more</button>}{!visibleModels.length && <span>Try a different search.</span>}</div></div> : <div className="model-empty"><Bot aria-hidden="true" /><strong>No models loaded</strong><p>Connect a provider to browse models, or enter a model ID above.</p><button type="button" onClick={() => setAiSection('connection')}>Set up connection</button></div>}</div>
         </section>
 
         <section hidden={aiSection !== 'prompts'} className="settings-card prompts-card">
