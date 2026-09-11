@@ -16,7 +16,7 @@ Working behavior on `main` includes:
 - generation-type-specific Context Management with automatic context, explicit additional context, model-budget checks, and a rendered request preview for Story, Codex, and Chat;
 - persisted book Chat with streaming responses, Stop, edit, Save & regenerate, assistant regenerate/delete/fork/read-aloud actions, per-chat model/system prompt/context settings, and approval-based workspace edit proposals;
 - Chat request composition with per-Chat System and ordered Predefined messages, explicit context variables, exact normalized request previews, and structured workspace-tool rounds. The prototype database v3 migration removes legacy Chat and ChatMessage entities together; books, manuscript, notes, Codex, summaries, and Book settings are preserved;
-- a standalone Images workspace opened from the Library, editor, or Chat, with Generate and Gallery tabs, a device-wide queue grouped by status, activity badges, book context when opened from a book, and gallery actions in the image viewer;
+- a standalone Images workspace opened from the Library, editor, or Chat, with text-to-image, image-to-image, text-to-video, and image-to-video generation, a mixed-media Gallery, a durable device-wide queue, activity badges, and book-aware gallery actions;
 - device-global image provider/model configuration under Settings > Images; opening settings preserves the Images tab, generation draft, and gallery filters in Workspace;
 - responsive Outline, Notes, Codex, Chat, Images, Book, AI, Context, and UI surfaces;
 - device-local typography/theme settings and custom themes;
@@ -28,8 +28,8 @@ The prototype is still intentionally single-user and local to one browser/device
 
 - Open issue [#29](https://github.com/goodjobwebdev-blip/novel-app-prototype/issues/29) is mostly implemented, but Chat still needs graceful trimming of older history when a request exceeds the model context window and persistence of partial assistant output after non-cancellation provider/network failures.
 - Dedicated Note generation is not implemented; Note work can currently be done through Chat.
-- Text-to-image generation supports NanoGPT, OpenAI GPT Image, and supported Pruna models, with Chat proposals, editable favorites, a persistent device-local queue, and a shared device gallery. Image editing/reference inputs and server-side background completion are not implemented. Codex illustrations also support uploads, mobile cropping, zoom, captions, recovery, and undo.
-- Book backup export/import is available as `.arcbook` files, including illustrations and kept generated images. Import creates a new book; automatic cross-device sync is not implemented.
+- Visual generation supports NanoGPT, current OpenAI GPT Image models, and curated Pruna image/video models. Source images are snapshotted into durable jobs, videos use resumable provider IDs where available, and kept outputs share the device gallery. Server-side background completion is not implemented. Codex illustrations remain still-image-only and support uploads, mobile cropping, zoom, captions, recovery, and undo.
+- Book backup export/import is available as `.arcbook` files, including illustrations and kept generated media. Video-containing backups use archive version 3; import creates a new book and never resumes paid jobs. Automatic cross-device sync is not implemented.
 - Offline behavior is prototype-grade: local manuscript data is device-local, while provider calls and uncached external runtime resources still require network access.
 
 For illustration storage, supported image sizes, and the backup format, see [docs/CODEX_ILLUSTRATIONS.md](docs/CODEX_ILLUSTRATIONS.md). For AI providers, the queue, gallery, and setup, see [docs/IMAGE_GENERATION.md](docs/IMAGE_GENERATION.md).

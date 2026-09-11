@@ -4,7 +4,7 @@ import { getBookAiSettings } from './persistence'
 import { IMAGE_PROVIDERS, resolveImageKey } from './image-settings'
 import { claimImageJob, completeImageJob, getEntity, IMAGE_STORE_CHANGED, listImageJobs, notifyImageStore, patchOwnedImageJob, recoverImageJobs } from './image-store'
 import { generateProviderImage, prepareGeneratedImage, safeImageError } from './image-providers'
-import type { ImageJob, ImageProvider } from './image-generation-types'
+import { generationTask, type ImageJob, type ImageProvider } from './image-generation-types'
 
 const active = new Map<string, AbortController>()
 let stopQueue: (() => void) | undefined
@@ -25,9 +25,10 @@ export async function runImageQueue(provider: ImageProvider, deps = dependencies
     let key = ''
     try {
       if (job.messageId && !await getEntity(job.messageId)) throw new Error('The source chat message was deleted.')
-      await checkStorageHeadroom(20 * 1024 * 1024)
+      const video = generationTask(job).endsWith('video')
+      await checkStorageHeadroom((video ? 200 : 20) * 1024 * 1024)
       key = await deps.key(job)
-      const output = await deps.generate(job, key, AbortSignal.any([controller.signal, AbortSignal.timeout(10 * 60_000)]), async (id) => {
+      const output = await deps.generate(job, key, AbortSignal.any([controller.signal, AbortSignal.timeout((video ? 20 : 10) * 60_000)]), async (id) => {
         if (!await patchOwnedImageJob(job.id, owner, { providerJobId: id })) throw new Error('The job was cancelled before its provider ID could be saved.')
       })
       controller.signal.throwIfAborted()

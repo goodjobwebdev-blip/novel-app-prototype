@@ -10,27 +10,31 @@ import type { GalleryImage, ImageJob } from './image-generation-types'
 export function GeneratedImageViewer({ asset, onClose, actions }: { asset: GalleryImage; onClose: () => void; actions?: ReactNode }) {
   const url = useImageUrl(asset.image)
   const [view, setView] = useState({ ...centeredImageView })
-  return <IllustrationModal title="Image" fullScreen onClose={onClose}>
-    {url && <IllustrationGestures src={url} alt={asset.prompt || 'Book illustration'} image={asset} value={view} onChange={setView} />}
+  const kind = asset.kind ?? 'image'
+  const extension = asset.image.type === 'image/jpeg' ? 'jpg' : asset.image.type === 'image/webp' ? 'webp' : asset.image.type === 'video/webm' ? 'webm' : kind === 'video' ? 'mp4' : 'png'
+  return <IllustrationModal title={kind === 'video' ? 'Video' : 'Image'} fullScreen onClose={onClose}>
+    {url && (kind === 'video' ? <video className="image-video-player" src={url} controls playsInline preload="metadata" /> : <IllustrationGestures src={url} alt={asset.prompt || 'Book illustration'} image={asset} value={view} onChange={setView} />)}
     <div className="image-viewer-actions">
-      {url && <a className="image-download" href={url} download={`arc-image-${asset.id}.${asset.image.type === 'image/jpeg' ? 'jpg' : asset.image.type === 'image/webp' ? 'webp' : 'png'}`}><Download size={18} /> Download image</a>}
+      {url && <a className="image-download" href={url} download={`arc-${kind}-${asset.id}.${extension}`}><Download size={18} /> Download {kind}</a>}
       {actions}
     </div>
-    <details className="image-result-metadata"><summary>Prompt and image details</summary><p>{asset.prompt || 'Uploaded illustration'}</p>{asset.revisedPrompt && <p>Provider prompt: {asset.revisedPrompt}</p>}<dl><dt>Model</dt><dd>{asset.modelAlias || asset.model || 'Uploaded image'}{asset.provider ? ` · ${imageProviderNames[asset.provider]}` : ''}</dd><dt>Dimensions</dt><dd>{asset.width} × {asset.height}{asset.requestedSize && ` (requested ${asset.requestedSize})`}</dd><dt>Created</dt><dd>{new Date(asset.createdAt).toLocaleString()}</dd>{asset.durationMs !== undefined && <><dt>Generation time</dt><dd>{Math.round(asset.durationMs / 1000)} s</dd></>}{asset.seed !== undefined && <><dt>Seed</dt><dd>{asset.seed}</dd></>}{asset.cost !== undefined && <><dt>Provider cost</dt><dd>${asset.cost.toFixed(4)}</dd></>}{asset.bookTitle && <><dt>Book</dt><dd>{asset.bookTitle}</dd></>}</dl></details>
+    <details className="image-result-metadata"><summary>Prompt and {kind} details</summary><p>{asset.prompt || 'Uploaded illustration'}</p>{asset.revisedPrompt && <p>Provider prompt: {asset.revisedPrompt}</p>}<dl><dt>Model</dt><dd>{asset.modelAlias || asset.model || `Uploaded ${kind}`}{asset.provider ? ` · ${imageProviderNames[asset.provider]}` : ''}</dd><dt>Dimensions</dt><dd>{asset.width} × {asset.height}{asset.requestedSize && ` (requested ${asset.requestedSize})`}</dd>{asset.mediaDurationMs !== undefined && <><dt>Video duration</dt><dd>{(asset.mediaDurationMs / 1000).toFixed(1)} s</dd></>}<dt>Created</dt><dd>{new Date(asset.createdAt).toLocaleString()}</dd>{asset.durationMs !== undefined && <><dt>Generation time</dt><dd>{Math.round(asset.durationMs / 1000)} s</dd></>}{asset.seed !== undefined && <><dt>Seed</dt><dd>{asset.seed}</dd></>}{asset.cost !== undefined && <><dt>Provider cost</dt><dd>${asset.cost.toFixed(4)}</dd></>}{asset.bookTitle && <><dt>Book</dt><dd>{asset.bookTitle}</dd></>}</dl></details>
   </IllustrationModal>
 }
 export function ImageAssetPreview({ asset, renderViewerActions, onOpen }: { asset: GalleryImage; renderViewerActions?: (close: () => void) => ReactNode; onOpen?: () => void }) {
   const thumb = useImageUrl(asset.thumbnail)
   const [open, setOpen] = useState(false)
   const close = () => setOpen(false)
-  return <><button type="button" className="image-result-preview" onClick={() => { onOpen?.(); setOpen(true) }} aria-label="View image and prompt">{thumb && <img loading="lazy" src={thumb} alt={asset.prompt || 'Book illustration'} />}<Expand aria-hidden="true" size={20} /></button>{open && <GeneratedImageViewer asset={asset} onClose={close} actions={renderViewerActions?.(close)} />}</>
+  const kind = asset.kind ?? 'image'
+  return <><button type="button" className="image-result-preview" onClick={() => { onOpen?.(); setOpen(true) }} aria-label={`View ${kind} and prompt`}>{thumb && <img loading="lazy" src={thumb} alt={asset.prompt || (kind === 'video' ? 'Generated video' : 'Book illustration')} />}{kind === 'video' && <span className="image-video-badge">Video</span>}<Expand aria-hidden="true" size={20} /></button>{open && <GeneratedImageViewer asset={asset} onClose={close} actions={renderViewerActions?.(close)} />}</>
 }
 function JobResult({ job, chat }: { job: ImageJob; chat: boolean }) {
   const { data: asset, error: loadError } = useImageQuery(() => job.assetId ? getGalleryImage(job.assetId) : Promise.resolve(undefined), [job.assetId], undefined)
   const [error, setError] = useState(''), [busy, setBusy] = useState(false)
   const action = async (fn: () => Promise<void>) => { setBusy(true); setError(''); try { await fn() } catch (e) { setError(e instanceof Error ? e.message : 'Image action failed.') } finally { setBusy(false) } }
-  if (job.decision === 'discarded') return <p className="image-help">Image discarded</p>
-  return <div className="image-job-result">{asset ? <ImageAssetPreview asset={asset} /> : <p>{loadError || 'Loading image…'}</p>}<div className="image-actions">{!job.decision && asset && <><button disabled={busy} type="button" onClick={() => { void action(() => decideImageJob(job.id, true)) }}>Keep image</button><button disabled={busy} type="button" onClick={() => { void action(async () => { await decideImageJob(job.id, false); if (!chat) await clearImageQueue([job.id]) }) }}>Discard</button></>}{job.decision === 'kept' && <span>Saved to gallery</span>}{chat && <button disabled={busy} type="button" onClick={() => { void action(() => hideImageFromChat(job.id)) }}><Trash2 size={16} /> Remove from chat</button>}</div>{error && <p role="alert">{error}</p>}</div>
+  const kind = job.task?.endsWith('video') ? 'video' : 'image'
+  if (job.decision === 'discarded') return <p className="image-help">{kind === 'video' ? 'Video' : 'Image'} discarded</p>
+  return <div className="image-job-result">{asset ? <ImageAssetPreview asset={asset} /> : <p>{loadError || `Loading ${kind}…`}</p>}<div className="image-actions">{!job.decision && asset && <><button disabled={busy} type="button" onClick={() => { void action(() => decideImageJob(job.id, true)) }}>Keep {kind}</button><button disabled={busy} type="button" onClick={() => { void action(async () => { await decideImageJob(job.id, false); if (!chat) await clearImageQueue([job.id]) }) }}>Discard</button></>}{job.decision === 'kept' && <span>Saved to gallery</span>}{chat && <button disabled={busy} type="button" onClick={() => { void action(() => hideImageFromChat(job.id)) }}><Trash2 size={16} /> Remove from chat</button>}</div>{error && <p role="alert">{error}</p>}</div>
 }
 export default function ImageJobs({ proposalId, messageId }: { proposalId?: string; messageId?: string }) {
   const { data: jobs, error } = useImageQuery(listImageJobs, [], [])
@@ -65,7 +69,7 @@ export default function ImageJobs({ proposalId, messageId }: { proposalId?: stri
   ].filter((group) => group.jobs.length)
   const jobCard = (job: ImageJob) => <article className="image-job" key={job.id}>
     <header><strong>{job.modelAlias}</strong><span>{job.status === 'running' ? `Generating · ${Math.max(0, Math.floor((now - (job.startedAt ?? now)) / 1000))} s` : job.status === 'queued' ? `Queued · #${jobs.filter((item) => item.provider === job.provider && item.status === 'queued').findIndex((item) => item.id === job.id) + 1}` : job.status}</span></header>
-    <small>{job.size.width} × {job.size.height}{!proposalId && job.bookTitle ? ` · ${job.bookTitle}` : ''}</small>
+    <small>{job.task?.endsWith('video') ? `${job.video?.resolution ?? `${job.size.width} × ${job.size.height}`}${job.video?.duration ? ` · ${job.video.duration} s` : ''}` : `${job.size.width} × ${job.size.height}`}{!proposalId && job.bookTitle ? ` · ${job.bookTitle}` : ''}</small>
     {!proposalId && <p className="image-prompt-preview">{job.prompt}</p>}
     {job.error && <p role="alert">{job.error}</p>}
     {job.status === 'completed' && <JobResult job={job} chat={Boolean(proposalId)} />}

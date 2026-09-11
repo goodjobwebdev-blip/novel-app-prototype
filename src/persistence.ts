@@ -1172,7 +1172,7 @@ export async function readBookArchive(bookId: string): Promise<BookArchiveData> 
     const ids = [bookId, ...entries.map((entry) => entry.id)]
     const galleryImages = (await db.table('galleryImages').where('bookId').equals(bookId).toArray() as GalleryImage[]).filter((a) => a.kept)
     const keptIds = new Set(galleryImages.map((a) => a.id))
-    const imageJobs = (await db.table('imageJobs').where('bookId').equals(bookId).toArray() as ImageJob[]).filter((j) => j.status === 'completed' && j.assetId && keptIds.has(j.assetId)).map(({ providerJobId: _p, owner: _o, heartbeat: _h, ...j }) => j)
+    const imageJobs = (await db.table('imageJobs').where('bookId').equals(bookId).toArray() as ImageJob[]).filter((j) => j.status === 'completed' && j.assetId && keptIds.has(j.assetId)).map(({ providerJobId: _p, owner: _o, heartbeat: _h, sources: _sources, ...j }) => j)
     return {
       galleryImages, imageJobs,
       entities: [book, ...entries, ...(series ? [series] : [])],

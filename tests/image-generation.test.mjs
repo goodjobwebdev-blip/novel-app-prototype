@@ -215,12 +215,57 @@ test('NanoGPT and OpenAI submit one output with the correct fields and decode or
   }
 })
 
-test('Pruna catalog hardcodes supported text-to-image models, sizes, and flat costs', () => {
-  assert.deepEqual(s.prunaImageModels.map((m) => m.id), ['flux-dev', 'qwen-image', 'qwen-image-fast', 'z-image-turbo', 'flux-2-klein-4b', 'wan-image-small', 'p-image'])
+test('Pruna catalog hardcodes verified image and video capabilities, sizes, and flat costs', () => {
+  assert.deepEqual(s.prunaImageModels.map((m) => m.id), ['flux-dev', 'qwen-image', 'qwen-image-fast', 'z-image-turbo', 'flux-2-klein-4b', 'wan-image-small', 'p-image', 'p-image-edit', 'qwen-image-edit-plus', 'wan-i2v', 'p-video', 'wan-t2v'])
   assert.equal(s.prunaImageModels.find((m) => m.id === 'qwen-image').cost, 0.025)
   assert.equal(s.prunaImageModels.find((m) => m.id === 'flux-2-klein-4b').cost, 0.0001)
   assert.equal(s.prunaImageModels.find((m) => m.id === 'p-image').ratios.includes('16:9'), true)
   assert.equal(s.prunaImageModels.find((m) => m.id === 'z-image-turbo').sizeMode, 'dimensions')
+  assert.deepEqual(s.prunaImageModels.find((m) => m.id === 'p-image-edit').tasks, ['image-to-image'])
+  assert.deepEqual(s.prunaImageModels.find((m) => m.id === 'p-video').tasks, ['text-to-video', 'image-to-video'])
+})
+
+test('OpenAI edits use the current multipart Image API with repeated source fields', async () => {
+  const source = { id: 'source', mime: 'image/png', data: png, width: 1, height: 1 }
+  const calls = []
+  await providers.generateProviderImage(job('openai', { model: 'gpt-image-2.5-sunburst', task: 'image-to-image', sources: [source], quality: 'max' }), 'key', new AbortController().signal, async () => {}, async (url, init) => {
+    calls.push({ url, init })
+    assert.equal(url, 'https://api.openai.com/v1/images/edits')
+    assert.equal(init.body.get('model'), 'gpt-image-2.5-sunburst')
+    assert.equal(init.body.get('quality'), 'max')
+    assert.equal(init.body.getAll('image[]').length, 1)
+    return response({ data: [{ b64_json: png64 }] })
+  })
+  assert.equal(calls.length, 1)
+})
+
+test('Pruna image editing uploads sources and uses each model-specific source field', async () => {
+  const source = { id: 'source', mime: 'image/png', data: png, width: 1, height: 1 }
+  for (const [model, field] of [['p-image-edit', 'images'], ['qwen-image-edit-plus', 'image']]) {
+    const calls = []
+    await providers.generateProviderImage(job('pruna', { model, task: 'image-to-image', sources: [source] }), 'key', new AbortController().signal, async () => {}, async (url, init) => {
+      calls.push({ url, init })
+      if (url.endsWith('/v1/files')) { assert.equal(init.body.getAll('content').length, 1); return response({ urls: { get: '/v1/files/uploaded' } }) }
+      if (url.endsWith('/v1/predictions')) { const input = JSON.parse(init.body).input; assert.deepEqual(input[field], ['https://api.pruna.ai/v1/files/uploaded']); return response({ status: 'complete', generation_url: '/v1/predictions/delivery/edit' }) }
+      return new Response(png)
+    })
+    assert.equal(calls.length, 3)
+  }
+})
+
+test('NanoGPT video persists request IDs, polls, and downloads a validated video', async () => {
+  const video = new Blob([new Uint8Array([0, 0, 0, 16, 102, 116, 121, 112, 105, 115, 111, 109])], { type: 'video/mp4' })
+  const submitted = [], calls = []
+  const result = await providers.generateProviderImage(job('nanogpt', { model: 'pruna-ai/p-video/text-to-video', task: 'text-to-video', video: { resolution: '720p', duration: 5, aspectRatio: '16:9' } }), 'key', new AbortController().signal, async (id) => submitted.push(id), async (url, init) => {
+    calls.push({ url, init })
+    if (url.endsWith('/api/generate-video')) { const body = JSON.parse(init.body); assert.equal(body.duration, '5'); return response({ requestId: 'video-request' }, 202) }
+    if (url.includes('/api/video/status')) return response({ status: 'completed', url: 'https://cdn.example/video.mp4' })
+    assert.equal(init.headers['x-api-key'], 'key'); return new Response(video)
+  }, async () => {})
+  assert.deepEqual(submitted, ['video-request'])
+  assert.equal(result.kind, 'video')
+  assert.equal(result.image.type, 'video/mp4')
+  assert.equal(calls.length, 3)
 })
 
 test('Pruna submits an aspect ratio, persists async predictions, and decodes output arrays', async () => {
@@ -296,6 +341,24 @@ test('v2 backups retain kept originals and chat references, omit active jobs, im
   const old = await archive.decodeBookArchive(new Blob([header, manifest]))
   assert.equal(old.entities.find((e) => e.id === f.book.id).title, f.book.title)
   assert.deepEqual(old.galleryImages, [])
+})
+
+test('v3 backups round-trip kept video media and exclude frozen source blobs', async () => {
+  await clearJobs()
+  const f = await fixture()
+  await store.setImageProposal(f.message.id, f.proposal.id, 'accepted')
+  const queued = await enqueue(f)
+  await runImageQueue('openai', deps)
+  await store.decideImageJob(queued.id, true)
+  const data = await p.readBookArchive(f.book.id)
+  const video = new Blob([new Uint8Array([0, 0, 0, 16, 102, 116, 121, 112, 105, 115, 111, 109])], { type: 'video/mp4' })
+  data.galleryImages[0] = { ...data.galleryImages[0], kind: 'video', task: 'text-to-video', image: video, mediaDurationMs: 5000 }
+  data.imageJobs[0] = { ...data.imageJobs[0], task: 'text-to-video', sources: [{ id: 'private-source', data: png, mime: 'image/png', width: 1, height: 1 }] }
+  const encoded = archive.encodeBookArchive(data)
+  const decoded = await archive.decodeBookArchive(encoded)
+  assert.equal(decoded.galleryImages[0].kind, 'video')
+  assert.equal(decoded.galleryImages[0].image.type, 'video/mp4')
+  assert.equal(decoded.imageJobs[0].sources, undefined)
 })
 
 test('chat forks share kept attachments without cloning queued requests or reauthorizing proposals', async () => {

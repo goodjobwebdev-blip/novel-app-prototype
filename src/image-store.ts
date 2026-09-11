@@ -1,6 +1,6 @@
 import { database, getEntity, type ArcEntity, type Illustration } from './persistence'
 import { resolveImageSpec } from './image-settings'
-import type { ChatImageProposal, GalleryImage, ImageGenerationSpec, ImageJob, ImageProvider } from './image-generation-types'
+import { generationTask, outputKind, type ChatImageProposal, type GalleryImage, type ImageGenerationSpec, type ImageJob, type ImageProvider } from './image-generation-types'
 import type { ImageOutput } from './image-providers'
 export const IMAGE_STORE_CHANGED = 'arc-image-store-changed'
 export function notifyImageStore() { if (typeof window !== 'undefined') window.dispatchEvent(new Event(IMAGE_STORE_CHANGED)) }
@@ -19,7 +19,7 @@ export async function listGalleryImages(bookId?: string): Promise<GalleryImage[]
 export type ImageJobOrigin = { bookId?: string; chatId?: string; messageId?: string; proposalId?: string }
 export async function enqueueImageJob(spec: ImageGenerationSpec, origin: ImageJobOrigin = {}): Promise<ImageJob> {
   // Revalidate the current favorites on every Generate click, then freeze this request.
-  const clean = resolveImageSpec(spec.prompt, spec.modelAlias, spec.size.value)
+  const clean = resolveImageSpec(spec.prompt, spec.modelAlias, spec.size.value, undefined, undefined, generationTask(spec), spec.sources ?? [], spec.video ?? {})
   const db = await database()
   const job = await db.transaction('rw', db.table('entities'), db.table('imageJobs'), async () => {
     const book = origin.bookId ? await db.table('entities').get(origin.bookId) : undefined
@@ -65,9 +65,9 @@ export async function completeImageJob(job: ImageJob, output: ImageOutput) {
   await db.transaction('rw', db.table('imageJobs'), db.table('galleryImages'), async () => {
     const current: ImageJob | undefined = await db.table('imageJobs').get(job.id)
     if (current?.status !== 'running' || current.owner !== job.owner) return
-    const asset: GalleryImage = { ...output, id: imageId('generated'), kept: false, bookId: job.bookId, bookTitle: job.bookTitle, prompt: job.prompt, provider: job.provider, model: job.model, modelAlias: job.modelAlias, requestedSize: job.size.value, createdAt: Date.now(), durationMs: Date.now() - (job.startedAt ?? job.createdAt) }
+    const asset: GalleryImage = { ...output, kind: output.kind ?? outputKind(job), task: generationTask(job), sourceIds: job.sources?.map((source) => source.id), id: imageId('generated'), kept: false, bookId: job.bookId, bookTitle: job.bookTitle, prompt: job.prompt, provider: job.provider, model: job.model, modelAlias: job.modelAlias, requestedSize: job.size.value, createdAt: Date.now(), durationMs: Date.now() - (job.startedAt ?? job.createdAt) }
     await db.table('galleryImages').add(asset)
-    await db.table('imageJobs').update(job.id, { status: 'completed', completedAt: Date.now(), assetId: asset.id })
+    await db.table('imageJobs').update(job.id, { status: 'completed', completedAt: Date.now(), assetId: asset.id, sources: undefined })
   })
   notifyImageStore()
 }
@@ -103,7 +103,7 @@ export async function clearImageQueue(ids: string[]) {
     const jobs: (ImageJob | undefined)[] = await db.table('imageJobs').bulkGet([...new Set(ids)])
     for (const job of jobs) {
       if (!job || job.hiddenInQueue) continue
-      const patch: Partial<ImageJob> = { hiddenInQueue: true }
+      const patch: Partial<ImageJob> = { hiddenInQueue: true, sources: undefined }
       if (['queued', 'running'].includes(job.status)) {
         patch.status = 'cancelled'
         patch.completedAt = Date.now()
@@ -144,7 +144,7 @@ export async function retryImageJob(id: string) {
   const db = await database()
   const job: ImageJob | undefined = await db.table('imageJobs').get(id)
   if (!job || !['failed', 'interrupted', 'cancelled'].includes(job.status)) throw new Error('This job cannot be retried.')
-  if (job.provider === 'pruna' && job.providerJobId) {
+  if (job.providerJobId && (job.provider === 'pruna' || (job.provider === 'nanogpt' && generationTask(job).endsWith('video')))) {
     await db.transaction('rw', db.table('imageJobs'), async () => {
       const current = await db.table('imageJobs').get(id)
       if (current && ['failed', 'interrupted', 'cancelled'].includes(current.status)) await db.table('imageJobs').update(id, { status: 'queued', error: undefined, hiddenInQueue: false })
@@ -152,8 +152,8 @@ export async function retryImageJob(id: string) {
     notifyImageStore()
   } else await enqueueImageJob(job, { bookId: job.bookId, chatId: job.chatId, messageId: job.messageId, proposalId: job.proposalId })
 }
-export async function setImageProposal(messageId: string, proposalId: string, status: 'accepted' | 'rejected', input?: { prompt: string; alias: string; size: string }) {
-  const spec = input ? resolveImageSpec(input.prompt, input.alias, input.size) : undefined
+export async function setImageProposal(messageId: string, proposalId: string, status: 'accepted' | 'rejected', input?: { prompt: string; alias: string; size: string; task?: ImageGenerationSpec['task']; sources?: ImageGenerationSpec['sources']; resolution?: string; duration?: number; aspectRatio?: string; fps?: number; numFrames?: number; seed?: number; draftVideo?: boolean }) {
+  const spec = input ? resolveImageSpec(input.prompt, input.alias, input.size, undefined, undefined, input.task ?? 'text-to-image', input.sources ?? [], { resolution: input.resolution, duration: input.duration, aspectRatio: input.aspectRatio, fps: input.fps, numFrames: input.numFrames, seed: input.seed, draft: input.draftVideo }) : undefined
   const db = await database()
   await db.transaction('rw', db.table('entities'), async () => {
     const message = await db.table('entities').get(messageId)
@@ -161,7 +161,7 @@ export async function setImageProposal(messageId: string, proposalId: string, st
     const proposals: ChatImageProposal[] = message.imageGenerations ?? []
     const proposal = proposals.find((p) => p.id === proposalId)
     if (!proposal || proposal.status !== 'proposed') throw new Error('This proposal has already been handled.')
-    const next = { ...proposal, status, ...(spec ? { prompt: spec.prompt, modelAlias: spec.modelAlias, size: spec.size.value } : {}) }
+    const next = { ...proposal, status, ...(spec ? { prompt: spec.prompt, modelAlias: spec.modelAlias, size: spec.size.value, task: generationTask(spec) } : {}) }
     await db.table('entities').update(messageId, { imageGenerations: proposals.map((p) => p.id === proposalId ? next : p), updatedAt: Date.now() })
   })
   notifyImageStore()
