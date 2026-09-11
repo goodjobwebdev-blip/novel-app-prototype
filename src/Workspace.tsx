@@ -60,7 +60,7 @@ import { runDeletionSaveBarrier } from './deletion-save-barrier'
 import { navigateAfterRequiredSave, saveRequiredBeforeNavigation } from './navigation-save-guard'
 import { canUnmountEditor } from './editor-unmount-guard'
 import { summaryGenerationOwnsUi, type SummaryGenerationOwner } from './summary-generation-owner'
-import ExpandableTextInput from './ExpandableTextInput'
+import ExpandableTextInput, { type ExpandableTextInputDictationTarget } from './ExpandableTextInput'
 import GenerationActions from './GenerationActions'
 import MarkdownEditor, { type CodexMentionClick, type GenerationContext, type MarkdownEditorHandle } from './MarkdownEditor'
 import type { NanoGPTStreamMetadata } from './nanogpt'
@@ -1627,37 +1627,50 @@ export default function Workspace() {
     }
   }
 
-  async function dictateInstruction() {
-    const input = promptRef.current
+  async function dictateInstruction(target?: ExpandableTextInputDictationTarget) {
+    const input = target?.element ?? promptRef.current
     const documentId = activeDocumentIdRef.current
-    if (!documentId || !activeDocument || activeDocument.type === 'summary') return
-    flushSync(() => setArcOpen(true))
+    if (!documentId || !activeDocument || activeDocument.type === 'summary' || generationActive) return false
+    if (!target) flushSync(() => setArcOpen(true))
     const isLore = activeDocument.type === 'codexEntry'
-    const base = isLore ? lorePrompt : arcPrompt
+    const base = target?.value ?? (isLore ? lorePrompt : arcPrompt)
     const setPrompt = isLore ? setLorePrompt : setArcPrompt
-    const start = input?.selectionStart ?? base.length
-    const end = input?.selectionEnd ?? start
+    const start = target?.selectionStart ?? input?.selectionStart ?? base.length
+    const end = target?.selectionEnd ?? input?.selectionEnd ?? start
+    const targetIsValid = () => activeDocumentIdRef.current === documentId && (target ? target.isValid() : Boolean(promptRef.current))
+    const setTargetValue = (nextValue: string) => {
+      if (!targetIsValid()) return false
+      if (target) return target.setValue(nextValue)
+      setPrompt(nextValue)
+      return true
+    }
     const render = (transcript: string) => {
       const insertion = normalizeTranscriptForInsertion(transcript, base.slice(0, start), base.slice(end))
       return { value: `${base.slice(0, start)}${insertion}${base.slice(end)}`, cursor: start + insertion.length }
     }
     try {
       const speech = await currentSpeechSettings()
+      if (!targetIsValid()) return false
       await startSttSession(speech, {
         kind: 'instruction',
         label: 'Dictate instruction',
-        isValid: () => activeDocumentIdRef.current === documentId && Boolean(promptRef.current),
-        onProvisional: (transcript) => setPrompt(render(transcript).value),
+        isValid: targetIsValid,
+        onProvisional: (transcript) => {
+          if (!setTargetValue(render(transcript).value)) throw new Error('The original instruction input is no longer available.')
+        },
         onFinal: (transcript) => {
           const next = render(transcript)
-          setPrompt(next.value)
-          requestAnimationFrame(() => { promptRef.current?.focus(); promptRef.current?.setSelectionRange(next.cursor, next.cursor) })
+          if (!setTargetValue(next.value)) throw new Error('The original instruction input is no longer available.')
+          if (target) target.focus(next.cursor)
+          else requestAnimationFrame(() => { promptRef.current?.focus(); promptRef.current?.setSelectionRange(next.cursor, next.cursor) })
         },
-        onCancel: () => { if (activeDocumentIdRef.current === documentId) setPrompt(base) },
+        onCancel: () => { setTargetValue(base) },
       })
+      return true
     } catch (error) {
-      if (activeDocumentIdRef.current === documentId) setPrompt(base)
+      setTargetValue(base)
       showToast(error instanceof Error ? error.message : 'Could not start instruction dictation.')
+      return false
     }
   }
 
@@ -1765,7 +1778,7 @@ export default function Workspace() {
 
       {screen === 'editor' && (activeDocument?.type === 'scene' || (activeDocument?.type === 'codexEntry' && !activeCodexArchived)) && !arcOpen && <div className="editor-bottom"><button type="button" onClick={() => setArcOpen(true)} aria-label="Open generation input"><PanelBottomOpen aria-hidden="true" /></button><GenerateControl isGenerating={generationActive} phase={generationPhase} elapsedSeconds={generationElapsedSeconds} sttState={sttState} ttsState={ttsState} canUndo={editorHistory.canUndo} canRedo={editorHistory.canRedo} onOpenDetails={() => setGenerationDetailsOpen(true)} onGenerate={generate} onStop={stopGeneration} onMicro={() => { void dictateEditor() }} onMicro2={() => { void dictateInstruction() }} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} onReadAloud={() => { void readCurrentDocument() }} readAloudDisabled={activeDocument?.type === 'scene' && !lastGeneratedPassage.trim()} readAloudTitle={activeDocument?.type === 'scene' ? 'Read latest generated passage' : 'Read full Codex entry'} /></div>}
       {screen === 'editor' && activeDocument?.type === 'summary' && !activeSummarySourceArchived && <div className="summary-generate-wrap"><button className="summary-generate" type="button" onClick={generationActive ? stopGeneration : generate}>{generationActive ? <Square aria-hidden="true" fill="currentColor" /> : <RefreshCw aria-hidden="true" />} {generationActive ? 'Stop' : openSummaryState === 'missing' ? 'Summarize' : 'Re-summarize'}</button></div>}
-      {screen === 'editor' && (activeDocument?.type === 'scene' || (activeDocument?.type === 'codexEntry' && !activeCodexArchived)) && arcOpen && <section className="arc-drawer"><div className="arc-generation-header">{generationActive && generationPhase ? <GenerationActivityStrip phase={generationPhase} elapsedSeconds={generationElapsedSeconds} placement="drawer" onOpenDetails={() => setGenerationDetailsOpen(true)} /> : <span className="arc-generation-idle">Ready to generate</span>}<button type="button" onClick={() => setArcOpen(false)} aria-label="Close generation input"><X aria-hidden="true" /></button></div><div className="arc-compose"><div className="arc-prompt-field"><ExpandableTextInput ref={promptRef} value={activeDocument.type === 'codexEntry' ? lorePrompt : arcPrompt} onChange={activeDocument.type === 'codexEntry' ? setLorePrompt : setArcPrompt} readOnly={sttState.target === 'instruction' && ['requesting-permission', 'recording', 'recording-live', 'stopping', 'transcribing', 'finalizing'].includes(sttState.status)} aria-label="generation prompt" dialogTitle="Edit generation prompt" /></div><GenerateControl inDrawer isGenerating={generationActive} phase={generationPhase} elapsedSeconds={generationElapsedSeconds} sttState={sttState} ttsState={ttsState} canUndo={editorHistory.canUndo} canRedo={editorHistory.canRedo} onOpenDetails={() => setGenerationDetailsOpen(true)} onGenerate={generate} onStop={stopGeneration} onMicro={() => { void dictateEditor() }} onMicro2={() => { void dictateInstruction() }} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} onReadAloud={() => { void readCurrentDocument() }} readAloudDisabled={activeDocument?.type === 'scene' && !lastGeneratedPassage.trim()} readAloudTitle={activeDocument?.type === 'scene' ? 'Read latest generated passage' : 'Read full Codex entry'} /></div></section>}
+      {screen === 'editor' && (activeDocument?.type === 'scene' || (activeDocument?.type === 'codexEntry' && !activeCodexArchived)) && arcOpen && <section className="arc-drawer"><div className="arc-generation-header">{generationActive && generationPhase ? <GenerationActivityStrip phase={generationPhase} elapsedSeconds={generationElapsedSeconds} placement="drawer" onOpenDetails={() => setGenerationDetailsOpen(true)} /> : <span className="arc-generation-idle">Ready to generate</span>}<button type="button" onClick={() => setArcOpen(false)} aria-label="Close generation input"><X aria-hidden="true" /></button></div><div className="arc-compose"><div className="arc-prompt-field"><ExpandableTextInput ref={promptRef} value={activeDocument.type === 'codexEntry' ? lorePrompt : arcPrompt} onChange={activeDocument.type === 'codexEntry' ? setLorePrompt : setArcPrompt} readOnly={sttState.target === 'instruction' && ['requesting-permission', 'recording', 'recording-live', 'stopping', 'transcribing', 'finalizing'].includes(sttState.status)} aria-label="generation prompt" dialogTitle="Edit generation prompt" onDictate={dictateInstruction} dictationStatus={sttState.target === 'instruction' ? sttState.status : 'idle'} dictationDisabled={generationActive} onStopDictation={stopSttSession} onCancelDictation={cancelSttSession} /></div><GenerateControl inDrawer isGenerating={generationActive} phase={generationPhase} elapsedSeconds={generationElapsedSeconds} sttState={sttState} ttsState={ttsState} canUndo={editorHistory.canUndo} canRedo={editorHistory.canRedo} onOpenDetails={() => setGenerationDetailsOpen(true)} onGenerate={generate} onStop={stopGeneration} onMicro={() => { void dictateEditor() }} onMicro2={() => { void dictateInstruction() }} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} onReadAloud={() => { void readCurrentDocument() }} readAloudDisabled={activeDocument?.type === 'scene' && !lastGeneratedPassage.trim()} readAloudTitle={activeDocument?.type === 'scene' ? 'Read latest generated passage' : 'Read full Codex entry'} /></div></section>}
 
       {rightOpen && <aside className="book-panel">
         <header><div><small>{formatSeries(currentBook, seriesList)}</small><strong>{currentBook?.title ?? 'Untitled Book'}</strong></div><div className="book-panel-header-actions">{activeSceneId && <button type="button" onClick={() => { void loadScene(activeSceneId) }} aria-label="Return to Scene" title="Return to Scene"><CornerUpLeft aria-hidden="true" /></button>}<button type="button" onClick={() => setRightOpen(false)} aria-label="Close book workspace"><X aria-hidden="true" /></button></div></header>
