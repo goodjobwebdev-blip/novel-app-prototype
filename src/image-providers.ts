@@ -1,4 +1,4 @@
-import { documentedImageModels, imageSize } from './image-settings'
+import { documentedImageModels, imageRatio, imageSize, prunaImageModels } from './image-settings'
 import type { ImageJob, ImageModel, ImageProvider, ImageSize } from './image-generation-types'
 import { assertImageFile, makeThumbnail } from './illustration-image'
 export type ImageOutput = { image: Blob; thumbnail: Blob; width: number; height: number; seed?: number; cost?: number; revisedPrompt?: string }
@@ -8,9 +8,16 @@ export function safeImageError(error: unknown, key = '') {
   const text = error instanceof Error ? error.message : 'Image generation failed.'
   return (key ? text.split(key).join('[redacted]') : text).slice(0, 1000)
 }
+function providerError(data: any, fallback: string) {
+  const value = data?.error ?? data?.detail ?? data?.message
+  if (typeof value === 'string') return value
+  if (typeof value?.message === 'string') return value.message
+  if (value != null) try { return JSON.stringify(value) } catch { /* Use the fallback below. */ }
+  return fallback
+}
 async function jsonResponse(response: Response, key = '') {
   const data = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(safeImageError(new Error(`Image provider (${response.status}): ${typeof data.error === 'string' ? data.error : data.error?.message || data.message || response.statusText}`), key))
+  if (!response.ok) throw new Error(safeImageError(new Error(`Image provider (${response.status}): ${providerError(data, response.statusText)}`), key))
   return data
 }
 export function normalizeNanoImageModels(payload: any): ImageModel[] {
@@ -45,8 +52,9 @@ async function imageResponse(response: Response) {
   }
   return new Blob(chunks, { type: response.headers.get('content-type')?.split(';')[0] || 'application/octet-stream' })
 }
-async function decodeOutput(data: any, provider: ImageProvider, key: string, signal: AbortSignal, fetcher: typeof fetch): Promise<ProviderResult> {
-  const item = provider === 'pruna' ? { url: data.generation_url } : data.data?.[0]
+async function decodeOutput(data: any, provider: ImageProvider, key: string, signal: AbortSignal, fetcher: typeof fetch, staticCost?: number): Promise<ProviderResult> {
+  const prunaOutput = [data.generation_url, data.output].flat().find((value) => typeof value === 'string')
+  const item = provider === 'pruna' ? { url: prunaOutput } : data.data?.[0]
   if (!item) throw new Error('The provider returned no image.')
   let image: Blob
   if (typeof item.b64_json === 'string') {
@@ -60,8 +68,11 @@ async function decodeOutput(data: any, provider: ImageProvider, key: string, sig
   await assertImageFile(image)
   const signature = new Uint8Array(await image.slice(0, 4).arrayBuffer())
   image = image.slice(0, image.size, signature[0] === 137 ? 'image/png' : signature[0] === 255 ? 'image/jpeg' : 'image/webp')
-  return { image, ...(Number.isFinite(data.seed ?? item.seed) ? { seed: data.seed ?? item.seed } : {}), ...(Number.isFinite(data.cost) ? { cost: data.cost } : {}), ...(typeof item.revised_prompt === 'string' ? { revisedPrompt: item.revised_prompt } : {}) }
+  return { image, ...(Number.isFinite(data.seed ?? item.seed) ? { seed: data.seed ?? item.seed } : {}), ...(Number.isFinite(staticCost ?? data.cost) ? { cost: staticCost ?? data.cost } : {}), ...(typeof item.revised_prompt === 'string' ? { revisedPrompt: item.revised_prompt } : {}) }
 }
+const PRUNA_SUCCESS = ['succeeded', 'success', 'completed', 'complete']
+const PRUNA_FAILURE = ['failed', 'canceled', 'cancelled']
+function prunaStatus(data: any) { return typeof data?.status === 'string' ? data.status.toLowerCase() : '' }
 export async function generateProviderImage(job: ImageJob, key: string, signal: AbortSignal, onSubmitted: (id: string) => Promise<void>, fetcher = fetch, pause = (ms: number) => new Promise<void>((resolve, reject) => {
   const abort = () => { clearTimeout(timer); reject(new DOMException('Stopped', 'AbortError')) }
   const timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve() }, ms)
@@ -76,12 +87,25 @@ export async function generateProviderImage(job: ImageJob, key: string, signal: 
     }), key)
     return decodeOutput(data, job.provider, key, signal, fetcher)
   }
+  const model = prunaImageModels.find((candidate) => candidate.id === job.model)
+  if (!model) throw new Error(`Unsupported Pruna image model: ${job.model}`)
+  const ratio = imageRatio(job.size)
+  const input = model.sizeMode === 'dimensions'
+    ? model.sizes.some((size) => size.width === job.size.width && size.height === job.size.height)
+      ? { prompt: job.prompt, width: job.size.width, height: job.size.height }
+      : undefined
+    : model.ratios?.includes(ratio)
+      ? { prompt: job.prompt, aspect_ratio: ratio }
+      : undefined
+  if (!input) throw new Error(`Size ${job.size.value} is not supported by Pruna model ${model.id}.`)
   let id = job.providerJobId
   if (!id) {
-    const data = await jsonResponse(await fetcher(`${PRUNA}/v1/predictions`, { method: 'POST', headers: { apikey: key, Model: job.model, 'Content-Type': 'application/json' }, credentials: 'omit', redirect: 'error', signal,
-      body: JSON.stringify({ input: { prompt: job.prompt, aspect_ratio: 'custom', width: job.size.width, height: job.size.height } }),
+    const data = await jsonResponse(await fetcher(`${PRUNA}/v1/predictions`, { method: 'POST', headers: { apikey: key, Model: model.id, 'Try-Sync': 'true', 'Content-Type': 'application/json' }, credentials: 'omit', redirect: 'error', signal,
+      body: JSON.stringify({ input }),
     }), key)
-    if (data.status === 'succeeded') return decodeOutput(data, 'pruna', key, signal, fetcher)
+    const status = prunaStatus(data)
+    if (PRUNA_SUCCESS.includes(status)) return decodeOutput(data, 'pruna', key, signal, fetcher, model.cost)
+    if (PRUNA_FAILURE.includes(status)) throw new Error(safeImageError(new Error(providerError(data, 'Pruna generation failed.')), key))
     if (typeof data.id !== 'string' || !data.id || data.id.length > 200) throw new Error('Pruna returned no job ID. Check the provider before retrying.')
     id = data.id as string
     await onSubmitted(id)
@@ -89,8 +113,9 @@ export async function generateProviderImage(job: ImageJob, key: string, signal: 
   while (true) {
     signal.throwIfAborted()
     const data = await jsonResponse(await fetcher(`${PRUNA}/v1/predictions/status/${encodeURIComponent(id)}`, { headers: { apikey: key }, signal, credentials: 'omit', redirect: 'error' }), key)
-    if (data.status === 'succeeded') return decodeOutput(data, 'pruna', key, signal, fetcher)
-    if (['failed', 'canceled', 'cancelled'].includes(data.status)) throw new Error(safeImageError(new Error(data.error || data.message || 'Pruna generation failed.'), key))
+    const status = prunaStatus(data)
+    if (PRUNA_SUCCESS.includes(status)) return decodeOutput(data, 'pruna', key, signal, fetcher, model.cost)
+    if (PRUNA_FAILURE.includes(status)) throw new Error(safeImageError(new Error(providerError(data, 'Pruna generation failed.')), key))
     await pause(1500)
   }
 }

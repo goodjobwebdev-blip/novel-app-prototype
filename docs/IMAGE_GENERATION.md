@@ -21,9 +21,13 @@ The square default is 1024×1024 when the model supports it; otherwise its first
 | --- | --- | --- |
 | NanoGPT | Public `/api/v1/image-models?detailed=true`; text-to-image models advertising numeric resolutions and single-image output | `/v1/images/generations`, `n: 1`, numeric size, `b64_json` preferred |
 | OpenAI | `/v1/models` filtered to GPT Image; documented presets available without a key. Common sizes: 1024×1024, 1536×1024, 1024×1536 | `/v1/images/generations`, `n: 1`, PNG output, saved `quality` and `moderation` (both default to `low`) |
-| Pruna | Documented P-Image presets; other Pruna model input schemas are not enabled yet | `/v1/predictions`, model header and custom dimensions, then status polling and authenticated delivery |
+| Pruna | Static text-to-image catalog for `flux-dev`, `qwen-image`, `qwen-image-fast`, `z-image-turbo`, `flux-2-klein-4b`, `wan-image-small`, and `p-image` | `/v1/predictions` with `Model` and `Try-Sync` headers, model-specific size input, status polling when needed, and authenticated delivery |
 
-Sources: [NanoGPT image models](https://docs.nano-gpt.com/api-reference/endpoint/image-models), [OpenAI image generation](https://developers.openai.com/api/docs/guides/image-generation), [Pruna quickstart](https://docs.api.pruna.ai/guides/quickstart), [Pruna P-Image](https://docs.api.pruna.ai/guides/models/p-image).
+Pruna’s aspect-ratio models receive only `prompt` and an allowed `aspect_ratio`. The UI represents those ratios with approximately one-megapixel presets: 1024×1024, 1344×768, 768×1344, 1536×672, 672×1536, 1216×832, 832×1216, 896×1120, 1120×896, 896×1152, and 1152×896, filtered to each model’s supported ratios. `z-image-turbo` instead receives the selected preset’s explicit `width` and `height`. Saved unknown Pruna model IDs and unsupported model/size combinations are rejected rather than submitted with a guessed schema.
+
+The Pruna catalog displays a flat estimated USD cost per successful image: `$0.025` for `qwen-image`, `$0.0001` for `flux-2-klein-4b`, and `$0.005` for each other listed model. Pruna’s prediction response does not report actual per-request billing, so gallery cost metadata for Pruna is this static catalog estimate—not provider-reported billing.
+
+Sources: [NanoGPT image models](https://docs.nano-gpt.com/api-reference/endpoint/image-models), [OpenAI image generation](https://developers.openai.com/api/docs/guides/image-generation), [Pruna quickstart](https://docs.api.pruna.ai/guides/quickstart), and the individual Pruna model guides linked from the model catalog.
 
 Requests go directly from the browser to the selected provider. Provider CORS policy, account/model access, API changes, and balance still apply. Automated tests use provider fixtures; they do not make paid requests or prove live account access.
 

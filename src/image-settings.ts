@@ -17,9 +17,27 @@ export function imageSize(value: string): ImageSize | undefined {
   return { value: `${width}x${height}`, width, height }
 }
 const sizes = (...values: string[]) => values.map((v) => imageSize(v)!)
+const PRUNA_SIZES = {
+  '1:1': '1024x1024', '16:9': '1344x768', '9:16': '768x1344', '21:9': '1536x672', '9:21': '672x1536',
+  '3:2': '1216x832', '2:3': '832x1216', '4:5': '896x1120', '5:4': '1120x896', '3:4': '896x1152', '4:3': '1152x896',
+} as const
+export type PrunaImageModel = ImageModel & { sizeMode: 'aspect_ratio' | 'dimensions'; ratios?: string[] }
+const prunaModel = (id: string, name: string, cost: number, ratios: (keyof typeof PRUNA_SIZES)[], description: string, sizeMode: PrunaImageModel['sizeMode'] = 'aspect_ratio'): PrunaImageModel => ({
+  id, name, provider: 'pruna', cost, description, sizeMode, ratios: sizeMode === 'aspect_ratio' ? ratios : undefined,
+  sizes: sizes(...ratios.map((ratio) => PRUNA_SIZES[ratio])), source: `https://docs.api.pruna.ai/guides/models/${id}`,
+})
+export const prunaImageModels: PrunaImageModel[] = [
+  prunaModel('flux-dev', 'FLUX.1 Dev', 0.005, ['1:1', '16:9', '21:9', '3:2', '2:3', '4:5', '5:4', '3:4', '4:3', '9:16', '9:21'], 'High-quality FLUX text-to-image generation.'),
+  prunaModel('qwen-image', 'Qwen-Image', 0.025, ['16:9', '1:1', '9:16', '4:3', '3:4', '3:2', '2:3'], 'Qwen text-to-image generation.'),
+  prunaModel('qwen-image-fast', 'Qwen-Image (fast)', 0.005, ['16:9', '1:1', '9:16', '4:3', '3:4', '3:2', '2:3'], 'Faster Qwen text-to-image generation.'),
+  prunaModel('z-image-turbo', 'Z-Image Turbo', 0.005, ['1:1', '16:9', '9:16', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '21:9', '9:21'], 'Fast text-to-image generation with explicit dimensions.', 'dimensions'),
+  prunaModel('flux-2-klein-4b', 'FLUX.2 Klein 4B', 0.0001, ['1:1', '16:9', '9:16', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '21:9', '9:21'], 'Low-cost FLUX.2 Klein text-to-image generation.'),
+  prunaModel('wan-image-small', 'WAN Image (small)', 0.005, ['16:9', '1:1', '9:16', '4:3', '3:4', '21:9'], 'Small WAN text-to-image model.'),
+  prunaModel('p-image', 'P-Image', 0.005, ['16:9', '1:1', '9:16', '4:3', '3:4', '3:2', '2:3'], 'Pruna’s P-Image text-to-image model.'),
+]
 export const documentedImageModels: ImageModel[] = [
   ...['gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5', 'gpt-image-2'].map((id): ImageModel => ({ id, name: id, provider: 'openai', sizes: sizes('1024x1024', '1536x1024', '1024x1536'), source: 'https://developers.openai.com/api/docs/guides/image-generation' })),
-  { id: 'p-image', name: 'P-Image', provider: 'pruna', sizes: sizes('1024x1024', '1280x720', '720x1280', '1024x768', '768x1024', '1152x768', '768x1152'), source: 'https://docs.api.pruna.ai/guides/models/p-image' },
+  ...prunaImageModels,
 ]
 export function loadImageSettings(): ImageSettings {
   const empty: ImageSettings = { keys: { nanogpt: '', openai: '', pruna: '' }, favorites: [], defaultAlias: '' }
