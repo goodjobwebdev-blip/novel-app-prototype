@@ -1,4 +1,4 @@
-import ImagePanel from './ImagePanel'
+import ImageSettingsPanel, { type ImageSettingsPanelRef } from './ImageSettingsPanel'
 import { ContextSourcePicker, ContextSourceInventory, ContextBudget } from './ContextControls'
 import './context-settings-ux.css'
 import { switchProviderProfile } from './provider-profiles'
@@ -161,6 +161,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
   const [contextLoadVersion, setContextLoadVersion] = useState(0)
   const [leaveRecoveryOpen, setLeaveRecoveryOpen] = useState(false)
   const [leaveSaving, setLeaveSaving] = useState(false)
+  const [imageSettingsDirty, setImageSettingsDirty] = useState(false)
   const [summaryPreviewSource, setSummaryPreviewSource] = useState<SummarySource | null>(null)
   const [summaryPreviewError, setSummaryPreviewError] = useState('')
   const aiLoadedScopeRef = useRef<string | null>(null)
@@ -177,6 +178,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
   const modelRefreshSequenceRef = useRef(0)
   const modelRefreshControllerRef = useRef<AbortController | null>(null)
   const promptEditorRef = useRef<PromptTemplateEditorHandle | null>(null)
+  const imageSettingsRef = useRef<ImageSettingsPanelRef | null>(null)
   const isBookSettings = Boolean(book)
   onSavedRef.current = onSaved
 
@@ -568,6 +570,17 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
     })
   }
 
+  async function flushImageSettings(): Promise<boolean> {
+    if (!imageSettingsDirty) return true
+    return imageSettingsRef.current?.save() ?? true
+  }
+
+  async function selectSettingsTab(tab: SettingsTab) {
+    if (tab === settingsTab) return
+    if (settingsTab === 'images' && !(await flushImageSettings())) return
+    setSettingsTab(tab)
+  }
+
   async function leaveSettings(destination?: () => void) {
     if (!destination || leaveSavingRef.current) return
     pendingLeaveDestinationRef.current = destination
@@ -576,6 +589,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
     const saved = await saveRequiredSettingsForLeave([
       () => flushAiSettings(),
       ...(!contextSaved ? [() => saveContextDefaults()] : []),
+      ...((settingsTab === 'images' && imageSettingsDirty) ? [() => flushImageSettings()] : []),
     ])
     leaveSavingRef.current = false
     setLeaveSaving(false)
@@ -612,6 +626,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
     ])
     leaveSavingRef.current = false
     setLeaveSaving(false)
+    imageSettingsRef.current?.discard()
     setLeaveRecoveryOpen(false)
     pendingLeaveDestinationRef.current = null
     destination()
@@ -664,10 +679,10 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
         <div className="rail-header"><button className="home-button" type="button" aria-label="Back to library" onClick={() => { void leaveSettings(onHome) }} disabled={leaveSaving}><Home aria-hidden="true" /><b>Home</b></button>{onBack && <button className="settings-close" type="button" onClick={() => { void leaveSettings(onBack) }} aria-label="Close settings" disabled={leaveSaving}><X aria-hidden="true" /></button>}</div>
         <nav>
           {([['ai', Bot, 'AI'], ['context', SlidersHorizontal, 'Context'], ['appearance', Type, 'UI'], ['speech', Volume2, 'Speech'], ['images', ImageIcon, 'Images']] as const).map(([key, Icon, label]) => (
-            <button className={settingsTab === key ? 'active' : ''} type="button" onClick={() => setSettingsTab(key)} aria-current={settingsTab === key ? 'page' : undefined} key={key}><Icon aria-hidden="true" /><span>{label}</span></button>
+            <button className={settingsTab === key ? 'active' : ''} type="button" onClick={() => { void selectSettingsTab(key) }} aria-current={settingsTab === key ? 'page' : undefined} key={key}><Icon aria-hidden="true" /><span>{label}</span></button>
           ))}
         </nav>
-        <p>{isBookSettings ? `Changes here affect only “${book?.title}”. Favorite models are shared across books.` : 'Defaults are copied into a new book. After that, each book keeps its own settings.'}</p>
+        <p>{settingsTab === 'images' ? 'Image providers and favorite models apply to all books on this device.' : isBookSettings ? `Changes here affect only “${book?.title}”. Favorite models are shared across books.` : 'Defaults are copied into a new book. After that, each book keeps its own settings.'}</p>
       </aside>
 
       <section className="settings-page" aria-labelledby="page-title">
@@ -819,7 +834,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
                 : <ContextSettings bookId={book.id} bookTitle={book.title} bookPromptValues={book.promptValues} type={contextSection} currentDocumentId={(book.contextType ?? 'scene') === contextSection ? book.currentDocumentId : undefined} currentDocumentText={(book.contextType ?? 'scene') === contextSection ? book.currentDocumentText : undefined} insertionPosition={(book.contextType ?? 'scene') === contextSection ? book.insertionPosition : undefined} chatId={contextSection === 'chat' ? book.chatId : undefined} settings={settings} value={visibleContextSettings} sources={contextSources} saved={contextSaved} saveError={contextSaveError} onRetry={() => { void saveContextDefaults() }} onChange={(value) => updateContextDefaults(value, contextSection)} />}
           </div>
         </> : <GlobalContextDefaults value={contextSettings} saved={contextSaved} saveError={contextSaveError} onRetry={() => { void saveContextDefaults() }} onChange={updateContextDefaults} />)
-          : settingsTab === 'images' ? <ImagePanel bookId={book?.id} ai={settings} />
+          : settingsTab === 'images' ? <ImageSettingsPanel ref={imageSettingsRef} ai={settings} onDirtyChange={setImageSettingsDirty} />
           : settingsTab === 'speech' ? <SpeechSettingsPanel settings={settings} scope={isBookSettings ? 'book' : 'defaults'} onChange={(speech) => update('speech', speech)} />
           : <SettingsPlaceholder tab={settingsTab} scope={isBookSettings ? 'book' : 'defaults'} />}
       </section>

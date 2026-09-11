@@ -1,14 +1,19 @@
-import { useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useState } from 'react'
 import type { AiSettings } from './ai-settings'
 import type { ImageModel, ImageProvider, ImageSettings, OpenAIImageQuality, OpenAIImageModeration } from './image-generation-types'
 import { documentedImageModels, imageSize, imageFavorite, imageProviderNames, imageRatio, IMAGE_PROVIDERS, loadImageSettings, resolveImageKey, saveImageSettings } from './image-settings'
 import { fetchImageModels } from './image-providers'
-export default function ImageSettingsPanel({ ai }: { ai: AiSettings }) {
+export type ImageSettingsPanelRef = { save(): boolean; discard(): void; isDirty(): boolean }
+export type ImageSettingsPanelProps = { ai: AiSettings; onDirtyChange?: (dirty: boolean) => void }
+
+const ImageSettingsPanel = forwardRef<ImageSettingsPanelRef, ImageSettingsPanelProps>(function ImageSettingsPanel({ ai, onDirtyChange }, ref) {
   const [settings, setSettings] = useState<ImageSettings>(loadImageSettings)
   const [provider, setProvider] = useState<ImageProvider>('nanogpt'), [query, setQuery] = useState('')
   const [catalogs, setCatalogs] = useState<Partial<Record<ImageProvider, ImageModel[]>>>(() => { try { const data = JSON.parse(localStorage.getItem('arc-image-catalog-v1') || '{}'); return Object.fromEntries(IMAGE_PROVIDERS.filter((p) => Array.isArray(data?.[p])).map((p) => [p, data[p].filter((m: ImageModel) => m?.provider === p && typeof m.id === 'string' && typeof m.name === 'string' && Array.isArray(m.sizes) && m.sizes.length && m.sizes.every((s) => typeof s?.value === 'string' && imageSize(s.value)))])) } catch { return {} } })
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [message, setMessage] = useState(''), [dirty, setDirty] = useState(false)
+  const [editingFavorite, setEditingFavorite] = useState<number | null>(settings.favorites.length ? 0 : null)
   const change = (value: ImageSettings) => { setSettings(value); setDirty(true); setMessage('') }
+  useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
   const models = provider === 'pruna' ? documentedImageModels.filter((m) => m.provider === provider) : catalogs[provider] ?? documentedImageModels.filter((m) => m.provider === provider)
   const refresh = async () => {
     setBusy(true); setError('')
@@ -22,9 +27,15 @@ export default function ImageSettingsPanel({ ai }: { ai: AiSettings }) {
     } catch (e) { setError(e instanceof Error ? e.message : 'Models could not be loaded.') }
     finally { setBusy(false) }
   }
-  const save = () => { try { setSettings(saveImageSettings(settings)); setDirty(false); setMessage('Image settings saved'); setError('') } catch (e) { setError(e instanceof Error ? e.message : 'Settings could not be saved.') } }
-  return <section className="image-settings">
-    <p className="image-help">Image providers and favorites apply to all books on this device. Save changes before generating.</p>
+  const save = () => {
+    try { setSettings(saveImageSettings(settings)); setDirty(false); setMessage('Image settings saved'); setError(''); return true }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'Settings could not be saved.'); return false }
+  }
+  const discard = () => { const saved = loadImageSettings(); setSettings(saved); setDirty(false); setError(''); setMessage('Changes discarded'); setEditingFavorite(saved.favorites.length ? 0 : null) }
+  useImperativeHandle(ref, () => ({ save, discard, isDirty: () => dirty }), [dirty, settings])
+  return <section className="image-settings image-ui">
+    <h1 id="page-title">Image generation</h1>
+    <p className="image-help">Configure device-global image providers and favorite models. These settings apply to every book on this device. Save changes before generating.</p>
     <details className="image-settings-section" open={!settings.favorites.length}>
       <summary>Provider API keys</summary>
       <div className="image-provider-fields">{IMAGE_PROVIDERS.map((p) => <label key={p}>
@@ -49,8 +60,8 @@ export default function ImageSettingsPanel({ ai }: { ai: AiSettings }) {
     {settings.favorites.map((f, index) => {
       const update = (patch: Partial<typeof f>) => change({ ...settings, favorites: settings.favorites.map((m, i) => i === index ? { ...m, ...patch } : m) })
       const discovered = (f.provider === 'pruna' ? documentedImageModels : catalogs[f.provider])?.find((m) => m.id === f.id)
-      return <article className="image-favorite" key={`${f.provider}/${f.id}`}>
-        <header className="image-favorite-heading"><small>{imageProviderNames[f.provider]}{(discovered?.cost ?? f.cost) != null ? ` · $${(discovered?.cost ?? f.cost)!.toFixed(4)} per image` : ''}</small><h3>{f.name}</h3>{(discovered?.description ?? f.description) && <small>{discovered?.description ?? f.description}</small>}</header>
+      return <details className="image-favorite" open={editingFavorite === index} onToggle={(event) => { if (event.currentTarget.open && editingFavorite !== index) setEditingFavorite(index); else if (!event.currentTarget.open && editingFavorite === index) setEditingFavorite(null) }} key={`${f.provider}/${f.id}`}>
+        <summary className="image-favorite-heading"><span><small>{imageProviderNames[f.provider]}{(discovered?.cost ?? f.cost) != null ? ` · $${(discovered?.cost ?? f.cost)!.toFixed(4)} per image` : ''}</small><strong>{f.name}</strong>{(discovered?.description ?? f.description) && <small>{discovered?.description ?? f.description}</small>}</span></summary>
         <label>Chat model alias<input maxLength={64} value={f.alias} onChange={(e) => { const alias = e.target.value; change({ ...settings, defaultAlias: settings.defaultAlias === f.alias ? alias : settings.defaultAlias, favorites: settings.favorites.map((m, i) => i === index ? { ...m, alias } : m) }) }} /></label>
         <label className="image-check image-default-choice"><input type="radio" name="default-image-model" checked={settings.defaultAlias === f.alias || (!settings.defaultAlias && index === 0)} onChange={() => change({ ...settings, defaultAlias: f.alias })} /><span>Default image model</span></label>
         <fieldset className="image-size-options">
@@ -74,9 +85,9 @@ export default function ImageSettingsPanel({ ai }: { ai: AiSettings }) {
         <div className="image-favorite-actions">
           {discovered && <button type="button" onClick={() => { const enabledSizes = discovered.sizes.map((s) => s.value).filter((s) => f.enabledSizes.includes(s)); const active = enabledSizes.length ? enabledSizes : [discovered.sizes[0].value]; update({ name: discovered.name, source: discovered.source, cost: discovered.cost, description: discovered.description, sizes: discovered.sizes, enabledSizes: active, defaultSize: active.includes(f.defaultSize) ? f.defaultSize : active[0] }) }}>Update supported sizes</button>}
           <a href={f.source} target="_blank" rel="noreferrer">Provider documentation</a>
-          <button className="image-remove-favorite" type="button" onClick={() => change({ ...settings, favorites: settings.favorites.filter((_, i) => i !== index) })}>Remove favorite</button>
+          <button className="image-remove-favorite" type="button" onClick={() => { change({ ...settings, favorites: settings.favorites.filter((_, i) => i !== index) }); setEditingFavorite(null) }}>Remove favorite</button>
         </div>
-      </article>
+      </details>
     })}
     <div className="image-settings-save">
       {error && <p role="alert">{error}</p>}
@@ -84,4 +95,6 @@ export default function ImageSettingsPanel({ ai }: { ai: AiSettings }) {
       <span role="status">{message || (dirty ? 'Unsaved changes' : '')}</span>
     </div>
   </section>
-}
+})
+
+export default ImageSettingsPanel

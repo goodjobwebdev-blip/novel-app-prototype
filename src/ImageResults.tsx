@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Download, Expand, Trash2 } from 'lucide-react'
 import IllustrationModal from './IllustrationModal'
 import IllustrationGestures from './IllustrationGestures'
@@ -7,15 +7,23 @@ import { useImageQuery, useImageUrl } from './image-hooks'
 import { cancelImageJob, clearImageQueue, decideImageJob, getGalleryImage, hideImageFromChat, listImageJobs, retryImageJob } from './image-store'
 import { imageProviderNames } from './image-settings'
 import type { GalleryImage, ImageJob } from './image-generation-types'
-export function GeneratedImageViewer({ asset, onClose }: { asset: GalleryImage; onClose: () => void }) {
+export function GeneratedImageViewer({ asset, onClose, actions }: { asset: GalleryImage; onClose: () => void; actions?: ReactNode }) {
   const url = useImageUrl(asset.image)
   const [view, setView] = useState({ ...centeredImageView })
-  return <IllustrationModal title="Image" fullScreen onClose={onClose}>{url && <IllustrationGestures src={url} alt={asset.prompt || 'Book illustration'} image={asset} value={view} onChange={setView} />}<details className="image-result-metadata"><summary>Prompt and image details</summary><p>{asset.prompt || 'Uploaded illustration'}</p>{asset.revisedPrompt && <p>Provider prompt: {asset.revisedPrompt}</p>}<dl><dt>Model</dt><dd>{asset.modelAlias || asset.model || 'Uploaded image'}{asset.provider ? ` · ${imageProviderNames[asset.provider]}` : ''}</dd><dt>Dimensions</dt><dd>{asset.width} × {asset.height}{asset.requestedSize && ` (requested ${asset.requestedSize})`}</dd><dt>Created</dt><dd>{new Date(asset.createdAt).toLocaleString()}</dd>{asset.durationMs !== undefined && <><dt>Generation time</dt><dd>{Math.round(asset.durationMs / 1000)} s</dd></>}{asset.seed !== undefined && <><dt>Seed</dt><dd>{asset.seed}</dd></>}{asset.cost !== undefined && <><dt>Provider cost</dt><dd>${asset.cost.toFixed(4)}</dd></>}{asset.bookTitle && <><dt>Book</dt><dd>{asset.bookTitle}</dd></>}</dl>{url && <a className="image-download" href={url} download={`arc-image-${asset.id}.${asset.image.type === 'image/jpeg' ? 'jpg' : asset.image.type === 'image/webp' ? 'webp' : 'png'}`}><Download size={18} /> Download image</a>}</details></IllustrationModal>
+  return <IllustrationModal title="Image" fullScreen onClose={onClose}>
+    {url && <IllustrationGestures src={url} alt={asset.prompt || 'Book illustration'} image={asset} value={view} onChange={setView} />}
+    <div className="image-viewer-actions">
+      {url && <a className="image-download" href={url} download={`arc-image-${asset.id}.${asset.image.type === 'image/jpeg' ? 'jpg' : asset.image.type === 'image/webp' ? 'webp' : 'png'}`}><Download size={18} /> Download image</a>}
+      {actions}
+    </div>
+    <details className="image-result-metadata"><summary>Prompt and image details</summary><p>{asset.prompt || 'Uploaded illustration'}</p>{asset.revisedPrompt && <p>Provider prompt: {asset.revisedPrompt}</p>}<dl><dt>Model</dt><dd>{asset.modelAlias || asset.model || 'Uploaded image'}{asset.provider ? ` · ${imageProviderNames[asset.provider]}` : ''}</dd><dt>Dimensions</dt><dd>{asset.width} × {asset.height}{asset.requestedSize && ` (requested ${asset.requestedSize})`}</dd><dt>Created</dt><dd>{new Date(asset.createdAt).toLocaleString()}</dd>{asset.durationMs !== undefined && <><dt>Generation time</dt><dd>{Math.round(asset.durationMs / 1000)} s</dd></>}{asset.seed !== undefined && <><dt>Seed</dt><dd>{asset.seed}</dd></>}{asset.cost !== undefined && <><dt>Provider cost</dt><dd>${asset.cost.toFixed(4)}</dd></>}{asset.bookTitle && <><dt>Book</dt><dd>{asset.bookTitle}</dd></>}</dl></details>
+  </IllustrationModal>
 }
-export function ImageAssetPreview({ asset }: { asset: GalleryImage }) {
+export function ImageAssetPreview({ asset, renderViewerActions, onOpen }: { asset: GalleryImage; renderViewerActions?: (close: () => void) => ReactNode; onOpen?: () => void }) {
   const thumb = useImageUrl(asset.thumbnail)
   const [open, setOpen] = useState(false)
-  return <><button type="button" className="image-result-preview" onClick={() => setOpen(true)} aria-label="View image and prompt">{thumb && <img loading="lazy" src={thumb} alt={asset.prompt || 'Book illustration'} />}<Expand aria-hidden="true" size={20} /></button>{open && <GeneratedImageViewer asset={asset} onClose={() => setOpen(false)} />}</>
+  const close = () => setOpen(false)
+  return <><button type="button" className="image-result-preview" onClick={() => { onOpen?.(); setOpen(true) }} aria-label="View image and prompt">{thumb && <img loading="lazy" src={thumb} alt={asset.prompt || 'Book illustration'} />}<Expand aria-hidden="true" size={20} /></button>{open && <GeneratedImageViewer asset={asset} onClose={close} actions={renderViewerActions?.(close)} />}</>
 }
 function JobResult({ job, chat }: { job: ImageJob; chat: boolean }) {
   const { data: asset, error: loadError } = useImageQuery(() => job.assetId ? getGalleryImage(job.assetId) : Promise.resolve(undefined), [job.assetId], undefined)
@@ -49,6 +57,25 @@ export default function ImageJobs({ proposalId, messageId }: { proposalId?: stri
     catch (e) { setActionError(e instanceof Error ? e.message : 'Could not clear the queue.') }
     finally { setClearing(false) }
   }
+  const groups = [
+    { title: 'Active', jobs: visible.filter((job) => ['queued', 'running'].includes(job.status)) },
+    { title: 'Needs review', jobs: visible.filter((job) => job.status === 'completed' && Boolean(job.assetId) && !job.decision) },
+    { title: 'Attention', jobs: visible.filter((job) => ['failed', 'interrupted', 'cancelled'].includes(job.status)) },
+    { title: 'Earlier', jobs: visible.filter((job) => job.status === 'completed' && (!job.assetId || Boolean(job.decision))) },
+  ].filter((group) => group.jobs.length)
+  const jobCard = (job: ImageJob) => <article className="image-job" key={job.id}>
+    <header><strong>{job.modelAlias}</strong><span>{job.status === 'running' ? `Generating · ${Math.max(0, Math.floor((now - (job.startedAt ?? now)) / 1000))} s` : job.status === 'queued' ? `Queued · #${jobs.filter((item) => item.provider === job.provider && item.status === 'queued').findIndex((item) => item.id === job.id) + 1}` : job.status}</span></header>
+    <small>{job.size.width} × {job.size.height}{!proposalId && job.bookTitle ? ` · ${job.bookTitle}` : ''}</small>
+    {!proposalId && <p className="image-prompt-preview">{job.prompt}</p>}
+    {job.error && <p role="alert">{job.error}</p>}
+    {job.status === 'completed' && <JobResult job={job} chat={Boolean(proposalId)} />}
+    <div className="image-actions">
+      {['queued', 'running'].includes(job.status) && <button type="button" onClick={() => action(() => cancelImageJob(job.id))}>{job.status === 'running' ? 'Stop waiting' : 'Cancel queued image'}</button>}
+      {['failed', 'interrupted', 'cancelled'].includes(job.status) && <button type="button" onClick={() => action(() => retryImageJob(job.id))}>{job.providerJobId ? 'Check existing result' : 'Retry as new generation'}</button>}
+      {!proposalId && !['queued', 'running'].includes(job.status) && (job.status !== 'completed' || job.decision || !job.assetId) && <button type="button" disabled={clearing} onClick={() => action(() => clearImageQueue([job.id]))}>Remove from queue</button>}
+    </div>
+    {job.status === 'running' && <small>Stopping does not guarantee the provider cancels its charge.</small>}
+  </article>
   return <div className="image-jobs">
     {!proposalId && matching.length > 0 && <div className="image-queue-actions">
       <span>{matching.length} {matching.length === 1 ? 'generation' : 'generations'}</span>
@@ -57,19 +84,10 @@ export default function ImageJobs({ proposalId, messageId }: { proposalId?: stri
     </div>}
     {(error || actionError) && <p role="alert">{error || actionError}</p>}
     {!visible.length && !proposalId && <p className="image-help">Your generation queue is empty.</p>}
-    {visible.map((job) => <article className="image-job" key={job.id}>
-      <header><strong>{job.modelAlias}</strong><span>{job.status === 'running' ? `Generating · ${Math.max(0, Math.floor((now - (job.startedAt ?? now)) / 1000))} s` : job.status === 'queued' ? `Queued · #${jobs.filter((j) => j.provider === job.provider && j.status === 'queued').findIndex((j) => j.id === job.id) + 1}` : job.status}</span></header>
-      <small>{job.size.width} × {job.size.height}{!proposalId && job.bookTitle ? ` · ${job.bookTitle}` : ''}</small>
-      {!proposalId && <p className="image-prompt-preview">{job.prompt}</p>}
-      {job.error && <p role="alert">{job.error}</p>}
-      {job.status === 'completed' && <JobResult job={job} chat={Boolean(proposalId)} />}
-      <div className="image-actions">
-        {['queued', 'running'].includes(job.status) && <button type="button" onClick={() => action(() => cancelImageJob(job.id))}>{job.status === 'running' ? 'Stop waiting' : 'Cancel queued image'}</button>}
-        {['failed', 'interrupted', 'cancelled'].includes(job.status) && <button type="button" onClick={() => action(() => retryImageJob(job.id))}>{job.providerJobId ? 'Check existing result' : 'Retry as new generation'}</button>}
-        {!proposalId && !['queued', 'running'].includes(job.status) && (job.status !== 'completed' || job.decision || !job.assetId) && <button type="button" disabled={clearing} onClick={() => action(() => clearImageQueue([job.id]))}>Remove from queue</button>}
-      </div>
-      {job.status === 'running' && <small>Stopping does not guarantee the provider cancels its charge.</small>}
-    </article>)}
+    {groups.map((group) => <section className="image-job-group" aria-labelledby={`image-job-group-${group.title.toLowerCase().replace(' ', '-')}`} key={group.title}>
+      <h3 id={`image-job-group-${group.title.toLowerCase().replace(' ', '-')}`}>{group.title}<span>{group.jobs.length}</span></h3>
+      <div className="image-job-list">{group.jobs.map(jobCard)}</div>
+    </section>)}
     {visible.length < matching.length && <button type="button" onClick={() => setLimit(limit + 30)}>Show earlier generations</button>}
   </div>
 }
