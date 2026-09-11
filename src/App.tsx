@@ -3,7 +3,7 @@ import { ContextSourcePicker, ContextSourceInventory, ContextBudget } from './Co
 import './context-settings-ux.css'
 import { switchProviderProfile } from './provider-profiles'
 import { TextRevealPreview } from './TextRevealPreview'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import {
   Bot,
   Check,
@@ -52,6 +52,7 @@ import {
   defaultBookContextSettings,
   type ArcEntity,
   type BookContextSettings,
+  type GenerationContextProfile,
   type GenerationContextType,
   type SummarySourceType,
 } from './persistence'
@@ -81,6 +82,7 @@ import './codex-triggers.css'
 import './settings-save-recovery.css'
 import type { PromptPresetScope } from './prompt-presets'
 type SettingsTab = 'ai' | 'context' | 'appearance' | 'speech' | 'images'
+type ContextSection = GenerationContextType | 'summary'
 type SaveState = 'loading' | 'saved' | 'saving' | 'error'
 type RequestPreviewMessage = {
   key: string
@@ -149,7 +151,9 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
   const [saveState, setSaveState] = useState<SaveState>(book ? 'loading' : 'saved')
   const [settingsTab, setSettingsTab] = useState<SettingsTab>(initialTab)
   const [settingsLoading, setSettingsLoading] = useState(Boolean(book))
+  const [contextSection, setContextSection] = useState<ContextSection>(() => book?.currentSummary ? 'summary' : book?.contextType ?? 'scene')
   const [contextSettings, setContextSettings] = useState<BookContextSettings>(defaultBookContextSettings)
+  const [chatContextProfile, setChatContextProfile] = useState<GenerationContextProfile | null>(null)
   const [contextSources, setContextSources] = useState<ArcEntity[]>([])
   const [contextSaved, setContextSaved] = useState(true)
   const [contextSaveError, setContextSaveError] = useState('')
@@ -261,6 +265,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
     if (!book) {
       setContextSaveError('')
       setContextSettings(loadDefaultBookContextSettings())
+      setChatContextProfile(null)
       setContextSources([])
       setContextSaved(true)
       setContextReady(true)
@@ -271,17 +276,15 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
     setContextSaveError('')
     void Promise.all([getBookContextSettings(book.id), listEntitiesByBook(book.id), book.chatId ? getChat(book.chatId) : Promise.resolve(undefined)]).then(([value, entities, chat]) => {
       if (!cancelled) {
-        const scopedValue = book.contextType === 'chat' && chat
-          ? { ...value, profiles: { ...value.profiles, chat: chat.contextProfile } }
-          : value
         setContextReady(true)
-        setContextSettings(scopedValue)
+        setContextSettings(value)
+        setChatContextProfile(chat?.contextProfile ?? null)
         setContextSources(entities)
         setContextSaved(true)
       }
     }).catch(() => { if (!cancelled) { setContextSaved(false); setContextSaveError('Context settings could not be loaded. Reopen settings to try again.') } })
     return () => { cancelled = true }
-  }, [book?.id, book?.chatId, book?.contextType, contextLoadVersion])
+  }, [book?.id, book?.chatId, contextLoadVersion])
 
   const visibleModels = useMemo(() => {
     const query = modelSearch.trim().toLowerCase()
@@ -483,6 +486,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
 
   async function saveContextDefaults(): Promise<boolean> {
     if (!contextReady) return true // No editable Context draft has been loaded.
+    const section = contextSection
     setContextSaveError('')
     setContextSaved(false)
     const value = contextSettings
@@ -500,9 +504,9 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
     }
 
     const version = ++contextSaveVersionRef.current
-    if (book.contextType === 'chat' && book.chatId) {
+    if (section === 'chat' && book.chatId && chatContextProfile) {
       try {
-        await saveChatContextProfile(book.chatId, value.profiles.chat)
+        await saveChatContextProfile(book.chatId, chatContextProfile)
         if (version !== contextSaveVersionRef.current) return false
         setContextSaved(true)
         return true
@@ -526,11 +530,12 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
     }
   }
 
-  function updateContextDefaults(value: BookContextSettings) {
+  function updateContextDefaults(value: BookContextSettings, section: GenerationContextType = 'scene') {
     if (!contextReady) return
     setContextSaveError('')
-    setContextSettings(value)
     setContextSaved(false)
+    if (section === 'chat' && book?.chatId) setChatContextProfile(value.profiles.chat)
+    else setContextSettings(value)
     if (!book) {
       try {
         const saved = saveDefaultBookContextSettings(value)
@@ -543,7 +548,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
       return
     }
     const version = ++contextSaveVersionRef.current
-    if (book.contextType === 'chat' && book.chatId) {
+    if (section === 'chat' && book.chatId) {
       contextSaveQueueRef.current = contextSaveQueueRef.current.catch(() => undefined).then(async () => {
         await saveChatContextProfile(book.chatId!, value.profiles.chat)
         if (version === contextSaveVersionRef.current) setContextSaved(true)
@@ -649,6 +654,9 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
         sourceDiagnostics: summaryPreviewSource.diagnostics,
       })
     : null
+  const visibleContextSettings = contextSection === 'chat' && chatContextProfile
+    ? { ...contextSettings, profiles: { ...contextSettings.profiles, chat: chatContextProfile } }
+    : contextSettings
 
   return (
     <main className="app-shell ai-settings-shell">
@@ -801,16 +809,48 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
           <div className="prompt-footer"><button type="button" onClick={() => { if (window.confirm('Reset this prompt and all predefined messages to the Arc default?')) changeAiSettings((current) => resetPromptComposition(current, promptTab)) }}>Reset prompt composition</button></div></div>
         </section>
 
-        </> : settingsTab === 'context' ? (!contextReady ? <section className="settings-card"><h1 id="page-title">Context</h1><p role="status">{contextSaveError || 'Loading context settings…'}</p>{contextSaveError && <button type="button" onClick={() => setContextLoadVersion(version => version + 1)}>Retry loading</button>}</section> : book ? (book.currentSummary ? <SummaryContextSettings book={book} source={summaryPreviewSource} error={summaryPreviewError} settings={settings} /> : book.contextType === 'note'
-          ? <NoteContextPlaceholder />
-          : <ContextSettings bookId={book.id} bookTitle={book.title} bookPromptValues={book.promptValues} type={book.contextType ?? 'scene'} currentDocumentId={book.currentDocumentId} currentDocumentText={book.currentDocumentText} insertionPosition={book.insertionPosition} chatId={book.chatId} settings={settings} value={contextSettings} sources={contextSources} saved={contextSaved} saveError={contextSaveError} onRetry={() => { void saveContextDefaults() }} onChange={updateContextDefaults} />)
-          : <GlobalContextDefaults value={contextSettings} saved={contextSaved} saveError={contextSaveError} onRetry={() => { void saveContextDefaults() }} onChange={updateContextDefaults} />)
+        </> : settingsTab === 'context' ? (!contextReady ? <section className="settings-card"><h1 id="page-title">Context</h1><p role="status">{contextSaveError || 'Loading context settings…'}</p>{contextSaveError && <button type="button" onClick={() => setContextLoadVersion(version => version + 1)}>Retry loading</button>}</section> : book ? <>
+          <ContextSectionTabs active={contextSection} onChange={setContextSection} />
+          <div role="tabpanel" id={`context-panel-${contextSection}`} aria-labelledby={`context-tab-${contextSection}`}>
+            {contextSection === 'summary'
+              ? book.currentSummary ? <SummaryContextSettings book={book} source={summaryPreviewSource} error={summaryPreviewError} settings={settings} /> : <SummaryContextPlaceholder />
+              : contextSection === 'note'
+                ? <NoteContextPlaceholder />
+                : <ContextSettings bookId={book.id} bookTitle={book.title} bookPromptValues={book.promptValues} type={contextSection} currentDocumentId={(book.contextType ?? 'scene') === contextSection ? book.currentDocumentId : undefined} currentDocumentText={(book.contextType ?? 'scene') === contextSection ? book.currentDocumentText : undefined} insertionPosition={(book.contextType ?? 'scene') === contextSection ? book.insertionPosition : undefined} chatId={contextSection === 'chat' ? book.chatId : undefined} settings={settings} value={visibleContextSettings} sources={contextSources} saved={contextSaved} saveError={contextSaveError} onRetry={() => { void saveContextDefaults() }} onChange={(value) => updateContextDefaults(value, contextSection)} />}
+          </div>
+        </> : <GlobalContextDefaults value={contextSettings} saved={contextSaved} saveError={contextSaveError} onRetry={() => { void saveContextDefaults() }} onChange={updateContextDefaults} />)
           : settingsTab === 'images' ? <ImagePanel bookId={book?.id} ai={settings} />
           : settingsTab === 'speech' ? <SpeechSettingsPanel settings={settings} scope={isBookSettings ? 'book' : 'defaults'} onChange={(speech) => update('speech', speech)} />
           : <SettingsPlaceholder tab={settingsTab} scope={isBookSettings ? 'book' : 'defaults'} />}
       </section>
     </main>
   )
+}
+
+const contextSections: ReadonlyArray<readonly [ContextSection, string]> = [
+  ['scene', 'Story'],
+  ['codex', 'Codex'],
+  ['chat', 'Chat'],
+  ['summary', 'Summary'],
+  ['note', 'Note'],
+]
+
+function ContextSectionTabs({ active, onChange }: { active: ContextSection; onChange: (section: ContextSection) => void }) {
+  const selectFromKeyboard = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const next = event.key === 'ArrowRight' ? (index + 1) % contextSections.length
+      : event.key === 'ArrowLeft' ? (index + contextSections.length - 1) % contextSections.length
+        : event.key === 'Home' ? 0
+          : event.key === 'End' ? contextSections.length - 1
+            : -1
+    if (next < 0) return
+    event.preventDefault()
+    const section = contextSections[next][0]
+    onChange(section)
+    document.getElementById(`context-tab-${section}`)?.focus()
+  }
+  return <div className="context-section-tabs" role="tablist" aria-label="Context type">
+    {contextSections.map(([section, label], index) => <button key={section} type="button" role="tab" id={`context-tab-${section}`} aria-controls={`context-panel-${section}`} aria-selected={active === section} tabIndex={active === section ? 0 : -1} className={active === section ? 'active' : ''} onClick={() => onChange(section)} onKeyDown={(event) => selectFromKeyboard(event, index)}>{label}</button>)}
+  </div>
 }
 
 function SummaryRequestPreview({ request, source, error, hasCurrentSummary, model, modelContextLength }: {
@@ -899,8 +939,16 @@ function GlobalContextDefaults({ value, saved, saveError, onRetry, onChange }: {
 function NoteContextPlaceholder() {
   return <section className="compact-settings-empty" aria-labelledby="page-title">
     <MessageCircle aria-hidden="true" />
-    <h1 id="page-title">Context Management</h1>
+    <h1 id="page-title">Note context</h1>
     <p>Notes have no direct generation settings. Use Chat to create or revise a note, and choose its context in that conversation. Notes can also be selected as additional context for Story, Codex, and Chat.</p>
+  </section>
+}
+
+function SummaryContextPlaceholder() {
+  return <section className="compact-settings-empty" aria-labelledby="page-title">
+    <SlidersHorizontal aria-hidden="true" />
+    <h1 id="page-title">Summary context</h1>
+    <p>Summary context is assembled automatically from the item being summarized. Open a Summary to inspect its authoritative source and request preview.</p>
   </section>
 }
 

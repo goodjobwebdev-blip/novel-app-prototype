@@ -38,7 +38,7 @@ The application should feel like a quiet writing workspace, not a general-purpos
 - AI and Context can be scoped to the open book where applicable.
 - UI is global on the current device and has no per-book override.
 - UI settings control editor typography, expandable/scalable text-input typography, built-in themes, and custom themes. Typography and theme selection are independent.
-- Context Management is generation-type-specific for Story, Codex, Note, and Chat profiles. Story, Codex, and Chat currently expose rendered request previews; dedicated Note generation is not implemented yet.
+- Context Management uses explicit Story, Codex, Chat, Summary, and Note tabs rather than following the active workspace entity. Story, Codex, and Chat expose rendered request previews; Summary context is source-driven and read-only, and dedicated Note generation is not implemented yet.
 
 ### Right book workspace
 

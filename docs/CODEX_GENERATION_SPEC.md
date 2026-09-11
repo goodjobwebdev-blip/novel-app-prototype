@@ -43,8 +43,8 @@ The current implementation also exposes a rendered request preview in Context Ma
 
 1. Context configuration is persisted per book and generation type.
 2. Profiles exist for Scene, Codex, Note, and Chat. Chat uses a persisted per-chat copy of its profile; Note keeps its profile for the future dedicated Note-generation flow.
-3. Context Management displays the profile matching the document/generation type currently active in the main workspace.
-4. Switching between Scene and Codex restores each type's independent context configuration.
+3. Context Management exposes explicit Story, Codex, Chat, Summary, and Note tabs instead of changing its screen with the active workspace entity.
+4. Story, Codex, and book-default Chat profiles remain independent; an open Chat uses and saves its per-chat profile. Summary is read-only and Note explains the future dedicated generation flow.
 5. Codex's current Scene is the last Scene opened in that book.
 6. If a book has no Scene, the Codex current-Scene value is empty.
 7. Every profile has two distinct sections:
