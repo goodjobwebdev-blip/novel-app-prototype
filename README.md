@@ -51,6 +51,10 @@ Text generation uses the Main effort for writing and quick tools, Codex effort f
 
 Provider references: [NanoGPT reasoning](https://docs.nano-gpt.com/api-reference/miscellaneous/extended-thinking), [OpenRouter reasoning](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens), [OpenAI Chat Completions](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create).
 
+### Sensory detail
+
+Select prose in the editor and choose **Sensory detail** from its context menu. Suggestions start automatically using the book's Main model and effort, with two ideas requested for each of seven senses: sight, sound, smell, taste, touch/temperature, balance/movement, and internal bodily sensation. Chips appear as complete ideas arrive. Each chip replaces the entire selected passage with that variant; its pencil opens the full replacement for review and editing. **Save edit** updates the chip without changing the document, while **Use this variant** applies the edited text. **Stop** retains the ideas already shown, and **More ideas** requests additional alternatives. If the selected passage has changed, applying is refused so it can be selected again. Other rewrite tools retain their Generate/preview/Apply flow.
+
 ## Local development
 
 Requirements: Node.js 24 is used by CI.

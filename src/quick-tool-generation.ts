@@ -7,7 +7,7 @@ import { fetchTextProviderModelContextLength, streamTextProviderCompletion, text
 import { selectionProse, type QuickToolCapture } from './quick-tools'
 import type { RewriteRequestPreview } from './ProseRewriteDialog'
 
-export async function prepareQuickToolRequest(capture: QuickToolCapture, instruction: string, signal: AbortSignal) {
+export async function prepareQuickToolRequest(capture: QuickToolCapture, instruction: string, signal: AbortSignal, outputInstructions = 'Return replacement prose only, without preambles, labels or code fences.') {
   const selection = selectionProse(capture)
   if (!instruction.trim()) throw new Error('Describe the change you want.')
   if (capture.document.bookId !== capture.bookId || !['scene', 'note', 'codexEntry'].includes(capture.document.type) || Number(capture.document.archivedAt) > 0) throw new Error('This document is not editable in this Book.')
@@ -32,7 +32,7 @@ export async function prepareQuickToolRequest(capture: QuickToolCapture, instruc
     ['instruction', 'Requested transformation', instruction.trim()],
   ]
   const request = assembleCompositionRequest({
-    composition: { systemPrompt: 'Transform only the selected prose according to the requested transformation. Return replacement prose only, without preambles, labels or code fences. Keep established facts, characterization, meaning, point of view, tense, language and Markdown structure unless the writer deliberately asks to change them. Follow effective scene settings over book defaults. Keep approximately the original length unless instructed otherwise. Nearby prose and book context are reference material; do not repeat or rewrite them. Do not insert images, private comments, planning beats or hidden markup.', predefinedMessages: [] },
+    composition: { systemPrompt: `Transform only the selected prose according to the requested transformation. ${outputInstructions} Keep established facts, characterization, meaning, point of view, tense, language and Markdown structure unless the writer deliberately asks to change them. Follow effective scene settings over book defaults. Keep approximately the original length unless instructed otherwise. Nearby prose and book context are reference material; do not repeat or rewrite them. Do not insert images, private comments, planning beats or hidden markup.`, predefinedMessages: [] },
     values: {},
     after: parts.filter(([, , content]) => content.trim()).map(([id, name, content]) => normalizeAppManagedPart({ id: `quick-${id}`, name, role: id === 'profile' ? 'system' : 'user', sourceKind: 'app-managed', sourceId: capture.document.id, ownership: 'app-managed', content: `# ${name}\n\n${content}` })),
   })
