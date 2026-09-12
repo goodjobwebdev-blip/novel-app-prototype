@@ -1,3 +1,4 @@
+import type { CodexCheckpoint, TimelineSummary } from './codex-timeline'
 import { ensureLoreTypesWithDb, resolveLoreType } from './lore-types.ts'
 import { installSeriesCodexHooks, synchronizeCodexEntity, synchronizeSeriesCodex, seriesTransaction, detachSeriesCodex } from './series-codex.ts'
 import { documentBlocks, encodeDocumentBlock } from './document-projection.ts'
@@ -72,7 +73,7 @@ export type BookMetadata = {
 export type BookEntity = ArcEntity & { type: 'book'; title: string } & Partial<Omit<BookMetadata, 'title'>>
 export type SeriesEntity = ArcEntity & { type: 'series'; title: string }
 export type NoteEntity = ArcEntity & { type: 'note'; bookId: string; parentId: string; title: string; content: string; useAsChatSkill?: boolean; useAsCodexTemplate?: boolean; compatibleLoreTypeIds?: string[] }
-export type CodexEntryEntity = ArcEntity & { type: 'codexEntry'; bookId: string; parentId: string; title: string; category: string; typeId?: string; content: string; primaryImageId?: string; archivedAt?: number; preferSummaryForContext?: boolean; sourceRevision?: number; autoIncludeTriggers?: string[]; codexScope?: 'series' | 'inherited' | 'override'; seriesSourceId?: string; seriesSourceSeriesId?: string; seriesSnapshotSignature?: string; hiddenInBook?: boolean }
+export type CodexEntryEntity = ArcEntity & { type: 'codexEntry'; checkpoints?: CodexCheckpoint[]; timelineSummaries?: TimelineSummary[]; bookId: string; parentId: string; title: string; category: string; typeId?: string; content: string; primaryImageId?: string; archivedAt?: number; preferSummaryForContext?: boolean; sourceRevision?: number; autoIncludeTriggers?: string[]; codexScope?: 'series' | 'inherited' | 'override'; seriesSourceId?: string; seriesSourceSeriesId?: string; seriesSnapshotSignature?: string; hiddenInBook?: boolean }
 export type SummaryEntity = ArcEntity & {
   type: 'summary'
   bookId: string
@@ -87,6 +88,7 @@ export type EditableEntity = StructuralEntity | NoteEntity | CodexEntryEntity | 
 export type GenerationContextType = 'scene' | 'codex' | 'note' | 'chat'
 export type SummaryRange = 'none' | 'all' | 'before' | 'after'
 export type GenerationContextProfile = {
+  loreAtCurrentScene?: boolean
   includeLastScene: boolean
   includePreviousSceneWhenEmpty: boolean
   structuralIds: string[]
@@ -141,6 +143,7 @@ function normalizeContextProfile(value?: Partial<GenerationContextProfile>, defa
     structuralIds: uniqueIds(value?.structuralIds ?? []),
     noteIds: uniqueIds(value?.noteIds ?? []),
     codexEntryIds: uniqueIds(value?.codexEntryIds ?? []),
+    loreAtCurrentScene: value?.loreAtCurrentScene === true,
     summaryRange: ['all', 'before', 'after'].includes(String(value?.summaryRange)) ? value!.summaryRange! : 'none',
   }
 }

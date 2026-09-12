@@ -1,3 +1,5 @@
+import { resolveTimelineEntities } from './codex-timeline'
+import { readTimelineWorld } from './codex-timeline-service'
 import { codexScopeLabel } from './series-codex.ts'
 import { sceneBeats } from './scene-beats'
 import { proseText, proseEntities } from './document-projection.ts'
@@ -10,6 +12,7 @@ import type { DynamicContextSource } from './prompt-composition'
 export type PreparedAutomaticCodex = { entryId: string; title: string; category: string; representation: 'Full entry' | 'Summary'; fallbackReason?: string; source: 'trigger' | 'dependency'; matches: CodexTriggerSceneMatch[]; dependencyPath?: Array<{ entryId: string; title: string }> }
 
 export type PreparedContextValues = {
+  temporalCodex?: CodexEntryEntity[]
   sceneBeats?: Array<{ type: 'scene_beat'; sceneId: string; id: string; text: string }>
   currentSceneId: string
   currentSceneText: string
@@ -130,7 +133,10 @@ function additionalContextOrder(a: AdditionalContextSection, b: AdditionalContex
 
 export async function buildContextValues(options: BuildOptions): Promise<PreparedContextValues> {
   const [rawEntities, contextSettings, dependencyEdges] = await Promise.all([listEntitiesByBook(options.bookId), getBookContextSettings(options.bookId), listCodexDependencies(options.bookId)])
-  const entities = proseEntities(rawEntities)
+  const temporalAnchor = options.currentSceneId || contextSettings.lastOpenedSceneId
+  const temporal = (options.type === 'scene' || options.profile.loreAtCurrentScene) && temporalAnchor
+  const resolved = temporal ? resolveTimelineEntities(rawEntities, { bookId: options.bookId, sceneId: temporalAnchor }, await readTimelineWorld(options.bookId)) : rawEntities
+  const entities = proseEntities(resolved)
   const outline = orderedOutline(options.bookId, entities)
   const scenes = outline.filter((item) => item.type === 'scene')
   const anchorSceneId = options.currentSceneId || contextSettings.lastOpenedSceneId || undefined
@@ -254,6 +260,7 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
       reason: 'Current Codex target is represented through entry variables',
     }] : []
   return {
+    temporalCodex: temporal ? allCodexEntries.filter(entry => !isCodexEntryArchived(entry)) : undefined,
     sceneBeats: options.type === 'chat' ? sceneBeats(String(rawEntities.find((entity) => entity.id === anchorSceneId)?.content ?? '')).map(({ block }) => ({ type: 'scene_beat', sceneId: anchorSceneId || '', id: block.id, text: block.text || '' })) : undefined,
     currentSceneId: currentScene?.id ?? '',
     currentSceneText: liveCurrentText,
