@@ -91,6 +91,7 @@ type ActiveGeneration = {
   generatedTo: number
   resultDocument: string
   placement: 'append' | 'replace'
+  trailingCarriageReturn: boolean
 }
 
 type ActiveDictation = { id: string; preDocument: string; from: number; to: number; provisional: string }
@@ -384,6 +385,7 @@ function beginGeneration(
       generatedTo: latest.insertionPosition,
       resultDocument: current,
       placement,
+      trailingCarriageReturn: false,
     }
   }
 
@@ -398,6 +400,7 @@ function beginGeneration(
     generatedTo: position,
     resultDocument: current,
     placement,
+    trailingCarriageReturn: false,
   }
 }
 
@@ -405,6 +408,13 @@ function appendGenerationChunk(view: EditorView, session: ActiveGeneration, text
   if (!text) return true
   const current = view.state.doc.toString()
   if (current !== session.resultDocument) throw new Error('The scene changed while generation was in progress.')
+
+  // CodeMirror stores LF line breaks. Track that same text and its positions,
+  // including a CRLF split across two provider/word-renderer chunks.
+  const continuedLineBreak = session.trailingCarriageReturn && text.startsWith('\n')
+  session.trailingCarriageReturn = text.endsWith('\r')
+  text = (continuedLineBreak ? text.slice(1) : text).replace(/\r\n?/g, '\n')
+  if (!text) return true
 
   const annotations = [
     Transaction.time.of(session.historyTime),
@@ -421,7 +431,7 @@ function appendGenerationChunk(view: EditorView, session: ActiveGeneration, text
       session.generatedFrom = 0
       session.generatedTo = text.length
       session.generatedText = text
-      session.resultDocument = text
+      session.resultDocument = view.state.doc.toString()
       return true
     }
     const { beforeSeparator, afterSeparator } = generationSeparators(session.preDocument, session.insertionPosition)
@@ -440,7 +450,7 @@ function appendGenerationChunk(view: EditorView, session: ActiveGeneration, text
     session.generatedFrom = generatedFrom
     session.generatedTo = generatedTo
     session.generatedText = text
-    session.resultDocument = nextDocument
+    session.resultDocument = view.state.doc.toString()
     return true
   }
 
@@ -554,11 +564,18 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       const session = activeGenerationRef.current
       activeGenerationRef.current = null
       if (!session?.generatedText) return null
+      const view = viewRef.current
+      if (!view) return null
+      const current = view.state.doc.toString()
+      if (current !== session.resultDocument) {
+        // An actual edit invalidates the saved range. Preserve that edit instead
+        // of moving to an obsolete cursor or restoring over the new document.
+        latestGenerationRef.current = null
+        view.dispatch({ effects: setGenerationHighlight.of(null) })
+        return { ...session, sceneText: session.preDocument, resultDocument: current, status: 'error' }
+      }
       if (session.placement === 'replace') {
-        const view = viewRef.current
-        if (!view) return null
         const generated = session.resultDocument
-        const current = view.state.doc.toString()
         view.dispatch({ changes: { from: 0, to: current.length, insert: session.preDocument }, annotations: Transaction.addToHistory.of(false) })
         if (status === 'complete') {
           view.dispatch({
@@ -572,7 +589,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
           session.resultDocument = session.preDocument
         }
       }
-      if (session.placement === 'append') viewRef.current?.dispatch({
+      if (session.placement === 'append') view.dispatch({
           selection: { anchor: session.generatedTo },
           effects: setGenerationHighlight.of({ from: session.generatedFrom, to: session.generatedTo, active: false }),
           annotations: isolateHistory.of('before'),

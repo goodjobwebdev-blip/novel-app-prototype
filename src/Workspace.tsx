@@ -91,7 +91,7 @@ import { canUnmountEditor } from './editor-unmount-guard'
 import { summaryGenerationOwnsUi, type SummaryGenerationOwner } from './summary-generation-owner'
 import ExpandableTextInput, { type ExpandableTextInputDictationTarget } from './ExpandableTextInput'
 import GenerationActions from './GenerationActions'
-import MarkdownEditor, { type CodexMentionClick, type GenerationContext, type MarkdownEditorHandle } from './MarkdownEditor'
+import MarkdownEditor, { type CodexMentionClick, type GenerationContext, type GenerationResult, type MarkdownEditorHandle } from './MarkdownEditor'
 import type { NanoGPTStreamMetadata } from './nanogpt'
 import { fetchTextProviderModelContextLength, streamTextProviderCompletion, textProviderRequestText } from './text-provider'
 import { assertPromptTemplateValid, type BookPromptValues } from './prompt-template'
@@ -1579,9 +1579,23 @@ export default function Workspace() {
         showToast(error instanceof Error ? error.message : 'Generation stopped unexpectedly.')
       }
     } finally {
-      const result = editor.finishGeneration(status)
-      generationAbortRef.current = null
-      finishGenerationActivity(status)
+      let result: GenerationResult | null = null
+      try {
+        result = editor.finishGeneration(status)
+        if (result?.status === 'error' && status !== 'error') {
+          status = 'error'
+          showToast('The scene changed while generation was in progress. Your current edits have been kept.')
+        }
+      } catch (error) {
+        status = 'error'
+        showToast(error instanceof Error ? error.message : 'The editor could not finish generation.')
+      } finally {
+        // Editor cleanup must never leave Stop active or release a newer run.
+        if (generationAbortRef.current === controller) {
+          generationAbortRef.current = null
+          finishGenerationActivity(status)
+        }
+      }
       if (result?.status === 'complete') {
         latestGenerationRequestRef.current = requestSnapshot
         if (!isCodex) setLastGeneratedPassage(result.generatedText)
