@@ -7,6 +7,8 @@ export type QuickTool = { id: string; label: string; kind: 'rewrite' | 'synonyms
 export const quickTools: QuickTool[] = [
   { id: 'make-more', label: 'Make it more…', kind: 'rewrite', examples: ['Make it darker', 'Fix grammar', 'Make the dialogue more natural', 'Make it more concise'] },
   { id: 'synonyms', label: 'Synonyms', kind: 'synonyms', maxWords: 6, examples: [] },
+  { id: 'show-dont-tell', label: 'Show, don’t tell', kind: 'rewrite', examples: ['Keep it subtle', 'Keep the dialogue unchanged'] },
+  { id: 'sensory-detail', label: 'Sensory detail', kind: 'rewrite', examples: ['Keep the pacing brisk', 'Use restrained detail'] },
 ]
 export type QuickToolCapture = { bookId: string; book: BookPromptValues; document: EditableEntity; snapshot: EditorSelectionSnapshot }
 export function selectionWordCount(text: string) { return text.trim().match(/[\p{L}\p{N}]+(?:[’'-][\p{L}\p{N}]+)*/gu)?.length ?? 0 }
