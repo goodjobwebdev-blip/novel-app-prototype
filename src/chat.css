@@ -219,3 +219,14 @@
 .chat-skills label { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
 .chat-skills article { padding: 10px; border: 1px solid var(--border); margin: 8px 0; border-radius: 8px; }
 .note-roles { display: flex; align-items: center; gap: 16px; }
+
+.codex-scope-controls, .series-codex-manager { padding: 12px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 12px; }
+.codex-scope-controls p, .series-codex-manager p { color: var(--muted); font-size: 12px; }
+.codex-scope-controls button, .series-codex-manager button { margin: 4px; }
+.series-codex-manager article { border-bottom: 1px solid var(--border); padding: 12px 0; }
+.series-source-editor { padding: 18px; }
+.series-source-editor label, .series-codex-manager label { display: grid; gap: 6px; margin: 10px 0; }
+.series-source-editor .codemirror-shell { min-height: 200px; }
+.series-reset-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 16px; }
+.series-reset-comparison pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media(max-width: 640px) { .series-reset-comparison { grid-template-columns: 1fr; } }

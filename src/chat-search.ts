@@ -1,3 +1,4 @@
+import { codexScopeLabel } from './series-codex.ts'
 import { proseText } from './document-projection.ts'
 import type { ArcEntity } from './persistence'
 
@@ -13,7 +14,7 @@ export function searchBookEntities(entities: ArcEntity[], args: Record<string, u
   if (!Number.isInteger(offset) || Number(offset) < 0 || !Number.isInteger(limit) || Number(limit) < 1 || Number(limit) > 50) throw new Error('offset must be a nonnegative integer; limit must be 1–50.')
   if (args.include_archived !== undefined && typeof args.include_archived !== 'boolean') throw new Error('include_archived must be a boolean.')
   const matches = entities.filter((entity) =>
-    searchableTypes.includes(entity.type as typeof searchableTypes[number])
+    !entity.hiddenInBook && searchableTypes.includes(entity.type as typeof searchableTypes[number])
     && (args.include_archived === true || !(entity.type === 'codexEntry' && Number(entity.archivedAt) > 0))
     && (!Array.isArray(types) || !types.length || types.includes(entity.type))
     && (args.parent_id === undefined || entity.parentId === args.parent_id)
@@ -25,6 +26,7 @@ export function searchBookEntities(entities: ArcEntity[], args: Record<string, u
     const start = Math.max(0, hit - 100)
     return {
       id: entity.id, type: entity.type, title: String(entity.title ?? 'Untitled'), parentId: entity.parentId,
+      ...(entity.type === 'codexEntry' ? { scope: codexScopeLabel(entity), series_source_id: entity.seriesSourceId } : {}),
       category: entity.category, updatedAt: entity.updatedAt, archived: Number(entity.archivedAt) > 0,
       preview: `${start ? '…' : ''}${body.slice(start, start + 320)}${body.length > start + 320 ? '…' : ''}`,
     }

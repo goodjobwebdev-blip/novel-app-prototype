@@ -347,7 +347,8 @@ export async function applyChatDocumentEdit(messageId: string, proposalId: strin
 
   if (nextContent !== currentContent) {
     await createSnapshot(entity.id, 'generation', currentContent)
-    await saveDocumentContent(entity.id, nextContent)
+    try { await saveDocumentContent(entity.id, nextContent, { bookId: message.bookId, updatedAt: entity.updatedAt, content: currentContent }) }
+    catch (error) { await setProposalStatus(message.id, proposal.id, 'stale'); throw error }
   }
   const appliedAt = Date.now()
   await setProposalStatus(message.id, proposal.id, 'applied', appliedAt)
