@@ -6,8 +6,8 @@ import { useImageQuery } from './image-hooks'
 import ImageGenerationControls, { type ImageDraft } from './ImageGenerationControls'
 import IllustrationModal from './IllustrationModal'
 import ImageJobs from './ImageResults'
-import { enqueueImageJob, getEntity, listGalleryImages, listImageJobs, saveImageProposalDraft, setImageProposal } from './image-store'
-import { generationTaskNames, resolveImageSpec } from './image-settings'
+import { enqueueImageProposal, getEntity, listGalleryImages, listImageJobs, saveImageProposalDraft, setImageProposal } from './image-store'
+import { generationTaskNames } from './image-settings'
 import './image-generation.css'
 
 const proposalDraft = (value: ChatImageProposal): ImageDraft => structuredClone(value.draft ?? { prompt: value.prompt, alias: value.modelAlias, size: value.size, task: value.task ?? 'text-to-image', sources: [] })
@@ -42,11 +42,9 @@ export default function ImageProposalCard({ message, proposal }: { message: Chat
     if (!saved || !['proposed', 'accepted'].includes(saved.status)) throw new Error('This media proposal is no longer editable.')
     setDraft(proposalDraft(saved)); setExpanded(true)
   }) }
-  const task = draft.task ?? 'text-to-image'
   const generate = async () => {
     await pendingSave.current
-    const spec = resolveImageSpec(selectedMediaPrompt(draft), draft.alias, draft.size, undefined, undefined, task, draft.sources ?? [], { resolution: draft.resolution, duration: draft.duration, aspectRatio: draft.aspectRatio, fps: draft.fps, numFrames: draft.numFrames, seed: draft.seed, draft: draft.draftVideo })
-    await enqueueImageJob(spec, { ...origin, submissionId: crypto.randomUUID() })
+    await enqueueImageProposal(draft, { ...origin, submissionId: crypto.randomUUID() })
   }
   const latestJob = ownedJobs.at(-1)
   const active = ownedJobs.filter(job => ['queued', 'running'].includes(job.status))
@@ -56,14 +54,20 @@ export default function ImageProposalCard({ message, proposal }: { message: Chat
     <p className="image-prompt-preview">{value.draft ? selectedMediaPrompt(value.draft) : value.prompt}</p>
     {['proposed', 'accepted'].includes(value.status) && <button type="button" disabled={busy} onClick={open}>Open generation tool</button>}
     {(error || readError) && <p role="alert">{error || readError}</p>}
-    <ImageJobs proposalId={proposal.id} messageId={message.id} />
+    {!expanded && <ImageJobs proposalId={proposal.id} messageId={message.id} />}
     {expanded && <IllustrationModal title="Generation tool" onClose={close} footer={<div className="image-actions">
       <button type="button" disabled={busy} onClick={close}>Close tool</button>
-      {value.status === 'proposed' ? <><button type="button" disabled={busy} onClick={() => { void action(async () => { await pendingSave.current; await setImageProposal(message.id, value.id, 'accepted', draft) }) }}>Accept proposal</button><button type="button" disabled={busy} onClick={() => { void action(async () => { await pendingSave.current; await setImageProposal(message.id, value.id, 'rejected'); setExpanded(false) }) }}>Reject</button></> : <button type="button" disabled={busy || !selectedMediaPrompt(draft).trim()} onClick={() => { void action(generate) }}>Generate</button>}
+      {value.status === 'proposed' && <button type="button" disabled={busy} onClick={() => { void action(async () => { await pendingSave.current; await setImageProposal(message.id, value.id, 'rejected'); setExpanded(false) }) }}>Reject</button>}
+      <button type="button" className="image-primary" disabled={busy || !['proposed', 'accepted'].includes(value.status) || !selectedMediaPrompt(draft).trim()} onClick={() => { void action(generate) }}>{busy ? 'Saving…' : 'Generate'}</button>
     </div>}>
       <div className="image-ui"><ImageGenerationControls bookId={message.bookId} value={draft} onChange={changeDraft} disabled={busy} sourceAssets={sourceAssets} />
-      <p className="image-help">{value.status === 'proposed' ? 'Accepting approves this draft. Press Generate to start a media request.' : 'Generate queues the shown prompt, model, options, and source images. Closing this dialog keeps your draft and queued work.'}</p>
-      {error && <p role="alert">{error}</p>}</div>
+      <p className="image-help">Generate approves and queues the shown prompt, model, options, and source images. You can keep editing and queue another generation while earlier requests run.</p>
+      {error && <p role="alert">{error}</p>}
+      <section className="image-proposal-queue" aria-label="Proposal generation queue">
+        <h3>Generation queue</h3>
+        {!ownedJobs.length && <p className="image-help">Your queued generations and results will appear here.</p>}
+        <ImageJobs proposalId={proposal.id} messageId={message.id} showPrompt />
+      </section></div>
     </IllustrationModal>}
   </section>
 }

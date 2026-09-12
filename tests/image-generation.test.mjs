@@ -512,3 +512,110 @@ test('chat media drafts persist without jobs, and a repeated submission queues o
   assert.equal(first.id, second.id)
   assert.equal((await store.listImageJobs()).filter(job => job.messageId === f.message.id).length, 1)
 })
+
+async function waitForQueue(predicate) {
+  for (let i = 0; i < 100 && !predicate(); i++) await new Promise(resolve => setTimeout(resolve, 10))
+  assert.ok(predicate(), 'Queue did not reach the expected state')
+}
+
+test('competing workers respect a shared three-job cap, drain queued work, and isolate cancellations', async () => {
+  await clearJobs(); configure()
+  const queued = []
+  for (let i = 0; i < 6; i++) queued.push(await enqueue(undefined, `Parallel ${i}`))
+  const providerPeer = await enqueue(undefined, 'Other provider', 'fast')
+  const starts = [], releases = new Map()
+  let openaiActive = 0, peak = 0
+  const adapter = { ...deps, generate: async job => {
+    starts.push(job)
+    if (job.provider === 'openai') peak = Math.max(peak, ++openaiActive)
+    await new Promise(resolve => releases.set(job.id, resolve))
+    if (job.provider === 'openai') openaiActive--
+    return { image: png }
+  } }
+  const workers = [runImageQueue('openai', adapter), runImageQueue('openai', adapter), runImageQueue('pruna', adapter)]
+  try {
+    await waitForQueue(() => starts.length === 4)
+    assert.equal(peak, 3)
+    assert.equal((await store.listImageJobs()).filter(job => job.provider === 'openai' && job.status === 'running').length, 3)
+    assert.ok(starts.some(job => job.id === providerPeer.id))
+    const cancelled = starts.find(job => job.provider === 'openai')
+    await store.cancelImageJob(cancelled.id)
+    releases.get(cancelled.id)()
+    await waitForQueue(() => starts.length === 5)
+    assert.equal((await store.listImageJobs()).find(job => job.id === cancelled.id).assetId, undefined)
+    while (starts.length < 7) {
+      const count = starts.length
+      releases.forEach(resolve => resolve())
+      await waitForQueue(() => starts.length > count)
+    }
+    releases.forEach(resolve => resolve())
+    await Promise.all(workers)
+    assert.equal(peak, 3)
+    assert.equal(new Set(starts.map(job => job.id)).size, 7)
+    const jobs = await store.listImageJobs()
+    assert.equal(jobs.filter(job => job.status === 'completed').length, 6)
+    assert.equal(jobs.find(job => job.id === cancelled.id).status, 'cancelled')
+  } finally {
+    // No queued work should outlive a failed assertion.
+    for (const job of await store.listImageJobs()) if (job.status === 'queued') await store.cancelImageJob(job.id)
+    releases.forEach(resolve => resolve())
+    await Promise.all(workers)
+  }
+})
+
+test('new jobs fill spare slots before an earlier generation completes', async () => {
+  await clearJobs(); configure()
+  await enqueue(undefined, 'Slow first')
+  const starts = [], releases = new Map()
+  const work = runImageQueue('openai', { ...deps, generate: async job => {
+    starts.push(job.prompt)
+    await new Promise(resolve => releases.set(job.id, resolve))
+    return { image: png }
+  } })
+  try {
+    await waitForQueue(() => starts.length === 1)
+    await enqueue(undefined, 'New second')
+    await enqueue(undefined, 'New third')
+    await waitForQueue(() => starts.length === 3)
+    assert.equal(starts[0], 'Slow first')
+    assert.deepEqual(starts.slice(1).sort(), ['New second', 'New third'])
+  } finally {
+    releases.forEach(resolve => resolve())
+    await work
+  }
+})
+
+test('Generate atomically approves the draft, freezes each click, and leaves invalid proposals unapproved', async () => {
+  await clearJobs()
+  const f = await fixture()
+  const draft = { prompt: 'Approved with Generate', alias: 'portrait', size: '1024x1024' }
+  await assert.rejects(store.enqueueImageProposal({ ...draft, alias: 'missing' }, f.origin), /favorite/)
+  assert.equal((await p.getEntity(f.message.id)).imageGenerations[0].status, 'proposed')
+  assert.equal((await store.listImageJobs()).length, 0)
+  await assert.rejects(store.enqueueImageProposal(draft, { ...f.origin, chatId: 'wrong-chat' }), /Accept/)
+  const job = await store.enqueueImageProposal(draft, { ...f.origin, submissionId: 'one-click' })
+  assert.equal((await p.getEntity(f.message.id)).imageGenerations[0].status, 'accepted')
+  assert.equal(job.prompt, draft.prompt)
+  const duplicate = await store.enqueueImageProposal({ ...draft, prompt: 'Duplicate replay' }, { ...f.origin, submissionId: 'one-click' })
+  assert.equal(duplicate.id, job.id)
+  assert.equal((await p.getEntity(f.message.id)).imageGenerations[0].draft.prompt, draft.prompt)
+  const next = await store.enqueueImageProposal({ ...draft, prompt: 'Another click' }, f.origin)
+  assert.notEqual(next.id, job.id)
+  assert.equal((await store.listImageJobs()).find(item => item.id === job.id).prompt, draft.prompt)
+})
+
+test('failed queue persistence rolls back approval and rejected proposals cannot generate', async () => {
+  await clearJobs()
+  const f = await fixture()
+  const draft = { prompt: 'Atomic save', alias: 'portrait', size: '1024x1024' }
+  const db = await p.database()
+  const fail = () => { throw new Error('Simulated queue write failure') }
+  db.table('imageJobs').hook('creating', fail)
+  try { await assert.rejects(store.enqueueImageProposal(draft, f.origin), /Simulated queue write failure/) }
+  finally { db.table('imageJobs').hook('creating').unsubscribe(fail) }
+  assert.equal((await p.getEntity(f.message.id)).imageGenerations[0].status, 'proposed')
+  assert.equal((await store.listImageJobs()).length, 0)
+  await store.setImageProposal(f.message.id, f.proposal.id, 'rejected')
+  await assert.rejects(store.enqueueImageProposal(draft, f.origin), /Accept/)
+  assert.equal((await store.listImageJobs()).length, 0)
+})

@@ -3,7 +3,7 @@ import { KeyedAsyncQueue } from './keyed-async-queue'
 import type { MediaGenerationDraft } from './image-generation-types'
 import { database, getEntity, type ArcEntity, type Illustration } from './persistence'
 import { resolveImageSpec } from './image-settings'
-import { generationTask, outputKind, type ChatImageProposal, type GalleryImage, type ImageGenerationSpec, type ImageJob, type ImageProvider } from './image-generation-types'
+import { IMAGE_QUEUE_CONCURRENCY, generationTask, outputKind, type ChatImageProposal, type GalleryImage, type ImageGenerationSpec, type ImageJob, type ImageProvider } from './image-generation-types'
 import type { ImageOutput } from './image-providers'
 export const IMAGE_STORE_CHANGED = 'arc-image-store-changed'
 export function notifyImageStore() { if (typeof window !== 'undefined') window.dispatchEvent(new Event(IMAGE_STORE_CHANGED)) }
@@ -21,22 +21,37 @@ export async function listGalleryImages(bookId?: string): Promise<GalleryImage[]
 }
 export type ImageJobOrigin = { bookId?: string; chatId?: string; messageId?: string; proposalId?: string; submissionId?: string }
 export async function enqueueImageJob(spec: ImageGenerationSpec, origin: ImageJobOrigin = {}): Promise<ImageJob> {
+  return queueImageJob(spec, origin)
+}
+/** Called by the writer's Generate action: approve the shown draft and queue it atomically. */
+export async function enqueueImageProposal(draft: MediaGenerationDraft, origin: Required<Pick<ImageJobOrigin, 'bookId' | 'chatId' | 'messageId' | 'proposalId'>> & Pick<ImageJobOrigin, 'submissionId'>): Promise<ImageJob> {
+  const snapshot = structuredClone(draft)
+  const spec = resolveImageSpec(selectedMediaPrompt(snapshot), snapshot.alias, snapshot.size, undefined, undefined, snapshot.task ?? 'text-to-image', snapshot.sources ?? [], { resolution: snapshot.resolution, duration: snapshot.duration, aspectRatio: snapshot.aspectRatio, fps: snapshot.fps, numFrames: snapshot.numFrames, seed: snapshot.seed, draft: snapshot.draftVideo })
+  return queueImageJob(spec, origin, snapshot)
+}
+async function queueImageJob(spec: ImageGenerationSpec, origin: ImageJobOrigin, approvedDraft?: MediaGenerationDraft): Promise<ImageJob> {
   // Revalidate the current favorites on every Generate click, then freeze this request.
   const clean = resolveImageSpec(spec.prompt, spec.modelAlias, spec.size.value, undefined, undefined, generationTask(spec), spec.sources ?? [], spec.video ?? {})
   const db = await database()
   const job = await db.transaction('rw', db.table('entities'), db.table('imageJobs'), async () => {
     const book = origin.bookId ? await db.table('entities').get(origin.bookId) : undefined
     if (origin.bookId && book?.type !== 'book') throw new Error('This book no longer exists.')
+    let approval: { id: string; imageGenerations: ChatImageProposal[] } | undefined
     if (origin.messageId) {
       const message = await db.table('entities').get(origin.messageId)
       const chat = await db.table('entities').get(origin.chatId)
       const proposal: ChatImageProposal | undefined = message?.imageGenerations?.find((p: ChatImageProposal) => p.id === origin.proposalId)
-      if (chat?.type !== 'chat' || message?.type !== 'chatMessage' || message.parentId !== origin.chatId || message.bookId !== origin.bookId || chat.bookId !== origin.bookId || proposal?.status !== 'accepted') throw new Error('Accept an available image proposal before generating.')
+      if (chat?.type !== 'chat' || message?.type !== 'chatMessage' || message.parentId !== origin.chatId || message.bookId !== origin.bookId || chat.bookId !== origin.bookId || !(proposal?.status === 'accepted' || (approvedDraft && proposal?.status === 'proposed'))) throw new Error('Accept an available image proposal before generating.')
+      if (approvedDraft) {
+        const next = { ...proposal!, status: 'accepted' as const, draft: approvedDraft, prompt: clean.prompt, modelAlias: clean.modelAlias, size: clean.size.value, task: generationTask(clean) }
+        approval = { id: message.id, imageGenerations: message.imageGenerations.map((item: ChatImageProposal) => item.id === proposal!.id ? next : item) }
+      }
     } else if (origin.chatId || origin.proposalId) throw new Error('This image proposal is no longer available.')
     if (origin.submissionId) {
       const existing = (await db.table('imageJobs').toArray()).find((job: ImageJob) => job.submissionId === origin.submissionId && job.messageId === origin.messageId && job.bookId === origin.bookId)
       if (existing) return existing as ImageJob
     }
+    if (approval) await db.table('entities').update(approval.id, { imageGenerations: approval.imageGenerations, updatedAt: Date.now() })
     const record: ImageJob = { ...clean, ...origin, id: imageId('image-job'), bookTitle: book?.title, status: 'queued', createdAt: Date.now() }
     await db.table('imageJobs').add(record)
     return record
@@ -48,7 +63,7 @@ export async function claimImageJob(provider: ImageProvider, owner: string): Pro
   const db = await database()
   return db.transaction('rw', db.table('imageJobs'), async () => {
     const jobs: ImageJob[] = await db.table('imageJobs').where('provider').equals(provider).toArray()
-    if (jobs.some((j) => j.status === 'running')) return
+    if (jobs.filter((j) => j.status === 'running').length >= IMAGE_QUEUE_CONCURRENCY) return
     const next = jobs.filter((j) => j.status === 'queued').sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))[0]
     if (!next) return
     const job = { ...next, status: 'running' as const, owner, startedAt: next.providerJobId ? next.startedAt ?? Date.now() : Date.now(), heartbeat: Date.now(), error: undefined }

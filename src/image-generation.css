@@ -114,6 +114,8 @@
 .image-job-group > h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
 .image-job-group > h3 span { display: inline-grid; min-width: 24px; min-height: 24px; place-items: center; padding: 0 6px; border-radius: 999px; background: var(--surface-2); color: var(--soft); font-size: 12px; }
 .image-job-list { display: grid; gap: 10px; }
+.image-proposal-queue { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+.image-proposal-queue > h3 { margin: 0 0 12px; }
 .image-job { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .image-job > small { display: block; }
 .image-job > header > strong { overflow-wrap: anywhere; }

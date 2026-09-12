@@ -142,6 +142,6 @@ export function imageFavorite(model: ImageModel, used: FavoriteImageModel[]): Fa
 }
 export function imageModelInstructions() {
   const settings = loadImageSettings()
-  return `\n\nVisual generation proposals never contact a provider or incur a charge. The user must accept a proposal and press Generate. Use only configured favorite aliases and supported tasks. If none exist, ask the user to configure Images settings. Favorites: ${JSON.stringify(settings.favorites.map((favorite) => ({ alias: favorite.alias, tasks: modelTasks(favorite), maxSourceImages: favorite.maxSourceImages ?? 0, sizes: favorite.sizes.filter((size) => favorite.enabledSizes.includes(size.value)).map((size) => ({ size: size.value, ratio: imageRatio(size) })), defaultSize: favorite.defaultSize })))} `
+  return `\n\nVisual generation proposals never contact a provider or incur a charge. The user must press Generate to approve the shown draft and queue a request. Use only configured favorite aliases and supported tasks. If none exist, ask the user to configure Images settings. Favorites: ${JSON.stringify(settings.favorites.map((favorite) => ({ alias: favorite.alias, tasks: modelTasks(favorite), maxSourceImages: favorite.maxSourceImages ?? 0, sizes: favorite.sizes.filter((size) => favorite.enabledSizes.includes(size.value)).map((size) => ({ size: size.value, ratio: imageRatio(size) })), defaultSize: favorite.defaultSize })))} `
 }
 export { generationTask }
