@@ -1,6 +1,6 @@
 import SynonymsDialog from './SynonymsDialog'
 import SelectionTools from './SelectionTools'
-import { generateQuickTool } from './quick-tool-generation'
+import QuickRewriteDialog from './QuickRewriteDialog'
 import type { QuickTool, QuickToolCapture } from './quick-tools'
 import type { EditorSelectionInfo } from './MarkdownEditor'
 import { loadUiSettings, UI_SETTINGS_EVENT } from './ui-settings'
@@ -1835,7 +1835,7 @@ export default function Workspace() {
       {autotitleOverlay}
       {screen === 'editor' && currentBook && activeDocument && ['scene', 'note', 'codexEntry'].includes(activeDocument.type) && !activeCodexArchived && !generationActive && !quickTool && !beatRewrite && selectedProse?.documentId === activeDocument.id && <SelectionTools selection={selectedProse.selection} open={(tool) => setQuickTool({ tool, capture: { bookId: currentBook.id, book: toBookPromptValues(currentBook, seriesList), document: { ...activeDocument }, snapshot: selectedProse.selection.snapshot } })} />}
       {quickTool?.tool.kind === 'synonyms' && activeDocument?.id === quickTool.capture.document.id && currentBook?.id === quickTool.capture.bookId && <SynonymsDialog key={`${quickTool.capture.document.id}-${quickTool.capture.snapshot.revision}`} capture={quickTool.capture} apply={(text) => Boolean(editorRef.current?.replaceRange(quickTool.capture.snapshot, text))} close={() => setQuickTool(null)} />}
-      {quickTool?.tool.kind === 'rewrite' && activeDocument?.id === quickTool.capture.document.id && currentBook?.id === quickTool.capture.bookId && <ProseRewriteDialog key={`${quickTool.tool.id}-${quickTool.capture.snapshot.revision}`} title={quickTool.tool.label} original={quickTool.capture.snapshot.text} instruction="" examples={quickTool.tool.examples} generateLabel="Go" generate={(instruction, chunk, signal, onRequest) => generateQuickTool(quickTool.capture, instruction, chunk, signal, onRequest)} apply={(text) => Boolean(editorRef.current?.replaceRange(quickTool.capture.snapshot, text))} close={() => setQuickTool(null)} />}
+      {quickTool?.tool.kind === 'rewrite' && activeDocument?.id === quickTool.capture.document.id && currentBook?.id === quickTool.capture.bookId && <QuickRewriteDialog key={`${quickTool.tool.id}-${quickTool.capture.snapshot.revision}`} tool={quickTool.tool} capture={quickTool.capture} apply={(text) => Boolean(editorRef.current?.replaceRange(quickTool.capture.snapshot, text))} close={() => setQuickTool(null)} />}
       {beatRewrite && currentBook && activeDocument?.type === 'scene' && beatRewrite.documentId === activeDocument.id && <ProseRewriteDialog key={`${activeDocument.id}-${beatRewrite.snapshot.revision}`} title="Regenerate scene beat" original={beatRewrite.snapshot.text} instruction={beatRewrite.instruction} instructionReadOnly autoStart generate={(instruction, chunk, signal, onRequest) => generateSceneBeat({ bookId: currentBook.id, book: toBookPromptValues(currentBook, seriesList), scene: activeDocument, source: beatRewrite.snapshot.document, from: beatRewrite.snapshot.from, to: beatRewrite.snapshot.to, instruction }, chunk, signal, onRequest)} apply={(text) => Boolean(editorRef.current?.replaceRange(beatRewrite.snapshot, `\n\n${text.trim()}\n\n`))} close={() => setBeatRewrite(null)} />}
 
       {screen === 'editor' ? <article className="story-editor">
