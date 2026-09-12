@@ -12,6 +12,7 @@ import type { DynamicContextSource } from './prompt-composition'
 export type PreparedAutomaticCodex = { entryId: string; title: string; category: string; representation: 'Full entry' | 'Summary'; fallbackReason?: string; source: 'trigger' | 'dependency'; matches: CodexTriggerSceneMatch[]; dependencyPath?: Array<{ entryId: string; title: string }> }
 
 export type PreparedContextValues = {
+  requiredCharacterSources?: DynamicContextSource[]
   temporalCodex?: CodexEntryEntity[]
   sceneBeats?: Array<{ type: 'scene_beat'; sceneId: string; id: string; text: string }>
   currentSceneId: string

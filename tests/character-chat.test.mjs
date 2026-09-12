@@ -14,6 +14,9 @@ const { assembleChatGenerationRequest, emptyCharacterBook } = await import('../s
 const { availableChatTools } = await import('../src/chat-tool-availability.ts')
 const images = await import('../src/chat-direct-images.ts'), settings = await import('../src/image-settings.ts')
 const { copyBookArchive } = await import('../src/book-archive.ts')
+const { resolveCodexState } = await import('../src/codex-timeline.ts')
+const { readTimelineWorld } = await import('../src/codex-timeline-service.ts')
+const { finalizeChatProviderRequest } = await import('../src/chat-request.ts')
 after(async () => (await p.database()).close())
 async function fixture() {
  const { book } = await p.createBook(initialAiSettings, 'FUTURE_SECRET title')
@@ -56,6 +59,90 @@ test('cutoffs persist; earlier positions start empty; forward history is validat
  await assert.rejects(c.captureCharacterFrame(forward,history),/Restart/)
  const restart=await c.moveCharacterChat(forward.id,f.cutoff,true);await c.captureCharacterFrame(restart,[])
  await assert.rejects(c.captureCharacterFrame(restart,history),/another or later/)
+})
+
+const requestFor = (conversation, frame, composition = conversation.promptComposition) => assembleChatGenerationRequest({ book: emptyCharacterBook, composition, context: frame.context, restrictedInstructions: frame.instructions, history: [{ role: 'user', content: 'Tell me about yourself.' }], tools: availableChatTools(true, []) })
+const sentText = request => JSON.stringify(finalizeChatProviderRequest(request).messages)
+
+test('full participant knowledge survives short summaries and customized or old prompts without duplicate text', async () => {
+ const f = await fixture(), body = 'Mara is a navigator. Her sister is Elena. Her hometown is Coral Bay.'
+ await p.saveDocumentContent(f.entry.id, body)
+ const world = await readTimelineWorld(f.book.id), entry = await p.getEntity(f.entry.id)
+ const state = resolveCodexState(entry, f.cutoff, world, 'strict')
+ await f.db.table('entities').update(entry.id, { timelineSummaries: [{ checkpointId: state.checkpointId, sourceText: state.content, orderSignature: state.orderSignature, mode: 'strict', content: 'Mara is kind.' }] })
+ const frame = await c.captureCharacterFrame(f.conversation, [])
+ for (const composition of [f.conversation.promptComposition, { systemPrompt: 'Stay in character.', predefinedMessages: [] }, { systemPrompt: 'Stay in character. {% if book.overview %}{{context.automatic}}{% endif %}', predefinedMessages: [] }, { systemPrompt: '{% if context.automatic_codex %}Stay in character.{% endif %}', predefinedMessages: [] }, { systemPrompt: '{{context.additional}}', predefinedMessages: [{ id: 'disabled', role: 'system', enabled: false, template: '{{context.automatic}}' }] }]) {
+   const text = sentText(requestFor(f.conversation, frame, composition))
+   assert.match(text, /Her sister is Elena/)
+   assert.match(text, /Character: Mara/)
+   assert.equal(text.split('Her hometown is Coral Bay').length - 1, 1)
+ }
+ assert.equal(frame.context.automaticSources[0].representation, 'Full character profile')
+})
+
+test('manual Codex, notes and manuscript selections reach existing character chats and remain editable', async () => {
+ const f = await fixture()
+ const place = await p.createCodexEntry(f.book.id, 'Harbor')
+ await p.saveDocumentContent(place.id, 'The harbor bell rings at noon.')
+ const note = await p.createNote(f.book.id, 'Shared memory')
+ await p.saveDocumentContent(note.id, 'Elena gave Mara a compass. <!-- PRIVATE_NOTE -->')
+ const unselected = await p.createNote(f.book.id, 'Hidden note')
+ await p.saveDocumentContent(unselected.id, 'UNSELECTED_NOTE')
+ const foreign = await fixture(), foreignNote = await p.createNote(foreign.book.id, 'Foreign')
+ await p.saveDocumentContent(foreignNote.id, 'FOREIGN_NOTE')
+ const before = await c.captureCharacterFrame(f.conversation, [])
+ await chat.createChatMessage(f.conversation, 'assistant', 'Hello.', { characterBoundary: before.boundary })
+ const history = await chat.listChatMessages(f.book.id, f.conversation.id)
+ const profile = { ...f.conversation.contextProfile, codexEntryIds: [place.id], noteIds: [note.id, foreignNote.id], structuralIds: [f.first.parentId] }
+ const updated = await chat.saveChatContextProfile(f.conversation.id, profile)
+ const frame = await c.captureCharacterFrame(updated, history)
+ assert.equal(frame.boundary.fingerprint, before.boundary.fingerprint)
+ const text = sentText(requestFor(updated, frame, { systemPrompt: 'Roleplay.', predefinedMessages: [] }))
+ assert.match(text, /harbor bell rings/)
+ assert.match(text, /Elena gave Mara a compass/)
+ assert.match(text, /FUTURE_SECRET suffix/)
+ assert.match(text, /FUTURE_SECRET later manuscript/)
+ assert.doesNotMatch(text, /PRIVATE_NOTE|UNSELECTED_NOTE|FOREIGN_NOTE/)
+ const search = JSON.parse(c.executeCharacterRead(frame, { function: { name: 'search_story_context', arguments: '{"query":"compass"}' } }))
+ assert.equal(search.results.length, 1)
+ assert.equal(JSON.parse(c.executeCharacterRead(frame, { function: { name: 'read_story_context', arguments: JSON.stringify({ source_id: search.results[0].id }) } })).source.kind, 'note')
+ const reloaded = await chat.getChat(updated.id)
+ assert.deepEqual(reloaded.contextProfile.codexEntryIds, [place.id])
+ const restarted = await c.moveCharacterChat(updated.id, f.cutoff, true)
+ assert.deepEqual(restarted.contextProfile, reloaded.contextProfile)
+ const cleared = await chat.saveChatContextProfile(updated.id, { ...profile, codexEntryIds: [], noteIds: [], structuralIds: [] })
+ const next = await c.captureCharacterFrame(cleared, history)
+ assert.doesNotMatch(sentText(requestFor(cleared, next)), /compass|harbor bell rings|FUTURE_SECRET/)
+ assert.match(sentText(requestFor(cleared, next)), /Mara is alive/)
+})
+
+test('preview selections use their draft and full selected Codex respects the explicit timeline preference', async () => {
+ const f = await fixture(), place = await p.createCodexEntry(f.book.id, 'Harbor')
+ await f.db.table('entities').update(place.id, { content: 'Baseline harbor.', checkpoints: [{ id: 'now', label: 'Now', sceneId: f.first.id, anchorBookId: f.book.id, content: 'Checkpoint harbor.', revision: 1 }] })
+ const profile = { ...f.conversation.contextProfile, codexEntryIds: [place.id], loreAtCurrentScene: true }
+ const resolved = await c.captureCharacterFrame(f.conversation, [], profile)
+ assert.match(sentText(requestFor(f.conversation, resolved)), /Checkpoint harbor/)
+ assert.doesNotMatch(sentText(requestFor(f.conversation, resolved)), /Baseline harbor/)
+ const baseline = await c.captureCharacterFrame(f.conversation, [], { ...profile, loreAtCurrentScene: false })
+ assert.match(sentText(requestFor(f.conversation, baseline)), /Baseline harbor/)
+ assert.deepEqual((await chat.getChat(f.conversation.id)).contextProfile.codexEntryIds, [], 'Preview must not save the draft')
+ await f.db.table('entities').update(place.id, { archivedAt: Date.now() })
+ assert.doesNotMatch(sentText(requestFor(f.conversation, await c.captureCharacterFrame(f.conversation, [], profile))), /Checkpoint harbor|Baseline harbor/)
+})
+
+test('explicit summary ranges include selected manuscript summaries without changing automatic context', async () => {
+ const f = await fixture()
+ await f.db.table('entities').put({ id: `summary-${f.later.id}`, type: 'summary', bookId: f.book.id, parentId: f.later.id, sourceEntityId: f.later.id, sourceType: 'scene', title: 'Later summary', content: 'The treasure is under the bell.', proseProjectionVersion: 1, createdAt: 1, updatedAt: 1 })
+ const before = await c.captureCharacterFrame(f.conversation, [])
+ for (const range of ['all', 'after']) {
+   const frame = await c.captureCharacterFrame(f.conversation, [], { ...f.conversation.contextProfile, summaryRange: range })
+   assert.match(sentText(requestFor(f.conversation, frame)), /treasure is under the bell/)
+   assert.equal(frame.boundary.fingerprint, before.boundary.fingerprint)
+ }
+ for (const range of ['none', 'before']) {
+   const frame = await c.captureCharacterFrame(f.conversation, [], { ...f.conversation.contextProfile, summaryRange: range })
+   assert.doesNotMatch(sentText(requestFor(f.conversation, frame)), /treasure is under the bell/)
+ }
 })
 test('only eligible distinct participants and available scene positions can start roleplay',async()=>{
  const f=await fixture()

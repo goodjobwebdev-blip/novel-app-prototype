@@ -1,4 +1,5 @@
-import { database, isCodexEntryArchived, listEntitiesByBook, type CodexEntryEntity } from './persistence'
+import { database, isCodexEntryArchived, listEntitiesByBook, type CodexEntryEntity, type GenerationContextProfile } from './persistence'
+import { characterAdditionalSources } from './character-context'
 import { createChat, getChat, type ChatEntity, type ChatMessageEntity } from './chat-service'
 import { compareStoryPositions, resolveCodexState, timelineScenes, type StoryCutoff, type TimelineWorld } from './codex-timeline'
 import { readTimelineWorld } from './codex-timeline-service'
@@ -10,12 +11,12 @@ import type { PreparedContextValues } from './context-service'
 export type CharacterParticipant = { entryId: string; label: string; token: string }
 export type CharacterChatConfig = { sessionId: string; participants: CharacterParticipant[]; cutoff: StoryCutoff }
 export type CharacterBoundary = { cutoff: StoryCutoff; fingerprint: string; sessionId: string }
-export type CharacterSource = { id: string; kind: 'scene' | 'codex'; content: string }
+export type CharacterSource = { id: string; kind: 'scene' | 'codex' | 'note' | 'summary'; content: string; title?: string }
 export type CharacterFrame = { boundary: CharacterBoundary; sources: CharacterSource[]; context: PreparedContextValues; instructions: string }
-export const characterPromptComposition: PromptComposition = { systemPrompt: 'Roleplay the selected characters at the supplied story position. Stay in character, distinguish uncertainty, and write dialogue naturally. Use only the selected speaker labels.', predefinedMessages: [{ id: 'character-context', name: 'Allowed story context', role: 'system', enabled: true, template: '{{context.automatic}}' }] }
+export const characterPromptComposition: PromptComposition = { systemPrompt: 'Roleplay the selected characters at the supplied story position. Stay in character, distinguish uncertainty, and write dialogue naturally. Use only the selected speaker labels.', predefinedMessages: [{ id: 'character-context', name: 'Story context', role: 'system', enabled: true, template: '{{context.automatic}}' }, { id: 'character-additional', name: 'Selected references', role: 'system', enabled: true, template: '{{context.additional}}' }] }
 export const characterReadTools: ChatToolDefinition[] = [
   { type: 'function', function: { name: 'read_story_context', description: 'Read one source from the captured character-chat boundary by its opaque ID. Only eligible prose is available.', parameters: { type: 'object', properties: { source_id: { type: 'string' } }, required: ['source_id'], additionalProperties: false } } },
-  { type: 'function', function: { name: 'search_story_context', description: 'Search only the captured prior manuscript and eligible Codex states. No future sources, Notes, skills or unversioned metadata are available.', parameters: { type: 'object', properties: { query: { type: 'string' }, offset: { type: 'integer', minimum: 0 } }, required: ['query'], additionalProperties: false } } },
+  { type: 'function', function: { name: 'search_story_context', description: 'Search the captured prior manuscript, eligible Codex states, and references explicitly selected by the author for this chat.', parameters: { type: 'object', properties: { query: { type: 'string' }, offset: { type: 'integer', minimum: 0 } }, required: ['query'], additionalProperties: false } } },
 ]
 const hash = async (value: string) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)))).map(byte => byte.toString(16).padStart(2, '0')).join('')
 export const opaqueCharacterId = async (id: string) => `source-${(await hash(id)).slice(0, 24)}`
@@ -35,13 +36,13 @@ function validCutoff(cutoff: StoryCutoff, world: TimelineWorld, bookId: string) 
   const scene = timelineScenes(world, bookId).find(scene => scene.id === cutoff.sceneId)
   if (cutoff.bookId !== bookId || !scene || !Number.isInteger(cutoff.position) || cutoff.position! < 0 || cutoff.position! > String(scene.content ?? '').length) throw new Error('Choose an existing scene and a position within its current text.')
 }
-export async function createCharacterChat(bookId: string, participants: Array<{ entryId: string; label: string }>, cutoff: StoryCutoff, composition = characterPromptComposition) {
+export async function createCharacterChat(bookId: string, participants: Array<{ entryId: string; label: string }>, cutoff: StoryCutoff, composition = characterPromptComposition, contextProfile?: GenerationContextProfile) {
   const validated = await validateParticipants(bookId, participants), world = await readTimelineWorld(bookId)
   validCutoff(cutoff, world, bookId)
   const created = await createChat(bookId, `Character chat · ${validated.map(p => p.label).join(', ')}`)
   const config: CharacterChatConfig = { sessionId: crypto.randomUUID(), participants: validated, cutoff: { ...cutoff } }
   const db = await database()
-  await db.table('entities').update(created.id, { character: config, promptComposition: structuredClone(composition), skillNoteIds: [], contextProfile: { includeLastScene: false, includePreviousSceneWhenEmpty: false, structuralIds: [], noteIds: [], codexEntryIds: [], summaryRange: 'none' } })
+  await db.table('entities').update(created.id, { character: config, promptComposition: structuredClone(composition), skillNoteIds: [], contextProfile: structuredClone(contextProfile ?? { includeLastScene: false, includePreviousSceneWhenEmpty: false, structuralIds: [], noteIds: [], codexEntryIds: [], summaryRange: 'none', loreAtCurrentScene: true }) })
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('arc-chat-changed', { detail: { bookId } }))
   return (await getChat(created.id))!
 }
@@ -49,7 +50,7 @@ export async function moveCharacterChat(chatId: string, cutoff: StoryCutoff, res
   const chat = await getChat(chatId)
   if (!chat?.character) throw new Error('This is not a character chat.')
   const world = await readTimelineWorld(chat.bookId); validCutoff(cutoff, world, chat.bookId)
-  if (restart || compareStoryPositions(cutoff, chat.character.cutoff, world) < 0) return createCharacterChat(chat.bookId, chat.character.participants, cutoff, chat.promptComposition)
+  if (restart || compareStoryPositions(cutoff, chat.character.cutoff, world) < 0) return createCharacterChat(chat.bookId, chat.character.participants, cutoff, chat.promptComposition, chat.contextProfile)
   const db = await database()
   await db.transaction('rw', db.table('entities'), async () => {
     const current = await db.table('entities').get(chatId) as ChatEntity | undefined
@@ -64,29 +65,30 @@ async function frameFor(config: CharacterChatConfig, entries: CodexEntryEntity[]
   const scenes = timelineScenes(world, config.cutoff.bookId), index = scenes.findIndex(scene => scene.id === config.cutoff.sceneId)
   const sources: CharacterSource[] = []
   for (const scene of scenes.slice(0, index + 1)) sources.push({ id: await opaqueCharacterId(scene.id), kind: 'scene', content: proseText(String(scene.content ?? '').slice(0, scene.id === config.cutoff.sceneId ? config.cutoff.position : undefined)) })
-  const lore = new Map<string, { source: CharacterSource; summary?: string }>()
+  const lore = new Map<string, { source: CharacterSource }>()
   for (const entry of entries.filter(entry => !isCodexEntryArchived(entry))) {
     const state = resolveCodexState(entry, config.cutoff, world, 'strict')
     const source: CharacterSource = { id: await opaqueCharacterId(entry.id), kind: 'codex', content: state.content }
-    sources.push(source); lore.set(entry.id, { source, summary: state.summary })
+    sources.push(source); lore.set(entry.id, { source })
   }
   for (const participant of config.participants) if (!lore.has(participant.entryId)) throw new Error('A selected participant is unavailable. Start a new character chat with available entries.')
   const fingerprint = await hash(JSON.stringify(sources))
   const current = sources.filter(source => source.kind === 'scene').at(-1)!
   const prior = sources.filter(source => source.kind === 'scene').slice(0, -1)
-  const selected = config.participants.map(participant => lore.get(participant.entryId)!)
-  const automaticCodexContext = selected.map(item => `${item.source.id}\n${item.summary ?? item.source.content}`).join('\n\n')
+  const selected = config.participants.map(participant => ({ ...lore.get(participant.entryId)!, participant }))
+  const participantSources = selected.map(item => ({ sourceId: item.source.id, title: item.participant.label, content: `### Character: ${item.participant.label}\n${item.source.id}\n\n${item.source.content || '[This character’s Codex body is empty.]'}`, type: 'codex', representation: 'Full character profile', reason: 'Roleplay participant; always included' }))
+  const automaticCodexContext = participantSources.map(item => item.content).join('\n\n')
   const context: PreparedContextValues = { currentSceneId: current.id, currentSceneText: current.content, currentSceneTitle: '', previousSceneId: '', previousSceneText: '', previousSceneTitle: '', summaryContext: prior.map(source => `${source.id}\n${source.content}`).join('\n\n'), lastSceneText: '', lastSceneTitle: '', additionalContext: '', codexRepresentations: [], automaticCodex: [], automaticCodexContext,
-    storySoFarSources: prior.map(source => ({ sourceId: source.id, content: source.content, type: 'scene', representation: 'Allowed prior prose' })), automaticSources: selected.map(item => ({ sourceId: item.source.id, content: item.summary ?? item.source.content, type: 'codex', representation: 'Eligible body only' })) }
+    storySoFarSources: prior.map(source => ({ sourceId: source.id, content: source.content, type: 'scene', representation: 'Allowed prior prose' })), automaticSources: participantSources, requiredCharacterSources: participantSources }
   const speakers = await Promise.all(config.participants.map(async p => ({ token: p.token, label: p.label, source_id: await opaqueCharacterId(p.entryId) })))
-  const instructions = `Character mode: only the captured story context and the scoped read/search tools are available. Do not invent another participant. Prefix each speaker turn with @<token>: using the exact token below; the app renders its chosen display label. A character may not have witnessed every prior event. Facts the user supplies are user instructions, not automatically verified story knowledge.\nSelected participants: ${JSON.stringify(speakers)}\nAvailable opaque source IDs: ${JSON.stringify([current, ...selected.map(item => item.source)].map(({ id, kind }) => ({ id, kind })))}; search finds other allowed sources.\nWorkspace mutations require approval in author chat. Still images require an explicit request in the current user turn.`
+  const instructions = `Character mode: use the supplied full character profiles as facts about the speakers, including their identity, background, personality and relationships. Answer questions about yourself from your profile rather than claiming not to know information it contains. Automatic story context follows the saved story position; explicitly selected references supplement it and may describe other times or author guidance. A character may not have witnessed every prior event. Do not invent another participant. Prefix each speaker turn with @<token>: using the exact token below; the app renders its chosen display label.\nSelected participants: ${JSON.stringify(speakers)}\nAvailable opaque source IDs: ${JSON.stringify([current, ...selected.map(item => item.source)].map(({ id, kind }) => ({ id, kind })))}; search finds other allowed sources.\nWorkspace mutations require approval in author chat. Still images require an explicit request in the current user turn.`
   return { boundary: { cutoff: { ...config.cutoff }, fingerprint, sessionId: config.sessionId }, sources, context, instructions }
 }
-export async function captureCharacterFrame(chat: ChatEntity, history: Array<Pick<ChatMessageEntity, 'role' | 'content'> & Partial<Pick<ChatMessageEntity, 'characterBoundary'>>>): Promise<CharacterFrame> {
+export async function captureCharacterFrame(chat: ChatEntity, history: Array<Pick<ChatMessageEntity, 'role' | 'content'> & Partial<Pick<ChatMessageEntity, 'characterBoundary'>>>, profile = chat.contextProfile): Promise<CharacterFrame> {
   if (!chat.character) throw new Error('Character chat has no stored boundary.')
   const current = await getChat(chat.id)
   if (JSON.stringify(current?.character) !== JSON.stringify(chat.character)) throw new Error('The character chat position changed. Reload it before sending.')
-  const world = await readTimelineWorld(chat.bookId), entries = await listEntitiesByBook(chat.bookId, 'codexEntry') as CodexEntryEntity[]
+  const world = await readTimelineWorld(chat.bookId), entities = await listEntitiesByBook(chat.bookId), entries = entities.filter((entity): entity is CodexEntryEntity => entity.type === 'codexEntry')
   const frames = new Map<string, CharacterFrame>()
   const frame = await frameFor(chat.character, entries, world)
   frames.set(JSON.stringify(chat.character.cutoff), frame)
@@ -98,6 +100,20 @@ export async function captureCharacterFrame(chat: ChatEntity, history: Array<Pic
     if (!verified) { verified = await frameFor({ ...chat.character, cutoff: previous.cutoff }, entries, world); frames.set(key, verified) }
     if (verified.boundary.fingerprint !== previous.fingerprint) throw new Error('The story or eligible lore changed since these replies. Restart at this position to use the revised story without old knowledge.')
   }
+  // Selections supplement the captured story boundary. Changing them must not invalidate
+  // existing conversations; earlier replies remain part of the visible chat history.
+  const additional = []
+  for (const source of characterAdditionalSources(entities, profile, chat.character.cutoff, world)) {
+    const automaticId = await opaqueCharacterId(source.entityId)
+    const automatic = frame.sources.find(item => item.id === automaticId)
+    // A deliberately selected full scene/baseline can differ from its automatic cutoff excerpt.
+    const id = automatic && automatic.content !== source.content ? `${automaticId}-selected` : automaticId
+    if (!frame.sources.some(item => item.id === id)) frame.sources.push({ id, kind: source.kind, content: source.content, title: source.title })
+    additional.push({ sourceId: id, title: source.title, type: source.kind, representation: 'Full selected reference', reason: 'Explicitly selected for this character chat', content: `## ${source.kind === 'codex' ? 'Codex' : source.kind}: ${source.title}\n${id}\n\n${source.content}` })
+  }
+  frame.context.additionalSources = additional
+  frame.context.additionalContext = additional.map(item => item.content).join('\n\n')
+  frame.context.requiredCharacterSources = [...(frame.context.requiredCharacterSources ?? []), ...additional]
   return frame
 }
 export function executeCharacterRead(frame: CharacterFrame, call: ChatToolCall): string {

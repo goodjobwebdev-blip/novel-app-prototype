@@ -978,7 +978,6 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
     const currentSceneId = type === 'scene' ? currentDocumentId : value.lastOpenedSceneId || undefined
     ;(async () => {
       try {
-        let prepared = await buildContextValues({ bookId, type, currentSceneId, currentSceneText: type === 'scene' ? currentDocumentText : undefined, currentDocumentId, previousScenesForCodexTriggers: value.previousScenesForCodexTriggers, profile })
         let chat: ChatEntity | null = null
         let history: ChatMessageEntity[] = []
         if (type === 'chat' && chatId) {
@@ -986,8 +985,9 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
           chat = loadedChat ?? null
           history = loadedHistory
         }
-        const character = chat?.character ? await captureCharacterFrame(chat, history) : undefined
-        if (character) prepared = character.context
+        if (!cancelled) setPreviewChat(chat)
+        const character = chat?.character ? await captureCharacterFrame(chat, history, profile) : undefined
+        const prepared = character?.context ?? await buildContextValues({ bookId, type, currentSceneId, currentSceneText: type === 'scene' ? currentDocumentText : undefined, currentDocumentId, previousScenesForCodexTriggers: value.previousScenesForCodexTriggers, profile })
         if (!cancelled) {
           setPreviewCharacter(character)
           setPreviewPending(false)
@@ -996,13 +996,13 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
           setPreviewHistory(history)
           setPreviewError(type === 'chat' && !chatId ? 'Open a chat to preview its request.' : '')
         }
-      } catch {
+      } catch (error) {
         if (!cancelled) {
           setPreviewPending(false)
           setPreview(null)
-          setPreviewChat(null)
+          setPreviewCharacter(undefined)
           setPreviewHistory([])
-          setPreviewError('Request preview could not be prepared.')
+          setPreviewError(error instanceof Error ? error.message : 'Request preview could not be prepared.')
         }
       }
     })()
@@ -1114,7 +1114,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
     <header className="page-heading"><div><p>{typeLabel} generation</p><h1 id="page-title">{typeLabel} context</h1><span>{scopeLabel} · {bookTitle}</span></div><ContextSaveStatus saved={saved} error={saveError} onRetry={onRetry} /></header>
     <div className="context-scope-banner"><strong>Previewing: {type === 'chat' ? previewChat?.title || 'Chat' : currentDocument?.title || 'No document selected'}</strong><span>Reference scene: {anchorLabel}</span>{type !== 'scene' && !previewChat?.character && <small>Opening another scene changes the reference scene for Chat and Codex. {type === 'codex' && !profile.includeLastScene ? 'Story context is off; Codex trigger scanning still uses this scene.' : ''}</small>}</div>
     <ContextBudget diagnostics={diagnostics} model={selectedModel} pending={previewPending} error={previewError || (previewPromptErrors.length ? 'Fix the prompt errors before generating.' : '')} />
-    {previewChat?.character && <p className="context-help">Character chat uses its stored story position and eligible Codex bodies. Change its position in the chat. General context selections are disabled.</p>}
+    {previewChat?.character && <p className="context-help">Each participant’s full Codex profile is always included. Automatic manuscript context follows the chat’s story position. Add Codex entries, notes, manuscript sections or summaries below; selected references are sent with every reply, including in existing chats.</p>}
     {!previewChat?.character && <section className="settings-card context-defaults-card"><div className="card-heading"><div><span>01</span><h2>Automatic context</h2></div></div>
       <label className="context-trigger-window"><span><strong>Previous Scenes to scan for Codex triggers</strong><small>Book-wide setting. Scan “{anchorLabel}” plus this many preceding scenes. {type === 'chat' ? 'Change this from a Scene or Codex Context tab; it is read-only in Chat.' : 'Changes affect Story, Codex, and Chat in this book.'}</small></span><input type="number" min="0" step="1" disabled={type === 'chat'} value={value.previousScenesForCodexTriggers} onChange={(event) => onChange({ ...value, previousScenesForCodexTriggers: Math.max(0, Math.floor(Number(event.target.value) || 0)) })} /></label>
       {archivedSelectedCodex.length > 0 && <div className="context-inactive-source"><div><strong>{archivedSelectedCodex.length} archived Codex {archivedSelectedCodex.length === 1 ? 'selection is' : 'selections are'} inactive</strong><small>{archivedSelectedCodex.map((item) => item.title ?? 'Untitled').join(', ')}. Archived lore is skipped from requests.</small></div><button type="button" onClick={() => updateProfile({ ...profile, codexEntryIds: profile.codexEntryIds.filter((id) => !archivedSelectedIds.has(id)) })}>Remove inactive</button></div>}
@@ -1122,13 +1122,14 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
       {type === 'scene' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current Scene</strong><small>The active editor content is available to the Story prompt. See Included sources below for what this template sends.</small></span><b>Available</b></div><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} /><span><strong>Previous Scene when empty</strong><small>Use the immediately previous Scene only when the current Scene has no text.</small></span></label><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Earlier summaries</strong><small>Uses the highest completed Act or Chapter summary without exposing later material.</small></span><b>Automatic</b></div></> : type === 'codex' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current entry</strong><small>Title, category, full body, and the captured insertion point are available through <code>entry.*</code> variables.</small></span><b>Available</b></div><label><input type="checkbox" checked={profile.includeLastScene} onChange={(event) => updateProfile({ ...profile, includeLastScene: event.target.checked })} /><span><strong>Story context from {anchorLabel}</strong><small>Use the Book’s last-opened Scene and earlier story summaries as the Codex story anchor.</small></span></label><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} disabled={!profile.includeLastScene} /><span><strong>Previous Scene when anchor is empty</strong><small>Use the immediately previous Scene as the full anchor without duplicating its summary.</small></span></label></> : <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>{anchorLabel} and earlier summaries</strong><small>Available through Chat composition variables from the book's last-opened Scene anchor.</small></span><b>Automatic</b></div><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} /><span><strong>Previous Scene when empty</strong><small>Expose the immediately previous Scene only when the anchor Scene has no text.</small></span></label></>}
     </section>}
     <ContextSourceInventory preview={preview} request={normalizedRequest} sources={sources} pending={previewPending} />
-    {!previewChat?.character && <section className="settings-card context-sources-card"><div className="card-heading"><div><span>02</span><h2>Additional context</h2></div><p>Available as <code>{'{{context.additional}}'}</code>.</p></div>
-      {type !== 'scene' && <label><input type="checkbox" checked={profile.loreAtCurrentScene === true} onChange={event => updateProfile({ ...profile, loreAtCurrentScene: event.target.checked })} /><span><strong>Resolve Codex at the reference scene</strong><small>Uses eligible checkpoint bodies and their matching summaries. Off uses baseline lore for unrestricted author planning; Character chat enforces its own cutoff.</small></span></label>}
+    <section className="settings-card context-sources-card"><div className="card-heading"><div><span>02</span><h2>Additional context</h2></div><p>{previewChat?.character ? 'Selected references are included automatically.' : <>Available as <code>{'{{context.additional}}'}</code>.</>}</p></div>
+      {previewChat?.character && <p className="context-help">Your selections can include material outside the story position. Removing a selection affects future requests; it does not erase earlier conversation messages.</p>}
+      {type !== 'scene' && <label><input type="checkbox" checked={profile.loreAtCurrentScene === true} onChange={event => updateProfile({ ...profile, loreAtCurrentScene: event.target.checked })} /><span><strong>Resolve Codex at the reference scene</strong><small>{previewChat?.character ? 'Selected Codex entries use their full body at the story position. Off uses their full baseline body. Automatic character profiles continue to follow the story position.' : 'Uses eligible checkpoint bodies and their matching summaries. Off uses baseline lore for unrestricted author planning.'}</small></span></label>}
       <fieldset className="summary-range"><legend>Additional summaries</legend>{([['none','None'],['all','All summaries'],['before',`Before ${anchorLabel}`],['after',`After ${anchorLabel}`]] as const).map(([range,label]) => <label key={range}><input type="radio" name="summary-range" disabled={!anchor && (range === 'before' || range === 'after')} checked={profile.summaryRange === range} onChange={() => updateProfile({ ...profile, summaryRange: range })}/><span>{label}</span></label>)}</fieldset>
       <p className="context-help">None turns off additional summaries only. Automatic earlier-story summaries stay available. {(!anchor && (profile.summaryRange === 'before' || profile.summaryRange === 'after')) && 'Open a scene to resolve this range.'}</p>
       {(profile.summaryRange === 'all' || profile.summaryRange === 'after') && <p className="context-caution" role="status">This range can include material later than the reference scene.</p>}
-      <ContextSourcePicker sources={sources} currentDocumentId={type === 'chat' ? undefined : currentDocumentId} anchorId={anchor?.id} profile={profile} onToggle={toggle} onClear={() => updateProfile({ ...profile, structuralIds: [], noteIds: [], codexEntryIds: [] })} />
-    </section>}
+      <ContextSourcePicker sources={sources} currentDocumentId={type === 'chat' ? undefined : currentDocumentId} anchorId={anchor?.id} profile={profile} fullCodex={Boolean(previewChat?.character)} onToggle={toggle} onClear={() => updateProfile({ ...profile, structuralIds: [], noteIds: [], codexEntryIds: [] })} />
+    </section>
     <details className="settings-card context-preview-card context-inspector"><summary>Inspect request</summary><div className="card-heading"><div><span>04</span><h2>Request details</h2></div><p>{selectedModel ? `Model: ${selectedModel}. ` : ''}Rendered message stack for the current {typeLabel.toLowerCase()} request.</p></div>
       {type !== 'chat' && <p className="context-preview-empty">The generation instruction below shows the fallback used when the generation drawer is empty. Custom drawer text replaces it when you generate.</p>}
       {type === 'scene' && <p className="context-preview-empty">Captured generation point: {(insertionPosition ?? currentDocumentText?.length ?? 0).toLocaleString()} of {(currentDocumentText?.length ?? 0).toLocaleString()} characters. Empty instruction fallback: “{STORY_CONTINUE_FALLBACK}”</p>}

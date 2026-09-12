@@ -99,6 +99,7 @@ export type NormalizedAssembledRequest = {
 export type RenderedTemplate = {
   content: string
   referencedVariables: string[]
+  renderedVariables: string[]
 }
 
 export type PromptTemplateToken = {
@@ -427,6 +428,7 @@ export function renderCompositionTemplate(template: string, values: Record<strin
   const parsed = parsePromptTemplate(template)
   const references = referencedVariables(template)
   const included: boolean[] = []
+  const rendered = new Set<string>()
   let content = ''
   for (const token of parsed.tokens) {
     if (token.type === 'if') {
@@ -434,12 +436,13 @@ export function renderCompositionTemplate(template: string, values: Record<strin
     } else if (token.type === 'endif') {
       included.pop()
     } else if (included.every(Boolean)) {
+      if (token.type === 'variable' && token.variable && normalizedValues[token.variable]?.trim()) rendered.add(token.variable)
       content += token.type === 'variable' && token.variable && VARIABLE_EXPRESSION.test(token.variable)
         ? normalizedValues[token.variable] ?? ''
         : token.raw
     }
   }
-  return { content: content.replace(/\n{3,}/g, '\n\n').trim(), referencedVariables: references }
+  return { content: content.replace(/\n{3,}/g, '\n\n').trim(), referencedVariables: references, renderedVariables: [...rendered] }
 }
 
 export function dedupeAdditionalSources(automatic: DynamicContextSource[], additional: DynamicContextSource[]) {
@@ -488,13 +491,13 @@ export function renderPromptComposition(
     referencedVariables: system.referencedVariables,
     enabled: true,
     omitted: !system.content,
-    ...(diagnosticsForVariables(system.referencedVariables, dynamicSources).length
-      ? { dynamicVariables: diagnosticsForVariables(system.referencedVariables, dynamicSources) }
+    ...(diagnosticsForVariables(system.renderedVariables, dynamicSources).length
+      ? { dynamicVariables: diagnosticsForVariables(system.renderedVariables, dynamicSources) }
       : {}),
   })
   for (const message of composition.predefinedMessages) {
     const rendered = renderCompositionTemplate(message.template, values)
-    const diagnostics = diagnosticsForVariables(rendered.referencedVariables, dynamicSources)
+    const diagnostics = diagnosticsForVariables(rendered.renderedVariables, dynamicSources)
     parts.push({
       id: `predefined:${message.id}`,
       role: message.role,
