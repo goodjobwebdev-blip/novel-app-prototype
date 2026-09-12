@@ -1,3 +1,4 @@
+import { ensureLoreTypesWithDb, resolveLoreType } from './lore-types.ts'
 import { installSeriesCodexHooks, synchronizeCodexEntity, synchronizeSeriesCodex, seriesTransaction, detachSeriesCodex } from './series-codex.ts'
 import { documentBlocks, encodeDocumentBlock } from './document-projection.ts'
 import { PROSE_PROJECTION_VERSION } from './document-projection.ts'
@@ -71,7 +72,7 @@ export type BookMetadata = {
 export type BookEntity = ArcEntity & { type: 'book'; title: string } & Partial<Omit<BookMetadata, 'title'>>
 export type SeriesEntity = ArcEntity & { type: 'series'; title: string }
 export type NoteEntity = ArcEntity & { type: 'note'; bookId: string; parentId: string; title: string; content: string; useAsChatSkill?: boolean }
-export type CodexEntryEntity = ArcEntity & { type: 'codexEntry'; bookId: string; parentId: string; title: string; category: string; content: string; primaryImageId?: string; archivedAt?: number; preferSummaryForContext?: boolean; sourceRevision?: number; autoIncludeTriggers?: string[]; codexScope?: 'series' | 'inherited' | 'override'; seriesSourceId?: string; seriesSourceSeriesId?: string; seriesSnapshotSignature?: string; hiddenInBook?: boolean }
+export type CodexEntryEntity = ArcEntity & { type: 'codexEntry'; bookId: string; parentId: string; title: string; category: string; typeId?: string; content: string; primaryImageId?: string; archivedAt?: number; preferSummaryForContext?: boolean; sourceRevision?: number; autoIncludeTriggers?: string[]; codexScope?: 'series' | 'inherited' | 'override'; seriesSourceId?: string; seriesSourceSeriesId?: string; seriesSnapshotSignature?: string; hiddenInBook?: boolean }
 export type SummaryEntity = ArcEntity & {
   type: 'summary'
   bookId: string
@@ -333,7 +334,7 @@ export async function ensurePrototypeSeed(initialStoryMarkdown: string) {
 export async function getEntity<T extends ArcEntity = ArcEntity>(id: string): Promise<T | undefined> {
   const db = await database()
   const entity = await db.table('entities').get(id) as T | undefined
-  if (entity?.type === 'codexEntry' && entity.seriesSourceId && entity.bookId) { await synchronizeSeriesCodex(db, entity.bookId); return db.table('entities').get(id) }
+  if (entity?.type === 'codexEntry' && entity.bookId) { await synchronizeSeriesCodex(db, entity.bookId); return db.table('entities').get(id) }
   return entity
 }
 
@@ -676,13 +677,15 @@ export async function createNote(bookId: string, title = 'Untitled Note'): Promi
 
 export async function createCodexEntry(bookId: string, title = 'Untitled Entry', category = 'Character'): Promise<CodexEntryEntity> {
   const db = await database()
-  const now = Date.now()
-  const entry: CodexEntryEntity = { id: makeId('codex'), type: 'codexEntry', bookId, parentId: bookId, title, category, content: '', autoIncludeTriggers: normalizeCodexTriggerList([title]), preferSummaryForContext: false, sourceRevision: now, createdAt: now, updatedAt: now }
-  await db.transaction('rw', db.table('entities'), async () => {
+  return seriesTransaction(db, async () => {
+    const loreType = resolveLoreType(await ensureLoreTypesWithDb(db, bookId), category)
+    if (!loreType) throw new Error('Choose a current lore type.')
+    const now = Date.now()
+    const entry: CodexEntryEntity = { id: makeId('codex'), type: 'codexEntry', bookId, parentId: bookId, title, category: loreType.name, typeId: loreType.id, content: '', autoIncludeTriggers: normalizeCodexTriggerList([title]), preferSummaryForContext: false, sourceRevision: now, createdAt: now, updatedAt: now }
     await db.table('entities').put(entry)
     await touchAncestors(db, bookId, now)
+    return entry
   })
-  return entry
 }
 
 export async function getOrCreateSummary(source: StructuralEntity | CodexEntryEntity): Promise<SummaryEntity> {
@@ -773,8 +776,10 @@ export async function updateCodexCategory(id: string, category: string): Promise
   return db.transaction('rw', db.table('entities'), async () => {
     const current = await db.table('entities').get(id) as CodexEntryEntity | undefined
     if (!current || current.type !== 'codexEntry') throw new Error(`Cannot update missing Codex entry ${id}`)
+    const loreType = resolveLoreType(await ensureLoreTypesWithDb(db, current.bookId), category)
+    if (!loreType) throw new Error('This lore type is unavailable in this scope.')
     const now = Date.now()
-    await db.table('entities').update(id, { category: category.trim() || 'Other', sourceRevision: now, updatedAt: now })
+    await db.table('entities').update(id, { category: loreType.name, typeId: loreType.id, sourceRevision: now, updatedAt: now })
     await touchAncestors(db, current.bookId, now)
     const updated = await db.table('entities').get(id) as CodexEntryEntity | undefined
     if (!updated || updated.type !== 'codexEntry') throw new Error(`Cannot update missing Codex entry ${id}`)

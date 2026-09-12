@@ -230,3 +230,13 @@
 .series-reset-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 16px; }
 .series-reset-comparison pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 @media(max-width: 640px) { .series-reset-comparison { grid-template-columns: 1fr; } }
+
+.lore-types-manager { padding: 12px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: 10px; }
+.lore-types-manager article { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.lore-types-manager label { display: grid; gap: 6px; margin: 10px 0; }
+.lore-types-manager button { margin: 3px; }
+.lore-types-manager p, .lore-types-manager small { font-size: 12px; color: var(--soft); }
+
+.lore-type-select, .lore-types-manager select, .series-leave-policy select, select[aria-label="Replacement lore type"] { width: 100%; min-height: 42px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); }
+.lore-types-manager button { min-height: 36px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--ink); cursor: pointer; }
+.lore-types-manager input { padding: 8px 10px; border-radius: 8px; }

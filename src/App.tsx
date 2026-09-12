@@ -1054,6 +1054,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
         id: currentDocument?.id ?? currentDocumentId ?? 'current-codex-entry',
         title: currentDocument?.title ?? '',
         category: typeof currentDocument?.category === 'string' ? currentDocument.category : '',
+        typeId: typeof currentDocument?.typeId === 'string' ? currentDocument.typeId : '',
         content: entryContent,
       },
       insertionPosition: insertionPosition ?? entryContent.length,

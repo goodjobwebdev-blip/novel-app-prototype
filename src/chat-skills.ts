@@ -1,3 +1,4 @@
+import { getEffectiveLoreTypes } from './lore-types-service'
 import { database, listEntitiesByBook, updateEntityAtomically, type GenerationContextProfile, type NoteEntity } from './persistence'
 import { projectProse } from './document-projection'
 import { buildContextValues } from './context-service'
@@ -26,7 +27,7 @@ export async function prepareChatSkillContext(chat: { bookId: string; skillNoteI
   const skills = await captureChatSkills(chat.bookId, chat.skillNoteIds)
   const ids = new Set(skills.map(skill => skill.id))
   const context = await buildContextValues({ bookId: chat.bookId, type: 'chat', currentSceneId, profile: { ...chat.contextProfile, noteIds: chat.contextProfile.noteIds.filter(id => !ids.has(id)) } })
-  return { context, skills }
+  return { context, skills, loreTypes: await getEffectiveLoreTypes(chat.bookId) }
 }
 export function chatSkillParts(skills: CapturedChatSkill[] = []): NormalizedRequestPart[] {
   const seen = new Set<string>()

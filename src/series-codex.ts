@@ -1,3 +1,4 @@
+import { ensureLoreTypesWithDb, localizeSeriesLoreTypes } from './lore-types.ts'
 import Dexie from 'dexie'
 import type { ArcEntity, BookEntity, CodexDependencyEdge, CodexEntryEntity, Illustration } from './persistence'
 import type { GalleryImage } from './image-generation-types'
@@ -54,6 +55,7 @@ async function removeProxy(db: Dexie, entry: CodexEntryEntity) {
   // Keep gallery assets and snapshots: other documents or history may still reference them.
 }
 export async function detachSeriesCodex(db: Dexie, bookId: string, policy: 'keep' | 'remove' = 'keep') {
+  await localizeSeriesLoreTypes(db, bookId)
   const entries = await db.table('entities').where('bookId').equals(bookId).toArray() as CodexEntryEntity[]
   for (const entry of entries.filter(item => item.type === 'codexEntry' && item.seriesSourceId)) {
     if (entry.codexScope === 'override' || (policy === 'keep' && !entry.hiddenInBook && !entry.archivedAt)) await db.table('entities').put(detachedCodex(entry))
@@ -62,14 +64,16 @@ export async function detachSeriesCodex(db: Dexie, bookId: string, policy: 'keep
 }
 export async function synchronizeCodexEntity(db: Dexie, entityId: string) {
   const entry = await db.table('entities').get(entityId) as CodexEntryEntity | undefined
-  if (entry?.seriesSourceId && entry.bookId) await synchronizeSeriesCodex(db, entry.bookId)
+  if (entry?.type === 'codexEntry' && entry.bookId) await synchronizeSeriesCodex(db, entry.bookId)
 }
 export async function synchronizeSeriesCodex(db: Dexie, bookId: string): Promise<void> {
   if (Dexie.currentTransaction) return
   const changed: string[] = []
   await seriesTransaction(db, async () => {
     const book = await db.table('entities').get(bookId) as BookEntity | undefined
-    if (book?.type !== 'book') return
+    if (!book || !['book', 'series'].includes(book.type)) return
+    await ensureLoreTypesWithDb(db, bookId)
+    if (book.type !== 'book') return
     const local = (await db.table('entities').where('bookId').equals(bookId).toArray() as CodexEntryEntity[]).filter(item => item.type === 'codexEntry')
     const series = book.seriesId ? await db.table('entities').get(book.seriesId) : undefined
     const sources = series?.type === 'series' ? (await db.table('entities').where('bookId').equals(series.id).toArray() as CodexEntryEntity[]).filter(item => item.type === 'codexEntry' && item.codexScope === 'series') : []

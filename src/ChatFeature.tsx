@@ -1,3 +1,4 @@
+import type { LoreType } from './lore-types'
 import ChatSkillsPicker from './ChatSkillsPicker'
 import { prepareChatSkillContext, type CapturedChatSkill } from './chat-skills'
 import BrainstormCard from './BrainstormCard'
@@ -134,6 +135,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   const [modelStatus, setModelStatus] = useState('')
   const [promptOpen, setPromptOpen] = useState(false)
   const [compositionDraft, setCompositionDraft] = useState<PromptComposition>({ systemPrompt: '', predefinedMessages: [] })
+  const [promptPreviewTypes, setPromptPreviewTypes] = useState<LoreType[]>([])
   const [promptPreviewSkills, setPromptPreviewSkills] = useState<CapturedChatSkill[]>([])
   const [promptPreviewContext, setPromptPreviewContext] = useState<Awaited<ReturnType<typeof buildContextValues>> | null>(null)
   const [lastNormalizedRequest, setLastNormalizedRequest] = useState<NormalizedAssembledRequest | null>(null)
@@ -279,7 +281,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       setPromptPreviewContext(null)
       return () => { cancelled = true }
     }
-    prepareChatSkillContext(chat, currentSceneId || undefined).then(({ context, skills }) => { if (!cancelled && isCurrentChat(chat)) { setPromptPreviewContext(context); setPromptPreviewSkills(skills) } })
+    prepareChatSkillContext(chat, currentSceneId || undefined).then(({ context, skills, loreTypes }) => { if (!cancelled && isCurrentChat(chat)) { setPromptPreviewContext(context); setPromptPreviewSkills(skills); setPromptPreviewTypes(loreTypes) } })
       .catch(() => { if (!cancelled) setPromptPreviewContext(null) })
     return () => { cancelled = true }
   }, [promptOpen, chat?.id, chat?.updatedAt, currentSceneId])
@@ -423,6 +425,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     settings: Awaited<ReturnType<typeof getChatBookAiSettings>>
     context: Awaited<ReturnType<typeof buildContextValues>>
     skills: CapturedChatSkill[]
+    loreTypes: LoreType[]
   }
 
   function generationOwnsCurrentUi(owner: ChatGenerationOwner) {
@@ -485,6 +488,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       book: bookPromptValues,
       context: prepared.context,
       skills: prepared.skills,
+      loreTypes: prepared.loreTypes,
       history,
       tools: CHAT_TOOL_DEFINITIONS,
     })
@@ -513,17 +517,18 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     const instructionsWarning = chatWorkspaceInstructionsWarning(activeChat.promptComposition)
     if (instructionsWarning) onToast(instructionsWarning)
 
+    let loreTypes: LoreType[]
     let skills: CapturedChatSkill[]
     let context: Awaited<ReturnType<typeof buildContextValues>>
     try {
-      ;({ context, skills } = await prepareChatSkillContext(activeChat, currentSceneId || undefined))
+      ;({ context, skills, loreTypes } = await prepareChatSkillContext(activeChat, currentSceneId || undefined))
     } catch (error) {
       assertGenerationOwnerCurrent(owner, activeChat)
       throw new Error(error instanceof Error ? error.message : 'Chat context could not be prepared.')
     }
     assertGenerationOwnerCurrent(owner, activeChat)
 
-    const prepared = { settings, context, skills }
+    const prepared = { settings, context, skills, loreTypes }
     const normalizedRequest = buildNormalizedRequest(activeChat, history, prepared)
     const finalizedRequest = finalizeChatProviderRequest(normalizedRequest)
     const diagnostics = generationContextDiagnostics(activeChat.model, activeChat.modelContextLength, activeChat.effectiveContextLimit, finalizedRequest.diagnosticText)
@@ -1146,7 +1151,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   const compositionTemplates = [compositionDraft.systemPrompt, ...compositionDraft.predefinedMessages.filter((message) => message.enabled).map((message) => message.template)]
   const compositionDiagnostics = compositionTemplates.flatMap((template) => promptTemplateDiagnostics(template, 'assistant', promptPreviewContext ? chatRequestValues(bookPromptValues, promptPreviewContext) : bookTemplateValues(bookPromptValues)))
   const draftNormalizedRequest = chat && promptPreviewContext
-    ? assembleChatGenerationRequest({ composition: compositionDraft, book: bookPromptValues, context: promptPreviewContext, skills: promptPreviewSkills, history: messages, tools: CHAT_TOOL_DEFINITIONS })
+    ? assembleChatGenerationRequest({ composition: compositionDraft, book: bookPromptValues, context: promptPreviewContext, skills: promptPreviewSkills, loreTypes: promptPreviewTypes, history: messages, tools: CHAT_TOOL_DEFINITIONS })
     : null
   const previewRequest = promptOpen ? draftNormalizedRequest : lastNormalizedRequest
   const previewFinalizedRequest = previewRequest ? finalizeChatProviderRequest(previewRequest) : null

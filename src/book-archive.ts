@@ -1,3 +1,4 @@
+import { BUILTIN_LORE_TYPES, storedLoreTypes } from './lore-types.ts'
 import { detachedCodex } from './series-codex.ts'
 import type { CodexEntryEntity } from './persistence'
 import { documentBlocks, remapDocumentBlocks } from './document-projection.ts'
@@ -9,8 +10,8 @@ const MAGIC = 'ARCBK001'
 const MAX_MANIFEST = 64 * 1024 * 1024
 const MAX_ARCHIVE = 2_000_000_000
 const TYPES = new Set(['book', 'series', 'act', 'chapter', 'scene', 'note', 'codexEntry', 'summary', 'chat', 'chatMessage', 'settings'])
-const REF_KEYS = new Set(['bookId', 'entryId', 'parentId', 'seriesId', 'sourceEntityId', 'entityId', 'sourceId', 'targetId', 'primaryImageId', 'assetId', 'messageId', 'chatId', 'lastOpenedSceneId', 'sourceParentId', 'targetParentId', 'beforeId'])
-const REF_ARRAYS = new Set(['skillNoteIds', 'structuralIds', 'noteIds', 'codexEntryIds', 'sourceIds'])
+const REF_KEYS = new Set(['typeId', 'ownerId', 'bookId', 'entryId', 'parentId', 'seriesId', 'sourceEntityId', 'entityId', 'sourceId', 'targetId', 'primaryImageId', 'assetId', 'messageId', 'chatId', 'lastOpenedSceneId', 'sourceParentId', 'targetParentId', 'beforeId'])
+const REF_ARRAYS = new Set(['compatibleLoreTypeIds', 'skillNoteIds', 'structuralIds', 'noteIds', 'codexEntryIds', 'sourceIds'])
 
 type StoredGalleryImage = Omit<GalleryImage, 'image' | 'thumbnail'> & { imageSize: number; imageType: string; thumbnailSize: number; thumbnailType: string }
 type StoredImage = Omit<Illustration, 'image' | 'thumbnail'> & { imageSize: number; imageType: string; thumbnailSize: number; thumbnailType: string }
@@ -152,6 +153,10 @@ export async function decodeBookArchive(file: Blob): Promise<BookArchiveData> {
 /** Import as a new book; preserve text verbatim while remapping structural references. */
 export function copyBookArchive(data: BookArchiveData, newId = () => crypto.randomUUID()): { data: BookArchiveData; bookId: string } {
   const ids = new Map<string, string>()
+  const sourceBook = data.entities.find(entity => entity.type === 'book')!
+  const sourceSeries = data.entities.find(entity => entity.type === 'series' && entity.id === sourceBook.seriesId)
+  const importedTypes = sourceSeries ? [...storedLoreTypes(sourceSeries), ...storedLoreTypes(sourceBook).filter(type => !type.builtin)] : storedLoreTypes(sourceBook)
+  data = { ...data, entities: data.entities.map(entity => entity.id === sourceBook.id ? { ...entity, loreTypes: importedTypes.map(type => ({ ...type, ownerId: sourceBook.id })) } : entity.id === sourceSeries?.id ? { ...entity, loreTypes: storedLoreTypes(entity).filter(type => type.builtin) } : entity) }
   data = { ...data, entities: data.entities.map(entity => entity.type === 'codexEntry' ? detachedCodex(entity as CodexEntryEntity) : entity) }
   for (const entity of data.entities) if (entity.type !== 'settings' && entity.type !== 'summary') ids.set(entity.id, `${entity.type}-${newId()}`)
   for (const entity of data.entities) {
@@ -161,12 +166,15 @@ export function copyBookArchive(data: BookArchiveData, newId = () => crypto.rand
     }
     if (entity.type === 'summary') ids.set(entity.id, `summary-${ids.get(String(entity.sourceEntityId))}`)
   }
+  for (const type of BUILTIN_LORE_TYPES) ids.set(type.id, type.id)
+  for (const entity of data.entities) if (Array.isArray(entity.loreTypes)) for (const type of entity.loreTypes) if (type && typeof type.id === 'string' && !ids.has(type.id)) ids.set(type.id, `lore-${newId()}`)
   for (const asset of data.galleryImages ?? []) ids.set(asset.id, `generated-${newId()}`)
   for (const job of data.imageJobs ?? []) ids.set(job.id, `image-job-${newId()}`)
   for (const image of data.illustrations) ids.set(image.id, `image-${newId()}`)
   for (const row of [...data.entities, ...data.snapshots]) for (const item of documentBlocks(row.content ?? '')) if (!ids.has(item.block.id)) ids.set(item.block.id, `block-${newId()}`)
   const remap = (value: any, key = '', depth = 0): any => {
     if (depth > 80) throw new Error('This backup contains excessively nested data.')
+    if (Array.isArray(value) && key === 'compatibleLoreTypeIds') return value.map(id => ids.get(id) ?? `missing-type-${id}`)
     if (Array.isArray(value) && key === 'skillNoteIds') return value.map(id => ids.get(id) ?? `missing-skill-${id}`)
     if (Array.isArray(value)) return REF_ARRAYS.has(key) ? value.map((id) => ids.get(id)).filter(Boolean) : value.map((item) => remap(item, '', depth + 1))
     if (value && typeof value === 'object') {

@@ -57,7 +57,11 @@ test('a failed database open can retry and recover existing books, drafts, and n
     await act(async () => library.retry())
     await settle(() => library.state === 'ready' && library.series.length > 0)
     assert.ok(library.books.some((book) => book.id === 'old-book'))
-    for (const entity of existing) assert.deepEqual(await p.getEntity(entity.id), entity)
+    for (const entity of existing) {
+      const saved = await p.getEntity(entity.id)
+      assert.deepEqual(Object.fromEntries(Object.keys(entity).map(key => [key, saved[key]])), entity)
+      if (entity.type === 'codexEntry') { assert.equal(saved.typeId, 'lore-other'); assert.equal(saved.category, 'Other') }
+    }
     const db = new Dexie('arc-novel-local-v1')
     await db.open()
     assert.equal((await db.table('snapshots').get('old-snapshot')).content, 'Earlier draft')
