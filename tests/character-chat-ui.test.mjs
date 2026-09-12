@@ -45,6 +45,7 @@ const ai = await moduleAt('ai-settings')
 const chatService = await moduleAt('chat-service')
 const api = await moduleAt('chat-api')
 const { ChatView } = await moduleAt('ChatFeature')
+const { default: Settings } = await moduleAt('App')
 const character = await moduleAt('character-chat')
 const imageSettings = await moduleAt('image-settings')
 const { characterSpeakerParts } = await moduleAt('CharacterMessage')
@@ -69,7 +70,7 @@ async function fixture(limit) {
   const entry=await p.createCodexEntry(book.id,'Mara'); await (await p.database()).table('entities').update(entry.id,{typeId:'lore-character',content:'Mara is kind.',triggers:['FUTURE_SECRET']})
   let chat = await character.createCharacterChat(book.id,[{entryId:entry.id,label:'Mara'}],{bookId:book.id,sceneId:scene.id,position:12})
   chat = await chatService.updateChat(chat.id, { maxModelRounds: limit, modelContextLength: 100000 })
-  return { book, chat }
+  return { book, chat, scene, entry }
 }
 function view(f) { return h(ChatView, { bookId: f.book.id, chatId: f.chat.id, bookPromptValues: { title: f.book.title }, onChatChange() {}, onToast(message) { throw new Error(message) } }) }
 
@@ -88,4 +89,45 @@ test('actual character chat sends a restricted request, queues one direct image,
   assert.equal(document.querySelector('.character-speaker').textContent,'@Mara:');assert.match(document.querySelector('.chat-media-card').textContent,/Requested image/)
   assert.equal(characterSpeakerParts('@Mara: Hello\n@Intruder: Hi',f.chat.character.participants)[1].speaker,undefined)
  } finally {await act(async()=>root.unmount())}
+})
+
+test('actual Chat context settings save character references, preview them, and send them after reopening chat', async () => {
+ const f = await fixture(8)
+ const note = await p.createNote(f.book.id, 'Compass memory')
+ await p.saveDocumentContent(note.id, 'Elena gave Mara the brass compass.')
+ const codex = await p.createCodexEntry(f.book.id, 'Coral Bay')
+ await p.saveDocumentContent(codex.id, 'Coral Bay has a lighthouse with a green lantern.')
+ await p.saveDocumentContent(f.entry.id, 'Mara grew up in Coral Bay and her sister is Elena.')
+ f.chat = await chatService.updateChat(f.chat.id, { promptComposition: { systemPrompt: 'Answer as Mara.', predefinedMessages: [] } })
+ const settingsProps = { initialTab: 'context', book: { id: f.book.id, title: f.book.title, contextType: 'chat', chatId: f.chat.id } }
+ let root = createRoot(document.getElementById('root'))
+ const selection = title => [...document.querySelectorAll('.context-selection-row')].find(row => row.querySelector('strong').textContent === title)?.querySelector('input')
+ try {
+   await act(async () => root.render(h(Settings, settingsProps)))
+   await settle(() => selection('Compass memory') && document.querySelector('.context-help')?.textContent.includes('full Codex'))
+   assert.ok(selection('Coral Bay'), 'Character chat must expose Codex selections')
+   await act(async () => selection('Compass memory').click())
+   await settle(() => document.querySelector('.context-inventory').textContent.includes('Compass memory'))
+   await act(async () => selection('Coral Bay').click())
+   await settle(() => document.querySelector('.context-inventory').textContent.includes('Coral Bay'))
+   await settle(() => document.querySelector('.context-inspector').textContent.includes('green lantern'))
+   await settle(() => document.querySelector('.context-inspector').textContent.includes('brass compass'))
+   const saved = await chatService.getChat(f.chat.id)
+   assert.deepEqual(saved.contextProfile.noteIds, [note.id])
+   assert.deepEqual(saved.contextProfile.codexEntryIds, [codex.id])
+   await act(async () => root.unmount())
+   root = createRoot(document.getElementById('root'))
+   await act(async () => root.render(h(Settings, settingsProps)))
+   await settle(() => selection('Compass memory')?.checked && selection('Coral Bay')?.checked)
+   await act(async () => root.unmount())
+   root = createRoot(document.getElementById('root'))
+   const before = api.calls.length
+   await act(async () => root.render(view(f)))
+   await send()
+   await settle(() => api.calls.length > before && button('Send') && !button('Send').disabled)
+   const payload = JSON.stringify(api.calls.at(-1))
+   assert.match(payload, /Mara grew up in Coral Bay and her sister is Elena/)
+   assert.match(payload, /brass compass/)
+   assert.match(payload, /green lantern/)
+ } finally { await act(async () => root.unmount()) }
 })

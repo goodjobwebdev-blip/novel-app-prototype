@@ -144,7 +144,7 @@ export function assembleChatGenerationRequest(input: {
       ...(message.role === 'assistant' && message.thoughts ? { reasoning_content: message.thoughts } : {}),
     },
   }))
-  return assembleCompositionRequest({
+  const assembled = assembleCompositionRequest({
     composition: clonePromptComposition(input.composition),
     values,
     dynamicSources: {
@@ -164,6 +164,20 @@ export function assembleChatGenerationRequest(input: {
     structuredParts: [normalizeStructuredTools(loreTypesForTools(input.tools ?? CHAT_TOOL_DEFINITIONS, input.loreTypes) as unknown as Array<Record<string, unknown>>)],
     dynamicSourceDedupe: dedupe.decisions,
   })
+  if (!input.restrictedInstructions || !input.context.requiredCharacterSources?.length) return assembled
+  const represented = new Set(assembled.parts.filter(part => !part.omitted).flatMap(part => part.dynamicVariables?.flatMap(variable => variable.sources.map(item => item.sourceId)) ?? []))
+  const required = new Map(input.context.requiredCharacterSources.map(item => [item.sourceId, item]))
+  // Older or customized prompts may omit context variables. Keep participant knowledge
+  // and explicitly pinned references present without duplicating sources already rendered.
+  const missing = [...required.values()].filter(item => !represented.has(item.sourceId)).map(item => normalizeAppManagedPart({
+    id: `character-reference-${item.sourceId}`, sourceId: item.sourceId, role: 'system', sourceKind: 'app-managed', ownership: 'app-managed',
+    name: `Character reference: ${item.title || item.sourceId}`, content: item.content,
+    dynamicVariables: [{ variable: 'context.character_references', sources: [item] }],
+  }))
+  if (!missing.length) return assembled
+  const firstHistory = assembled.parts.findIndex(part => part.sourceKind === 'history' || part.sourceKind === 'current-turn')
+  const index = firstHistory < 0 ? assembled.parts.length : firstHistory
+  return assembleNormalizedRequest([...assembled.parts.slice(0, index), ...missing, ...assembled.parts.slice(index)], { structuredParts: assembled.structuredParts, dynamicSourceDedupe: assembled.dynamicSourceDedupe })
 }
 
 export function appendChatRuntimeMessages(base: NormalizedAssembledRequest, runtimeParts: NormalizedRequestPart[]) {
