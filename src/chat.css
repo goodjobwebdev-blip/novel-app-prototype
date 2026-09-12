@@ -250,3 +250,19 @@
 .note-roles label { display: flex; align-items: center; gap: 8px; }
 .note-roles input[type="checkbox"] { flex: none; width: 16px; height: 16px; min-height: 0; }
 .note-template-types { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
+
+.character-position, .roleplay-participant { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .6rem; padding: .5rem .8rem; border-bottom: 1px solid var(--border); }
+.character-position p { margin: 0; font-size: .85rem; color: var(--muted); }
+.character-chat-setup { display: grid; gap: 1rem; }
+.character-chat-setup label, .chat-image-references label { display: flex; align-items: center; gap: .5rem; padding: .35rem 0; }
+.character-chat-setup label:has(select), .character-chat-setup label:has(input:not([type=checkbox])) { flex-direction: column; align-items: stretch; }
+.character-chat-setup fieldset { max-height: 45vh; overflow: auto; border: 1px solid var(--border); }
+.character-speaker { display: block; margin: .65rem 0 .25rem; color: var(--text); }
+.character-speech { border-left: 3px solid transparent; padding-left: .6rem; }
+.character-speech.speaker-color-0 { border-color: var(--accent); }
+.character-speech.speaker-color-1 { border-color: #ad79c5; }
+.character-speech.speaker-color-2 { border-color: #6a9c84; }
+.character-speech.speaker-color-3 { border-color: #c49164; }
+.character-speech.speaker-color-4 { border-color: #658dc1; }
+.character-speech.speaker-color-5 { border-color: #c07689; }
+.chat-image-references { max-height: 15rem; overflow: auto; margin: .5rem .8rem; font-size: .82rem; }

@@ -1,3 +1,4 @@
+import type { CharacterBoundary } from './character-chat'
 import { loreTypesForTools, type LoreType } from './lore-types'
 import { chatSkillParts, type CapturedChatSkill } from './chat-skills'
 import { brainstormTools } from './chat-brainstorm'
@@ -36,6 +37,7 @@ export const CHAT_TOOL_DEFINITIONS = [...chatWorkspaceTools, ...chatEntityTools,
 
 export type ChatRequestHistoryItem = {
   id?: string
+  characterBoundary?: CharacterBoundary
   role: 'user' | 'assistant'
   content: string
   thoughts?: string
@@ -83,7 +85,8 @@ function source(sourceId: string, title: string, content: string, reason: string
   return content.trim() ? [{ sourceId, title, representation: 'Full', content, reason }] : []
 }
 
-export function chatRequestValues(book: BookPromptValues, context: PreparedContextValues) {
+export const emptyCharacterBook: BookPromptValues = { title: '', series: '', seriesOrder: '', overview: '', genre: '', style: '', pov: '', tense: '', language: '' }
+export function chatRequestValues(book: BookPromptValues, context: PreparedContextValues, restrictedInstructions?: string) {
   const bookValues = bookTemplateValues(book)
   delete bookValues['response.length']
   const storySoFar = context.summaryContext.trim()
@@ -104,11 +107,12 @@ export function chatRequestValues(book: BookPromptValues, context: PreparedConte
     'context.automatic_codex': automaticCodex,
     'context.automatic': automatic,
     'context.additional': '',
-    'chat.workspace_instructions': CHAT_WORKSPACE_INSTRUCTIONS + imageModelInstructions(),
+    'chat.workspace_instructions': restrictedInstructions ?? CHAT_WORKSPACE_INSTRUCTIONS + imageModelInstructions(),
   }
 }
 
 export function assembleChatGenerationRequest(input: {
+  restrictedInstructions?: string
   composition: PromptComposition
   book: BookPromptValues
   context: PreparedContextValues
@@ -117,7 +121,8 @@ export function assembleChatGenerationRequest(input: {
   skills?: CapturedChatSkill[]
   tools?: ChatToolDefinition[]
 }): NormalizedAssembledRequest {
-  const values = chatRequestValues(input.book, input.context)
+  const values = chatRequestValues(input.restrictedInstructions ? emptyCharacterBook : input.book, input.context, input.restrictedInstructions)
+  if (input.restrictedInstructions) values['chat.workspace_instructions'] = input.restrictedInstructions
   const storySources = input.context.storySoFarSources ?? []
   const sceneSources = input.context.currentSceneText.trim()
     ? source(input.context.currentSceneId || 'chat-current-scene', input.context.currentSceneTitle || 'Current scene', input.context.currentSceneText, 'Current Chat story anchor')
@@ -151,8 +156,9 @@ export function assembleChatGenerationRequest(input: {
       'context.additional': dedupe.additional,
     },
     after: [
-      ...chatSkillParts(input.skills),
-      ...(input.context.sceneBeats?.length ? [normalizeAppManagedPart({ id: 'scene-planning-beats', role: 'system', sourceKind: 'app-managed', sourceId: input.context.currentSceneId, name: 'Scene planning beats', ownership: 'app-managed', content: `Planning only, distinct from manuscript facts. Use propose_scene_beat to suggest changes; approval is required.\n${JSON.stringify(input.context.sceneBeats)}` })] : []),
+      ...(input.restrictedInstructions ? [normalizeAppManagedPart({ id: 'character-boundary', role: 'system', sourceKind: 'app-managed', sourceId: 'character-boundary', name: 'Character context boundary', ownership: 'app-managed', content: input.restrictedInstructions })] : []),
+      ...chatSkillParts(input.restrictedInstructions ? [] : input.skills),
+      ...(!input.restrictedInstructions && input.context.sceneBeats?.length ? [normalizeAppManagedPart({ id: 'scene-planning-beats', role: 'system', sourceKind: 'app-managed', sourceId: input.context.currentSceneId, name: 'Scene planning beats', ownership: 'app-managed', content: `Planning only, distinct from manuscript facts. Use propose_scene_beat to suggest changes; approval is required.\n${JSON.stringify(input.context.sceneBeats)}` })] : []),
       ...historyParts,
     ],
     structuredParts: [normalizeStructuredTools(loreTypesForTools(input.tools ?? CHAT_TOOL_DEFINITIONS, input.loreTypes) as unknown as Array<Record<string, unknown>>)],

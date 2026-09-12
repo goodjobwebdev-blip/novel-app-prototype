@@ -36,13 +36,13 @@ function JobResult({ job, chat }: { job: ImageJob; chat: boolean }) {
   if (job.decision === 'discarded') return <p className="image-help">{kind === 'video' ? 'Video' : 'Image'} discarded</p>
   return <div className="image-job-result">{asset ? <ImageAssetPreview asset={asset} /> : <p>{loadError || `Loading ${kind}…`}</p>}<div className="image-actions">{!job.decision && asset && <><button disabled={busy} type="button" onClick={() => { void action(() => decideImageJob(job.id, true)) }}>Keep {kind}</button><button disabled={busy} type="button" onClick={() => { void action(async () => { await decideImageJob(job.id, false); if (!chat) await clearImageQueue([job.id]) }) }}>Discard</button></>}{job.decision === 'kept' && <span>Saved to gallery</span>}{chat && <button disabled={busy} type="button" onClick={() => { void action(() => hideImageFromChat(job.id)) }}><Trash2 size={16} /> Remove from chat</button>}</div>{error && <p role="alert">{error}</p>}</div>
 }
-export default function ImageJobs({ proposalId, messageId }: { proposalId?: string; messageId?: string }) {
+export default function ImageJobs({ proposalId, messageId, direct = false }: { proposalId?: string; messageId?: string; direct?: boolean }) {
   const { data: jobs, error } = useImageQuery(listImageJobs, [], [])
   const [limit, setLimit] = useState(30), [clearing, setClearing] = useState(false)
   const [now, setNow] = useState(Date.now()), [actionError, setActionError] = useState('')
   const active = jobs.some((j) => ['queued', 'running'].includes(j.status))
   useEffect(() => { if (!active) return; const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer) }, [active])
-  const matching = jobs.filter((j) => proposalId ? (j.proposalId === proposalId && j.messageId === messageId && !j.hiddenInChat) : !j.hiddenInQueue)
+  const matching = jobs.filter((j) => direct ? (j.messageId === messageId && Boolean(j.directUserMessageId) && !j.hiddenInChat) : proposalId ? (j.proposalId === proposalId && j.messageId === messageId && !j.hiddenInChat) : !j.hiddenInQueue)
   const visible = matching.filter((j, i) => ['queued', 'running'].includes(j.status) || i >= matching.length - limit)
   const action = (fn: () => Promise<unknown>) => { setActionError(''); void fn().catch((e) => setActionError(e instanceof Error ? e.message : 'Could not update this job.')) }
   const clear = async () => {
@@ -69,26 +69,26 @@ export default function ImageJobs({ proposalId, messageId }: { proposalId?: stri
   ].filter((group) => group.jobs.length)
   const jobCard = (job: ImageJob) => <article className="image-job" key={job.id}>
     <header><strong>{job.modelAlias}</strong><span>{job.status === 'running' ? `Generating · ${Math.max(0, Math.floor((now - (job.startedAt ?? now)) / 1000))} s` : job.status === 'queued' ? `Queued · #${jobs.filter((item) => item.provider === job.provider && item.status === 'queued').findIndex((item) => item.id === job.id) + 1}` : job.status}</span></header>
-    <small>{job.task?.endsWith('video') ? `${job.video?.resolution ?? `${job.size.width} × ${job.size.height}`}${job.video?.duration ? ` · ${job.video.duration} s` : ''}` : `${job.size.width} × ${job.size.height}`}{!proposalId && job.bookTitle ? ` · ${job.bookTitle}` : ''}</small>
-    {!proposalId && <p className="image-prompt-preview">{job.prompt}</p>}
+    <small>{job.task?.endsWith('video') ? `${job.video?.resolution ?? `${job.size.width} × ${job.size.height}`}${job.video?.duration ? ` · ${job.video.duration} s` : ''}` : `${job.size.width} × ${job.size.height}`}{!proposalId && !direct && job.bookTitle ? ` · ${job.bookTitle}` : ''}</small>
+    {!proposalId && !direct && <p className="image-prompt-preview">{job.prompt}</p>}
     {job.error && <p role="alert">{job.error}</p>}
-    {job.status === 'completed' && <JobResult job={job} chat={Boolean(proposalId)} />}
+    {job.status === 'completed' && <JobResult job={job} chat={Boolean(proposalId || direct)} />}
     <div className="image-actions">
       {['queued', 'running'].includes(job.status) && <button type="button" onClick={() => action(() => cancelImageJob(job.id))}>{job.status === 'running' ? 'Stop waiting' : 'Cancel queued image'}</button>}
       {['failed', 'interrupted', 'cancelled'].includes(job.status) && <button type="button" onClick={() => action(() => retryImageJob(job.id))}>{job.providerJobId ? 'Check existing result' : 'Retry as new generation'}</button>}
-      {!proposalId && !['queued', 'running'].includes(job.status) && (job.status !== 'completed' || job.decision || !job.assetId) && <button type="button" disabled={clearing} onClick={() => action(() => clearImageQueue([job.id]))}>Remove from queue</button>}
+      {!proposalId && !direct && !['queued', 'running'].includes(job.status) && (job.status !== 'completed' || job.decision || !job.assetId) && <button type="button" disabled={clearing} onClick={() => action(() => clearImageQueue([job.id]))}>Remove from queue</button>}
     </div>
     {job.status === 'running' && <small>Stopping does not guarantee the provider cancels its charge.</small>}
   </article>
   return <div className="image-jobs">
-    {!proposalId && matching.length > 0 && <div className="image-queue-actions">
+    {!proposalId && !direct && matching.length > 0 && <div className="image-queue-actions">
       <span>{matching.length} {matching.length === 1 ? 'generation' : 'generations'}</span>
       <button type="button" disabled={clearing} onClick={() => { void clear() }}>Clear queue</button>
       <small>Removes jobs from this view. Kept gallery images stay saved.</small>
     </div>}
     {(error || actionError) && <p role="alert">{error || actionError}</p>}
-    {!visible.length && !proposalId && <p className="image-help">Your generation queue is empty.</p>}
-    {proposalId ? <div className="image-job-list">{visible.map(jobCard)}</div> : groups.map((group) => <section className="image-job-group" aria-labelledby={`image-job-group-${group.title.toLowerCase().replace(' ', '-')}`} key={group.title}>
+    {!visible.length && !proposalId && !direct && <p className="image-help">Your generation queue is empty.</p>}
+    {proposalId || direct ? <div className="image-job-list">{visible.map(jobCard)}</div> : groups.map((group) => <section className="image-job-group" aria-labelledby={`image-job-group-${group.title.toLowerCase().replace(' ', '-')}`} key={group.title}>
       <h3 id={`image-job-group-${group.title.toLowerCase().replace(' ', '-')}`}>{group.title}<span>{group.jobs.length}</span></h3>
       <div className="image-job-list">{group.jobs.map(jobCard)}</div>
     </section>)}

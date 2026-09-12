@@ -81,6 +81,7 @@ export type ChatImageProposal = {
   status: 'proposed' | 'accepted' | 'rejected' | 'stale'; createdAt: number
 }
 export type ImageJob = ImageGenerationSpec & {
+  directUserMessageId?: string
   id: string; bookId?: string; bookTitle?: string; chatId?: string; messageId?: string; proposalId?: string; submissionId?: string
   status: 'queued' | 'running' | 'completed' | 'failed' | 'interrupted' | 'cancelled'
   createdAt: number; startedAt?: number; completedAt?: number; error?: string
