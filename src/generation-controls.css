@@ -438,25 +438,29 @@
 .expandable-text-backdrop {
   position: fixed;
   z-index: 200;
-  inset: 0;
+  inset: var(--expanded-viewport-top, 0px) 0 auto;
+  height: var(--expanded-viewport-height, 100dvh);
   padding: max(18px, env(safe-area-inset-top)) 14px max(18px, env(safe-area-inset-bottom));
   background: rgba(8, 9, 8, 0.72);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   display: grid;
   place-items: center;
+  overflow: auto;
 }
 
 .expandable-text-dialog {
   width: min(100%, 720px);
-  max-height: calc(100svh - 36px);
+  height: min(680px, 100%);
+  max-height: 100%;
+  min-height: 0;
   padding: 16px;
   border: 1px solid var(--line);
   border-radius: 18px;
   background: var(--deep);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   gap: 14px;
 }
 
@@ -464,6 +468,7 @@
 .expandable-text-dialog footer {
   display: flex;
   align-items: center;
+  flex: none;
 }
 
 .expandable-text-dialog header {
@@ -477,6 +482,7 @@
 }
 
 .expandable-text-dialog header button {
+  flex: none;
   width: 40px;
   height: 40px;
   padding: 0;
@@ -496,11 +502,13 @@
 
 .expandable-text-dialog textarea {
   width: 100%;
-  min-height: min(52svh, 420px);
-  max-height: calc(100svh - 170px);
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  max-height: none;
   padding: 14px;
   overflow: auto;
-  resize: vertical;
+  resize: none;
   border-radius: 13px;
   line-height: 1.55;
 }
@@ -532,7 +540,7 @@
   min-width: 96px;
   border: 1px solid rgba(245, 226, 185, 0.35);
   background: var(--accent);
-  color: #1a1813;
+  color: var(--on-accent, #1a1813);
 }
 
 .expandable-dictation-start {
@@ -593,10 +601,6 @@
 @media (max-width: 520px) {
   .expandable-text-dialog {
     padding: 13px;
-  }
-
-  .expandable-text-dialog textarea {
-    min-height: 55svh;
   }
 
   .expandable-text-dialog footer {

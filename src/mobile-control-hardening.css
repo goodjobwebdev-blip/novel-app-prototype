@@ -177,7 +177,7 @@ input[type="range"] {
 
 /* On phone-sized composers, stack config controls instead of relying on fixed widths. */
 @media (max-width: 520px) {
-  .functional-chat-composer .chat-config-row {
+  .functional-chat-composer .chat-config-strip > .chat-config-row {
     width: 100%;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -207,4 +207,145 @@ input[type="range"] {
     white-space: normal;
     overflow-wrap: anywhere;
   }
+}
+
+/* Settings are form fields, not the legacy composer's three icon columns. */
+.functional-chat-composer .chat-config-strip > .chat-config-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: .75rem;
+}
+
+.functional-chat-composer .chat-config-row > * {
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  margin: 0;
+}
+
+.functional-chat-composer .chat-config-row > :is(.chat-model-picker, .chat-system-prompt-button, .chat-model-status) {
+  grid-column: 1 / -1;
+}
+
+.functional-chat-composer .chat-config-row :is(.chat-skills, .chat-image-references) {
+  padding: 0;
+  overflow-wrap: anywhere;
+  color: var(--soft);
+  font-size: .82rem;
+}
+
+.functional-chat-composer .chat-config-row summary {
+  min-height: 44px;
+  padding: .5rem 0;
+  cursor: pointer;
+}
+
+.functional-chat-composer .chat-config-row :is(.chat-skills, .chat-image-references) button {
+  width: auto;
+  height: auto;
+  min-height: 40px;
+  margin: 0;
+  padding: .4rem .6rem;
+  border-radius: .5rem;
+}
+
+.functional-chat-composer .chat-system-prompt-button {
+  width: 100%;
+  height: auto;
+  min-height: 44px;
+  padding: .5rem .75rem;
+  border-radius: .65rem;
+}
+
+.functional-chat-composer .chat-system-prompt-button span { display: inline; }
+.functional-chat-composer .chat-context-limit input { width: 100%; }
+.functional-chat-composer .chat-context-limit small { display: block; max-width: none; }
+
+@media (max-width: 720px) {
+  .functional-chat-composer .chat-config-strip > .chat-config-row {
+    grid-template-columns: minmax(0, 1fr);
+    max-height: min(45dvh, 24rem);
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  /* Keep model search inside the scrollable settings when space is limited. */
+  .functional-chat-composer .chat-model-menu {
+    position: static;
+    width: 100%;
+    margin-top: .5rem;
+    box-shadow: none;
+  }
+}
+
+/* Metadata must use UI typography and keep checkbox labels on the same row. */
+.document-metadata.note-roles {
+  margin: 0 0 24px;
+  font: 14px/1.5 var(--input-font-family, sans-serif);
+}
+
+.document-metadata.note-roles label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: none;
+  min-height: 36px;
+}
+
+.document-metadata.note-roles input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  flex: none;
+}
+
+.note-roles > small { padding-left: 28px; }
+
+.lore-types-manager > article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.lore-types-manager > article > span { min-width: 0; overflow-wrap: anywhere; }
+.lore-types-manager > article > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.lore-types-manager > article > label,
+.lore-types-manager > article > div:has(button:nth-child(3)) { grid-column: 1 / -1; }
+.lore-types-manager > article button { min-width: 40px; min-height: 40px; margin: 0; }
+.lore-types-manager button:disabled { opacity: .45; cursor: not-allowed; }
+
+.chat-sidebar .new-character-chat {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  max-width: 100%;
+  margin-bottom: 12px;
+  padding: .5rem .75rem;
+  border: 1px solid var(--line);
+  border-radius: .65rem;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.chat-sidebar .new-character-chat svg { width: 18px; height: 18px; flex: none; }
+.codex-dashboard { display: grid; gap: .65rem; }
+.codex-view-controls { flex-wrap: wrap; }
+
+/* The image form must reserve space for Expand and honor multi-line rows. */
+.image-ui .expandable-text-input > textarea {
+  height: auto;
+  max-height: min(40dvh, 18rem);
+  padding-right: 64px;
+}
+
+.image-ui .expandable-text-input > .expandable-text-trigger {
+  width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
 }

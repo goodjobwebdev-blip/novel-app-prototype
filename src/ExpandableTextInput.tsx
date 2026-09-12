@@ -60,6 +60,7 @@ const ExpandableTextInput = forwardRef<HTMLTextAreaElement, ExpandableTextInputP
   const compactRef = useRef<HTMLTextAreaElement | null>(null)
   const expandedRef = useRef<HTMLTextAreaElement | null>(null)
   const dialogRef = useRef<HTMLElement | null>(null)
+  const backdropRef = useRef<HTMLDivElement | null>(null)
   const cancelDictationRef = useRef<HTMLButtonElement | null>(null)
   const openRef = useRef(false)
   const expandedDictationRef = useRef(false)
@@ -68,6 +69,24 @@ const ExpandableTextInput = forwardRef<HTMLTextAreaElement, ExpandableTextInputP
   const titleId = useId()
   const dictationActive = expandedDictation && ['requesting-permission', 'recording', 'recording-live', 'stopping', 'transcribing', 'finalizing'].includes(dictationStatus)
   const recording = dictationStatus === 'recording' || dictationStatus === 'recording-live'
+
+  useEffect(() => {
+    if (!open) return
+    const viewport = window.visualViewport
+    const resize = () => {
+      backdropRef.current?.style.setProperty('--expanded-viewport-height', `${viewport?.height ?? window.innerHeight}px`)
+      backdropRef.current?.style.setProperty('--expanded-viewport-top', `${viewport?.offsetTop ?? 0}px`)
+    }
+    resize()
+    viewport?.addEventListener('resize', resize)
+    viewport?.addEventListener('scroll', resize)
+    window.addEventListener('resize', resize)
+    return () => {
+      viewport?.removeEventListener('resize', resize)
+      viewport?.removeEventListener('scroll', resize)
+      window.removeEventListener('resize', resize)
+    }
+  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -215,6 +234,7 @@ const ExpandableTextInput = forwardRef<HTMLTextAreaElement, ExpandableTextInputP
     </div>
     {open && createPortal(
       <div
+        ref={backdropRef}
         className="expandable-text-backdrop"
         onPointerDown={(event) => {
           if (event.target === event.currentTarget) closeDialog()
@@ -227,7 +247,7 @@ const ExpandableTextInput = forwardRef<HTMLTextAreaElement, ExpandableTextInputP
               <X aria-hidden="true" />
             </button>
           </header>
-          <textarea ref={expandedRef} value={draft} onChange={(event) => setDraft(event.target.value)} aria-label={`Expanded ${ariaLabel}`} readOnly={textareaProps.readOnly || expandedDictation} disabled={textareaProps.disabled} spellCheck={textareaProps.spellCheck} />
+          <textarea ref={expandedRef} value={draft} onChange={(event) => setDraft(event.target.value)} aria-label={`Expanded ${ariaLabel}`} placeholder={textareaProps.placeholder} maxLength={textareaProps.maxLength} readOnly={textareaProps.readOnly || expandedDictation} disabled={textareaProps.disabled} spellCheck={textareaProps.spellCheck} />
           {error && <p className="expandable-dictation-error" role="alert">{error}</p>}
           <footer>
             {onDictate && (expandedDictation ? <div className="expandable-dictation-status" role="status" aria-live="polite">
