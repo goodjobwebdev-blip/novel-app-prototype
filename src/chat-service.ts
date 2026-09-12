@@ -1,3 +1,4 @@
+import { normalizeThinkingEffort, type ThinkingEffort } from './thinking-effort'
 import type { CharacterBoundary, CharacterChatConfig } from './character-chat'
 import { getEffectiveLoreTypes } from './lore-types-service'
 import { resolveLoreType } from './lore-types'
@@ -37,6 +38,7 @@ export type ChatEntity = ArcEntity & {
   effectiveContextLimit: string
   promptComposition: PromptComposition
   thinking: boolean
+  thinkingEffort: ThinkingEffort
   contextProfile: GenerationContextProfile
   lastMessagePreview?: string
   skillNoteIds?: string[]
@@ -195,15 +197,17 @@ export async function getChat(chatId: string): Promise<ChatEntity | undefined> {
   const compositionNeedsNormalization = !chat.promptComposition || !Array.isArray(chat.promptComposition.predefinedMessages)
   const limitNeedsMigration = typeof chat.effectiveContextLimit !== 'string'
   const roundsNeedMigration = chat.maxModelRounds !== normalizeChatRoundLimit(chat.maxModelRounds)
-  if (!compositionNeedsNormalization && !limitNeedsMigration && !roundsNeedMigration) return chat
+  const effortNeedsMigration = chat.thinkingEffort !== normalizeThinkingEffort(chat.thinkingEffort)
+  if (!compositionNeedsNormalization && !limitNeedsMigration && !roundsNeedMigration && !effortNeedsMigration) return chat
   return chatWriteQueue.run(chatId, () => updateEntityAtomically<ChatEntity>(chatId, (current) => {
     if (current.type !== 'chat') throw new Error('Chat is no longer available.')
     const currentCompositionNeedsNormalization = !current.promptComposition || !Array.isArray(current.promptComposition.predefinedMessages)
     const currentLimitNeedsMigration = typeof current.effectiveContextLimit !== 'string'
-    if (!currentCompositionNeedsNormalization && !currentLimitNeedsMigration && current.maxModelRounds === normalizeChatRoundLimit(current.maxModelRounds)) return current
+    if (!currentCompositionNeedsNormalization && !currentLimitNeedsMigration && current.maxModelRounds === normalizeChatRoundLimit(current.maxModelRounds) && current.thinkingEffort === normalizeThinkingEffort(current.thinkingEffort)) return current
     return {
       ...current,
       maxModelRounds: normalizeChatRoundLimit(current.maxModelRounds),
+      thinkingEffort: normalizeThinkingEffort(current.thinkingEffort),
       promptComposition: normalizePromptComposition(current.promptComposition),
       effectiveContextLimit: currentLimitNeedsMigration ? '' : current.effectiveContextLimit,
     }
@@ -227,7 +231,8 @@ export async function createChat(bookId: string, title = 'New chat'): Promise<Ch
     modelContextLength: settings.chatModel.trim() ? settings.chatModelContextLength : settings.mainModelContextLength,
     effectiveContextLimit: settings.chatModel.trim() ? '' : settings.mainEffectiveContextLimit,
     promptComposition: clonePromptComposition(settings.promptCompositions.assistant),
-    thinking: false,
+    thinking: settings.chatThinkingEffort !== 'default',
+    thinkingEffort: settings.chatThinkingEffort,
     maxModelRounds: normalizeChatRoundLimit(defaults.chatMaxModelRounds),
     skillNoteIds: [],
     contextProfile: profileForNewChat(contextSettings.profiles.chat),
@@ -239,10 +244,11 @@ export async function createChat(bookId: string, title = 'New chat'): Promise<Ch
   return chat
 }
 
-export async function updateChat(chatId: string, patch: Partial<Pick<ChatEntity, 'title' | 'model' | 'modelContextLength' | 'effectiveContextLimit' | 'promptComposition' | 'thinking' | 'contextProfile' | 'lastMessagePreview' | 'maxModelRounds' | 'skillNoteIds' | 'directImageReferenceIds'>>): Promise<ChatEntity> {
+export async function updateChat(chatId: string, patch: Partial<Pick<ChatEntity, 'title' | 'model' | 'modelContextLength' | 'effectiveContextLimit' | 'promptComposition' | 'thinking' | 'thinkingEffort' | 'contextProfile' | 'lastMessagePreview' | 'maxModelRounds' | 'skillNoteIds' | 'directImageReferenceIds'>>): Promise<ChatEntity> {
   if (patch.maxModelRounds !== undefined) validateChatRoundLimit(patch.maxModelRounds)
   const patchSnapshot = {
     ...patch,
+    ...(patch.thinkingEffort !== undefined ? { thinkingEffort: normalizeThinkingEffort(patch.thinkingEffort) } : {}),
     ...(patch.skillNoteIds ? { skillNoteIds: [...new Set(patch.skillNoteIds)] } : {}),
     ...(patch.promptComposition ? { promptComposition: clonePromptComposition(patch.promptComposition) } : {}),
     ...(patch.contextProfile ? { contextProfile: copyProfile(patch.contextProfile) } : {}),

@@ -1,3 +1,4 @@
+import { normalizeThinkingEffort, type ThinkingEffort } from './thinking-effort'
 import { normalizeChatRoundLimit } from './chat-round-limit'
 import type { ProviderProfile } from './provider-profiles'
 import { PROMPT_COMPOSITION_SCHEMA_VERSION, clonePromptComposition, compositionsFromLegacyPrompts, legacyPromptMirror, normalizePromptCompositions, withSystemPrompt, type PromptComposition, type PromptCompositions, type PromptCompositionScope } from './prompt-composition'
@@ -50,6 +51,10 @@ export type AiSettings = {
   provider: AiProvider
   apiKey: string
   baseUrl: string
+  mainThinkingEffort: ThinkingEffort
+  supportThinkingEffort: ThinkingEffort
+  codexThinkingEffort: ThinkingEffort
+  chatThinkingEffort: ThinkingEffort
   mainModel: string
   mainModelContextLength?: number
   mainEffectiveContextLimit: string
@@ -306,6 +311,10 @@ export const initialAiSettings: AiSettings = {
   provider: 'nanogpt',
   apiKey: '',
   baseUrl: 'https://nano-gpt.com/api/v1',
+  mainThinkingEffort: 'default',
+  supportThinkingEffort: 'default',
+  codexThinkingEffort: 'default',
+  chatThinkingEffort: 'default',
   mainModel: '',
   mainEffectiveContextLimit: '',
   supportModel: '',
@@ -440,6 +449,10 @@ export function normalizeAiSettings(value?: StoredAiSettings): AiSettings {
     favorites: Array.isArray(value?.favorites) ? [...value.favorites] : [],
     generationWordDelayMs: normalizeGenerationWordDelay(value?.generationWordDelayMs),
     chatMaxModelRounds: normalizeChatRoundLimit(value?.chatMaxModelRounds),
+    mainThinkingEffort: normalizeThinkingEffort(value?.mainThinkingEffort),
+    supportThinkingEffort: normalizeThinkingEffort(value?.supportThinkingEffort),
+    codexThinkingEffort: normalizeThinkingEffort(value?.codexThinkingEffort),
+    chatThinkingEffort: normalizeThinkingEffort(value?.chatThinkingEffort),
     chatModel: typeof value?.chatModel === 'string' ? value.chatModel : '',
     chatModelContextLength: Number.isFinite(value?.chatModelContextLength) ? value?.chatModelContextLength : undefined,
     mainModelContextLength: Number.isFinite(value?.mainModelContextLength) ? value?.mainModelContextLength : undefined,

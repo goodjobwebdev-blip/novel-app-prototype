@@ -35,7 +35,7 @@ export async function enhanceMediaPrompt(draft: MediaGenerationDraft, capability
   if (!generationContextDiagnostics(model, limit, '', textProviderRequestText({ systemPrompt: '', userMessage: '', messages: request.providerMessages })).fits) throw new Error('The enhancement request exceeds the Support model context limit.')
   onRequest?.({ model, request })
   let output = ''
-  await streamTextProviderCompletion({ provider: settings.provider, task: 'story', apiKey: settings.apiKey, baseUrl: settings.baseUrl, model, systemPrompt: '', userMessage: '', messages: request.providerMessages }, text => { output += text }, signal)
+  await streamTextProviderCompletion({ provider: settings.provider, task: 'story', thinkingEffort: settings.mainThinkingEffort, apiKey: settings.apiKey, baseUrl: settings.baseUrl, model, systemPrompt: '', userMessage: '', messages: request.providerMessages }, text => { output += text }, signal)
   signal.throwIfAborted()
   if (!output.trim() || output.length > 32000) throw new Error('The model returned an empty or oversized prompt. The previous draft was kept.')
   return output.trim()

@@ -202,7 +202,7 @@ export async function generateAutotitleSuggestion(settings: AiSettings, request:
   let output = ''
   await streamTextProviderCompletion({
     provider: settings.provider,
-    task: 'autotitle',
+    task: 'autotitle', thinkingEffort: settings.supportThinkingEffort,
     apiKey: settings.apiKey.trim(),
     baseUrl: settings.baseUrl,
     model: request.model,

@@ -30,5 +30,5 @@ export async function prepareSceneBeatRequest(input: { bookId: string; book: Boo
 export async function generateSceneBeat(input: Parameters<typeof prepareSceneBeatRequest>[0], chunk: (text: string) => void, signal: AbortSignal, onRequest?: (value: RewriteRequestPreview) => void) {
   const { settings, model, request } = await prepareSceneBeatRequest(input, signal)
   onRequest?.({ model, request })
-  await streamTextProviderCompletion({ provider: settings.provider, task: 'story', apiKey: settings.apiKey, baseUrl: settings.baseUrl, model, systemPrompt: '', userMessage: '', messages: request.providerMessages }, chunk, signal)
+  await streamTextProviderCompletion({ provider: settings.provider, task: 'story', thinkingEffort: settings.mainThinkingEffort, apiKey: settings.apiKey, baseUrl: settings.baseUrl, model, systemPrompt: '', userMessage: '', messages: request.providerMessages }, chunk, signal)
 }

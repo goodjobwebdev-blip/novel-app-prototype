@@ -1,3 +1,4 @@
+import type { ThinkingEffort } from './thinking-effort'
 export const FAKE_PROVIDER_MODEL = {
   id: 'fake/test',
   name: 'Fake Test Model',
@@ -35,6 +36,7 @@ export type FakeProviderRequest = {
   messages: FakeProviderMessage[]
   tools?: FakeProviderToolDefinition[]
   thinking?: boolean
+  thinkingEffort?: ThinkingEffort
 }
 
 export type FakeProviderStreamCallbacks = {
@@ -56,6 +58,7 @@ export type FakeProviderTraceEntry = {
   messages: FakeProviderMessage[]
   toolNames: string[]
   thinking: boolean
+  thinkingEffort?: ThinkingEffort
   directives: string[]
   emittedContent: string
   emittedThoughts: string
@@ -325,6 +328,7 @@ export async function streamFakeProvider(
     messages: request.messages.map(cloneMessage),
     toolNames: (request.tools ?? []).map((tool) => tool.function.name),
     thinking: request.thinking === true,
+    thinkingEffort: request.thinking ? request.thinkingEffort : undefined,
     directives: [...parsed.directives],
     emittedContent: '',
     emittedThoughts: '',

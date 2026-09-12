@@ -1,3 +1,4 @@
+import { thinkingRequestParameters, type ThinkingEffort } from './thinking-effort'
 import type { AiProvider } from './ai-settings'
 import { streamFakeProvider } from './fake-provider'
 
@@ -31,6 +32,7 @@ export type ChatCompletionRequest = {
   model: string
   messages: ChatCompletionMessage[]
   thinking: boolean
+  thinkingEffort?: ThinkingEffort
   tools?: ChatToolDefinition[]
 }
 
@@ -152,6 +154,7 @@ export async function streamChatCompletion(
       messages: providerMessages,
       tools: request.tools,
       thinking: request.thinking,
+      thinkingEffort: request.thinkingEffort,
     }, {
       onResponse,
       onContent: (content) => onChunk({ content }),
@@ -170,14 +173,7 @@ export async function streamChatCompletion(
     body.tools = request.tools
     body.tool_choice = 'auto'
   }
-  if (request.thinking && request.provider === 'nanogpt') {
-    body.reasoning = { enabled: true, delta_field: 'reasoning_content' }
-  } else if (request.thinking && request.provider === 'openrouter') {
-    body.reasoning = { enabled: true }
-    body.include_reasoning = true
-  } else if (request.thinking && request.provider === 'compatible') {
-    body.reasoning = { enabled: true }
-  }
+  Object.assign(body, thinkingRequestParameters(request.provider, request.thinking, request.thinkingEffort))
 
   const response = await fetch(completionEndpoint(request.baseUrl), {
     method: 'POST',

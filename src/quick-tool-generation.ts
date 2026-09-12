@@ -45,5 +45,5 @@ export async function prepareQuickToolRequest(capture: QuickToolCapture, instruc
 export async function generateQuickTool(capture: QuickToolCapture, instruction: string, chunk: (text: string) => void, signal: AbortSignal, onRequest?: (value: RewriteRequestPreview) => void) {
   const { settings, model, request } = await prepareQuickToolRequest(capture, instruction, signal)
   onRequest?.({ model, request })
-  await streamTextProviderCompletion({ provider: settings.provider, task: 'story', apiKey: settings.apiKey, baseUrl: settings.baseUrl, model, systemPrompt: '', userMessage: '', messages: request.providerMessages }, chunk, signal)
+  await streamTextProviderCompletion({ provider: settings.provider, task: 'story', thinkingEffort: settings.mainThinkingEffort, apiKey: settings.apiKey, baseUrl: settings.baseUrl, model, systemPrompt: '', userMessage: '', messages: request.providerMessages }, chunk, signal)
 }

@@ -218,3 +218,63 @@ test('actual chat sends capture ordered skill content once across rounds and ref
     assert.doesNotMatch(JSON.stringify(api.calls[2].messages), /Captured skill sentinel/)
   } finally { await act(async () => root.unmount()) }
 })
+
+async function chooseThinkingEffort(value) {
+  const select = document.querySelector('select[aria-label="Chat thinking effort"]')
+  assert.ok(select)
+  await act(async () => { select.value = value; select.dispatchEvent(new dom.window.Event('change', { bubbles: true })) })
+  await settle(() => document.querySelector('select[aria-label="Chat thinking effort"]').value === value)
+}
+
+test('chat effort controls persist across reloads, retain the choice when disabled, and apply to sends and regeneration', async () => {
+  const f = await fixture(8)
+  api.configure('complete')
+  let root = createRoot(document.getElementById('root'))
+  try {
+    await act(async () => root.render(view(f)))
+    await settle(() => Boolean(document.querySelector('select[aria-label="Chat thinking effort"]')))
+    assert.equal(document.querySelector('select[aria-label="Chat thinking effort"]').disabled, true)
+    await act(async () => document.querySelector('.chat-thinking-enabled input').click())
+    await settle(() => !document.querySelector('select[aria-label="Chat thinking effort"]').disabled)
+    await chooseThinkingEffort('high')
+    assert.equal((await chatService.getChat(f.chat.id)).thinkingEffort, 'high')
+    await act(async () => root.unmount())
+    root = createRoot(document.getElementById('root'))
+    await act(async () => root.render(view(f)))
+    await settle(() => document.querySelector('select[aria-label="Chat thinking effort"]')?.value === 'high')
+    await send()
+    await settle(() => api.calls.length === 1 && Boolean(button('Send')))
+    assert.equal(api.calls[0].thinkingEffort, 'high')
+    assert.equal(api.calls[0].thinking, true)
+    await chooseThinkingEffort('low')
+    const regenerate = button('Regenerate')
+    assert.ok(regenerate)
+    await act(async () => regenerate.click())
+    await settle(() => api.calls.length === 2 && Boolean(button('Send')))
+    assert.equal(api.calls[1].thinkingEffort, 'low')
+    await act(async () => document.querySelector('.chat-thinking-enabled input').click())
+    await settle(() => document.querySelector('select[aria-label="Chat thinking effort"]').disabled)
+    assert.equal((await chatService.getChat(f.chat.id)).thinkingEffort, 'low')
+    await send()
+    await settle(() => api.calls.length === 3 && Boolean(button('Send')))
+    assert.equal(api.calls[2].thinking, false)
+  } finally { await act(async () => root.unmount()) }
+})
+
+test('a response snapshots effort across tool rounds; Continue uses the updated chat setting', async () => {
+  const f = await fixture(2)
+  f.chat = await chatService.updateChat(f.chat.id, { thinking: true, thinkingEffort: 'high' })
+  api.configure('tools', async count => { if (count === 1) await chooseThinkingEffort('low') })
+  const root = createRoot(document.getElementById('root'))
+  try {
+    await act(async () => root.render(view(f)))
+    await send()
+    await settle(() => Boolean(button('Continue')) && !button('Continue').disabled)
+    assert.deepEqual(api.calls.map(request => request.thinkingEffort), ['high', 'high'])
+    assert.equal((await chatService.getChat(f.chat.id)).thinkingEffort, 'low')
+    api.setMode('complete')
+    await click('Continue')
+    await settle(() => api.calls.length === 3 && Boolean(button('Send')))
+    assert.equal(api.calls[2].thinkingEffort, 'low')
+  } finally { await act(async () => root.unmount()) }
+})

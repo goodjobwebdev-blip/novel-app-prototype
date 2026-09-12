@@ -1,3 +1,4 @@
+import { thinkingRequestParameters, type ThinkingEffort } from './thinking-effort'
 import { bookTemplateValues, renderPromptTemplate, type BookPromptValues } from './prompt-template'
 import type { NormalizedProviderMessage } from './prompt-composition'
 
@@ -11,6 +12,7 @@ export type StoryPromptValues = {
 }
 
 export type NanoGPTGenerationRequest = {
+  thinkingEffort?: ThinkingEffort
   apiKey: string
   baseUrl: string
   model: string
@@ -209,7 +211,7 @@ export async function streamNanoGPTCompletion(
       model: request.model,
       messages,
       stream: true,
-      reasoning: { enabled: true, delta_field: 'reasoning_content' },
+      ...thinkingRequestParameters('nanogpt', true, request.thinkingEffort),
       stream_options: { include_usage: true },
     }),
     signal,

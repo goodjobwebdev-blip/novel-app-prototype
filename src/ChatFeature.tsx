@@ -1,3 +1,4 @@
+import { THINKING_EFFORT_OPTIONS, normalizeThinkingEffort, type ThinkingEffort } from './thinking-effort'
 import { availableChatTools } from './chat-tool-availability'
 import { captureCharacterFrame, executeCharacterRead, type CharacterFrame, type CharacterBoundary } from './character-chat'
 import { queueRequestedImage } from './chat-direct-images'
@@ -372,12 +373,11 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     }
   }
 
-  async function setThinking(value: boolean) {
+  async function setThinking(value: boolean, effort?: ThinkingEffort) {
     if (!chat || !isCurrentChat(chat)) return
     const sourceChat = chat
-    applyIfCurrentChat(sourceChat, () => setChat({ ...sourceChat, thinking: value }))
     try {
-      const updated = await updateChat(sourceChat.id, { thinking: value })
+      const updated = await updateChat(sourceChat.id, { thinking: value, ...(effort !== undefined ? { thinkingEffort: effort } : {}) })
       if (updated.bookId === sourceChat.bookId) applyIfCurrentChat(sourceChat, () => setChat(updated))
     } catch (error) {
       onToast(error instanceof Error ? error.message : 'Could not save the thinking setting.')
@@ -720,6 +720,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           model: activeChat.model,
           messages: finalizedRequest.messages,
           thinking: activeChat.thinking,
+          thinkingEffort: activeChat.thinkingEffort,
           tools: finalizedRequest.tools,
         }, (chunk) => {
           if (!generationOwnsCurrentUi(owner)) return
@@ -1221,9 +1222,14 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     {!followOutput && <button className="chat-follow-output" type="button" onClick={jumpToLatest}>↓ New content</button>}
 
     <Composer strip={<details className="chat-config-strip">
-        <summary><span>Generation settings</span><small>Model · context · system prompt</small><ChevronDown aria-hidden="true" /></summary>
+        <summary><span>Generation settings</span><small>Thinking: {chat.thinking ? THINKING_EFFORT_OPTIONS.find(option => option.value === normalizeThinkingEffort(chat.thinkingEffort))?.label : 'Provider default'} · model · context</small><ChevronDown aria-hidden="true" /></summary>
         <div className="chat-config-row">
           <ChatModelPicker value={chat.model} models={sortedModels} onChange={(modelId) => { void changeModel(modelId) }} />
+          <div className="chat-thinking-settings">
+            <label className="chat-thinking-enabled"><input type="checkbox" checked={chat.thinking} onChange={event => { void setThinking(event.target.checked) }} /><span>Customize thinking</span></label>
+            <label><span>Thinking effort</span><select aria-label="Chat thinking effort" value={normalizeThinkingEffort(chat.thinkingEffort)} disabled={!chat.thinking} onChange={event => { void setThinking(true, normalizeThinkingEffort(event.target.value)) }}>{THINKING_EFFORT_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+            <small>Higher effort may take longer and use more tokens. Supported levels depend on the model. Changes apply to the next response.</small>
+          </div>
           {!chat.character && <ChatSkillsPicker key={chat.id} chat={chat} onChange={updated => applyIfCurrentChat(chat, () => setChat(updated))} />}
           <ChatImageReferences chat={chat} disabled={generating} onChange={updated => applyIfCurrentChat(chat, () => setChat(updated))} />
           <label className="chat-round-limit"><span>Max model rounds per response</span><select aria-label="Max model rounds per response" value={normalizeChatRoundLimit(chat.maxModelRounds)} onChange={event => { const captured = chat; void updateChat(captured.id, { maxModelRounds: Number(event.target.value) }).then(updated => applyIfCurrentChat(captured, () => setChat(updated))).catch(error => onToast(error.message)) }}>{Array.from({ length: 32 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</select><small>One model request is one round, even with several tool calls. Changes apply to the next run.</small></label>
