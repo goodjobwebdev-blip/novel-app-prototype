@@ -1,3 +1,4 @@
+import { applyAuthorPlanOperation, authorPlanning } from './author-planning'
 import type { CodexCheckpoint, TimelineSummary } from './codex-timeline'
 import { ensureLoreTypesWithDb, resolveLoreType } from './lore-types.ts'
 import { installSeriesCodexHooks, synchronizeCodexEntity, synchronizeSeriesCodex, seriesTransaction, detachSeriesCodex } from './series-codex.ts'
@@ -1119,6 +1120,13 @@ export async function applyChatManagementChange(bookId: string, entityId: string
     const entity = await db.table('entities').get(entityId) as ArcEntity | undefined
     if (!entity) throw new Error('The proposed item no longer exists.')
     const now = Date.now()
+    if (operation.kind === 'author_plan') {
+      if (entity.type !== 'book' || entity.id !== bookId) throw new Error('The Book is no longer available.')
+      const entities = await db.table('entities').where('bookId').equals(bookId).toArray()
+      const planning = applyAuthorPlanOperation(authorPlanning(entity as BookEntity), operation, bookId, entities)
+      await db.table('entities').update(bookId, { authorPlanning: planning, updatedAt: now })
+      return
+    }
     if (operation.kind === 'metadata') {
       if (entity.type !== 'book' || entity.id !== bookId) throw new Error('The Book is no longer available.')
       const current = metadataValues(entity as BookEntity)

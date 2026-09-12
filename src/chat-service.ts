@@ -62,7 +62,7 @@ export type ChatCodexCreationProposal = ProposalDraft & {
 }
 export type ChatEntityActionProposal = ProposalDraft & {
   id: string
-  action: 'create_note' | 'rename' | 'delete' | 'set_codex_category' | 'update_metadata' | 'update_dependency' | 'update_triggers' | 'regenerate_summary'
+  action: 'create_note' | 'rename' | 'delete' | 'set_codex_category' | 'update_metadata' | 'update_dependency' | 'update_triggers' | 'regenerate_summary' | 'update_author_plan'
   entityId?: string
   entityType: 'book' | 'note' | 'codexEntry' | 'act' | 'chapter' | 'scene'
   operation?: import('./chat-management-schema').ChatManagementOperation

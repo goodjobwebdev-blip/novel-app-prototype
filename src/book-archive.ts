@@ -1,3 +1,4 @@
+import { validateAuthorPlanning, type AuthorPlanning } from './author-planning'
 import { BUILTIN_LORE_TYPES, storedLoreTypes } from './lore-types.ts'
 import { detachedCodex } from './series-codex.ts'
 import type { CodexEntryEntity } from './persistence'
@@ -10,7 +11,7 @@ const MAGIC = 'ARCBK001'
 const MAX_MANIFEST = 64 * 1024 * 1024
 const MAX_ARCHIVE = 2_000_000_000
 const TYPES = new Set(['book', 'series', 'act', 'chapter', 'scene', 'note', 'codexEntry', 'summary', 'chat', 'chatMessage', 'settings'])
-const REF_KEYS = new Set(['jobId', 'directUserMessageId', 'sceneId', 'anchorBookId', 'typeId', 'ownerId', 'bookId', 'entryId', 'parentId', 'seriesId', 'sourceEntityId', 'entityId', 'sourceId', 'targetId', 'primaryImageId', 'assetId', 'messageId', 'chatId', 'lastOpenedSceneId', 'sourceParentId', 'targetParentId', 'beforeId'])
+const REF_KEYS = new Set(['goalId', 'linkedEntityId', 'jobId', 'directUserMessageId', 'sceneId', 'anchorBookId', 'typeId', 'ownerId', 'bookId', 'entryId', 'parentId', 'seriesId', 'sourceEntityId', 'entityId', 'sourceId', 'targetId', 'primaryImageId', 'assetId', 'messageId', 'chatId', 'lastOpenedSceneId', 'sourceParentId', 'targetParentId', 'beforeId'])
 const REF_ARRAYS = new Set(['compatibleLoreTypeIds', 'skillNoteIds', 'structuralIds', 'noteIds', 'codexEntryIds', 'sourceIds'])
 
 type StoredGalleryImage = Omit<GalleryImage, 'image' | 'thumbnail'> & { imageSize: number; imageType: string; thumbnailSize: number; thumbnailType: string }
@@ -147,6 +148,7 @@ export async function decodeBookArchive(file: Blob): Promise<BookArchiveData> {
   }
   valid(offset === file.size)
   for (const entity of entities) if (entity.primaryImageId) valid(illustrations.some((image) => image.id === entity.primaryImageId && image.entryId === entity.id))
+  for (const entity of entities) if (entity.type === 'book' && entity.authorPlanning) validateAuthorPlanning(entity.authorPlanning as AuthorPlanning, entity.id, entities, entity.authorPlanning as AuthorPlanning)
   return { entities, snapshots: manifest.snapshots, dependencies: manifest.dependencies, illustrations, galleryImages, imageJobs }
 }
 
@@ -168,6 +170,7 @@ export function copyBookArchive(data: BookArchiveData, newId = () => crypto.rand
   }
   for (const type of BUILTIN_LORE_TYPES) ids.set(type.id, type.id)
   for (const entity of data.entities) if (Array.isArray(entity.loreTypes)) for (const type of entity.loreTypes) if (type && typeof type.id === 'string' && !ids.has(type.id)) ids.set(type.id, `lore-${newId()}`)
+  for (const entity of data.entities) if (entity.type === 'book' && entity.authorPlanning) { const planning = entity.authorPlanning as AuthorPlanning; for (const item of [...planning.goals, ...planning.tasks]) ids.set(item.id, `planning-${newId()}`) }
   for (const asset of data.galleryImages ?? []) ids.set(asset.id, `generated-${newId()}`)
   for (const job of data.imageJobs ?? []) ids.set(job.id, `image-job-${newId()}`)
   for (const image of data.illustrations) ids.set(image.id, `image-${newId()}`)
@@ -183,6 +186,7 @@ export function copyBookArchive(data: BookArchiveData, newId = () => crypto.rand
       if (value instanceof Blob) return value
       return Object.fromEntries(Object.entries(value).map(([name, item]) => [name, remap(item, name, depth + 1)]))
     }
+    if (typeof value === 'string' && (key === 'linkedEntityId' || key === 'goalId')) return ids.get(value) ?? (value ? `unavailable-${newId()}` : '')
     if (typeof value === 'string' && key === 'content') return remapDocumentBlocks(value, ids)
     if (typeof value === 'string' && (REF_KEYS.has(key) || key === 'id')) return ids.get(value) ?? (key === 'id' ? value : '')
     return value
