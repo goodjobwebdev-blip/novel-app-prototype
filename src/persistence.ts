@@ -1,3 +1,4 @@
+import { documentBlocks, encodeDocumentBlock } from './document-projection.ts'
 import { PROSE_PROJECTION_VERSION } from './document-projection.ts'
 import { sceneWritingValues, validateSceneWritingPatch, type SceneWritingOverrides, type SceneWritingField } from './scene-writing'
 import type { GalleryImage, ImageJob } from './image-generation-types'
@@ -1084,6 +1085,17 @@ export async function applyChatManagementChange(bookId: string, entityId: string
         if (series?.type !== 'series') throw new Error('The selected Series no longer exists.')
       } else if (patch.seriesOrder) throw new Error('A standalone Book cannot have a Series order.')
       await db.table('entities').update(entityId, { ...patch, ...(!seriesId ? { seriesOrder: '' } : {}), updatedAt: now })
+      return
+    }
+    if (operation.kind === 'beat') {
+      if (entity.type !== 'scene' || entity.bookId !== bookId || typeof operation.text !== 'string' || !operation.text.trim() || !['create', 'edit'].includes(operation.action)) throw new Error('Provide a nonempty beat for a Scene in this Book.')
+      const content = String(entity.content ?? '')
+      const matches = documentBlocks(content).filter((item) => item.block.id === operation.beatId)
+      if (operation.action === 'create' ? matches.length > 0 : matches.length !== 1 || matches[0].block.type !== 'beat' || matches[0].block.text !== operation.before) throw new Error('The scene beat changed. Read the Scene and propose the change again.')
+      const block = encodeDocumentBlock({ id: operation.beatId, type: 'beat', text: operation.text.trim() })
+      const next = operation.action === 'create' ? `${content}\n\n${block}\n\n` : content.slice(0, matches[0].from) + block + content.slice(matches[0].to)
+      await db.table('entities').update(entityId, { content: next, updatedAt: now })
+      await touchAncestors(db, String(entity.parentId), now)
       return
     }
     if (operation.kind === 'scene_metadata') {

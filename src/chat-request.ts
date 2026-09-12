@@ -12,6 +12,7 @@ import {
   clonePromptComposition,
   dedupeDynamicSources,
   normalizeRuntimeMessagePart,
+  normalizeAppManagedPart,
   normalizeStructuredTools,
   type DynamicContextSource,
   type NormalizedAssembledRequest,
@@ -138,7 +139,10 @@ export function assembleChatGenerationRequest(input: {
       'context.automatic': dedupe.automatic,
       'context.additional': dedupe.additional,
     },
-    after: historyParts,
+    after: [
+      ...(input.context.sceneBeats?.length ? [normalizeAppManagedPart({ id: 'scene-planning-beats', role: 'system', sourceKind: 'app-managed', sourceId: input.context.currentSceneId, name: 'Scene planning beats', ownership: 'app-managed', content: `Planning only, distinct from manuscript facts. Use propose_scene_beat to suggest changes; approval is required.\n${JSON.stringify(input.context.sceneBeats)}` })] : []),
+      ...historyParts,
+    ],
     structuredParts: [normalizeStructuredTools((input.tools ?? CHAT_TOOL_DEFINITIONS) as unknown as Array<Record<string, unknown>>)],
     dynamicSourceDedupe: dedupe.decisions,
   })

@@ -26,7 +26,7 @@ test('Chat assembly owns predefined configuration, chronological history, curren
   assert.match(request, /assembleCompositionRequest\(\{[\s\S]*composition: clonePromptComposition\(input\.composition\)/)
   assert.match(request, /sourceKind: index === latestUserIndex \? 'current-turn' : 'history'/)
   assert.match(request, /ownership: index === latestUserIndex \? 'current-turn' : 'conversation'/)
-  assert.match(request, /after: historyParts/)
+  assert.match(request, /after: \[[\s\S]*\.\.\.historyParts/)
   assert.match(request, /structuredParts: \[normalizeStructuredTools/)
   assert.match(feature, /const finalizedRequest = finalizeChatProviderRequest\(normalizedRequest\)/)
 })

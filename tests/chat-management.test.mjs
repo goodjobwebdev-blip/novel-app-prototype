@@ -57,7 +57,7 @@ async function readProposal(message, proposal) { return (await db.getEntity(mess
 test('all tools have unique names; metadata reads and approved patches cover all fields', async () => {
   const names = CHAT_TOOL_DEFINITIONS.map((t) => t.function.name)
   assert.equal(new Set(names).size, names.length)
-  assert.equal(names.length, 26)
+  assert.equal(names.length, 27)
   assert.ok(names.includes('propose_image_generation'))
   const f = await fixture()
   const series = await db.createSeries('Test series ' + crypto.randomUUID())

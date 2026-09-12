@@ -30,6 +30,8 @@ export type EditorSelectionSnapshot = { revision: number; document: string; from
 
 type MarkdownEditorProps = {
   bookId?: string
+  showBeats?: boolean
+  onBeatAction?: (item: LocatedBlock, action: 'generate' | 'rebind') => void
   onEditBlock?: (item: LocatedBlock) => void
   value: string
   onChange: (value: string) => void
@@ -42,6 +44,7 @@ type MarkdownEditorProps = {
 }
 
 export type MarkdownEditorHandle = {
+  placeCursor: (position: number) => boolean
   captureSelection: (from?: number, to?: number) => EditorSelectionSnapshot | null
   replaceRange: (snapshot: EditorSelectionSnapshot, insert: string, allowProtected?: boolean) => boolean
   captureGenerationContext: () => GenerationContext | null
@@ -455,13 +458,16 @@ function runHistoryCommand(view: EditorView | null, command: (target: EditorView
 }
 
 const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor(
-  { value, onChange, bookId = '', onEditBlock, ariaLabel = 'Markdown editor', className = '', readOnly = false, mentionTerms = [], onMentionClick, onHistoryChange },
+  { value, onChange, bookId = '', onEditBlock, showBeats = true, onBeatAction, ariaLabel = 'Markdown editor', className = '', readOnly = false, mentionTerms = [], onMentionClick, onHistoryChange },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<EditorView | null>(null)
   const documentRevisionRef = useRef(0)
   const onChangeRef = useRef(onChange)
+  const blockCompartmentRef = useRef(new Compartment())
+  const onBeatActionRef = useRef(onBeatAction)
+  onBeatActionRef.current = onBeatAction
   const onEditBlockRef = useRef(onEditBlock)
   onEditBlockRef.current = onEditBlock
   const onHistoryChangeRef = useRef(onHistoryChange)
@@ -480,7 +486,13 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     viewRef.current?.dispatch({ effects: setMentionTerms.of(mentionTerms) })
   }, [mentionTerms])
 
+  useEffect(() => { viewRef.current?.dispatch({ effects: blockCompartmentRef.current.reconfigure(editorBlockPreview(bookId, (item) => onEditBlockRef.current?.(item), readOnly, showBeats, (item, action) => onBeatActionRef.current?.(item, action))) }) }, [bookId, readOnly, showBeats])
   useImperativeHandle(ref, () => ({
+    placeCursor: (position) => {
+      const view = viewRef.current
+      if (!view || activeGenerationRef.current || activeDictationRef.current || position < 0 || position > view.state.doc.length) return false
+      view.dispatch({ selection: { anchor: position }, scrollIntoView: true }); view.focus(); return true
+    },
     captureSelection: (from, to) => {
       const view = viewRef.current
       if (!view) return null
@@ -625,7 +637,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       extensions: [
         markdown({ base: markdownLanguage }),
         markdownTablePreview,
-        editorBlockPreview(bookId, (item) => onEditBlockRef.current?.(item), readOnly),
+        blockCompartmentRef.current.of(editorBlockPreview(bookId, (item) => onEditBlockRef.current?.(item), readOnly, showBeats, (item, action) => onBeatActionRef.current?.(item, action))),
         EditorState.readOnly.of(readOnly),
         editableCompartmentRef.current.of(EditorView.editable.of(!readOnly)),
         history(),

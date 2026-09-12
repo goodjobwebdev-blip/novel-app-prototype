@@ -1,6 +1,6 @@
 import { markdownLanguage } from '@codemirror/lang-markdown'
 
-export type DocumentBlock = { id: string; type: 'image' | 'comment'; assetId?: string; alt?: string; caption?: string; text?: string }
+export type DocumentBlock = { id: string; type: 'image' | 'comment' | 'beat'; assetId?: string; alt?: string; caption?: string; text?: string }
 export type SourceRange = { from: number; to: number }
 export type LocatedBlock = SourceRange & { block: DocumentBlock }
 export function encodeDocumentBlock(block: DocumentBlock): string {
@@ -11,7 +11,7 @@ export function documentBlocks(source: string): LocatedBlock[] {
   for (const match of source.matchAll(/<!--arc:block\s+([\s\S]*?)-->/g)) {
     try {
       const block = JSON.parse(match[1])
-      if (typeof block.id !== 'string' || !['image', 'comment'].includes(block.type)) continue
+      if (typeof block.id !== 'string' || !['image', 'comment', 'beat'].includes(block.type)) continue
       if (['assetId', 'alt', 'caption', 'text'].some((key) => block[key] !== undefined && typeof block[key] !== 'string')) continue
       blocks.push({ from: match.index, to: match.index + match[0].length, block })
     } catch { /* Malformed blocks stay editable as source, and remain private in projections. */ }
@@ -73,5 +73,8 @@ export function remapDocumentBlocks(source: string, ids: Map<string, string>) {
     if (block.assetId) block.assetId = ids.get(block.assetId) ?? block.assetId
     result = result.slice(0, item.from) + encodeDocumentBlock(block) + result.slice(item.to)
   }
+  result = result.replace(/<!--arc:passage\s+([\s\S]*?)-->/g, (raw, payload) => {
+    try { const value = JSON.parse(payload); return `<!--arc:passage ${JSON.stringify({ ...value, beatId: ids.get(value.beatId) ?? value.beatId })}-->` } catch { return raw }
+  })
   return result
 }

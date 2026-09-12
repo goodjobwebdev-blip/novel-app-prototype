@@ -1,3 +1,9 @@
+import { loadUiSettings, UI_SETTINGS_EVENT } from './ui-settings'
+import { sceneBeats, prepareAutomaticBeat, beatPassage, bindBeatPassage, passageMarkers, passageMarker } from './scene-beats'
+import { generateSceneBeat } from './scene-beat-generation'
+import ProseRewriteDialog from './ProseRewriteDialog'
+import type { EditorSelectionSnapshot } from './MarkdownEditor'
+import type { LocatedBlock } from './document-projection.ts'
 import { proseText } from './document-projection.ts'
 import EditorBlocks, { type BlockEditRequest } from './EditorBlocks'
 import SceneWritingSettings from './SceneWritingSettings'
@@ -232,6 +238,9 @@ export default function Workspace() {
   const [generationDetails, setGenerationDetails] = useState<GenerationDetails | null>(null)
   const [generationDetailsOpen, setGenerationDetailsOpen] = useState(false)
   const [blockEditRequest, setBlockEditRequest] = useState<BlockEditRequest | null>(null)
+  const [showBeats, setShowBeats] = useState(() => loadUiSettings().sceneBeats !== false)
+  const [beatRewrite, setBeatRewrite] = useState<{ documentId: string; snapshot: EditorSelectionSnapshot; instruction: string } | null>(null)
+  useEffect(() => { const sync = () => setShowBeats(loadUiSettings().sceneBeats !== false); window.addEventListener(UI_SETTINGS_EVENT, sync); window.addEventListener('storage', sync); return () => { window.removeEventListener(UI_SETTINGS_EVENT, sync); window.removeEventListener('storage', sync) } }, [])
   const [toast, setToast] = useState<ToastMessage | null>(null)
   const [lastGeneratedPassage, setLastGeneratedPassage] = useState('')
   const [sttState, setSttState] = useState<SttState>(() => getSttState())
@@ -1220,6 +1229,30 @@ export default function Workspace() {
     setGenerationDetails((current) => current ? { ...current, status, finishedAt } : current)
   }
 
+  function actOnBeat(item: LocatedBlock, action: 'generate' | 'rebind') {
+    const editor = editorRef.current
+    const selected = editor?.captureSelection()
+    if (!editor || !selected || activeDocument?.type !== 'scene' || generationActive) return
+    try {
+      if (!item.block.text?.trim()) throw new Error('Write a scene beat before generating prose.')
+      if (action === 'rebind') {
+        const next = bindBeatPassage(selected.document, item.block.id, selected.from, selected.to)
+        if (!editor.replaceRange({ ...selected, from: 0, to: selected.document.length, text: selected.document }, next, true)) throw new Error('The scene changed. Select the intended passage again.')
+        showToast('The selected prose is now linked to this beat.'); return
+      }
+      let passage = beatPassage(selected.document, item.block.id)
+      if (!passage && !passageMarkers(selected.document).some((marker) => marker.beatId === item.block.id)) {
+        const insertion = `\n${passageMarker(item.block.id, 'start')}\n\n${passageMarker(item.block.id, 'end')}\n`
+        const at = editor.captureSelection(item.to, item.to)!
+        if (!editor.replaceRange(at, insertion, true)) throw new Error('The scene changed. Reopen the beat.')
+        passage = beatPassage(editor.captureSelection()!.document, item.block.id)
+      }
+      if (!passage) throw new Error('This beat’s passage cannot be identified safely. Select its prose and use Bind selected prose.')
+      const snapshot = editor.captureSelection(passage.from, passage.to)!
+      setBeatRewrite({ documentId: activeDocument.id, snapshot, instruction: item.block.text || '' })
+    } catch (e) { showToast(e instanceof Error ? e.message : 'Could not open this beat.') }
+  }
+
   async function runGeneration(mode: 'generate' | 'regenerate') {
     if (generationAbortRef.current) return
 
@@ -1245,6 +1278,7 @@ export default function Workspace() {
       showToast('This book’s AI settings could not be loaded. Open Book settings and try again.')
       return
     }
+    if (activeDocumentIdRef.current !== activeDocument.id || currentBookIdRef.current !== currentBook.id) return
     if (settings.provider !== 'nanogpt' && settings.provider !== 'fake') {
       showToast('Text generation currently supports NanoGPT or Fake (testing) only. Choose one in Book settings.')
       return
@@ -1275,6 +1309,17 @@ export default function Workspace() {
     }
 
     const editor = editorRef.current
+    if (!isCodex && mode === 'generate' && showBeats && arcPrompt.trim() && editor) {
+      const snapshot = editor.captureSelection()
+      if (!snapshot) return
+      try {
+        const prepared = prepareAutomaticBeat(snapshot.document, snapshot.from, arcPrompt, `beat-${crypto.randomUUID()}`)
+        if (prepared) {
+          if (prepared.source !== snapshot.document && !editor.replaceRange({ ...snapshot, from: 0, to: snapshot.document.length, text: snapshot.document }, prepared.source, true)) throw new Error('The scene changed before the beat could be saved.')
+          editor.placeCursor(prepared.position)
+        }
+      } catch (e) { showToast(e instanceof Error ? e.message : 'Could not save this beat.'); return }
+    }
     const context = editor?.beginGeneration(mode, 'append')
     if (!editor || !context) {
       showToast(mode === 'regenerate'
@@ -1395,6 +1440,7 @@ export default function Workspace() {
       }
     }
 
+    if (activeDocumentIdRef.current !== activeDocument.id || currentBookIdRef.current !== currentBook.id) { editor.finishGeneration('cancelled'); return }
     const controller = new AbortController()
     generationAbortRef.current = controller
     startGenerationActivity({
@@ -1596,6 +1642,11 @@ export default function Workspace() {
   }
 
   function regenerate() {
+    if (activeDocument?.type === 'scene' && showBeats) {
+      const selected = editorRef.current?.captureSelection()
+      const beat = selected && sceneBeats(selected.document).find((item) => { const passage = beatPassage(selected.document, item.block.id); return passage && selected.from >= passage.from && selected.from <= passage.to })
+      if (beat) { actOnBeat(beat, 'generate'); return }
+    }
     if (activeDocument?.type === 'summary') void runSummaryGeneration()
     else void runGeneration('regenerate')
   }
@@ -1775,6 +1826,7 @@ export default function Workspace() {
       {generationDetailsOpen && generationDetails && <GenerationDetailsDialog details={generationDetails} elapsedSeconds={generationElapsedSeconds} onClose={() => setGenerationDetailsOpen(false)} />}
       {loreMention && <LoreMentionPopover state={loreMention} onClose={() => setLoreMention(null)} onSelect={(entry) => { void loadLoreMentionPreview(loreMention.id, entry) }} onOpen={(entryId) => { void openLoreMentionEntry(entryId) }} />}
       {autotitleOverlay}
+      {beatRewrite && currentBook && activeDocument?.type === 'scene' && beatRewrite.documentId === activeDocument.id && <ProseRewriteDialog key={`${activeDocument.id}-${beatRewrite.snapshot.revision}`} title="Regenerate scene beat" original={beatRewrite.snapshot.text} instruction={beatRewrite.instruction} instructionReadOnly autoStart generate={(instruction, chunk, signal, onRequest) => generateSceneBeat({ bookId: currentBook.id, book: toBookPromptValues(currentBook, seriesList), scene: activeDocument, source: beatRewrite.snapshot.document, from: beatRewrite.snapshot.from, to: beatRewrite.snapshot.to, instruction }, chunk, signal, onRequest)} apply={(text) => Boolean(editorRef.current?.replaceRange(beatRewrite.snapshot, `\n\n${text.trim()}\n\n`))} close={() => setBeatRewrite(null)} />}
 
       {screen === 'editor' ? <article className="story-editor">
         <small className="page-number">{pageLabel}</small><p className="document-path">{documentPath || 'No document selected'}</p>
@@ -1787,8 +1839,8 @@ export default function Workspace() {
         {activeDocument?.type === 'codexEntry' && <div className={`document-metadata ${activeCodexArchived ? 'archived' : ''}`}><label><span>Category</span><select disabled={activeCodexArchived} value={activeDocument.category} onChange={(event) => { void changeCodexCategory(event.target.value) }}><option>Character</option><option>Place</option><option>Object</option><option>Event</option><option>Group</option><option>Other</option></select></label>{!activeCodexArchived && <label className="codex-summary-preference"><input type="checkbox" checked={activeDocument.preferSummaryForContext === true} onChange={(event) => { void changeCodexSummaryPreference(event.target.checked) }} /><span><strong>Prefer summary for AI context</strong><small>{codexSummaryPolicyText(activeDocument, summaryStates[activeDocument.id] ?? 'missing')}</small></span></label>}{!activeCodexArchived && <label className="codex-trigger-editor"><span><strong>Auto include when text contains</strong></span><textarea value={codexTriggerDraft} onChange={(event) => setCodexTriggerDraft(event.target.value)} onBlur={() => { void saveCodexTriggers() }} placeholder="One literal trigger per line" /><small>One name, alias, phrase, or #tag per line. New entries start with their title; removing it keeps it removed, and renaming the entry does not rewrite triggers.</small></label>}{activeCodexArchived && <p className="archived-document-note"><Archive aria-hidden="true" /><span><strong>Archived lore</strong><small>Readable here, but excluded from AI context, Chat discovery, and normal Codex search until restored.</small></span></p>}</div>}
         {activeDocument?.type === 'codexEntry' && <CodexDependenciesMetadata key={`dependencies-${activeDocument.id}`} source={activeDocument} entries={codexEntries} edges={codexDependencies} readOnly={activeCodexArchived} onAdd={(targetId) => addCodexDependency(activeDocument.id, targetId)} onUpdate={changeCodexDependency} onRemove={deleteCodexDependency} onOpen={(entryId) => { void loadDocument(entryId) }} />}
         {activeDocument?.type === 'summary' && summaryContextIndicator && <div className="summary-context-indicator">{summaryContextIndicator}</div>}
-        {activeDocument && currentBook && ['scene', 'note', 'codexEntry'].includes(activeDocument.type) && !activeCodexArchived && <EditorBlocks key={activeDocument.id} bookId={currentBook.id} editor={editorRef} disabled={generationActive} editRequest={blockEditRequest?.documentId === activeDocument.id && blockEditRequest.snapshot.document === storyMarkdown ? blockEditRequest : null} />}
-        {activeDocument ? <MarkdownEditor key={`${activeDocument.id}-${editorRevision}`} ref={editorRef} bookId={currentBook?.id} onEditBlock={(item) => { const snapshot = editorRef.current?.captureSelection(item.from, item.to); if (snapshot) setBlockEditRequest({ documentId: activeDocument.id, item, snapshot }) }} value={storyMarkdown} onChange={handleStoryChange} onHistoryChange={setEditorHistory} ariaLabel={`${activeDocument.title} Markdown editor`} readOnly={activeCodexArchived || activeSummarySourceArchived} mentionTerms={activeDocument.type === 'scene' ? codexMentionIndex : []} onMentionClick={activeDocument.type === 'scene' ? openLoreMention : undefined} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No document selected</strong><p>Choose a Scene, Note, Codex entry, or Summary from the book workspace.</p><button type="button" onClick={() => setRightOpen(true)}>Open Book Workspace</button></div>}
+        {activeDocument && currentBook && ['scene', 'note', 'codexEntry'].includes(activeDocument.type) && !activeCodexArchived && <EditorBlocks key={activeDocument.id} bookId={currentBook.id} editor={editorRef} disabled={generationActive} onEditRequestHandled={() => setBlockEditRequest(null)} showBeats={showBeats && activeDocument.type === 'scene'} editRequest={blockEditRequest?.documentId === activeDocument.id && blockEditRequest.snapshot.document === storyMarkdown ? blockEditRequest : null} />}
+        {activeDocument ? <MarkdownEditor key={`${activeDocument.id}-${editorRevision}`} ref={editorRef} bookId={currentBook?.id} showBeats={showBeats} onBeatAction={actOnBeat} onEditBlock={(item) => { const snapshot = editorRef.current?.captureSelection(item.from, item.to); if (snapshot) setBlockEditRequest({ documentId: activeDocument.id, item, snapshot }) }} value={storyMarkdown} onChange={handleStoryChange} onHistoryChange={setEditorHistory} ariaLabel={`${activeDocument.title} Markdown editor`} readOnly={activeCodexArchived || activeSummarySourceArchived} mentionTerms={activeDocument.type === 'scene' ? codexMentionIndex : []} onMentionClick={activeDocument.type === 'scene' ? openLoreMention : undefined} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No document selected</strong><p>Choose a Scene, Note, Codex entry, or Summary from the book workspace.</p><button type="button" onClick={() => setRightOpen(true)}>Open Book Workspace</button></div>}
       </article> : currentBook ? <ChatView bookId={currentBook.id} chatId={activeChatId} bookPromptValues={toBookPromptValues(currentBook, seriesList)} currentSceneId={activeSceneId} onChatChange={openChat} onToast={showToast} /> : <section className="conversation chat-empty"><MessageCircle aria-hidden="true" /><p>Open a book before starting a chat.</p></section>}
 
 

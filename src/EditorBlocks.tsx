@@ -1,3 +1,4 @@
+import { passageMarkers } from './scene-beats'
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import ExpandableTextInput from './ExpandableTextInput'
@@ -9,8 +10,8 @@ import { prepareIllustration, checkStorageHeadroom } from './illustration-image'
 import type { GalleryImage } from './image-generation-types'
 
 export type BlockEditRequest = { documentId: string; item: LocatedBlock; snapshot: EditorSelectionSnapshot }
-export default function EditorBlocks({ bookId, editor, disabled, editRequest }: {
-  bookId: string; editor: RefObject<MarkdownEditorHandle | null>; disabled: boolean; editRequest: BlockEditRequest | null
+export default function EditorBlocks({ bookId, editor, disabled, editRequest, showBeats = false, onEditRequestHandled }: {
+  onEditRequestHandled?: () => void; showBeats?: boolean; bookId: string; editor: RefObject<MarkdownEditorHandle | null>; disabled: boolean; editRequest: BlockEditRequest | null
 }) {
   const [draft, setDraft] = useState<{ block: DocumentBlock; snapshot: EditorSelectionSnapshot; existing: boolean } | null>(null)
   const [images, setImages] = useState<GalleryImage[]>([])
@@ -23,7 +24,7 @@ export default function EditorBlocks({ bookId, editor, disabled, editRequest }: 
     dialog.current?.querySelector<HTMLElement>('textarea, input, select, button')?.focus()
     return () => { if (previous?.isConnected) previous.focus() }
   }, [Boolean(draft)])
-  useEffect(() => { if (editRequest) { setDraft({ block: { ...editRequest.item.block }, snapshot: editRequest.snapshot, existing: true }); setError('') } }, [editRequest])
+  useEffect(() => { if (editRequest) { setDraft({ block: { ...editRequest.item.block }, snapshot: editRequest.snapshot, existing: true }); setError(''); onEditRequestHandled?.() } }, [editRequest])
   useEffect(() => {
     if (draft?.block.type !== 'image') return
     let current = true
@@ -40,17 +41,24 @@ export default function EditorBlocks({ bookId, editor, disabled, editRequest }: 
   }
   const apply = (remove = false) => {
     if (!draft) return
+    if (remove && draft.block.type === 'beat') {
+      let content = draft.snapshot.document
+      const ranges = [{ from: draft.snapshot.from, to: draft.snapshot.to }, ...passageMarkers(content).filter((marker) => marker.beatId === draft.block.id)]
+      for (const range of ranges.sort((a, b) => b.from - a.from)) content = content.slice(0, range.from) + content.slice(range.to)
+      if (!editor.current?.replaceRange({ ...draft.snapshot, from: 0, to: draft.snapshot.document.length, text: draft.snapshot.document }, content, true)) { setError('The document changed. Reopen the beat.'); return }
+      setDraft(null); return
+    }
     const value = remove ? '' : encodeDocumentBlock(draft.block)
     const insert = draft.existing || remove ? value : `\n\n${value}\n\n`
     if (!editor.current?.replaceRange(draft.snapshot, insert, true)) { setError('The document changed. Close this panel and reopen the block to try again.'); return }
     setDraft(null)
   }
   return <>
-    <div className="editor-block-toolbar"><button type="button" disabled={disabled} onClick={() => start('image')}>Insert image</button><button type="button" disabled={disabled} onClick={() => start('comment')}>Private comment</button>{error && !draft && <span role="alert">{error}</span>}</div>
+    <div className="editor-block-toolbar"><button type="button" disabled={disabled} onClick={() => start('image')}>Insert image</button><button type="button" disabled={disabled} onClick={() => start('comment')}>Private comment</button>{showBeats && <button type="button" disabled={disabled} onClick={() => start('beat')}>Scene beat</button>}{error && !draft && <span role="alert">{error}</span>}</div>
     {draft && createPortal(<div className="editor-block-backdrop"><section ref={dialog} role="dialog" aria-modal="true" aria-labelledby="editor-block-title" className="editor-block-dialog" onKeyDown={(event) => { if (event.key === 'Escape' && !busy) setDraft(null); if (event.key === 'Tab') { const controls = Array.from(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)') ?? []); const first = controls[0], last = controls.at(-1); if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() } } }}>
-      <header><h2 id="editor-block-title">{draft.existing ? 'Edit' : 'Insert'} {draft.block.type === 'image' ? 'image' : 'private comment'}</h2><button type="button" disabled={busy} onClick={() => setDraft(null)} aria-label="Close block editor">×</button></header>
-      <p>This block stays in your book and backups. It is excluded from AI requests and read aloud.</p>
-      {draft.block.type === 'comment' ? <ExpandableTextInput autoFocus value={draft.block.text || ''} onChange={(text) => patch({ text })} aria-label="Private comment" dialogTitle="Edit private comment" /> : <>
+      <header><h2 id="editor-block-title">{draft.existing ? 'Edit' : 'Insert'} {draft.block.type === 'image' ? 'image' : draft.block.type === 'beat' ? 'scene beat' : 'private comment'}</h2><button type="button" disabled={busy} onClick={() => setDraft(null)} aria-label="Close block editor">×</button></header>
+      <p>{draft.block.type === 'beat' ? 'Planning visible to Chat. Used as the instruction when generating this beat, and excluded from manuscript context and read aloud.' : 'This block stays in your book and backups. It is excluded from AI requests and read aloud.'}</p>
+      {draft.block.type !== 'image' ? <ExpandableTextInput autoFocus value={draft.block.text || ''} onChange={(text) => patch({ text })} aria-label={draft.block.type === 'beat' ? 'Scene beat' : 'Private comment'} dialogTitle={draft.block.type === 'beat' ? 'Edit scene beat' : 'Edit private comment'} /> : <>
         <label>Saved image<select value={draft.block.assetId || ''} disabled={busy} onChange={async (event) => {
           const asset = images.find((image) => image.id === event.target.value)
           if (!asset) { patch({ assetId: '' }); return }
@@ -76,7 +84,7 @@ export default function EditorBlocks({ bookId, editor, disabled, editRequest }: 
         <label>Caption<input value={draft.block.caption || ''} onChange={(event) => patch({ caption: event.target.value })} /></label>
       </>}
       {error && <p role="alert">{error}</p>}
-      <footer>{draft.existing && <button type="button" disabled={busy || disabled} onClick={() => apply(true)}>Remove block</button>}<button type="button" disabled={busy} onClick={() => setDraft(null)}>Cancel</button><button type="button" disabled={busy || disabled || (draft.block.type === 'image' && !draft.block.assetId)} onClick={() => apply()}>{busy ? 'Saving image…' : 'Apply'}</button></footer>
+      <footer>{draft.existing && <button type="button" disabled={busy || disabled} onClick={() => apply(true)}>Remove block</button>}<button type="button" disabled={busy} onClick={() => setDraft(null)}>Cancel</button><button type="button" disabled={busy || disabled || (draft.block.type === 'image' && !draft.block.assetId) || (draft.block.type === 'beat' && !draft.block.text?.trim())} onClick={() => apply()}>{busy ? 'Saving image…' : 'Apply'}</button></footer>
     </section></div>, document.body)}
   </>
 }

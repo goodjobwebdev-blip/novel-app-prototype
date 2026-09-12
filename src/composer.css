@@ -38,3 +38,7 @@
 .editor-block-dialog input, .editor-block-dialog select { min-width: 0; width: 100%; }
 .composer-shell .generation-actions .generation-primary { display: inline-flex; width: auto; min-width: 48px; height: 48px; padding: 0 15px; align-items: center; justify-content: center; gap: 7px; margin: 0; }
 @media (max-width: 560px) { .composer-shell .generation-actions .generation-primary { width: 48px; padding: 0; } }
+.editor-block-beat { border-left: 3px solid var(--accent); }
+.editor-block-beat button { margin-right: .4rem; margin-top: .4rem; }
+.prose-rewrite-dialog { width: min(100%, 780px); }
+.rewrite-original { font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 25dvh; overflow: auto; color: var(--soft); }

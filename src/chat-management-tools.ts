@@ -1,3 +1,4 @@
+import { sceneBeats } from './scene-beats'
 import { proseEntities } from './document-projection.ts'
 import { sceneWritingFields, sceneWritingLabels, sceneWritingValues, validateSceneWritingPatch, resolveSceneWriting } from './scene-writing'
 import type { ChatToolCall, ChatToolDefinition } from './chat-api'
@@ -25,6 +26,7 @@ export const entitySearchProperties = {
 export const chatManagementTools: ChatToolDefinition[] = [
   tool('read_book_metadata', 'Read all current Book metadata and available Series IDs/titles before proposing metadata changes.', {}),
   tool('propose_book_metadata_update', 'Propose changes to any Book metadata fields. Only supplied fields change; empty strings clear optional fields. seriesId must identify an existing Series, or be empty for standalone. Requires approval.', { changes: { type: 'object', properties: Object.fromEntries(bookMetadataFields.map((field) => [field, string])), additionalProperties: false }, summary: string }, ['changes']),
+  tool('propose_scene_beat', 'Propose creating a planning beat at the end of a Scene or editing an existing beat by beat_id returned by read_entity. This changes planning only after approval; it never generates or replaces prose.', { ...entityId, beat_id: string, text: string, summary: string }, ['entity_id', 'text']),
   tool('read_scene_settings', 'Read explicit scene writing overrides and effective settings with their origin.', entityId, ['entity_id']),
   tool('propose_scene_settings_update', 'Propose scene POV, tense, writingStyle or language overrides. Empty strings restore live inheritance from the Book. Requires approval.', { ...entityId, changes: { type: 'object', properties: Object.fromEntries(sceneWritingFields.map((field) => [field, string])), additionalProperties: false }, summary: string }, ['entity_id', 'changes']),
   tool('list_entities', 'List Scenes, Chapters, Acts, Notes and Codex entries without a search term. Results are paginated; use next_offset until null.', entitySearchProperties),
@@ -72,6 +74,15 @@ export async function executeChatManagementTool(bookId: string, call: ChatToolCa
       if (patch.seriesOrder && !(patch.seriesId ?? current.seriesId)) throw new Error('Choose a Series before setting its book order.')
       const before = Object.fromEntries(Object.keys(patch).map((key) => [key, current[key as keyof typeof current]]))
       item = proposal(book, 'update_metadata', { kind: 'metadata', patch, before }, args, Object.entries(patch).map(([field, after]) => ({ field: bookMetadataLabels[field as keyof typeof bookMetadataLabels], before: field === 'seriesId' ? series.find((s) => s.id === before[field])?.title ?? 'Standalone' : before[field], after: field === 'seriesId' ? series.find((s) => s.id === after)?.title ?? 'Standalone' : after })))
+    } else if (name === 'propose_scene_beat') {
+      const entry = await getEntity(String(args.entity_id ?? ''))
+      if (!entry || entry.type !== 'scene' || entry.bookId !== bookId) throw new Error('Choose a Scene in this Book.')
+      if (typeof args.text !== 'string' || !args.text.trim()) throw new Error('Provide nonempty planning text.')
+      const existing = args.beat_id ? sceneBeats(String(entry.content ?? '')).filter((item) => item.block.id === args.beat_id) : []
+      if (args.beat_id && existing.length !== 1) throw new Error('The beat is unavailable. Read the Scene again.')
+      const before = existing[0]?.block.text
+      const operation: ChatManagementOperation = { kind: 'beat', action: args.beat_id ? 'edit' : 'create', beatId: existing[0]?.block.id ?? `beat-${crypto.randomUUID()}`, text: args.text.trim(), before }
+      item = proposal(entry, 'update_metadata', operation, args, [{ field: 'Scene beat (planning)', before: before ?? 'No beat', after: operation.text }])
     } else if (name === 'read_scene_settings' || name === 'propose_scene_settings_update') {
       const entry = await getEntity(String(args.entity_id ?? ''))
       if (!entry || entry.type !== 'scene' || entry.bookId !== bookId) throw new Error('This Scene is unavailable in this Book.')

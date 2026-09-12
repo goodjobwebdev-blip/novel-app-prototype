@@ -148,11 +148,11 @@ function ThemeEditor({ theme, onChange, onApply, onCancel }: { theme: CustomUiTh
   </section>
 }
 
-const appearanceSections = [['theme', 'Theme'], ['typography', 'Typography'], ['customization', 'Customization']] as const
+const appearanceSections = [['theme', 'Theme'], ['typography', 'Typography'], ['editor', 'Editor'], ['customization', 'Customization']] as const
 
 function UiSettingsPanel() {
   const [settings, setSettings] = useState<UiSettings>(() => pendingSettings ?? loadUiSettings())
-  const [section, setSection] = useState<'theme' | 'typography' | 'customization'>('theme')
+  const [section, setSection] = useState<'theme' | 'typography' | 'editor' | 'customization'>('theme')
   const [saveError, setSaveError] = useState(Boolean(pendingSettings))
   const [draft, setDraft] = useState<CustomUiTheme | null>(pendingTheme)
   const [deleted, setDeleted] = useState<{ theme: CustomUiTheme; wasActive: boolean } | null>(null)
@@ -212,6 +212,7 @@ function UiSettingsPanel() {
     {saveError && <p className="ui-save-error" role="alert">Changes could not be saved on this device. They are kept here for retry; a reload will use the last saved appearance.</p>}
     <div className="ui-appearance-tools"><span className="ui-scope-summary">All books on this device · {saveError ? 'Not saved' : 'Saved automatically'}</span><button type="button" className="ui-safe-reset" onClick={resetTheme}>Reset to readable theme</button></div>
     <SettingsSectionTabs tabs={appearanceSections.map(([tab, label]) => [tab, tab === 'customization' && draft ? `${label} · Draft` : label] as const)} active={section} onChange={setSection} idPrefix="appearance" label="Appearance sections" />
+    <section hidden={section !== 'editor'} role="tabpanel" id="appearance-panel-editor" aria-labelledby="appearance-tab-editor" className="settings-card"><h2>Editor</h2><label><input type="checkbox" checked={settings.sceneBeats !== false} onChange={(event) => commit((current) => ({ ...current, sceneBeats: event.target.checked }))} /> Scene beats</label><p>Show planning beats and save nonempty generation instructions above their prose. Turning this off hides beats and stops automatic capture; stored beats remain in the book.</p></section>
     <div hidden={section !== 'typography'} role="tabpanel" id="appearance-panel-typography" aria-labelledby="appearance-tab-typography">
     <TypographySection onReset={() => commit(current => ({ ...current, editor: { ...defaultUiSettings.editor } }))} number="01" title="Main editor" description="Typography for Scenes, Notes, Codex entries, and summaries." value={settings.editor} onChange={(editor) => commit((current) => ({ ...current, editor }))} />
     <TypographySection onReset={() => commit(current => ({ ...current, inputs: { ...defaultUiSettings.inputs } }))} number="02" title="Expandable inputs" description="Typography for scalable drawer and chat/context text inputs." value={settings.inputs} onChange={(inputs) => commit((current) => ({ ...current, inputs }))} />
