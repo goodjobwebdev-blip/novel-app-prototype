@@ -1,3 +1,4 @@
+import { sceneBeats } from './scene-beats'
 import { proseText, protectedRanges, rangeTouchesProtected } from './document-projection.ts'
 import type { ChatToolCall, ChatToolDefinition } from './chat-api'
 import { searchBookEntities } from './chat-search'
@@ -233,6 +234,7 @@ export async function executeChatWorkspaceTool(bookId: string, call: ChatToolCal
           category: entity.type === 'codexEntry' ? String(entity.category ?? 'Other') : undefined,
           updatedAt: entity.updatedAt,
           content: proseText(String(entity.content ?? '')),
+          planningBlocks: entity.type === 'scene' ? sceneBeats(String(entity.content ?? '')).map(({ block }) => ({ type: 'scene_beat', id: block.id, text: block.text || '' })) : [],
           ...dependencyMetadata,
         },
       }) }

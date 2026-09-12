@@ -1,3 +1,4 @@
+import { sceneBeats } from './scene-beats'
 import { proseText, proseEntities } from './document-projection.ts'
 import { getBookContextSettings, isCodexEntryArchived, listCodexDependencies, listEntitiesByBook, type ArcEntity, type CodexEntryEntity, type GenerationContextProfile, type GenerationContextType, type StructuralEntity, type SummaryEntity } from './persistence'
 import { automaticCodexMatches, type CodexTriggerSceneMatch } from './codex-trigger-service'
@@ -8,6 +9,7 @@ import type { DynamicContextSource } from './prompt-composition'
 export type PreparedAutomaticCodex = { entryId: string; title: string; category: string; representation: 'Full entry' | 'Summary'; fallbackReason?: string; source: 'trigger' | 'dependency'; matches: CodexTriggerSceneMatch[]; dependencyPath?: Array<{ entryId: string; title: string }> }
 
 export type PreparedContextValues = {
+  sceneBeats?: Array<{ type: 'scene_beat'; sceneId: string; id: string; text: string }>
   currentSceneId: string
   currentSceneText: string
   currentSceneTitle: string
@@ -251,6 +253,7 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
       reason: 'Current Codex target is represented through entry variables',
     }] : []
   return {
+    sceneBeats: options.type === 'chat' ? sceneBeats(String(rawEntities.find((entity) => entity.id === anchorSceneId)?.content ?? '')).map(({ block }) => ({ type: 'scene_beat', sceneId: anchorSceneId || '', id: block.id, text: block.text || '' })) : undefined,
     currentSceneId: currentScene?.id ?? '',
     currentSceneText: liveCurrentText,
     currentSceneTitle: currentScene?.title ?? '',

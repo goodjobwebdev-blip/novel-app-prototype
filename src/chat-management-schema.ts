@@ -5,6 +5,7 @@ export const bookMetadataFields = ['title', 'seriesId', 'seriesOrder', 'overview
 export const bookMetadataLabels: Record<keyof BookMetadata, string> = { title: 'Title', seriesId: 'Series', seriesOrder: 'Book in series', overview: 'Overview', genre: 'Genre', writingStyle: 'Writing style', pointOfView: 'Point of view', tense: 'Tense', language: 'Language' }
 export type MetadataPatch = Partial<BookMetadata>
 export type ChatManagementOperation =
+  | { kind: 'beat'; action: 'create' | 'edit'; beatId: string; text: string; before?: string }
   | { kind: 'scene_metadata'; patch: SceneWritingOverrides; before: SceneWritingOverrides }
   | { kind: 'metadata'; patch: MetadataPatch; before: MetadataPatch }
   | { kind: 'triggers'; triggers: string[]; before: string[] }

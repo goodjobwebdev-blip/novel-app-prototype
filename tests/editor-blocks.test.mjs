@@ -46,3 +46,26 @@ test('private block widgets preserve source, apply edits atomically, undo and re
   assert.equal(document.querySelectorAll('.editor-block-comment').length, 1)
   await act(async () => root.unmount())
 })
+
+test('beat visibility preserves source and history; replacement affects only bound prose and is undoable', async () => {
+  const { prepareAutomaticBeat, beatPassage } = await import('../src/scene-beats.ts')
+  const prepared = prepareAutomaticBeat('Before.\n\nAfter.', 9, 'Open the door.', 'beat-one')
+  const source = prepared.source.slice(0, prepared.position) + 'Old passage.' + prepared.source.slice(prepared.position)
+  const root = createRoot(document.getElementById('root')), ref = React.createRef()
+  const props = { ref, value: source, bookId: 'book-1', onChange: () => {} }
+  await act(async () => root.render(React.createElement(MarkdownEditor, { ...props, showBeats: true })))
+  assert.equal(document.querySelectorAll('.editor-block-beat').length, 1)
+  await act(async () => root.render(React.createElement(MarkdownEditor, { ...props, showBeats: false })))
+  assert.equal(document.querySelectorAll('.editor-block-beat').length, 0)
+  assert.equal(ref.current.captureSelection().document, source)
+  await act(async () => root.render(React.createElement(MarkdownEditor, { ...props, showBeats: true })))
+  const passage = beatPassage(source, 'beat-one')
+  const snapshot = ref.current.captureSelection(passage.from, passage.to)
+  await act(async () => assert.equal(ref.current.replaceRange(snapshot, '\n\nNew passage.\n\n'), true))
+  const changed = ref.current.captureSelection().document
+  assert.equal(changed, source.slice(0, passage.from) + '\n\nNew passage.\n\n' + source.slice(passage.to))
+  await act(async () => assert.equal(ref.current.undo(), true))
+  assert.equal(ref.current.captureSelection().document, source)
+  assert.equal(ref.current.replaceRange(snapshot, 'Stale preview after undo'), false)
+  await act(async () => root.unmount())
+})

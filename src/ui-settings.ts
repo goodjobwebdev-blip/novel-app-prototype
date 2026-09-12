@@ -29,6 +29,7 @@ export type CustomUiTheme = {
 }
 
 export type UiSettings = {
+  sceneBeats?: boolean
   editor: UiTypography
   inputs: UiTypography
   activeThemeId: string
@@ -149,6 +150,7 @@ export const builtInThemes: BuiltInTheme[] = [
 ]
 
 export const defaultUiSettings: UiSettings = {
+  sceneBeats: true,
   editor: { fontFamily: 'Literata', fontSize: 19, lineHeight: 1.78, fontWeight: 400 },
   inputs: { fontFamily: 'Inter', fontSize: 15, lineHeight: 1.55, fontWeight: 400 },
   activeThemeId: 'very-dark',
@@ -229,6 +231,7 @@ export function loadUiSettings(): UiSettings {
       ? stored.activeThemeId
       : defaultUiSettings.activeThemeId
     return {
+      sceneBeats: stored.sceneBeats !== false,
       editor: sanitizeTypography(stored.editor, defaultUiSettings.editor),
       inputs: sanitizeTypography(stored.inputs, defaultUiSettings.inputs),
       activeThemeId,
@@ -241,6 +244,7 @@ export function loadUiSettings(): UiSettings {
 
 export function saveUiSettings(settings: UiSettings) {
   const next: UiSettings = {
+    sceneBeats: settings.sceneBeats !== false,
     editor: sanitizeTypography(settings.editor, defaultUiSettings.editor),
     inputs: sanitizeTypography(settings.inputs, defaultUiSettings.inputs),
     activeThemeId: settings.activeThemeId,
