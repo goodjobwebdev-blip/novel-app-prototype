@@ -10,7 +10,7 @@ const MAGIC = 'ARCBK001'
 const MAX_MANIFEST = 64 * 1024 * 1024
 const MAX_ARCHIVE = 2_000_000_000
 const TYPES = new Set(['book', 'series', 'act', 'chapter', 'scene', 'note', 'codexEntry', 'summary', 'chat', 'chatMessage', 'settings'])
-const REF_KEYS = new Set(['sceneId', 'anchorBookId', 'typeId', 'ownerId', 'bookId', 'entryId', 'parentId', 'seriesId', 'sourceEntityId', 'entityId', 'sourceId', 'targetId', 'primaryImageId', 'assetId', 'messageId', 'chatId', 'lastOpenedSceneId', 'sourceParentId', 'targetParentId', 'beforeId'])
+const REF_KEYS = new Set(['jobId', 'directUserMessageId', 'sceneId', 'anchorBookId', 'typeId', 'ownerId', 'bookId', 'entryId', 'parentId', 'seriesId', 'sourceEntityId', 'entityId', 'sourceId', 'targetId', 'primaryImageId', 'assetId', 'messageId', 'chatId', 'lastOpenedSceneId', 'sourceParentId', 'targetParentId', 'beforeId'])
 const REF_ARRAYS = new Set(['compatibleLoreTypeIds', 'skillNoteIds', 'structuralIds', 'noteIds', 'codexEntryIds', 'sourceIds'])
 
 type StoredGalleryImage = Omit<GalleryImage, 'image' | 'thumbnail'> & { imageSize: number; imageType: string; thumbnailSize: number; thumbnailType: string }
@@ -177,6 +177,7 @@ export function copyBookArchive(data: BookArchiveData, newId = () => crypto.rand
     if (depth > 80) throw new Error('This backup contains excessively nested data.')
     if (Array.isArray(value) && key === 'compatibleLoreTypeIds') return value.map(id => ids.get(id) ?? `missing-type-${id}`)
     if (Array.isArray(value) && key === 'skillNoteIds') return value.map(id => ids.get(id) ?? `missing-skill-${id}`)
+    if (Array.isArray(value) && key === 'directImageReferenceIds') return value.map(id => typeof id === 'string' && id.startsWith('codex:') ? (ids.has(id.slice(6)) ? `codex:${ids.get(id.slice(6))}` : '') : ids.get(id)).filter(Boolean)
     if (Array.isArray(value)) return REF_ARRAYS.has(key) ? value.map((id) => ids.get(id)).filter(Boolean) : value.map((item) => remap(item, '', depth + 1))
     if (value && typeof value === 'object') {
       if (value instanceof Blob) return value

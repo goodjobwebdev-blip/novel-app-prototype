@@ -1,3 +1,9 @@
+import { availableChatTools } from './chat-tool-availability'
+import { captureCharacterFrame, executeCharacterRead, type CharacterFrame, type CharacterBoundary } from './character-chat'
+import { queueRequestedImage } from './chat-direct-images'
+import { ChatImageReferences, CharacterChatSetup, CharacterPosition } from './CharacterChatControls'
+import CharacterMessage from './CharacterMessage'
+import ImageJobs from './ImageResults'
 import { executeCodexCutoffRead } from './chat-codex-cutoff'
 import type { LoreType } from './lore-types'
 import ChatSkillsPicker from './ChatSkillsPicker'
@@ -90,7 +96,7 @@ import { applyChatOutlineAction, chatOutlineToolNames, executeChatOutlineTool, r
 import {
   appendChatRuntimeMessages,
   assembleChatGenerationRequest,
-  chatRequestValues,
+  chatRequestValues, emptyCharacterBook,
   chatWorkspaceInstructionsWarning,
   CHAT_TOOL_DEFINITIONS,
   finalizeChatProviderRequest,
@@ -136,6 +142,8 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   const [modelStatus, setModelStatus] = useState('')
   const [promptOpen, setPromptOpen] = useState(false)
   const [compositionDraft, setCompositionDraft] = useState<PromptComposition>({ systemPrompt: '', predefinedMessages: [] })
+  const [previewCharacter, setPreviewCharacter] = useState<CharacterFrame>()
+  const [promptPreviewError, setPromptPreviewError] = useState('')
   const [promptPreviewTypes, setPromptPreviewTypes] = useState<LoreType[]>([])
   const [promptPreviewSkills, setPromptPreviewSkills] = useState<CapturedChatSkill[]>([])
   const [promptPreviewContext, setPromptPreviewContext] = useState<Awaited<ReturnType<typeof buildContextValues>> | null>(null)
@@ -282,8 +290,9 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       setPromptPreviewContext(null)
       return () => { cancelled = true }
     }
-    prepareChatSkillContext(chat, currentSceneId || undefined).then(({ context, skills, loreTypes }) => { if (!cancelled && isCurrentChat(chat)) { setPromptPreviewContext(context); setPromptPreviewSkills(skills); setPromptPreviewTypes(loreTypes) } })
-      .catch(() => { if (!cancelled) setPromptPreviewContext(null) })
+    setPromptPreviewError('')
+    ;(async () => { if (chat.character) { const frame = await captureCharacterFrame(chat, messages); return { context: frame.context, skills: [] as CapturedChatSkill[], loreTypes: [] as LoreType[], frame } } return { ...(await prepareChatSkillContext(chat, currentSceneId || undefined)), frame: undefined } })().then(({ context, skills, loreTypes, frame }) => { if (!cancelled && isCurrentChat(chat)) { setPromptPreviewContext(context); setPromptPreviewSkills(skills); setPromptPreviewTypes(loreTypes); setPreviewCharacter(frame) } })
+      .catch(error => { if (!cancelled) { setPromptPreviewContext(null); setPreviewCharacter(undefined); setPromptPreviewError(error.message) } })
     return () => { cancelled = true }
   }, [promptOpen, chat?.id, chat?.updatedAt, currentSceneId])
 
@@ -426,6 +435,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     settings: Awaited<ReturnType<typeof getChatBookAiSettings>>
     context: Awaited<ReturnType<typeof buildContextValues>>
     skills: CapturedChatSkill[]
+    character?: CharacterFrame
     loreTypes: LoreType[]
   }
 
@@ -491,7 +501,8 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       skills: prepared.skills,
       loreTypes: prepared.loreTypes,
       history,
-      tools: CHAT_TOOL_DEFINITIONS,
+      restrictedInstructions: prepared.character?.instructions,
+      tools: availableChatTools(Boolean(activeChat.character), history),
     })
   }
 
@@ -515,21 +526,23 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       .flatMap((template) => promptTemplateDiagnostics(template, 'assistant'))
       .find((diagnostic) => diagnostic.severity === 'error')
     if (templateError) throw new Error(`Fix the invalid Chat composition: ${templateError.message}`)
-    const instructionsWarning = chatWorkspaceInstructionsWarning(activeChat.promptComposition)
+    const instructionsWarning = activeChat.character ? '' : chatWorkspaceInstructionsWarning(activeChat.promptComposition)
     if (instructionsWarning) onToast(instructionsWarning)
 
+    let character: CharacterFrame | undefined
     let loreTypes: LoreType[]
     let skills: CapturedChatSkill[]
     let context: Awaited<ReturnType<typeof buildContextValues>>
     try {
-      ;({ context, skills, loreTypes } = await prepareChatSkillContext(activeChat, currentSceneId || undefined))
+      if (activeChat.character) { character = await captureCharacterFrame(activeChat, history); context = character.context; skills = []; loreTypes = [] }
+      else ({ context, skills, loreTypes } = await prepareChatSkillContext(activeChat, currentSceneId || undefined))
     } catch (error) {
       assertGenerationOwnerCurrent(owner, activeChat)
       throw new Error(error instanceof Error ? error.message : 'Chat context could not be prepared.')
     }
     assertGenerationOwnerCurrent(owner, activeChat)
 
-    const prepared = { settings, context, skills, loreTypes }
+    const prepared = { settings, context, skills, loreTypes, character }
     const normalizedRequest = buildNormalizedRequest(activeChat, history, prepared)
     const finalizedRequest = finalizeChatProviderRequest(normalizedRequest)
     const diagnostics = generationContextDiagnostics(activeChat.model, activeChat.modelContextLength, activeChat.effectiveContextLimit, finalizedRequest.diagnosticText)
@@ -576,6 +589,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     const responseId = crypto.randomUUID()
     let roundNumber = 0
     let toolActivity: string[] = []
+    let capturedBoundary: CharacterBoundary | undefined
 
     async function ensureSourceHistoryStillCurrent() {
       const durableHistory = await listChatMessages(sourceBookId, activeChat.id)
@@ -596,7 +610,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       if (!roundContent && !roundThoughts && !hasWorkspaceProposal && !toolActivity.length && status === 'complete') return null
       lastRoundMessage = await createChatMessage(activeChat, 'assistant', roundContent, {
         thoughts: roundThoughts || undefined,
-        status, responseId, roundNumber, toolActivity,
+        status, responseId, roundNumber, toolActivity, characterBoundary: capturedBoundary,
         imageGenerations: extras.imageGenerations,
         brainstorms: extras.brainstorms,
         documentEdits: extras.documentEdits,
@@ -669,6 +683,8 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     try {
       const prepared = preparedInputs ?? await prepareAssistantGeneration(activeChat, requestHistory, owner)
       assertGenerationOwnerCurrent(owner, activeChat)
+      if (activeChat.character && continuation) { prepared.character = await captureCharacterFrame(activeChat, history); prepared.context = prepared.character.context }
+      capturedBoundary = prepared.character?.boundary
       const { settings } = prepared
       const baseRequest = buildNormalizedRequest(activeChat, requestHistory, prepared)
       const runtimeParts: NormalizedRequestPart[] = continuation ? structuredClone(continuation.runtimeParts) : []
@@ -736,6 +752,14 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           for (const call of result.toolCalls) {
             controller.signal.throwIfAborted()
             toolActivity.push(call.function.name)
+            const enabled = finalizedRequest.tools?.some(tool => tool.function.name === call.function.name)
+            if (!enabled) { runtimeParts.push(normalizeRuntimeMessagePart({ id: `chat-tool-${responseId}-${call.id}`, sourceKind: 'app-managed', ownership: 'app-managed', name: call.function.name, message: { role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: false, error: 'This tool is unavailable for this request.' }) } })); continue }
+            if (call.function.name === 'generate_requested_image') {
+              let content: string
+              try { const args = JSON.parse(call.function.arguments || '{}'), user = [...requestHistory].reverse().find(message => message.role === 'user'); if (!user?.id || typeof args.prompt !== 'string') throw new Error('The explicit originating image request is unavailable.'); await ensureSourceHistoryStillCurrent(); const result = await queueRequestedImage({ chat: activeChat, userMessageId: user.id, userText: user.content, responseId, roundNumber, callId: call.id, prompt: args.prompt, boundary: capturedBoundary, signal: controller.signal }); commitVisibleRound((await listChatMessages(sourceBookId, activeChat.id)).find(message => message.id === result.messageId) ?? null, false); content = JSON.stringify({ ok: true, ...result, message: result.reused ? 'This turn already has one image request. No new job was queued.' : 'One image queued; its status and Keep/Discard controls appear in this answer.' }) } catch (error) { content = JSON.stringify({ ok: false, error: (error as Error).message }) }
+              runtimeParts.push(normalizeRuntimeMessagePart({ id: `chat-tool-${responseId}-${call.id}`, sourceKind: 'app-managed', ownership: 'app-managed', name: call.function.name, message: { role: 'tool', tool_call_id: call.id, content } })); continue
+            }
+            if (prepared.character && call.function.name !== 'propose_image_generation') { const content = executeCharacterRead(prepared.character, call); runtimeParts.push(normalizeRuntimeMessagePart({ id: `chat-tool-${responseId}-${call.id}`, sourceKind: 'app-managed', ownership: 'app-managed', name: call.function.name, message: { role: 'tool', tool_call_id: call.id, content } })); continue }
             const cutoffRead = await executeCodexCutoffRead(sourceBookId, call, prepared.context.temporalCodex)
             if (cutoffRead !== undefined) {
               runtimeParts.push(normalizeRuntimeMessagePart({ id: `chat-tool-${responseId}-${call.id}`, sourceKind: 'app-managed', ownership: 'app-managed', name: call.function.name, message: { role: 'tool', tool_call_id: call.id, content: cutoffRead } }))
@@ -1131,7 +1155,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           {message.role === 'assistant' ? <div className="chat-message-stack">
             {editingId === message.id ? <InlineMessageEdit value={editingValue} onChange={setEditingValue} onCancel={() => setEditingId('')} onSave={() => { void saveEdit(message, false) }} /> : <>
               {message.thoughts && <details className="chat-thoughts" open={openThoughtMessageIds.has(message.id)} onToggle={(event) => setPersistedThoughtsOpen(message.id, event.currentTarget.open)}><summary>Thoughts</summary><div>{message.thoughts}</div></details>}
-              <div className="chat-assistant-body">{message.content ? <MarkdownMessage content={message.content} /> : null}</div>
+              <div className="chat-assistant-body">{message.content ? <>{chat?.character ? <CharacterMessage content={message.content} participants={chat.character.participants} render={text => <MarkdownMessage content={text} />} /> : <MarkdownMessage content={message.content} />}</> : null}</div>
               {message.status && message.status !== 'complete' && <small className="chat-message-status">{message.status === 'limited' ? `Limit reached · ${message.continuation?.maxRounds ?? message.roundNumber ?? 8} model rounds` : message.status === 'failed' ? 'Interrupted' : 'Stopped'}</small>}
               {message.continuation && !message.continuedAt && messages.at(-1)?.id === message.id && <button type="button" disabled={generating} onClick={() => { void continueResponse(message) }}>Continue</button>}
               <div className="message-tools"><button type="button" onClick={() => { void copyMessage(message) }}>{copiedMessageId === message.id ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />} {copiedMessageId === message.id ? 'Copied' : 'Copy'}</button><button type="button" disabled={generating || Boolean(summaryProposalId)} title={summaryProposalId ? 'Stop summary generation before changing history' : generating ? 'Stop the current response before editing history' : undefined} onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" onClick={() => { void fork(message) }}><GitFork aria-hidden="true" /> Fork</button><button type="button" onClick={() => { void readAloud(message) }}><Volume2 aria-hidden="true" /> Read aloud</button><button type="button" disabled={generating || Boolean(summaryProposalId)} onClick={() => { void regenerate(message) }}><RefreshCw aria-hidden="true" /> Regenerate</button><button type="button" disabled={generating || Boolean(summaryProposalId)} title={summaryProposalId ? 'Stop summary generation before changing history' : generating ? 'Stop the current response before deleting history' : undefined} onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
@@ -1153,23 +1177,24 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   }
 
   const compositionTemplates = [compositionDraft.systemPrompt, ...compositionDraft.predefinedMessages.filter((message) => message.enabled).map((message) => message.template)]
-  const compositionDiagnostics = compositionTemplates.flatMap((template) => promptTemplateDiagnostics(template, 'assistant', promptPreviewContext ? chatRequestValues(bookPromptValues, promptPreviewContext) : bookTemplateValues(bookPromptValues)))
+  const compositionDiagnostics = compositionTemplates.flatMap((template) => promptTemplateDiagnostics(template, 'assistant', promptPreviewContext ? chatRequestValues(chat?.character ? emptyCharacterBook : bookPromptValues, promptPreviewContext, previewCharacter?.instructions) : bookTemplateValues(bookPromptValues)))
   const draftNormalizedRequest = chat && promptPreviewContext
-    ? assembleChatGenerationRequest({ composition: compositionDraft, book: bookPromptValues, context: promptPreviewContext, skills: promptPreviewSkills, loreTypes: promptPreviewTypes, history: messages, tools: CHAT_TOOL_DEFINITIONS })
+    ? assembleChatGenerationRequest({ composition: compositionDraft, book: bookPromptValues, context: promptPreviewContext, skills: promptPreviewSkills, loreTypes: promptPreviewTypes, history: messages, restrictedInstructions: previewCharacter?.instructions, tools: availableChatTools(Boolean(chat.character), messages) })
     : null
   const previewRequest = promptOpen ? draftNormalizedRequest : lastNormalizedRequest
   const previewFinalizedRequest = previewRequest ? finalizeChatProviderRequest(previewRequest) : null
   const previewDiagnostics = chat && previewRequest
     ? generationContextDiagnostics(chat.model, chat.modelContextLength, chat.effectiveContextLimit, previewFinalizedRequest?.diagnosticText ?? '')
     : null
-  const workspaceWarning = chatWorkspaceInstructionsWarning(compositionDraft)
+  const workspaceWarning = chat?.character ? '' : chatWorkspaceInstructionsWarning(compositionDraft)
 
   if (!chatId) return <section className="conversation chat-empty"><MessageCircle aria-hidden="true" /><strong>No chat selected</strong><p>Create or open a chat from the Chat panel.</p></section>
   if (!chat || !isCurrentChat(chat)) return <section className="conversation chat-empty"><span className="chat-loading" /> <p>Loading chat…</p></section>
 
   return <>
     <section className="conversation functional-chat">
-      <header><small>Book chat</small><h1>{chat.title}</h1></header>
+      <header><small>{chat.character ? 'Character chat' : 'Book chat'}</small><h1>{chat.title}</h1></header>
+      <CharacterPosition chat={chat} disabled={generating} onOpen={onChatChange} />
       <div className="messages">
         {!messages.length && !generating && <div className="chat-first-message"><Feather aria-hidden="true" /><strong>Start this conversation</strong><p>The model, prompt, and context are saved independently for this chat.</p></div>}
         {groupChatAnswers(messages).map(group => group.role === 'user' ? renderRound(group.messages[0]) : <section className="chat-answer-group" key={group.id} aria-label="Assistant answer">
@@ -1179,6 +1204,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           </details>}
           {group.messages.flatMap(message => (message.brainstorms ?? []).map(brainstorm => <BrainstormCard key={brainstorm.id} message={message} brainstorm={brainstorm} disabled={generating} onSaved={reloadMessages} onSend={text => isCurrentChat({ id: message.parentId, bookId: message.bookId }) ? send(text) : Promise.resolve(false)} />))}
           {group.messages.map(renderWorkspaceCards)}
+          {group.messages.filter(message => message.directImageRequest).map(message => <section key={message.id} className="chat-media-card image-ui"><strong>Requested image</strong><ImageJobs messageId={message.id} direct /></section>)}
           {group.messages.flatMap(message => (message.imageGenerations ?? []).map(proposal => <ImageProposalCard key={proposal.id} message={message} proposal={proposal} />))}
           {group.messages.length > 1 && <div className="message-tools chat-answer-tools"><button type="button" onClick={() => { void copyMessage({ ...group.messages.at(-1)!, content: answerProse(group.messages) }) }}>Copy full answer</button><button type="button" onClick={() => { void readAloud({ ...group.messages.at(-1)!, content: answerProse(group.messages) }) }}>Read full answer aloud</button></div>}
         </section>)}
@@ -1186,7 +1212,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           <details className="chat-answer-activity"><summary>Activity</summary><p>Round {roundProgress.round || 1} of {roundProgress.limit}</p></details>
           <div className="chat-live-status"><i /><span>{generationPhaseLabel(phase)} · {formatElapsed(elapsed)}</span></div>
           {streamedThoughts && <details className="chat-thoughts" open={liveThoughtsOpen} onToggle={(event) => setLiveThoughtsOpen(event.currentTarget.open)}><summary>Thoughts</summary><div>{streamedThoughts}</div></details>}
-          {streamedContent && <div className="chat-assistant-body"><MarkdownMessage content={streamedContent} /></div>}
+          {streamedContent && <div className="chat-assistant-body">{chat.character ? <CharacterMessage content={streamedContent} participants={chat.character.participants} render={text => <MarkdownMessage content={text} />} /> : <MarkdownMessage content={streamedContent} />}</div>}
         </div></article>}
         <div ref={bottomRef} />
       </div>
@@ -1198,7 +1224,8 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
         <summary><span>Generation settings</span><small>Model · context · system prompt</small><ChevronDown aria-hidden="true" /></summary>
         <div className="chat-config-row">
           <ChatModelPicker value={chat.model} models={sortedModels} onChange={(modelId) => { void changeModel(modelId) }} />
-          <ChatSkillsPicker key={chat.id} chat={chat} onChange={updated => applyIfCurrentChat(chat, () => setChat(updated))} />
+          {!chat.character && <ChatSkillsPicker key={chat.id} chat={chat} onChange={updated => applyIfCurrentChat(chat, () => setChat(updated))} />}
+          <ChatImageReferences chat={chat} disabled={generating} onChange={updated => applyIfCurrentChat(chat, () => setChat(updated))} />
           <label className="chat-round-limit"><span>Max model rounds per response</span><select aria-label="Max model rounds per response" value={normalizeChatRoundLimit(chat.maxModelRounds)} onChange={event => { const captured = chat; void updateChat(captured.id, { maxModelRounds: Number(event.target.value) }).then(updated => applyIfCurrentChat(captured, () => setChat(updated))).catch(error => onToast(error.message)) }}>{Array.from({ length: 32 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</select><small>One model request is one round, even with several tool calls. Changes apply to the next run.</small></label>
           <label className={`chat-context-limit ${contextLimitInputError(limitDraft) ? 'invalid' : ''}`}><span>Context cap</span><input value={limitDraft} onChange={(event) => setLimitDraft(event.target.value)} onBlur={() => { void saveEffectiveContextLimit() }} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} placeholder="Model max" inputMode="text" aria-label="Chat effective context cap" /><small>{contextLimitInputError(limitDraft) || 'Empty uses the model maximum. 32k / 1m supported.'}</small></label>
           <button className="chat-system-prompt-button" type="button" onClick={() => { setCompositionDraft(clonePromptComposition(chat.promptComposition)); setPromptOpen(true) }}><Bot aria-hidden="true" /><span>Request composition</span></button>
@@ -1221,7 +1248,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           <PromptPresetControls scope="chat" composition={compositionDraft} arcDefault={defaultChatPromptComposition} onApply={setCompositionDraft} />
           <h3>System prompt</h3>
           <PromptTemplateEditor value={compositionDraft.systemPrompt} diagnostics={promptTemplateDiagnostics(compositionDraft.systemPrompt, 'assistant')} ariaLabel="Chat system prompt template" onChange={(systemPrompt) => setCompositionDraft((current) => ({ ...current, systemPrompt }))} />
-          <ChatPredefinedMessages messages={compositionDraft.predefinedMessages} previewValues={promptPreviewContext ? chatRequestValues(bookPromptValues, promptPreviewContext) : undefined} onChange={(predefinedMessages) => setCompositionDraft((current) => ({ ...current, predefinedMessages }))} />
+          <ChatPredefinedMessages messages={compositionDraft.predefinedMessages} previewValues={promptPreviewContext ? chatRequestValues(chat?.character ? emptyCharacterBook : bookPromptValues, promptPreviewContext, previewCharacter?.instructions) : undefined} onChange={(predefinedMessages) => setCompositionDraft((current) => ({ ...current, predefinedMessages }))} />
           {workspaceWarning && <p className="chat-composition-warning" role="status">{workspaceWarning}</p>}
           <details className="prompt-reference"><summary>Variables & syntax</summary><div className="chat-composition-variables">{promptVariables.filter((variable) => variable.scopes.includes('assistant')).map((variable) => <code key={variable.name}>{`{{${variable.name}}}`}</code>)}</div></details>
           <details className="chat-request-preview" open><summary>Request Preview</summary>
@@ -1233,7 +1260,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
               {previewRequest.structuredParts.map((part) => <section key={part.id}><strong>{part.name || part.id}</strong><small>APP MANAGED · structured tools</small><pre>{JSON.stringify(part.value, null, 2)}</pre></section>)}
               {previewRequest.dynamicSourceDedupe.map((decision) => <p key={decision.sourceId}>Omitted Additional source “{decision.omittedAdditional.title || decision.sourceId}” because it is already represented automatically.</p>)}
               {lastFinalizedRequest && <details><summary>Last sent provider payload</summary><pre>{JSON.stringify({ messages: lastFinalizedRequest.messages, tools: lastFinalizedRequest.tools }, null, 2)}</pre></details>}
-            </> : <p>Preparing the current Chat context…</p>}
+            </> : <p>{promptPreviewError || 'Preparing the current Chat context…'}</p>}
           </details>
           {compositionDiagnostics.some((diagnostic) => diagnostic.severity === 'error') && <div className="chat-composition-warning" role="alert">Fix template errors before saving.<ul>{compositionDiagnostics.map((diagnostic, index) => <li key={`${diagnostic.code}-${index}`}>{diagnostic.message}</li>)}</ul></div>}
         </div>
@@ -1427,7 +1454,8 @@ function ChatGenerateButton({ sttState, generating, phase, elapsed, thinking, on
   ]} />
 }
 
-export function ChatSidebar({ bookId, activeChatId, onOpen }: { bookId: string; activeChatId: string; onOpen: (chatId: string) => void }) {
+export function ChatSidebar({ bookId, activeChatId, onOpen, currentSceneId, caret }: { bookId: string; activeChatId: string; onOpen: (chatId: string) => void; currentSceneId?: string; caret?: number }) {
+  const [characterSetup, setCharacterSetup] = useState(false)
   const [items, setItems] = useState<ChatEntity[]>([])
   const [query, setQuery] = useState('')
   const bookIdRef = useRef(bookId)
@@ -1489,6 +1517,8 @@ export function ChatSidebar({ bookId, activeChatId, onOpen }: { bookId: string; 
   }
 
   return <section className="chat-sidebar"><div className="panel-title"><div><small>Conversations</small><h2>Chats</h2></div><button type="button" onClick={() => { void add() }} aria-label="Start new chat"><Plus aria-hidden="true" /></button></div>
+    <button type="button" onClick={() => setCharacterSetup(true)}>New character chat</button>
+    {characterSetup && <CharacterChatSetup bookId={bookId} currentSceneId={currentSceneId} caret={caret} onClose={() => setCharacterSetup(false)} onOpen={onOpen} />}
     <label className="chat-sidebar-search"><Search aria-hidden="true" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search chats" /></label>
     <div className="chat-sidebar-list">{visible.map((chat) => <article className={`chat-row-wrap ${activeChatId === chat.id ? 'selected' : ''}`} key={chat.id}>
       <button className="chat-row" type="button" onClick={() => { if (chat.bookId === bookIdRef.current) onOpen(chat.id) }}><i><MessageCircle aria-hidden="true" /></i><span><strong>{chat.title}</strong><small>{chat.lastMessagePreview || 'No messages yet'}</small></span><em>{formatChatEdited(chat.updatedAt)}</em></button>

@@ -1,3 +1,4 @@
+import type { CharacterBoundary, CharacterChatConfig } from './character-chat'
 import { getEffectiveLoreTypes } from './lore-types-service'
 import { resolveLoreType } from './lore-types'
 import { updateBrainstormDraft, type ChatBrainstorm } from './chat-brainstorm'
@@ -39,6 +40,8 @@ export type ChatEntity = ArcEntity & {
   contextProfile: GenerationContextProfile
   lastMessagePreview?: string
   skillNoteIds?: string[]
+  character?: CharacterChatConfig
+  directImageReferenceIds?: string[]
   maxModelRounds?: number
 }
 
@@ -127,6 +130,9 @@ export type ChatMessageEntity = ArcEntity & {
   roundNumber?: number
   continuation?: ChatContinuation
   continuedAt?: number
+  characterBoundary?: CharacterBoundary
+  directImageRequest?: { jobId: string; messageId: string; callId: string }
+  directImageClaim?: { jobId: string; messageId: string; callId: string }
   imageGenerations?: ChatImageProposal[]
   brainstorms?: ChatBrainstorm[]
   documentEdits?: ChatDocumentEditProposal[]
@@ -233,7 +239,7 @@ export async function createChat(bookId: string, title = 'New chat'): Promise<Ch
   return chat
 }
 
-export async function updateChat(chatId: string, patch: Partial<Pick<ChatEntity, 'title' | 'model' | 'modelContextLength' | 'effectiveContextLimit' | 'promptComposition' | 'thinking' | 'contextProfile' | 'lastMessagePreview' | 'maxModelRounds' | 'skillNoteIds'>>): Promise<ChatEntity> {
+export async function updateChat(chatId: string, patch: Partial<Pick<ChatEntity, 'title' | 'model' | 'modelContextLength' | 'effectiveContextLimit' | 'promptComposition' | 'thinking' | 'contextProfile' | 'lastMessagePreview' | 'maxModelRounds' | 'skillNoteIds' | 'directImageReferenceIds'>>): Promise<ChatEntity> {
   if (patch.maxModelRounds !== undefined) validateChatRoundLimit(patch.maxModelRounds)
   const patchSnapshot = {
     ...patch,
@@ -263,6 +269,7 @@ export async function saveChatContextProfile(chatId: string, profile: Generation
 export async function resetChatPromptComposition(chatId: string) {
   const chat = await getChat(chatId)
   if (!chat) throw new Error('Chat is no longer available.')
+  if (chat.character) { const { characterPromptComposition } = await import('./character-chat'); return updateChat(chatId, { promptComposition: clonePromptComposition(characterPromptComposition) }) }
   const settings = await getChatBookAiSettings(chat.bookId)
   return updateChat(chatId, { promptComposition: clonePromptComposition(settings.promptCompositions.assistant) })
 }
@@ -299,7 +306,7 @@ async function touchFromMessages(bookId: string, chatId: string, autoTitle?: str
   })
 }
 
-export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntity['role'], content: string, extra: Pick<ChatMessageEntity, 'thoughts' | 'status' | 'responseId' | 'toolActivity' | 'roundNumber' | 'continuation' | 'continuedAt' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations' | 'brainstorms'> = {}): Promise<ChatMessageEntity> {
+export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntity['role'], content: string, extra: Pick<ChatMessageEntity, 'thoughts' | 'status' | 'responseId' | 'toolActivity' | 'roundNumber' | 'continuation' | 'continuedAt' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations' | 'brainstorms' | 'characterBoundary'> = {}): Promise<ChatMessageEntity> {
   const messages = await listChatMessages(chat.bookId, chat.id)
   const now = Date.now()
   const message: ChatMessageEntity = {
@@ -315,6 +322,7 @@ export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntit
     responseId: extra.responseId,
     toolActivity: extra.toolActivity ? [...extra.toolActivity] : undefined,
     roundNumber: extra.roundNumber,
+    characterBoundary: extra.characterBoundary ? structuredClone(extra.characterBoundary) : undefined,
     continuation: extra.continuation ? structuredClone(extra.continuation) : undefined,
     continuedAt: extra.continuedAt,
     brainstorms: extra.brainstorms ? structuredClone(extra.brainstorms) : undefined,
@@ -336,7 +344,7 @@ export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntit
   return message
 }
 
-export async function updateChatMessage(messageId: string, patch: Partial<Pick<ChatMessageEntity, 'content' | 'thoughts' | 'status' | 'responseId' | 'toolActivity' | 'roundNumber' | 'continuation' | 'continuedAt' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations' | 'brainstorms'>>): Promise<ChatMessageEntity> {
+export async function updateChatMessage(messageId: string, patch: Partial<Pick<ChatMessageEntity, 'content' | 'thoughts' | 'status' | 'responseId' | 'toolActivity' | 'roundNumber' | 'continuation' | 'continuedAt' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations' | 'brainstorms' | 'characterBoundary'>>): Promise<ChatMessageEntity> {
   const snapshot = structuredClone(patch)
   const next = await updateEntityAtomically<ChatMessageEntity>(messageId, current => {
     if (current.type !== 'chatMessage') throw new Error('Message is no longer available.')
@@ -455,6 +463,8 @@ export async function forkChat(source: ChatEntity, throughOrder: number): Promis
       id: messageId,
       parentId: fork.id,
       continuation: undefined, continuedAt: undefined,
+      directImageClaim: message.directImageClaim ? { ...message.directImageClaim, messageId } : undefined,
+      directImageRequest: message.directImageRequest ? { ...message.directImageRequest, messageId } : undefined,
       imageGenerations: message.imageGenerations?.map((p) => ({ ...p, status: 'stale' })),
       documentEdits: snapshotProposalListForFork(message.documentEdits),
       codexCreations: snapshotProposalListForFork(message.codexCreations),
