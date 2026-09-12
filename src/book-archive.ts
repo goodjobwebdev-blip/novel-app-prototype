@@ -23,7 +23,7 @@ function withoutKeys(value: unknown): any {
 export function encodeBookArchive(data: BookArchiveData): Blob {
   const images: StoredImage[] = data.illustrations.map(({ image, thumbnail, ...rest }) => ({ ...rest, imageSize: image.size, imageType: image.type, thumbnailSize: thumbnail.size, thumbnailType: thumbnail.type }))
   const gallery: StoredGalleryImage[] = (data.galleryImages ?? []).map(({ image, thumbnail, ...rest }) => ({ ...rest, imageSize: image.size, imageType: image.type, thumbnailSize: thumbnail.size, thumbnailType: thumbnail.type }))
-  const entities = data.entities.map((entity) => entity.type === 'settings' ? withoutKeys(entity) : entity)
+  const entities = data.entities.map((entity) => entity.type === 'settings' ? withoutKeys(entity) : entity.type === 'chatMessage' && Array.isArray(entity.imageGenerations) ? { ...entity, imageGenerations: entity.imageGenerations.map((proposal: any) => ({ ...proposal, ...(proposal.draft ? { draft: { ...proposal.draft, sources: [] } } : {}) })) } : entity)
   const version = (data.galleryImages ?? []).some((asset) => asset.kind === 'video') ? 3 : 2
   const jobs = (data.imageJobs ?? []).map(({ sources: _sources, providerJobId: _providerJobId, owner: _owner, heartbeat: _heartbeat, ...job }) => job)
   const manifest = new TextEncoder().encode(JSON.stringify({ format: 'arc-book', version, entities, snapshots: data.snapshots, dependencies: data.dependencies, illustrations: images, galleryImages: gallery, imageJobs: jobs }))

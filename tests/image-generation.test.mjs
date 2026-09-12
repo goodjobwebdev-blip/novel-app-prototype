@@ -497,3 +497,18 @@ test('removing a failed job leaves others alone; retrying a cleared Pruna job ma
   assert.equal(jobs.find((j) => j.id === pruna.id).status, 'queued')
   assert.equal(jobs.find((j) => j.id === pruna.id).providerJobId, 'existing-prediction')
 })
+
+test('chat media drafts persist without jobs, and a repeated submission queues once', async () => {
+  const f = await fixture()
+  const draft = { prompt: 'Saved draft', alias: 'portrait', size: '1024x1024', task: 'text-to-image', sources: [] }
+  await store.saveImageProposalDraft(f.origin, draft)
+  assert.equal((await p.getEntity(f.message.id)).imageGenerations[0].draft.prompt, 'Saved draft')
+  assert.equal((await store.listImageJobs()).filter(job => job.messageId === f.message.id).length, 0)
+  await assert.rejects(() => store.saveImageProposalDraft({ ...f.origin, bookId: 'unrelated-book' }, draft), /original chat/)
+  await store.setImageProposal(f.message.id, f.proposal.id, 'accepted', draft)
+  const spec = s.resolveImageSpec(draft.prompt, draft.alias, draft.size)
+  const origin = { ...f.origin, submissionId: crypto.randomUUID() }
+  const [first, second] = await Promise.all([store.enqueueImageJob(spec, origin), store.enqueueImageJob(spec, origin)])
+  assert.equal(first.id, second.id)
+  assert.equal((await store.listImageJobs()).filter(job => job.messageId === f.message.id).length, 1)
+})

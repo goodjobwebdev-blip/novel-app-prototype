@@ -1,3 +1,5 @@
+import { KeyedAsyncQueue } from './keyed-async-queue'
+import type { MediaGenerationDraft } from './image-generation-types'
 import { database, getEntity, type ArcEntity, type Illustration } from './persistence'
 import { resolveImageSpec } from './image-settings'
 import { generationTask, outputKind, type ChatImageProposal, type GalleryImage, type ImageGenerationSpec, type ImageJob, type ImageProvider } from './image-generation-types'
@@ -16,7 +18,7 @@ export async function listGalleryImages(bookId?: string): Promise<GalleryImage[]
   return [...generated.filter((a) => a.kept), ...uploads.map((a): GalleryImage => ({ id: `codex:${a.id}`, entryId: a.entryId, illustrationId: a.id, bookId: a.bookId, prompt: a.caption, image: a.image, thumbnail: a.thumbnail, width: a.width, height: a.height, createdAt: a.createdAt, kept: true }))]
     .filter((a) => !bookId || a.bookId === bookId).sort((a, b) => b.createdAt - a.createdAt)
 }
-export type ImageJobOrigin = { bookId?: string; chatId?: string; messageId?: string; proposalId?: string }
+export type ImageJobOrigin = { bookId?: string; chatId?: string; messageId?: string; proposalId?: string; submissionId?: string }
 export async function enqueueImageJob(spec: ImageGenerationSpec, origin: ImageJobOrigin = {}): Promise<ImageJob> {
   // Revalidate the current favorites on every Generate click, then freeze this request.
   const clean = resolveImageSpec(spec.prompt, spec.modelAlias, spec.size.value, undefined, undefined, generationTask(spec), spec.sources ?? [], spec.video ?? {})
@@ -30,6 +32,10 @@ export async function enqueueImageJob(spec: ImageGenerationSpec, origin: ImageJo
       const proposal: ChatImageProposal | undefined = message?.imageGenerations?.find((p: ChatImageProposal) => p.id === origin.proposalId)
       if (chat?.type !== 'chat' || message?.type !== 'chatMessage' || message.parentId !== origin.chatId || message.bookId !== origin.bookId || chat.bookId !== origin.bookId || proposal?.status !== 'accepted') throw new Error('Accept an available image proposal before generating.')
     } else if (origin.chatId || origin.proposalId) throw new Error('This image proposal is no longer available.')
+    if (origin.submissionId) {
+      const existing = (await db.table('imageJobs').toArray()).find((job: ImageJob) => job.submissionId === origin.submissionId && job.messageId === origin.messageId && job.bookId === origin.bookId)
+      if (existing) return existing as ImageJob
+    }
     const record: ImageJob = { ...clean, ...origin, id: imageId('image-job'), bookTitle: book?.title, status: 'queued', createdAt: Date.now() }
     await db.table('imageJobs').add(record)
     return record
@@ -152,6 +158,23 @@ export async function retryImageJob(id: string) {
     notifyImageStore()
   } else await enqueueImageJob(job, { bookId: job.bookId, chatId: job.chatId, messageId: job.messageId, proposalId: job.proposalId })
 }
+const imageDraftQueue = new KeyedAsyncQueue()
+export async function saveImageProposalDraft(origin: Required<Pick<ImageJobOrigin, 'bookId' | 'chatId' | 'messageId' | 'proposalId'>>, draft: MediaGenerationDraft) {
+  const snapshot = structuredClone(draft)
+  return imageDraftQueue.run(origin.messageId, async () => {
+    const db = await database()
+    await db.transaction('rw', db.table('entities'), async () => {
+      const message = await db.table('entities').get(origin.messageId)
+      if (message?.type !== 'chatMessage' || message.bookId !== origin.bookId || message.parentId !== origin.chatId) throw new Error('The original chat is no longer available.')
+      const proposals: ChatImageProposal[] = message.imageGenerations ?? []
+      const proposal = proposals.find(item => item.id === origin.proposalId)
+      if (!proposal || !['proposed', 'accepted'].includes(proposal.status)) throw new Error('This media proposal is no longer editable.')
+      await db.table('entities').update(message.id, { imageGenerations: proposals.map(item => item.id === proposal.id ? { ...item, draft: snapshot } : item), updatedAt: Date.now() })
+    })
+    notifyImageStore()
+  })
+}
+
 export async function setImageProposal(messageId: string, proposalId: string, status: 'accepted' | 'rejected', input?: { prompt: string; alias: string; size: string; task?: ImageGenerationSpec['task']; sources?: ImageGenerationSpec['sources']; resolution?: string; duration?: number; aspectRatio?: string; fps?: number; numFrames?: number; seed?: number; draftVideo?: boolean }) {
   const spec = input ? resolveImageSpec(input.prompt, input.alias, input.size, undefined, undefined, input.task ?? 'text-to-image', input.sources ?? [], { resolution: input.resolution, duration: input.duration, aspectRatio: input.aspectRatio, fps: input.fps, numFrames: input.numFrames, seed: input.seed, draft: input.draftVideo }) : undefined
   const db = await database()
@@ -161,7 +184,7 @@ export async function setImageProposal(messageId: string, proposalId: string, st
     const proposals: ChatImageProposal[] = message.imageGenerations ?? []
     const proposal = proposals.find((p) => p.id === proposalId)
     if (!proposal || proposal.status !== 'proposed') throw new Error('This proposal has already been handled.')
-    const next = { ...proposal, status, ...(spec ? { prompt: spec.prompt, modelAlias: spec.modelAlias, size: spec.size.value, task: generationTask(spec) } : {}) }
+    const next = { ...proposal, status, ...(input ? { draft: structuredClone(input) } : {}), ...(spec ? { prompt: spec.prompt, modelAlias: spec.modelAlias, size: spec.size.value, task: generationTask(spec) } : {}) }
     await db.table('entities').update(messageId, { imageGenerations: proposals.map((p) => p.id === proposalId ? next : p), updatedAt: Date.now() })
   })
   notifyImageStore()

@@ -5,20 +5,8 @@ import { generationTaskNames, imageRatio, imageProviderNames } from './image-set
 import { useImageSettings, useImageUrl } from './image-hooks'
 import { assertImageFile } from './illustration-image'
 import { generationTask, modelTasks, type FavoriteImageModel, type GalleryImage, type GenerationSource, type GenerationTask } from './image-generation-types'
-export type ImageDraft = {
-  prompt: string
-  alias: string
-  size: string
-  task?: GenerationTask
-  sources?: GenerationSource[]
-  resolution?: string
-  duration?: number
-  aspectRatio?: string
-  fps?: number
-  numFrames?: number
-  seed?: number
-  draftVideo?: boolean
-}
+export type { MediaGenerationDraft as ImageDraft } from './image-generation-types'
+import type { MediaGenerationDraft as ImageDraft } from './image-generation-types'
 export function ImageModelPicker({ models, value, onChange }: { models: FavoriteImageModel[]; value: string; onChange: (model: FavoriteImageModel) => void }) {
   const [open, setOpen] = useState(false), [query, setQuery] = useState('')
   const visible = models.filter((model) => `${model.alias} ${model.name} ${model.provider}`.toLowerCase().includes(query.toLowerCase()))

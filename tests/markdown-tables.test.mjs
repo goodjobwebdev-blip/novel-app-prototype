@@ -34,6 +34,7 @@ registerHooks({
 const { act, createElement, createRef } = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { EditorState } = await import('@codemirror/state')
+const { ensureSyntaxTree } = await import('@codemirror/language')
 const { EditorView } = await import('@codemirror/view')
 const { markdown, markdownLanguage } = await import('@codemirror/lang-markdown')
 const { markdownTableRanges } = await import('../src/markdown-tables.ts')
@@ -58,7 +59,11 @@ async function editor(doc = fixture, readOnly = false) {
 }
 
 test('GFM parser finds complete tables and ignores fenced code or incomplete delimiters', () => {
-  const parse = (doc) => markdownTableRanges(EditorState.create({ doc, extensions: [markdown({ base: markdownLanguage })] }))
+  const parse = (doc) => {
+    const state = EditorState.create({ doc, extensions: [markdown({ base: markdownLanguage })] })
+    assert.ok(ensureSyntaxTree(state, state.doc.length, 5000), 'Complete the parser before checking its ranges')
+    return markdownTableRanges(state)
+  }
   assert.equal(parse(fixture).length, 1)
   assert.equal(parse('```markdown\n' + fixture + '\n```').length, 0)
   assert.equal(parse('| A | B |\n| --').length, 0)
