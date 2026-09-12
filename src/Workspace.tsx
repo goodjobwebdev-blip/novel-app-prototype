@@ -1,3 +1,7 @@
+import SelectionTools from './SelectionTools'
+import { generateQuickTool } from './quick-tool-generation'
+import type { QuickTool, QuickToolCapture } from './quick-tools'
+import type { EditorSelectionInfo } from './MarkdownEditor'
 import { loadUiSettings, UI_SETTINGS_EVENT } from './ui-settings'
 import { sceneBeats, prepareAutomaticBeat, beatPassage, bindBeatPassage, passageMarkers, passageMarker } from './scene-beats'
 import { generateSceneBeat } from './scene-beat-generation'
@@ -238,6 +242,8 @@ export default function Workspace() {
   const [generationDetails, setGenerationDetails] = useState<GenerationDetails | null>(null)
   const [generationDetailsOpen, setGenerationDetailsOpen] = useState(false)
   const [blockEditRequest, setBlockEditRequest] = useState<BlockEditRequest | null>(null)
+  const [selectedProse, setSelectedProse] = useState<{ documentId: string; selection: EditorSelectionInfo } | null>(null)
+  const [quickTool, setQuickTool] = useState<{ tool: QuickTool; capture: QuickToolCapture } | null>(null)
   const [showBeats, setShowBeats] = useState(() => loadUiSettings().sceneBeats !== false)
   const [beatRewrite, setBeatRewrite] = useState<{ documentId: string; snapshot: EditorSelectionSnapshot; instruction: string } | null>(null)
   useEffect(() => { const sync = () => setShowBeats(loadUiSettings().sceneBeats !== false); window.addEventListener(UI_SETTINGS_EVENT, sync); window.addEventListener('storage', sync); return () => { window.removeEventListener(UI_SETTINGS_EVENT, sync); window.removeEventListener('storage', sync) } }, [])
@@ -262,7 +268,7 @@ export default function Workspace() {
   const [codexDependencies, setCodexDependencies] = useState<CodexDependencyEdge[]>([])
   const [summaryStates, setSummaryStates] = useState<Record<string, SummaryState>>({})
   const [activeDocument, setActiveDocument] = useState<EditableEntity | null>(null)
-  useEffect(() => { setGenerationDetails(null); setGenerationDetailsOpen(false) }, [activeDocument?.id, currentBook?.id])
+  useEffect(() => { setGenerationDetails(null); setGenerationDetailsOpen(false); setQuickTool(null); setSelectedProse(null); setBeatRewrite(null) }, [activeDocument?.id, currentBook?.id])
   const [editorRevision, setEditorRevision] = useState(0)
   const [activeSceneId, setActiveSceneId] = useState<string | null>(null)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
@@ -1826,6 +1832,8 @@ export default function Workspace() {
       {generationDetailsOpen && generationDetails && <GenerationDetailsDialog details={generationDetails} elapsedSeconds={generationElapsedSeconds} onClose={() => setGenerationDetailsOpen(false)} />}
       {loreMention && <LoreMentionPopover state={loreMention} onClose={() => setLoreMention(null)} onSelect={(entry) => { void loadLoreMentionPreview(loreMention.id, entry) }} onOpen={(entryId) => { void openLoreMentionEntry(entryId) }} />}
       {autotitleOverlay}
+      {screen === 'editor' && currentBook && activeDocument && ['scene', 'note', 'codexEntry'].includes(activeDocument.type) && !activeCodexArchived && !generationActive && !quickTool && !beatRewrite && selectedProse?.documentId === activeDocument.id && <SelectionTools selection={selectedProse.selection} open={(tool) => setQuickTool({ tool, capture: { bookId: currentBook.id, book: toBookPromptValues(currentBook, seriesList), document: { ...activeDocument }, snapshot: selectedProse.selection.snapshot } })} />}
+      {quickTool && activeDocument?.id === quickTool.capture.document.id && currentBook?.id === quickTool.capture.bookId && <ProseRewriteDialog key={`${quickTool.tool.id}-${quickTool.capture.snapshot.revision}`} title={quickTool.tool.label} original={quickTool.capture.snapshot.text} instruction="" examples={quickTool.tool.examples} generateLabel="Go" generate={(instruction, chunk, signal, onRequest) => generateQuickTool(quickTool.capture, instruction, chunk, signal, onRequest)} apply={(text) => Boolean(editorRef.current?.replaceRange(quickTool.capture.snapshot, text))} close={() => setQuickTool(null)} />}
       {beatRewrite && currentBook && activeDocument?.type === 'scene' && beatRewrite.documentId === activeDocument.id && <ProseRewriteDialog key={`${activeDocument.id}-${beatRewrite.snapshot.revision}`} title="Regenerate scene beat" original={beatRewrite.snapshot.text} instruction={beatRewrite.instruction} instructionReadOnly autoStart generate={(instruction, chunk, signal, onRequest) => generateSceneBeat({ bookId: currentBook.id, book: toBookPromptValues(currentBook, seriesList), scene: activeDocument, source: beatRewrite.snapshot.document, from: beatRewrite.snapshot.from, to: beatRewrite.snapshot.to, instruction }, chunk, signal, onRequest)} apply={(text) => Boolean(editorRef.current?.replaceRange(beatRewrite.snapshot, `\n\n${text.trim()}\n\n`))} close={() => setBeatRewrite(null)} />}
 
       {screen === 'editor' ? <article className="story-editor">
@@ -1840,7 +1848,7 @@ export default function Workspace() {
         {activeDocument?.type === 'codexEntry' && <CodexDependenciesMetadata key={`dependencies-${activeDocument.id}`} source={activeDocument} entries={codexEntries} edges={codexDependencies} readOnly={activeCodexArchived} onAdd={(targetId) => addCodexDependency(activeDocument.id, targetId)} onUpdate={changeCodexDependency} onRemove={deleteCodexDependency} onOpen={(entryId) => { void loadDocument(entryId) }} />}
         {activeDocument?.type === 'summary' && summaryContextIndicator && <div className="summary-context-indicator">{summaryContextIndicator}</div>}
         {activeDocument && currentBook && ['scene', 'note', 'codexEntry'].includes(activeDocument.type) && !activeCodexArchived && <EditorBlocks key={activeDocument.id} bookId={currentBook.id} editor={editorRef} disabled={generationActive} onEditRequestHandled={() => setBlockEditRequest(null)} showBeats={showBeats && activeDocument.type === 'scene'} editRequest={blockEditRequest?.documentId === activeDocument.id && blockEditRequest.snapshot.document === storyMarkdown ? blockEditRequest : null} />}
-        {activeDocument ? <MarkdownEditor key={`${activeDocument.id}-${editorRevision}`} ref={editorRef} bookId={currentBook?.id} showBeats={showBeats} onBeatAction={actOnBeat} onEditBlock={(item) => { const snapshot = editorRef.current?.captureSelection(item.from, item.to); if (snapshot) setBlockEditRequest({ documentId: activeDocument.id, item, snapshot }) }} value={storyMarkdown} onChange={handleStoryChange} onHistoryChange={setEditorHistory} ariaLabel={`${activeDocument.title} Markdown editor`} readOnly={activeCodexArchived || activeSummarySourceArchived} mentionTerms={activeDocument.type === 'scene' ? codexMentionIndex : []} onMentionClick={activeDocument.type === 'scene' ? openLoreMention : undefined} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No document selected</strong><p>Choose a Scene, Note, Codex entry, or Summary from the book workspace.</p><button type="button" onClick={() => setRightOpen(true)}>Open Book Workspace</button></div>}
+        {activeDocument ? <MarkdownEditor key={`${activeDocument.id}-${editorRevision}`} ref={editorRef} onSelectionChange={(selection) => setSelectedProse(selection ? { documentId: activeDocument.id, selection } : null)} bookId={currentBook?.id} showBeats={showBeats} onBeatAction={actOnBeat} onEditBlock={(item) => { const snapshot = editorRef.current?.captureSelection(item.from, item.to); if (snapshot) setBlockEditRequest({ documentId: activeDocument.id, item, snapshot }) }} value={storyMarkdown} onChange={handleStoryChange} onHistoryChange={setEditorHistory} ariaLabel={`${activeDocument.title} Markdown editor`} readOnly={activeCodexArchived || activeSummarySourceArchived} mentionTerms={activeDocument.type === 'scene' ? codexMentionIndex : []} onMentionClick={activeDocument.type === 'scene' ? openLoreMention : undefined} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No document selected</strong><p>Choose a Scene, Note, Codex entry, or Summary from the book workspace.</p><button type="button" onClick={() => setRightOpen(true)}>Open Book Workspace</button></div>}
       </article> : currentBook ? <ChatView bookId={currentBook.id} chatId={activeChatId} bookPromptValues={toBookPromptValues(currentBook, seriesList)} currentSceneId={activeSceneId} onChatChange={openChat} onToast={showToast} /> : <section className="conversation chat-empty"><MessageCircle aria-hidden="true" /><p>Open a book before starting a chat.</p></section>}
 
 
