@@ -18,6 +18,6 @@ export default function SelectionTools({ selection, open }: { selection: EditorS
   }, [selection])
   const words = selectionWordCount(selection.snapshot.text)
   return <div ref={element} className="selection-tools" role="toolbar" aria-label="Selection tools" style={position} onPointerDown={(event) => { if (event.pointerType === 'mouse') event.preventDefault() }}>
-    {selection.protected ? <span>Select prose outside image, comment and beat blocks.</span> : quickTools.filter((tool) => !tool.maxWords || words <= tool.maxWords).map((tool) => <button key={tool.id} type="button" onClick={() => open(tool)}>{tool.label}</button>)}
+    {selection.protected ? <span>Select prose outside image, comment and beat blocks.</span> : quickTools.filter((tool) => !tool.maxWords || (words > 0 && words <= tool.maxWords)).map((tool) => <button key={tool.id} type="button" onClick={() => open(tool)}>{tool.label}</button>)}
   </div>
 }

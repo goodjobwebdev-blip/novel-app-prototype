@@ -3,9 +3,10 @@ import type { BookPromptValues } from './prompt-template'
 import type { EditorSelectionSnapshot } from './MarkdownEditor'
 import { projectProse, rangeTouchesProtected } from './document-projection.ts'
 
-export type QuickTool = { id: string; label: string; kind: 'rewrite'; examples: string[]; maxWords?: number }
+export type QuickTool = { id: string; label: string; kind: 'rewrite' | 'synonyms'; examples: string[]; maxWords?: number }
 export const quickTools: QuickTool[] = [
   { id: 'make-more', label: 'Make it more…', kind: 'rewrite', examples: ['Make it darker', 'Fix grammar', 'Make the dialogue more natural', 'Make it more concise'] },
+  { id: 'synonyms', label: 'Synonyms', kind: 'synonyms', maxWords: 6, examples: [] },
 ]
 export type QuickToolCapture = { bookId: string; book: BookPromptValues; document: EditableEntity; snapshot: EditorSelectionSnapshot }
 export function selectionWordCount(text: string) { return text.trim().match(/[\p{L}\p{N}]+(?:[’'-][\p{L}\p{N}]+)*/gu)?.length ?? 0 }

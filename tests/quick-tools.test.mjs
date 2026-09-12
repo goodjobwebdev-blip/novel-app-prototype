@@ -39,3 +39,29 @@ test('selection requests use Main, projected context and effective settings whil
   assert.throws(() => selectionProse({ snapshot: { ...capture.snapshot, from: source.indexOf('PRIVATE_SENTINEL'), to: source.indexOf('PRIVATE_SENTINEL') + 7, text: 'PRIVATE' } }), /outside/)
   await assert.rejects(() => prepareQuickToolRequest({ ...capture, bookId: 'another-book' }, 'Fix grammar', new AbortController().signal), /not editable/)
 })
+
+test('synonyms use only bounded word context and Support; previews preserve surrounding punctuation', async () => {
+  const { synonymContext, prepareSynonymRequest, parseSynonyms } = await import('../src/synonyms.ts')
+  const settings = copyAiSettings(initialAiSettings); settings.provider = 'fake'; settings.mainModel = 'fake/main'; settings.supportModel = 'fake/support'; settings.supportModelContextLength = 100000
+  const f = await db.createBook(settings, 'Synonyms')
+  const source = 'Bright rain fell. A quiet bell rang.\n\nDISTANT_BOOK_SENTINEL ' + 'x'.repeat(2000)
+  const from = source.indexOf('quiet'), to = from + 5
+  const capture = { bookId: f.book.id, book, document: f.scene, snapshot: { editorId: 'editor', revision: 1, document: source, from, to, text: 'quiet' } }
+  const context = synonymContext(capture)
+  assert.equal(context.before + 'soft' + context.after, 'A soft bell rang.')
+  assert.equal(synonymContext({ ...capture, snapshot: { ...capture.snapshot, from: 0, to: 6, text: 'Bright' } }).before, '')
+  const prepared = await prepareSynonymRequest(capture, [{ text: 'soft', note: 'Gentler' }], new AbortController().signal)
+  assert.equal(prepared.model, 'fake/support')
+  const payload = JSON.stringify(prepared.request.providerMessages)
+  assert.doesNotMatch(payload, /DISTANT_BOOK_SENTINEL/)
+  assert.match(payload, /soft/)
+  const first = parseSynonyms('{"candidates":[{"text":"quiet"},{"text":"soft","note":"Gentler"},{"text":" SOFT "},{"text":"hushed"}]}', 'quiet')
+  assert.deepEqual(first.map((item) => item.text), ['soft', 'hushed'])
+  const more = parseSynonyms('["Soft", "muted", "hushed"]', 'quiet', first)
+  assert.deepEqual(more.map((item) => item.text), ['soft', 'hushed', 'muted'])
+  assert.deepEqual(parseSynonyms('{"candidates":[]}', 'quiet', first), first)
+  assert.throws(() => parseSynonyms('Here are some words', 'quiet'), /invalid/)
+  assert.equal(parseSynonyms(JSON.stringify(Array.from({ length: 12 }, (_, i) => `word${i}`)), 'quiet').length, 8)
+  const tooLong = 'one two three four five six seven'
+  assert.throws(() => synonymContext({ ...capture, snapshot: { ...capture.snapshot, document: tooLong, from: 0, to: tooLong.length, text: tooLong } }), /six words/)
+})
