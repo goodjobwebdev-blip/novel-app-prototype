@@ -713,3 +713,16 @@ select {
 @media (max-width: 759px) { .ui-appearance-tools { position: relative; }.ui-appearance-tools nav { flex-basis: 100%; }.ui-settings-panel .ui-safe-reset { width: 100%; }.ui-range-grid { grid-template-columns: 1fr; } }
 @media (min-width: 760px) and (max-width: 1120px) { .ui-range-grid { grid-template-columns: 1fr; } }
 .ui-scope-summary { flex-basis: 100%; color: var(--soft); font-size: 12px; }
+
+/* Compact theme choices keep action targets usable. */
+.ui-theme-grid { gap: 7px; }
+.ui-theme-select { min-height: 66px; padding: 8px 44px 8px 8px; grid-template-columns: 30px minmax(0,1fr) 14px; gap: 7px; }
+.ui-theme-select strong { font: 600 12px var(--sans, ui-sans-serif, system-ui); }
+.ui-settings-panel .ui-theme-select small { font-size: 10px; margin-top: 2px; }
+.ui-theme-swatch { width: 30px; height: 40px; border-radius: 5px; }
+.ui-theme-swatch > i { inset: 5px 4px 5px 10px; }
+.ui-theme-swatch > b { left: 3px; top: 5px; width: 3px; height: 28px; }
+.ui-theme-swatch > em { left: 12px; top: 13px; font-size: 8px; }
+.ui-theme-actions { top: 2px; right: 2px; gap: 0; }
+.ui-theme-actions button { width: 36px; height: 30px; }
+.ui-theme-select:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }

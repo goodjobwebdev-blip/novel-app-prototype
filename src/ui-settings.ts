@@ -1,3 +1,5 @@
+import { readableForeground } from './appearance-utils.ts'
+
 export type UiTypography = {
   fontFamily: string
   fontSize: number
@@ -18,7 +20,7 @@ export type ThemePalette = {
   error: string
 }
 
-export type BuiltInThemeId = 'very-dark' | 'blue-dark' | 'green-dark' | 'very-white' | 'blue-light' | 'green-light'
+export type BuiltInThemeId = 'very-dark' | 'blue-dark' | 'green-dark' | 'very-white' | 'blue-light' | 'green-light' | 'near-black' | 'slate-dark' | 'warm-paper'
 
 export type CustomUiTheme = {
   id: string
@@ -80,7 +82,7 @@ export const fontOptions: FontOption[] = [
 export const builtInThemes: BuiltInTheme[] = [
   {
     id: 'very-dark',
-    name: 'Very Dark',
+    name: 'Gold Dark',
     tone: 'dark',
     palette: {
       background: '#090a09', elevated: '#151613', editor: '#10110f', text: '#e9e4d9', muted: '#9e9a91', border: '#30312d',
@@ -131,6 +133,18 @@ export const builtInThemes: BuiltInTheme[] = [
       background: '#f3f8f4', elevated: '#ffffff', editor: '#fbfefb', text: '#18271e', muted: '#65776b', border: '#cadbce',
       accent: '#3f8057', accentActive: '#28633d', selection: '#d9ecdd', error: '#b7504d',
     },
+  },
+  {
+    id: 'near-black', name: 'Near Black', tone: 'dark',
+    palette: { background: '#000000', elevated: '#101010', editor: '#050505', text: '#eeeeee', muted: '#aaaaaa', border: '#343434', accent: '#b8bdc7', accentActive: '#e1e5ec', selection: '#353942', error: '#ff9999' },
+  },
+  {
+    id: 'slate-dark', name: 'Slate Dark', tone: 'dark',
+    palette: { background: '#111722', elevated: '#1c2635', editor: '#151e2c', text: '#ecf0f8', muted: '#a8b5c9', border: '#3c4d64', accent: '#94b9ed', accentActive: '#c7dcfa', selection: '#344d6e', error: '#ffaaa5' },
+  },
+  {
+    id: 'warm-paper', name: 'Warm Paper', tone: 'light',
+    palette: { background: '#f2eadc', elevated: '#fff8ec', editor: '#fcf4e7', text: '#302920', muted: '#73624e', border: '#cbbb9f', accent: '#79502b', accentActive: '#573519', selection: '#e5d4b7', error: '#a43f39' },
   },
 ]
 
@@ -257,6 +271,9 @@ export function applyUiSettings(settings: UiSettings) {
   root.style.setProperty('--line', palette.border)
   root.style.setProperty('--accent', palette.accent)
   root.style.setProperty('--accent-bright', palette.accentActive)
+  root.style.setProperty('--on-accent', readableForeground(palette.accent))
+  root.style.setProperty('--on-accent-bright', readableForeground(palette.accentActive))
+  root.style.setProperty('--on-danger', readableForeground(palette.error))
   root.style.setProperty('--selection', palette.selection)
   root.style.setProperty('--danger', palette.error)
 

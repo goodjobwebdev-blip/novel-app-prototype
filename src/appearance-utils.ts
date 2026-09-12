@@ -17,3 +17,7 @@ export function contrastWarnings(palette: ThemePalette) {
     ['Error text', palette.error, palette.elevated],
   ].map(([label, text, background]) => ({ label, ratio: contrastRatio(text, background) })).filter(item => item.ratio < 4.5)
 }
+
+export function readableForeground(background: string): string {
+  return contrastRatio('#000000', background) >= contrastRatio('#ffffff', background) ? '#000000' : '#ffffff'
+}
