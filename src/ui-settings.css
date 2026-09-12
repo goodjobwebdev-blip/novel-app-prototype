@@ -95,6 +95,7 @@ select {
 }
 
 .floating-controls > button,
+.floating-control-group > button,
 .editor-bottom > button,
 .library-top > button {
   background: color-mix(in srgb, var(--surface) 76%, transparent);
@@ -139,7 +140,8 @@ select {
   font-weight: var(--input-font-weight);
 }
 
-:root[data-ui-theme-tone="light"] .floating-controls > button svg {
+:root[data-ui-theme-tone="light"] .floating-controls > button svg,
+:root[data-ui-theme-tone="light"] .floating-control-group > button svg {
   filter: none;
 }
 

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Plus, MoreHorizontal, ChevronRight } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Plus, ChevronRight } from 'lucide-react'
+import CodexActionsMenu, { type CodexAction } from './CodexActionsMenu'
 import { CodexThumbnail } from './CodexIllustration'
 import { useLoreTypes } from './LoreTypesControls'
 import { SeriesSourceEditor } from './SeriesCodexControls'
@@ -25,10 +26,13 @@ export default function CodexDashboard({ bookId, entries, activeId, summaryState
   const key = `arc-codex-dashboard-${bookId}`
   const [prefs, setPrefs] = useState(() => { try { return dashboardPreferences(JSON.parse(localStorage.getItem(key) ?? 'null')) } catch { return { ...defaultCodexDashboard } } })
   const [page, setPage] = useState(0), [error, setError] = useState(''), [saveError, setSaveError] = useState(false), [busy, setBusy] = useState(''), [sourceId, setSourceId] = useState(''), [world, setWorld] = useState<TimelineWorld>()
+  const [actionsId, setActionsId] = useState<string | null>(null)
+  const closeActions = useCallback(() => setActionsId(null), [])
   const controller = useRef<AbortController | null>(null), { types } = useLoreTypes(bookId)
   useEffect(() => { try { localStorage.setItem(key, JSON.stringify(prefs)); setSaveError(false) } catch { setSaveError(true) } }, [key, prefs])
   useEffect(() => { let current = true; if (entries.some(entry => entry.checkpoints?.length)) void readTimelineWorld(bookId).then(world => { if (current) setWorld(world) }).catch(() => {}); return () => { current = false } }, [bookId, entries])
   useEffect(() => () => controller.current?.abort(), [])
+  useEffect(closeActions, [bookId, page, prefs, closeActions])
   const update = (patch: Partial<CodexDashboardPreferences>) => { setPrefs(value => ({ ...value, ...patch })); if (Object.keys(patch).some(key => key !== 'view')) setPage(0) }
   const filtered = useMemo(() => queryCodexDashboard(entries, prefs, summaryStates), [entries, prefs, summaryStates])
   const pages = Math.max(1, Math.ceil(filtered.length / CODEX_PAGE_SIZE)), currentPage = Math.min(page, pages - 1), visible = filtered.slice(currentPage * CODEX_PAGE_SIZE, (currentPage + 1) * CODEX_PAGE_SIZE)
@@ -45,15 +49,26 @@ export default function CodexDashboard({ bookId, entries, activeId, summaryState
         const summary = summaryStates[entry.id] ?? 'missing', inherited = entry.codexScope === 'inherited', shared = Boolean(entry.seriesSourceId)
         const unplaced = world ? (entry.checkpoints ?? []).filter(point => !checkpointPlaced(point, world)).length : 0
         const broken = dependencies.filter(edge => edge.sourceId === entry.id && !entryIds.has(edge.targetId)).length
+        const actions: CodexAction[] = []
+        const addAction = (label: string, onSelect: () => void) => actions.push({ label, onSelect, disabled: Boolean(busy) })
+        if (!prefs.archived) {
+          addAction(inherited ? 'Rename for this book' : 'Rename', () => onRename(entry))
+          addAction(`Autotitle${inherited ? ' for this book' : ''}`, () => onAutotitle(entry))
+          addAction(`${summary === 'missing' ? 'Summarize' : 'Re-summarize'} baseline`, () => { void run(entry.id, async () => { controller.current = new AbortController(); await regenerateEntitySummary(bookId, entry.id, controller.current.signal) }) })
+        }
+        if (shared) {
+          addAction('Edit series source', () => { void run(entry.id, async () => setSourceId(entry.seriesSourceId!)) })
+          addAction('Hide in this book', () => { void run(entry.id, () => setSeriesEntryHidden(bookId, entry.id, true)) })
+        }
+        if (!inherited) {
+          addAction(`${prefs.archived ? 'Restore' : 'Archive'}${shared ? ' for this book' : ''}`, () => prefs.archived ? onRestore(entry) : onArchive(entry))
+          if (!shared) addAction('Delete', () => onDelete(entry))
+        }
         return <article key={entry.id} className={`codex-dashboard-entry ${activeId === entry.id ? 'selected' : ''}`}>
           <button className="codex-dashboard-open" type="button" aria-current={activeId === entry.id ? 'true' : undefined} onClick={() => onOpen(entry.id)}><Thumbnail entry={entry} /><span><small>{entry.category}</small><strong>{entry.title}</strong><span className="codex-dashboard-preview">{proseText(entry.content).replace(/\s+/g, ' ').trim().slice(0, 240) || 'No body yet'}</span></span><ChevronRight aria-hidden="true" /></button>
           <div className="codex-row-indicators"><span>{codexScopeLabel(entry)}</span><span>{summary === 'current' ? 'Summary current' : summary === 'outdated' ? 'Summary stale' : 'No summary'}</span>{Boolean(unplaced || broken) && <strong>{unplaced + broken} unavailable references</strong>}</div>
           <div className="codex-row-bottom"><details><summary>Details</summary><p>{codexScopeLabel(entry)} · {summary} summary</p><p>{entry.autoIncludeTriggers?.length ?? 0} triggers · {dependencies.filter(edge => edge.sourceId === entry.id).length} relationships · {entry.checkpoints?.length ?? 0} checkpoints</p>{unplaced > 0 && <p className="codex-reference-error">{unplaced} unplaced checkpoints. Open the timeline to reassign anchors.</p>}{broken > 0 && <p className="codex-reference-error">{broken} unavailable relationship targets.</p>}<button type="button" onClick={() => onOpenSummary(entry)}>Open summary</button></details>
-          <details className="codex-row-menu"><summary aria-label={`Actions for ${entry.title}`}><MoreHorizontal aria-hidden="true" /><span>Actions</span></summary><div>
-            {!prefs.archived && <><button type="button" disabled={Boolean(busy)} onClick={() => onRename(entry)}>{inherited ? 'Rename for this book' : 'Rename'}</button><button type="button" disabled={Boolean(busy)} onClick={() => onAutotitle(entry)}>Autotitle{inherited ? ' for this book' : ''}</button><button type="button" disabled={Boolean(busy)} onClick={() => { void run(entry.id, async () => { controller.current = new AbortController(); await regenerateEntitySummary(bookId, entry.id, controller.current.signal) }) }}>{summary === 'missing' ? 'Summarize' : 'Re-summarize'} baseline</button></>}
-            {shared && <><button type="button" disabled={Boolean(busy)} onClick={() => { void run(entry.id, async () => setSourceId(entry.seriesSourceId!)) }}>Edit series source</button><button type="button" disabled={Boolean(busy)} onClick={() => { void run(entry.id, () => setSeriesEntryHidden(bookId, entry.id, true)) }}>Hide in this book</button></>}
-            {!inherited && <><button type="button" disabled={Boolean(busy)} onClick={() => prefs.archived ? onRestore(entry) : onArchive(entry)}>{prefs.archived ? 'Restore' : 'Archive'}{shared ? ' for this book' : ''}</button>{!shared && <button type="button" disabled={Boolean(busy)} onClick={() => onDelete(entry)}>Delete</button>}</>}
-          </div></details></div>
+          <CodexActionsMenu title={entry.title} open={actionsId === entry.id} onToggle={() => setActionsId(current => current === entry.id ? null : entry.id)} onClose={closeActions} actions={actions} /></div>
         </article>
       })}
     </div>
