@@ -155,7 +155,7 @@ import {
 import { buildSummarySource, getSummaryStateMap, summaryStateForSource, type SummaryState } from './summary-service'
 import { buildCodexMentionIndex, type CodexMentionEntry, type CodexMentionTerm } from './codex-trigger-service'
 import { generateAutotitleSuggestion, prepareAutotitleRequest, type AutotitleEntity, type AutotitleRequest, type AutotitleTargetType } from './autotitle-service'
-import { dismissTtsState, estimateSpeechRequest, fetchSpeechModels, getTtsState, pauseTtsSession, replayTtsSession, resumeTtsSession, seekTtsBy, seekTtsTo, startTtsSession, stopTtsSession, subscribeTtsState, type TtsState } from './tts-service'
+import { dismissTtsState, prepareSpeechPlayback, getTtsState, pauseTtsSession, replayTtsSession, resumeTtsSession, seekTtsBy, seekTtsTo, startTtsSession, stopTtsSession, subscribeTtsState, type TtsState } from './tts-service'
 import { cancelSttSession, dismissSttState, getSttState, normalizeTranscriptForInsertion, startSttSession, stopSttSession, subscribeSttState, type SttState } from './stt-service'
 import { ChatSidebar, ChatView } from './ChatFeature'
 import './generation-controls.css'
@@ -1222,10 +1222,10 @@ export default function Workspace() {
     return (await getBookAiSettings(currentBook.id, defaults.favorites)).speech
   }
 
-  async function readText(text: string, label: string) {
+  async function readText(text: string, label: string, entityId: string) {
     try {
       const speech = await speechSettings()
-      await startTtsSession(speech, text, label)
+      await startTtsSession(speech, text, label, { bookId: currentBook!.id, entityId })
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Could not start text to speech.')
     }
@@ -1235,15 +1235,15 @@ export default function Workspace() {
     if (!activeDocument) return
     if (activeDocument.type === 'scene') {
       if (!lastGeneratedPassage.trim()) { showToast('There is no identifiable latest generated passage to read in this Scene.'); return }
-      await readText(lastGeneratedPassage, `Scene · ${activeDocument.title}`)
+      await readText(lastGeneratedPassage, `Scene · ${activeDocument.title}`, activeDocument.id)
       return
     }
-    if (activeDocument.type === 'codexEntry') await readText(storyMarkdown, `Codex · ${activeDocument.title}`)
+    if (activeDocument.type === 'codexEntry') await readText(storyMarkdown, `Codex · ${activeDocument.title}`, activeDocument.id)
   }
 
   async function readNote(note: NoteEntity) {
     const text = activeDocument?.id === note.id ? storyMarkdown : note.content
-    await readText(text, `Note · ${note.title}`)
+    await readText(text, `Note · ${note.title}`, note.id)
   }
 
   async function readOutline(entity: StructuralEntity) {
@@ -1259,13 +1259,14 @@ export default function Workspace() {
         .filter((content) => content.trim())
         .join('\n\n')
       if (!text.trim()) { showToast(`“${entity.title}” has no readable prose.`); return }
-      const models = await fetchSpeechModels(speech.apiKey).catch(() => [])
-      const modelInfo = models.find((model) => model.id === speech.model)
-      const estimate = estimateSpeechRequest(speech, text, modelInfo)
-      const price = modelInfo?.price ? `\nProvider price: ${modelInfo.price}` : '\nProvider price: unavailable for a reliable estimate'
-      const confirmed = window.confirm(`Read ${entity.type === 'scene' ? 'Scene' : 'Chapter'} “${entity.title}” aloud with a paid NanoGPT request?\n\n${estimate.words.toLocaleString()} words · ${estimate.characters.toLocaleString()} characters · about ${estimate.chunks} TTS request${estimate.chunks === 1 ? '' : 's'}\nModel: ${speech.model}${price}`)
-      if (!confirmed) return
-      await startTtsSession(speech, text, `${entity.type === 'scene' ? 'Scene' : 'Chapter'} · ${entity.title}`)
+      const owner = { bookId: currentBook.id, entityId: entity.id, entityIds: entity.type === 'chapter' ? outlineEntities.filter(item => item.type === 'scene' && item.parentId === entity.id).map(item => item.id) : undefined }
+      const plan = await prepareSpeechPlayback(speech, text, owner)
+      if (plan.missingChunks) {
+        const price = plan.modelInfo?.price ? `Provider rate for missing audio: ${plan.modelInfo.price}` : 'Price for missing audio: unknown'
+        const confirmed = window.confirm(`Read ${entity.type === 'scene' ? 'Scene' : 'Chapter'} “${entity.title}” aloud?\n\n${plan.cachedChunks} cached parts · ${plan.missingChunks} new paid request${plan.missingChunks === 1 ? '' : 's'} (${plan.missingCharacters.toLocaleString()} characters to generate)\nModel: ${speech.model}\n${price}`)
+        if (!confirmed) return
+      }
+      await startTtsSession(speech, text, `${entity.type === 'scene' ? 'Scene' : 'Chapter'} · ${entity.title}`, owner, plan)
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Could not start text to speech.')
     }
@@ -1586,7 +1587,7 @@ export default function Workspace() {
         await flushDocument('generation', true)
         if (settings.speech.readAloudAfterGeneration) {
           const textToRead = isCodex ? result.resultDocument : result.generatedText
-          void startTtsSession(settings.speech, textToRead, `${isCodex ? 'Codex' : 'Story'} · ${activeDocument.title}`).catch((error) => showToast(error instanceof Error ? error.message : 'Automatic read aloud failed.'))
+          void startTtsSession(settings.speech, textToRead, `${isCodex ? 'Codex' : 'Story'} · ${activeDocument.title}`, { bookId: currentBook.id, entityId: activeDocument.id }).catch((error) => showToast(error instanceof Error ? error.message : 'Automatic read aloud failed.'))
         }
       }
     }
@@ -2047,7 +2048,7 @@ function TtsStatusBar() {
       <Volume2 aria-hidden="true" />
       <div className="tts-status-copy">
         <strong>{tts.label || 'Read aloud'}</strong>
-        <small aria-live="polite">{label}{tts.chunkCount ? ` · Part ${Math.max(1, tts.chunkIndex || 1)} of ${tts.chunkCount}` : ''}{tts.error ? ` · ${tts.error}` : ''}</small>
+        <small aria-live="polite">{label}{tts.chunkCount ? ` · Part ${Math.max(1, tts.chunkIndex || 1)} of ${tts.chunkCount}` : ''}{tts.error ? ` · ${tts.error}` : ''}</small>{tts.cachedChunks !== undefined && <small>{tts.cachedChunks} cached parts · {tts.missingChunks ?? 0} new audio requests</small>}
       </div>
       <div className="tts-status-actions">
         {tts.status === 'playing' && <button className="tts-playback-toggle" type="button" onClick={pauseTtsSession} aria-label="Pause audio" title="Pause"><Pause aria-hidden="true" /></button>}

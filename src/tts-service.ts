@@ -1,3 +1,4 @@
+import { defaultTtsOwner, pinTtsCache, readTtsCachePlan, readTtsModelInfo, saveTtsModelInfo, writeTtsCacheChunk, type TtsOwner, type TtsCacheIdentity, type TtsCachePlan } from './tts-cache.ts'
 import { proseText } from './document-projection.ts'
 import type { SpeechSettings } from './ai-settings'
 
@@ -17,12 +18,14 @@ export type TtsState = {
   chunkCount: number
   currentTime?: number
   duration?: number
+  cachedChunks?: number
+  missingChunks?: number
   canReplay?: boolean
   error?: string
 }
 
-type GeneratedAudio = { url: string; objectUrl: boolean }
-type RetainedPlayback = { label: string; items: GeneratedAudio[] }
+type GeneratedAudio = { url: string; objectUrl: boolean; blob?: Blob }
+type RetainedPlayback = { label: string; items: GeneratedAudio[]; cache?: TtsCachePlan }
 
 const TTS_EVENT = 'arc-tts-state'
 const TTS_BASE = 'https://nano-gpt.com/api'
@@ -211,6 +214,41 @@ export function estimateSpeechRequest(settings: SpeechSettings, markdown: string
   }
 }
 
+export function ttsAudioIdentity(settings: SpeechSettings): TtsCacheIdentity { return { provider: settings.provider, profile: 'nanogpt-speech', endpoint: `${TTS_BASE}/tts`, model: settings.model, voice: settings.voice.trim(), format: 'mp3', version: 'spoken-projection-2:paragraph-chunker-1', parameters: {} } }
+export type SpeechPlaybackPlan = { text: string; identity: TtsCacheIdentity; chunks: string[]; cache: TtsCachePlan; modelInfo?: SpeechModel; cachedChunks: number; missingChunks: number; missingCharacters: number }
+export async function prepareSpeechPlayback(settings: SpeechSettings, markdown: string, owner: TtsOwner = defaultTtsOwner, signal?: AbortSignal): Promise<SpeechPlaybackPlan> {
+  const text = normalizeSpeakableText(markdown)
+  if (!text) throw new Error('There is no readable text for this action.')
+  if (settings.provider !== 'nanogpt') throw new Error('NanoGPT is the only supported TTS provider in this version.')
+  if (!settings.model.trim()) throw new Error('Choose a TTS model in Speech settings.')
+  if (!settings.voice.trim()) throw new Error('Choose a TTS voice in Speech settings.')
+  const identity = ttsAudioIdentity(settings)
+  let modelInfo = await readTtsModelInfo<SpeechModel>(settings.model)
+  signal?.throwIfAborted()
+  let chunks = buildTtsChunks(text, settings.model, modelInfo), cache = await readTtsCachePlan(owner, identity, chunks)
+  signal?.throwIfAborted()
+  if (cache.cached.some(blob => !blob)) {
+    if (!settings.apiKey.trim()) throw new Error('Add a NanoGPT Speech API key in Speech settings to generate missing audio.')
+    const models = await fetchSpeechModels(settings.apiKey, signal).catch(error => { signal?.throwIfAborted(); return [] as SpeechModel[] })
+    signal?.throwIfAborted()
+    const currentInfo = models.find(model => model.id === settings.model)
+    if (models.length && !currentInfo) throw new Error(`Saved TTS model “${settings.model}” is unavailable. Choose another model in Speech settings.`)
+    if (currentInfo?.voices.length && !currentInfo.voices.includes(settings.voice)) throw new Error(`Saved voice “${settings.voice}” is unavailable for ${settings.model}.`)
+    if (currentInfo) { modelInfo = currentInfo; await saveTtsModelInfo(settings.model, modelInfo) }
+    const currentChunks = buildTtsChunks(text, settings.model, modelInfo)
+    if (JSON.stringify(chunks) !== JSON.stringify(currentChunks)) { chunks = currentChunks; cache = await readTtsCachePlan(owner, identity, chunks) }
+  }
+  const missing = new Map<string, string>()
+  chunks.forEach((chunk, index) => { if (!cache.cached[index]) missing.set(cache.keys[index], chunk) })
+  return { text, identity, chunks, cache, modelInfo, cachedChunks: cache.cached.filter(Boolean).length, missingChunks: missing.size, missingCharacters: [...missing.values()].reduce((sum, text) => sum + text.length, 0) }
+}
+function audioFromBlob(blob: Blob): GeneratedAudio { const url = URL.createObjectURL(blob); objectUrls.add(url); return { url, objectUrl: true, blob } }
+async function downloadableAudio(url: string, signal: AbortSignal): Promise<GeneratedAudio> {
+  // A failed asset download can still use the provider URL for temporary playback.
+  try { const response = await fetch(url, { signal }); if (response.ok) { const blob = await response.blob(); if (blob.size) return audioFromBlob(blob) } } catch { signal.throwIfAborted() }
+  return { url, objectUrl: false }
+}
+
 function safeError(payload: unknown, fallback: string) {
   if (!payload || typeof payload !== 'object') return fallback
   const value = payload as Record<string, unknown>
@@ -244,7 +282,7 @@ async function pollAudioUrl(ticket: Record<string, unknown>, apiKey: string, sig
   throw new Error('NanoGPT TTS timed out while waiting for generated audio.')
 }
 
-async function requestChunk(settings: SpeechSettings, text: string, signal: AbortSignal): Promise<{ url: string; objectUrl: boolean }> {
+async function requestChunk(settings: SpeechSettings, text: string, signal: AbortSignal): Promise<GeneratedAudio> {
   const response = await fetch(`${TTS_BASE}/tts`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': settings.apiKey.trim() },
@@ -253,7 +291,7 @@ async function requestChunk(settings: SpeechSettings, text: string, signal: Abor
   })
   if (response.status === 202) {
     const ticket = await response.json().catch(() => ({})) as Record<string, unknown>
-    return { url: await pollAudioUrl(ticket, settings.apiKey.trim(), signal), objectUrl: false }
+    return downloadableAudio(await pollAudioUrl(ticket, settings.apiKey.trim(), signal), signal)
   }
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}))
@@ -263,13 +301,11 @@ async function requestChunk(settings: SpeechSettings, text: string, signal: Abor
   if (contentType.includes('application/json')) {
     const payload = await response.json().catch(() => ({})) as Record<string, unknown>
     if (typeof payload.audioUrl !== 'string' || !payload.audioUrl) throw new Error('NanoGPT TTS returned no audio URL.')
-    return { url: payload.audioUrl, objectUrl: false }
+    return downloadableAudio(payload.audioUrl, signal)
   }
   const blob = await response.blob()
   if (!blob.size) throw new Error('NanoGPT TTS returned empty audio.')
-  const url = URL.createObjectURL(blob)
-  objectUrls.add(url)
-  return { url, objectUrl: true }
+  return audioFromBlob(blob)
 }
 
 function cleanupObjectUrls() {
@@ -336,7 +372,7 @@ async function playAudio(url: string, currentSession: number, chunkIndex: number
   if (currentSession !== sessionId) return
   const audio = new Audio(url)
   activeAudio = audio
-  emit({ status: 'playing', label, chunkIndex, chunkCount, currentTime: 0, duration: 0, canReplay: Boolean(retainedPlayback) })
+  emit({ ...state, status: 'playing', label, chunkIndex, chunkCount, currentTime: 0, duration: 0, canReplay: Boolean(retainedPlayback) })
   await new Promise<void>((resolve, reject) => {
     let settled = false
     const finish = (error?: Error) => {
@@ -360,6 +396,7 @@ async function playAudio(url: string, currentSession: number, chunkIndex: number
 async function playRetained(currentSession: number, playback: RetainedPlayback) {
   const controller = new AbortController()
   activeController = controller
+  const release = playback.cache ? await pinTtsCache(playback.cache) : () => undefined
   try {
     for (let index = 0; index < playback.items.length; index += 1) {
       if (controller.signal.aborted || currentSession !== sessionId) return
@@ -370,6 +407,7 @@ async function playRetained(currentSession: number, playback: RetainedPlayback) 
     if (controller.signal.aborted || currentSession !== sessionId) return
     emit({ ...state, status: 'failed', canReplay: true, error: error instanceof Error ? error.message : 'The browser could not replay generated audio.' })
   } finally {
+    release()
     if (currentSession === sessionId) {
       activeController = null
       activeAudio = null
@@ -384,44 +422,29 @@ export async function replayTtsSession() {
   await playRetained(currentSession, retainedPlayback)
 }
 
-export async function startTtsSession(settings: SpeechSettings, markdown: string, label = 'Read aloud') {
+export async function startTtsSession(settings: SpeechSettings, markdown: string, label = 'Read aloud', owner: TtsOwner = defaultTtsOwner, prepared?: SpeechPlaybackPlan) {
   stopTtsSession()
   retainedPlayback = null
   cleanupObjectUrls()
-  const text = normalizeSpeakableText(markdown)
-  if (!text) throw new Error('There is no readable text for this action.')
-  if (settings.provider !== 'nanogpt') throw new Error('NanoGPT is the only supported TTS provider in this version.')
-  if (!settings.apiKey.trim()) throw new Error('Add a NanoGPT Speech API key in Speech settings.')
-  if (!settings.model.trim()) throw new Error('Choose a TTS model in Speech settings.')
-  if (!settings.voice.trim()) throw new Error('Choose a TTS voice in Speech settings.')
-
+  settings = structuredClone(settings)
   const currentSession = ++sessionId
   const controller = new AbortController()
   activeController = controller
   emit({ status: 'preparing', label, chunkIndex: 0, chunkCount: 0, currentTime: 0, duration: 0, canReplay: false })
-  let models: SpeechModel[] = []
+  let plan: SpeechPlaybackPlan
   try {
-    models = await fetchSpeechModels(settings.apiKey, controller.signal)
+    plan = prepared && prepared.text === normalizeSpeakableText(markdown) && JSON.stringify(prepared.identity) === JSON.stringify(ttsAudioIdentity(settings)) && JSON.stringify(prepared.cache.owner) === JSON.stringify(owner) ? prepared : await prepareSpeechPlayback(settings, markdown, owner, controller.signal)
+    controller.signal.throwIfAborted()
+    if (plan.missingChunks && !settings.apiKey.trim()) throw new Error('Add a Speech API key to generate missing audio.')
   } catch (error) {
-    if (controller.signal.aborted || currentSession !== sessionId) return
-    // A catalog failure is recoverable because generation can still use the saved model.
-  }
-  if (controller.signal.aborted || currentSession !== sessionId) return
-  const modelInfo = models.find((model) => model.id === settings.model)
-  if (models.length && !modelInfo) {
+    if (currentSession !== sessionId || controller.signal.aborted) return
     activeController = null
-    emit({ status: 'failed', label, chunkIndex: 0, chunkCount: 0, error: `Saved TTS model “${settings.model}” is unavailable. Choose another model in Speech settings.` })
-    throw new Error(`Saved TTS model “${settings.model}” is unavailable.`)
+    emit({ status: 'failed', label, chunkIndex: 0, chunkCount: 0, error: error instanceof Error ? error.message : 'Could not prepare speech.' })
+    throw error
   }
-  if (modelInfo?.voices.length && !modelInfo.voices.includes(settings.voice)) {
-    activeController = null
-    emit({ status: 'failed', label, chunkIndex: 0, chunkCount: 0, error: `Saved voice “${settings.voice}” is unavailable for ${settings.model}.` })
-    throw new Error(`Saved voice “${settings.voice}” is unavailable for ${settings.model}.`)
-  }
-
-  const chunks = buildTtsChunks(text, settings.model, modelInfo)
-  const count = chunks.length
-  emit({ status: 'generating', label, chunkIndex: 0, chunkCount: count, currentTime: 0, duration: 0, canReplay: false })
+  const chunks = plan.chunks, count = chunks.length, releaseCache = await pinTtsCache(plan.cache)
+  if (currentSession !== sessionId || controller.signal.aborted) { releaseCache(); return }
+  emit({ status: 'generating', label, chunkIndex: 0, chunkCount: count, cachedChunks: plan.cachedChunks, missingChunks: plan.missingChunks, currentTime: 0, duration: 0, canReplay: false })
   const generatedItems: GeneratedAudio[] = new Array(count)
   const deferred = chunks.map(() => {
     let resolve!: (value: { url: string; objectUrl: boolean }) => void
@@ -432,6 +455,18 @@ export async function startTtsSession(settings: SpeechSettings, markdown: string
     void promise.catch(() => undefined)
     return { promise, resolve, reject, ready: false }
   })
+  const inFlight = new Map<string, Promise<GeneratedAudio>>()
+  const getAudio = (index: number) => {
+    const key = plan.cache.keys[index]
+    let work = inFlight.get(key)
+    if (!work) { work = (async () => {
+      const cached = plan.cache.cached[index]
+      const result = cached ? audioFromBlob(cached) : await requestChunk(settings, chunks[index], controller.signal)
+      if (!cached && result.blob && !controller.signal.aborted) await writeTtsCacheChunk(plan.cache, index, result.blob)
+      return result
+    })(); inFlight.set(key, work) }
+    return work
+  }
   let nextIndex = 0
   let fatalError: unknown
   const concurrency = Math.max(1, Math.min(8, Number.parseInt(settings.maxParallelRequests, 10) || 1))
@@ -440,7 +475,7 @@ export async function startTtsSession(settings: SpeechSettings, markdown: string
       const index = nextIndex++
       if (index >= chunks.length) return
       try {
-        const result = await requestChunk(settings, chunks[index], controller.signal)
+        const result = await getAudio(index)
         if (controller.signal.aborted || currentSession !== sessionId || fatalError !== undefined) {
           if (result.objectUrl) {
             URL.revokeObjectURL(result.url)
@@ -461,19 +496,22 @@ export async function startTtsSession(settings: SpeechSettings, markdown: string
       }
     }
   }
+  const abortPending = () => { deferred.forEach(item => { if (!item.ready) item.reject(new DOMException('Aborted', 'AbortError')) }); activeAudio?.pause(); finishActiveAudio?.() }
+  controller.signal.addEventListener('abort', abortPending, { once: true })
   const workers = Array.from({ length: Math.min(concurrency, chunks.length) }, () => worker())
 
   let completed = false
   try {
     for (let index = 0; index < deferred.length; index += 1) {
-      if (!deferred[index].ready && index > 0) emit({ status: 'waiting', label, chunkIndex: index, chunkCount: count, currentTime: 0, duration: 0, canReplay: false })
+      if (!deferred[index].ready && index > 0) emit({ ...state, status: 'waiting', label, chunkIndex: index, chunkCount: count, currentTime: 0, duration: 0, canReplay: false })
       const generated = await deferred[index].promise
       await playAudio(generated.url, currentSession, index + 1, count, label)
+      if (fatalError !== undefined) throw fatalError
       if (controller.signal.aborted || currentSession !== sessionId) return
     }
     await Promise.allSettled(workers)
     if (currentSession === sessionId) {
-      retainedPlayback = { label, items: generatedItems }
+      retainedPlayback = { label, items: generatedItems, cache: plan.cache }
       completed = true
       emit({ ...state, status: 'complete', label, chunkIndex: count, chunkCount: count, canReplay: true, error: undefined })
     }
@@ -490,6 +528,8 @@ export async function startTtsSession(settings: SpeechSettings, markdown: string
     if (currentSession === sessionId) emit({ status: 'failed', label, chunkIndex: state.chunkIndex, chunkCount: count, error: message })
     throw failure
   } finally {
+    controller.signal.removeEventListener('abort', abortPending)
+    releaseCache()
     if (currentSession === sessionId) {
       activeController = null
       activeAudio = null

@@ -64,7 +64,8 @@ test('fatal parallel TTS chunk failure aborts siblings and starts no later chunk
     maxParallelRequests: '2',
   }
   const paragraph = 'Lore '.repeat(80).trim()
-  const text = [paragraph, paragraph, paragraph, paragraph].join('\n\n')
+  // Distinct chunks exercise sibling cancellation; identical chunks now share one request.
+  const text = [paragraph, 'Second '+paragraph, 'Third '+paragraph, 'Fourth '+paragraph].join('\n\n')
 
   await assert.rejects(tts.startTtsSession(settings, text, 'Parallel failure'), /deterministic chunk failure/)
   assert.equal(tts.getTtsState().status, 'failed')
