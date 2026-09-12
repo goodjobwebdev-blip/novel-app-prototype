@@ -153,6 +153,7 @@ function notifyChatChange(bookId: string) {
 
 function copyProfile(profile: GenerationContextProfile): GenerationContextProfile {
   return {
+    ...(profile.loreAtCurrentScene ? { loreAtCurrentScene: true } : {}),
     includeLastScene: profile.includeLastScene,
     includePreviousSceneWhenEmpty: profile.includePreviousSceneWhenEmpty,
     structuralIds: [...profile.structuralIds],
