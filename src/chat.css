@@ -197,3 +197,17 @@
 .chat-round-limit { display: grid; gap: .3rem; max-width: 24rem; }
 .chat-round-limit select { width: 5rem; padding: .4rem; background: var(--canvas); color: var(--ink); border: 1px solid var(--line); border-radius: .45rem; }
 .chat-round-limit small { color: var(--soft); font-size: .72rem; }
+
+.chat-brainstorm { margin-top: .8rem; padding: .8rem; border: 1px solid var(--line); border-radius: .8rem; min-width: 0; }
+.chat-brainstorm h3 { margin: .25rem 0 .8rem; }
+.chat-brainstorm-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: .6rem; }
+.chat-brainstorm-options article { min-width: 0; padding: .7rem; border: 1px solid var(--line); border-radius: .65rem; }
+.chat-brainstorm-options article.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--canvas)); }
+.chat-brainstorm .chat-brainstorm-choice { display: flex; align-items: center; gap: .5rem; }
+.chat-brainstorm-choice input { flex: none; width: 1rem; min-height: 1rem; margin: 0; padding: 0; }
+.chat-brainstorm p { overflow-wrap: anywhere; font-size: .9rem; }
+.chat-brainstorm details { margin: .5rem 0; }
+.chat-brainstorm summary { cursor: pointer; color: var(--soft); font-size: .8rem; }
+.chat-brainstorm label { display: grid; gap: .4rem; margin: .5rem 0; }
+.chat-brainstorm footer { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .6rem; }
+.chat-brainstorm button { min-height: 40px; padding: .4rem .6rem; color: var(--ink); background: var(--glass); border: 1px solid var(--line); border-radius: .5rem; }

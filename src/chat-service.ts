@@ -1,3 +1,4 @@
+import { updateBrainstormDraft, type ChatBrainstorm } from './chat-brainstorm'
 import { normalizeChatRoundLimit, validateChatRoundLimit } from './chat-round-limit'
 import { chatHistorySignature } from './chat-history-guard'
 import type { NormalizedRequestPart } from './prompt-composition'
@@ -122,6 +123,7 @@ export type ChatMessageEntity = ArcEntity & {
   continuation?: ChatContinuation
   continuedAt?: number
   imageGenerations?: ChatImageProposal[]
+  brainstorms?: ChatBrainstorm[]
   documentEdits?: ChatDocumentEditProposal[]
   codexCreations?: ChatCodexCreationProposal[]
   outlineActions?: ChatOutlineActionProposal[]
@@ -289,7 +291,7 @@ async function touchFromMessages(bookId: string, chatId: string, autoTitle?: str
   })
 }
 
-export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntity['role'], content: string, extra: Pick<ChatMessageEntity, 'thoughts' | 'status' | 'responseId' | 'toolActivity' | 'roundNumber' | 'continuation' | 'continuedAt' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations'> = {}): Promise<ChatMessageEntity> {
+export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntity['role'], content: string, extra: Pick<ChatMessageEntity, 'thoughts' | 'status' | 'responseId' | 'toolActivity' | 'roundNumber' | 'continuation' | 'continuedAt' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations' | 'brainstorms'> = {}): Promise<ChatMessageEntity> {
   const messages = await listChatMessages(chat.bookId, chat.id)
   const now = Date.now()
   const message: ChatMessageEntity = {
@@ -307,6 +309,7 @@ export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntit
     roundNumber: extra.roundNumber,
     continuation: extra.continuation ? structuredClone(extra.continuation) : undefined,
     continuedAt: extra.continuedAt,
+    brainstorms: extra.brainstorms ? structuredClone(extra.brainstorms) : undefined,
     imageGenerations: extra.imageGenerations?.map((proposal) => ({ ...proposal })),
     documentEdits: extra.documentEdits?.map((proposal) => ({ ...proposal, edits: proposal.edits?.map((edit) => ({ ...edit })) })),
     codexCreations: extra.codexCreations?.map((proposal) => ({ ...proposal })),
@@ -325,7 +328,7 @@ export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntit
   return message
 }
 
-export async function updateChatMessage(messageId: string, patch: Partial<Pick<ChatMessageEntity, 'content' | 'thoughts' | 'status' | 'responseId' | 'toolActivity' | 'roundNumber' | 'continuation' | 'continuedAt' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations'>>): Promise<ChatMessageEntity> {
+export async function updateChatMessage(messageId: string, patch: Partial<Pick<ChatMessageEntity, 'content' | 'thoughts' | 'status' | 'responseId' | 'toolActivity' | 'roundNumber' | 'continuation' | 'continuedAt' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations' | 'brainstorms'>>): Promise<ChatMessageEntity> {
   const snapshot = structuredClone(patch)
   const next = await updateEntityAtomically<ChatMessageEntity>(messageId, current => {
     if (current.type !== 'chatMessage') throw new Error('Message is no longer available.')
@@ -333,6 +336,27 @@ export async function updateChatMessage(messageId: string, patch: Partial<Pick<C
   })
   await touchFromMessages(next.bookId, next.parentId)
   return next
+}
+
+export async function saveChatBrainstormDraft(bookId: string, chatId: string, messageId: string, value: ChatBrainstorm) {
+  const snapshot = structuredClone(value)
+  let saved: ChatBrainstorm | undefined
+  await updateEntityAtomically<ChatMessageEntity>(messageId, current => {
+    if (current.type !== 'chatMessage' || current.bookId !== bookId || current.parentId !== chatId) throw new Error('The original chat is no longer available.')
+    const original = current.brainstorms?.find(item => item.id === snapshot.id)
+    if (!original) throw new Error('This brainstorm is no longer available.')
+    saved = updateBrainstormDraft(original, snapshot)
+    return { ...current, brainstorms: current.brainstorms!.map(item => item.id === saved!.id ? saved! : item), updatedAt: Date.now() }
+  })
+  notifyChatChange(bookId)
+  return saved!
+}
+
+export async function markChatBrainstormSubmitted(bookId: string, chatId: string, messageId: string, brainstormId: string, text: string) {
+  await updateEntityAtomically<ChatMessageEntity>(messageId, current => {
+    if (current.type !== 'chatMessage' || current.bookId !== bookId || current.parentId !== chatId) throw new Error('The original chat is no longer available.')
+    return { ...current, brainstorms: current.brainstorms?.map(item => item.id === brainstormId ? { ...item, submittedText: text } : item), updatedAt: Date.now() }
+  })
 }
 
 export async function claimChatContinuation(bookId: string, chatId: string, messageId: string) {
