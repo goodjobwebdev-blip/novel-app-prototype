@@ -115,3 +115,27 @@ test('expanded dictation targets the dialog draft and keeps recording controls a
     if (mounted) await act(async () => root.unmount())
   }
 })
+
+
+test('closing invalidates delayed transcription and start failures stay inside the dialog', async () => {
+  const applied = [], stopped = [], cancelled = [], captured = []
+  const root = createRoot(document.getElementById('root'))
+  try {
+    await act(async () => root.render(React.createElement(Harness, { applied, stopped, cancelled, captured })))
+    await click('Expand Test prompt')
+    await click('Dictation')
+    await click('Close expanded editor')
+    assert.equal(captured[0].isValid(), false)
+    assert.equal(captured[0].setValue('Late transcript'), false)
+    assert.deepEqual(applied, [])
+    await act(async () => root.render(React.createElement(ExpandableTextInput, {
+      value: 'Saved', onChange: (value) => applied.push(value), 'aria-label': 'Failure prompt',
+      onDictate: async () => { throw new Error('Microphone permission denied') },
+    })))
+    await click('Expand Failure prompt')
+    await click('Dictation')
+    assert.match(document.querySelector('[role="dialog"] [role="alert"]').textContent, /permission denied/)
+    assert.equal(button('Apply').disabled, false)
+    assert.deepEqual(applied, [])
+  } finally { await act(async () => root.unmount()) }
+})
