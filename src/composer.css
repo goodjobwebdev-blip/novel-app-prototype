@@ -49,3 +49,9 @@
 body:has([role="dialog"]) .selection-tools { display: none; }
 .quick-tool-examples { display: flex; gap: .4rem; flex-wrap: wrap; }
 .quick-tool-examples button { font-size: .8rem; }
+.synonym-candidates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; max-height: 30dvh; overflow: auto; }
+.synonym-candidates button { text-align: left; display: grid; gap: .3rem; }
+.synonym-candidates small { color: var(--faint); }
+.synonym-candidates button[aria-pressed="true"] { border-color: var(--accent); }
+.synonym-sentence { white-space: pre-wrap; line-height: 1.7; }
+.synonym-sentence mark { background: var(--accent); color: var(--on-accent); border-radius: .2rem; padding: .1rem; }
