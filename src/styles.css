@@ -345,3 +345,18 @@ button:focus-visible { outline:3px solid rgba(198,168,107,.3); outline-offset:2p
 .library-title > button { min-height:48px; flex-shrink:0; }
 .library-storage-status { margin:16px 0; padding:16px; border:1px solid var(--line); border-radius:12px; font-size:16px; overflow-wrap:anywhere; }
 .library-storage-status button { min-height:48px; margin:4px 8px 4px 0; padding:10px 14px; border:1px solid var(--line); border-radius:10px; color:var(--ink); background:var(--surface); cursor:pointer; }
+.author-planning { border-bottom: 1px solid var(--border); padding: 1rem; font-size: .85rem; }
+.author-planning > summary { font-size: 1rem; font-weight: 650; margin-bottom: .8rem; cursor: pointer; }
+.author-planning p { margin: .4rem 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.author-planning strong { overflow-wrap: anywhere; }
+.author-planning button, .author-planning select, .author-planning input, .author-planning textarea { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: .35rem; padding: .4rem; min-width: 0; }
+.author-planning textarea { min-height: 5rem; resize: vertical; }
+.author-planning progress { width: 100%; margin-top: .5rem; accent-color: var(--accent); }
+.author-help, .author-planning small { color: var(--muted); font-size: .78rem; }
+.author-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .35rem; margin: .55rem 0; }
+.author-task-list { list-style: none; padding: 0; margin: .5rem 0; }
+.author-task-list li { border-bottom: 1px solid var(--border); padding: .65rem 0; }
+.author-task-link { display: block; text-align: left; margin: .3rem 0; }
+.author-draft { margin: .8rem 0; }
+.author-draft fieldset { border: 1px solid var(--border); padding: .6rem; min-width: 0; }
+.author-draft label { display: grid; gap: .3rem; margin: .55rem 0; }

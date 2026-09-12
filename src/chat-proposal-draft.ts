@@ -1,3 +1,4 @@
+import { authorPlanChanges, type AuthorGoal, type AuthorTask } from './author-planning'
 import { BUILTIN_LORE_TYPES, type LoreType } from './lore-types.ts'
 import type { ChatCodexCreationProposal, ChatDocumentEditProposal, ChatEntityActionProposal, ChatOutlineActionProposal } from './chat-service'
 
@@ -35,6 +36,11 @@ export function proposalDraftFields(field: EditableProposalField, proposal: Edit
         if (key !== 'seriesId') add(`patch:${key}`, key, value, ['overview', 'writingStyle'].includes(key), key === 'title')
       }
     }
+    if (op?.kind === 'author_plan') {
+      add('plan:title', 'Title', op.item.title, false, true)
+      if (op.target === 'goal') { const goal = op.item as AuthorGoal; add('plan:description', 'Description', goal.description, true); add('plan:targetWords', 'Target words (empty for none)', goal.targetWords); add('plan:completed', 'Completed', String(goal.completed), false, true, ['false', 'true']) }
+      else { const task = op.item as AuthorTask; add('plan:notes', 'Notes', task.notes, true); add('plan:status', 'Status', task.status, false, true, ['todo', 'doing', 'done']) }
+    }
     if (op?.kind === 'beat') add('beatText', 'Scene beat', op.text, true, true)
     if (op?.kind === 'triggers') add('triggers', 'Triggers (one per line)', op.triggers.join('\n'), true)
     if (op?.kind === 'dependency' && op.action !== 'remove') {
@@ -68,6 +74,9 @@ export function editProposalDraft(field: EditableProposalField, current: Editabl
     else if (key.startsWith('patch:')) {
       const op = (next as ChatEntityActionProposal).operation
       if (op?.kind === 'metadata' || op?.kind === 'scene_metadata') Object.assign(op.patch, { [key.slice(6)]: value })
+    } else if (key.startsWith('plan:')) {
+      const op = (next as ChatEntityActionProposal).operation
+      if (op?.kind === 'author_plan') { const field = key.slice(5); if (field === 'targetWords') { const number = value.trim() ? Number(value) : undefined; if (number !== undefined && (!Number.isSafeInteger(number) || number <= 0)) throw new Error('Use a positive whole word target or leave it empty.'); (op.item as AuthorGoal).targetWords = number } else Object.assign(op.item, { [field]: field === 'completed' ? value === 'true' : value }) }
     } else if (key === 'beatText') {
       const op = (next as ChatEntityActionProposal).operation
       if (op?.kind === 'beat') op.text = value
@@ -88,6 +97,7 @@ export function editProposalDraft(field: EditableProposalField, current: Editabl
     if (p.action === 'create_note') { p.entityTitle = p.newTitle!; p.contentLength = p.content?.length ?? 0 }
     const op = p.operation
     if (op?.kind === 'metadata' || op?.kind === 'scene_metadata') p.changes = Object.entries(op.patch).map(([key, value]) => ({ field: key, before: String(op.before[key as keyof typeof op.before] ?? ''), after: String(value) }))
+    if (op?.kind === 'author_plan') p.changes = authorPlanChanges(op)
     if (op?.kind === 'beat') p.changes = [{ field: 'Scene beat (planning)', before: op.before ?? 'No beat', after: op.text }]
     if (op?.kind === 'triggers') p.changes = [{ field: 'Triggers', before: op.before.join('\n'), after: op.triggers.join('\n') }]
     if (op?.kind === 'dependency') p.changes = [{ field: 'Relationship', before: op.before?.relationLabel ?? '', after: `${op.relationLabel} · Include with source: ${op.includeWithSource}` }]

@@ -1353,7 +1353,7 @@ function ChatModelPicker({ value, models, onChange }: { value: string; models: C
 }
 
 function EntityActionCard({ editor, proposal, onApply, onReject, running = false, summaryBusy = false, onStop }: { proposal: ChatEntityActionProposal; editor?: ReactNode; onApply: () => void; onReject: () => void; running?: boolean; summaryBusy?: boolean; onStop?: () => void }) {
-  const actionLabels: Record<ChatEntityActionProposal['action'], string> = { create_note: 'Create', rename: 'Rename', delete: 'Delete', set_codex_category: 'Change category', update_metadata: 'Update metadata', update_dependency: 'Update dependency', update_triggers: 'Update triggers', regenerate_summary: 'Regenerate summary' }
+  const actionLabels: Record<ChatEntityActionProposal['action'], string> = { create_note: 'Create', rename: 'Rename', delete: 'Delete', set_codex_category: 'Change category', update_metadata: 'Update metadata', update_dependency: 'Update dependency', update_triggers: 'Update triggers', regenerate_summary: 'Regenerate summary', update_author_plan: 'Update goals & tasks' }
   const actionLabel = actionLabels[proposal.action]
   const typeLabel = proposal.entityType === 'codexEntry' ? 'Codex' : proposal.entityType.charAt(0).toUpperCase() + proposal.entityType.slice(1)
   const statusLabel = running ? 'Generating summary…' : proposal.status === 'proposed' ? 'Needs approval' : proposal.status === 'applying' ? 'Applying…' : proposal.status === 'applied' ? 'Applied' : proposal.status === 'stale' ? 'Item changed' : 'Rejected'

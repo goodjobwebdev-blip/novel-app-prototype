@@ -1,3 +1,5 @@
+import { authorPlanning, applyAuthorPlanOperation, authorPlanChanges, type AuthorPlanOperation, type AuthorGoal, type AuthorTask } from './author-planning'
+import { readAuthorPlanning } from './author-planning-service'
 import { sceneBeats } from './scene-beats'
 import { proseEntities } from './document-projection.ts'
 import { sceneWritingFields, sceneWritingLabels, sceneWritingValues, validateSceneWritingPatch, resolveSceneWriting } from './scene-writing'
@@ -24,6 +26,9 @@ export const entitySearchProperties = {
   include_archived: { type: 'boolean', description: 'Include archived Codex entries for discovery. They must be restored in the workspace before editing.' },
 }
 export const chatManagementTools: ChatToolDefinition[] = [
+  tool('read_author_plan', 'Read only this Book’s author goals, ordered tasks and current manuscript word count. Use when the author asks about planning. This does not change tasks or mark anything complete.', {}),
+  tool('propose_author_goal', 'Propose creating or updating an author goal. Supply goal_id to update, omit to create. Read the plan first. Only supplied fields change. targetWords is a positive absolute manuscript word target; null clears it. completed requires explicit user approval, even if a number was reached. One active goal per Book. Creates an editable approval card only.', { goal_id: string, changes: { type: 'object', properties: { title: string, description: string, targetWords: { type: ['integer', 'null'], minimum: 1 }, completed: { type: 'boolean' } }, additionalProperties: false }, summary: string }, ['changes']),
+  tool('propose_author_task', 'Propose creating or updating an ordered author task. Supply task_id to update, omit to append. Read the plan first. Only supplied fields change. Optional goalId groups under the active goal, linkedEntityId links a Scene/Chapter/Note/Codex in this Book; empty strings remove them. Status todo/doing/done never changes without approval. Creates an editable approval card only.', { task_id: string, changes: { type: 'object', properties: { title: string, notes: string, status: { type: 'string', enum: ['todo', 'doing', 'done'] }, goalId: string, linkedEntityId: string }, additionalProperties: false }, summary: string }, ['changes']),
   tool('read_book_metadata', 'Read all current Book metadata and available Series IDs/titles before proposing metadata changes.', {}),
   tool('propose_book_metadata_update', 'Propose changes to any Book metadata fields. Only supplied fields change; empty strings clear optional fields. seriesId must identify an existing Series, or be empty for standalone. Requires approval.', { changes: { type: 'object', properties: Object.fromEntries(bookMetadataFields.map((field) => [field, string])), additionalProperties: false }, summary: string }, ['changes']),
   tool('propose_scene_beat', 'Propose creating a planning beat at the end of a Scene or editing an existing beat by beat_id returned by read_entity. This changes planning only after approval; it never generates or replaces prose.', { ...entityId, beat_id: string, text: string, summary: string }, ['entity_id', 'text']),
@@ -63,9 +68,26 @@ export async function executeChatManagementTool(bookId: string, call: ChatToolCa
     if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Arguments must be an object.')
     const name = call.function.name
     let item: ChatEntityActionProposal
+    if (name === 'read_author_plan') { const value = await readAuthorPlanning(bookId); return { content: JSON.stringify({ ok: true, bookId, ...value.planning, manuscriptWords: value.words }) } }
     if (name === 'read_book_metadata') return { content: JSON.stringify({ ok: true, bookId, metadata: metadataValues(await bookEntity(bookId)), series: (await listSeries()).map(({ id, title }) => ({ id, title })) }) }
     if (name === 'list_entities') return { content: JSON.stringify(searchBookEntities(await listEntitiesByBook(bookId), args, true)) }
-    if (name === 'propose_book_metadata_update') {
+    if (name === 'propose_author_goal' || name === 'propose_author_task') {
+      const book = await bookEntity(bookId), planning = authorPlanning(book), isGoal = name === 'propose_author_goal'
+      const changes = args.changes
+      const fields = isGoal ? ['title', 'description', 'targetWords', 'completed'] : ['title', 'notes', 'status', 'goalId', 'linkedEntityId']
+      if (!changes || typeof changes !== 'object' || Array.isArray(changes) || !Object.keys(changes).length || Object.keys(changes).some(key => !fields.includes(key))) throw new Error('Provide supported goal or task changes.')
+      const requestedId = args[isGoal ? 'goal_id' : 'task_id']
+      if (requestedId !== undefined && (typeof requestedId !== 'string' || !requestedId)) throw new Error('Use an existing goal or task ID, or omit it to create.')
+      const before = (isGoal ? planning.goals : planning.tasks).find(item => item.id === requestedId) ?? null
+      if (requestedId && !before) throw new Error('The requested goal or task is unavailable in this Book.')
+      const id = before?.id ?? `${isGoal ? 'goal' : 'task'}-${crypto.randomUUID()}`
+      const next = { ...(before ?? (isGoal ? { id, title: '', description: '', completed: false } : { id, title: '', notes: '', status: 'todo' })), ...changes } as AuthorGoal | AuthorTask
+      if ('targetWords' in next && next.targetWords === null) next.targetWords = undefined
+      const operation: AuthorPlanOperation = { kind: 'author_plan', target: isGoal ? 'goal' : 'task', item: next, before }
+      const validated = applyAuthorPlanOperation(planning, operation, bookId, await listEntitiesByBook(bookId))
+      operation.item = (isGoal ? validated.goals : validated.tasks).find(item => item.id === id)!
+      item = proposal(book, 'update_author_plan', operation, args, authorPlanChanges(operation))
+    } else if (name === 'propose_book_metadata_update') {
       const book = await bookEntity(bookId)
       const patch = validateMetadataPatch(args.changes)
       const current = metadataValues(book)
