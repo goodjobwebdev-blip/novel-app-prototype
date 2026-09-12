@@ -1,3 +1,5 @@
+import { getEffectiveLoreTypes } from './lore-types-service'
+import { resolveLoreType } from './lore-types'
 import { updateBrainstormDraft, type ChatBrainstorm } from './chat-brainstorm'
 import { normalizeChatRoundLimit, validateChatRoundLimit } from './chat-round-limit'
 import { chatHistorySignature } from './chat-history-guard'
@@ -47,6 +49,7 @@ export type ChatCodexCreationProposal = ProposalDraft & {
   id: string
   title: string
   category: string
+  typeId?: string
   content: string
   summary?: string
   status: ChatCodexCreationStatus
@@ -68,6 +71,7 @@ export type ChatEntityActionProposal = ProposalDraft & {
   contentLength?: number
   previousCategory?: string
   category?: string
+  typeId?: string
   expectedUpdatedAt?: number
   summary?: string
   status: 'proposed' | 'applying' | 'applied' | 'rejected' | 'stale'
@@ -375,13 +379,15 @@ export async function claimChatContinuation(bookId: string, chatId: string, mess
 }
 
 export async function saveChatProposalDraft(bookId: string, chatId: string, messageId: string, field: EditableProposalField, proposalId: string, values: Record<string, string>, expectedRevision: number) {
+  const types = await getEffectiveLoreTypes(bookId)
   const snapshot = structuredClone(values)
   const next = await updateEntityAtomically<ChatMessageEntity>(messageId, current => {
     if (current.type !== 'chatMessage' || current.bookId !== bookId || current.parentId !== chatId) throw new Error('The original chat is no longer available.')
     const proposals = current[field] as EditableProposal[] | undefined
     const selected = proposals?.find(proposal => proposal.id === proposalId)
     if (!selected) throw new Error('This proposal is no longer available.')
-    const edited = editProposalDraft(field, selected, snapshot, expectedRevision)
+    const edited = editProposalDraft(field, selected, snapshot, expectedRevision, types)
+    if ('category' in edited) { const type = resolveLoreType(types, edited.typeId ?? edited.category ?? ''); if (!type) throw new Error('This lore type is no longer available.'); if ('typeId' in selected && selected.typeId) edited.typeId = type.id; edited.category = type.name }
     return { ...current, [field]: proposals!.map(proposal => proposal.id === proposalId ? edited : proposal), updatedAt: Date.now() }
   })
   notifyChatChange(bookId)

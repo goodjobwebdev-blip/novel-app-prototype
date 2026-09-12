@@ -1,3 +1,4 @@
+import { useLoreTypes } from './LoreTypesControls'
 import { useEffect, useState } from 'react'
 import ExpandableTextInput from './ExpandableTextInput'
 import { getEntity, type ArcEntity } from './persistence'
@@ -5,6 +6,7 @@ import { saveChatProposalDraft, type ChatMessageEntity } from './chat-service'
 import { proposalDraftFields, proposalDraftValues, type EditableProposal, type EditableProposalField } from './chat-proposal-draft'
 
 export default function ProposalDraftEditor({ message, field, proposal, onSaved }: { message: ChatMessageEntity; field: EditableProposalField; proposal: EditableProposal; onSaved: () => Promise<unknown> }) {
+  const { types } = useLoreTypes(message.bookId)
   const [open, setOpen] = useState(false)
   const [values, setValues] = useState(() => proposalDraftValues(field, proposal))
   const [revision, setRevision] = useState(proposal.draftRevision ?? 0)
@@ -23,7 +25,7 @@ export default function ProposalDraftEditor({ message, field, proposal, onSaved 
     }).catch(() => { if (!cancelled) setSource('Could not load the source.') })
     return () => { cancelled = true }
   }, [open, message.bookId, proposal])
-  const fields = proposalDraftFields(field, proposal)
+  const fields = proposalDraftFields(field, proposal, types)
   if (proposal.status !== 'proposed' || !fields.length) return null
   async function save() {
     if (busy) return
@@ -40,7 +42,7 @@ export default function ProposalDraftEditor({ message, field, proposal, onSaved 
       <p>Save draft keeps your changes in this chat. Use the proposal’s Apply or Create button when ready.</p>
       <div className="chat-proposal-draft-columns">
         <div><strong>Original source / suggestion</strong>{source && <pre>{source}</pre>}{field === 'documentEdits' && 'edits' in proposal && proposal.edits?.map((edit, index) => <pre key={index}>{edit.oldText}</pre>)}<details><summary>Original suggestion</summary><pre>{Object.values(proposal.originalDraft ?? proposalDraftValues(field, proposal)).join('\n\n')}</pre></details></div>
-        <div>{fields.map(item => <label key={item.key}><span>{item.label}</span>{item.options ? <select disabled={busy} value={values[item.key]} onChange={event => setValues(current => ({ ...current, [item.key]: event.target.value }))}>{item.options.map(value => <option key={value}>{value}</option>)}</select> : item.multiline ? <ExpandableTextInput aria-label={item.label} dialogTitle={`Edit ${item.label.toLowerCase()}`} value={values[item.key]} readOnly={busy} onChange={value => setValues(current => ({ ...current, [item.key]: value }))} /> : <input aria-label={item.label} disabled={busy} value={values[item.key]} onChange={event => setValues(current => ({ ...current, [item.key]: event.target.value }))} />}</label>)}</div>
+        <div>{fields.map(item => <label key={item.key}><span>{item.label}</span>{item.options ? <select disabled={busy} value={values[item.key]} onChange={event => setValues(current => ({ ...current, [item.key]: event.target.value }))}>{!item.options.includes(values[item.key]) && <option value={values[item.key]} disabled>Unavailable type</option>}{item.options.map(value => <option key={value} value={value}>{item.optionLabels?.[value] ?? value}</option>)}</select> : item.multiline ? <ExpandableTextInput aria-label={item.label} dialogTitle={`Edit ${item.label.toLowerCase()}`} value={values[item.key]} readOnly={busy} onChange={value => setValues(current => ({ ...current, [item.key]: value }))} /> : <input aria-label={item.label} disabled={busy} value={values[item.key]} onChange={event => setValues(current => ({ ...current, [item.key]: event.target.value }))} />}</label>)}</div>
       </div>
       {error && <p role="alert">{error}</p>}
       <footer><button type="button" disabled={busy} onClick={() => setValues(proposal.originalDraft ?? proposalDraftValues(field, proposal))}>Reset to original</button><button type="button" disabled={busy} onClick={() => setOpen(false)}>Cancel editing</button><button type="button" disabled={busy} onClick={() => { void save() }}>{busy ? 'Saving…' : 'Save draft'}</button></footer>

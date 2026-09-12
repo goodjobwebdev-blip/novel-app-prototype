@@ -1,3 +1,4 @@
+import { loreTypesForTools, type LoreType } from './lore-types'
 import { chatSkillParts, type CapturedChatSkill } from './chat-skills'
 import { brainstormTools } from './chat-brainstorm'
 import { projectProse } from './document-projection'
@@ -112,6 +113,7 @@ export function assembleChatGenerationRequest(input: {
   book: BookPromptValues
   context: PreparedContextValues
   history: ChatRequestHistoryItem[]
+  loreTypes?: LoreType[]
   skills?: CapturedChatSkill[]
   tools?: ChatToolDefinition[]
 }): NormalizedAssembledRequest {
@@ -153,7 +155,7 @@ export function assembleChatGenerationRequest(input: {
       ...(input.context.sceneBeats?.length ? [normalizeAppManagedPart({ id: 'scene-planning-beats', role: 'system', sourceKind: 'app-managed', sourceId: input.context.currentSceneId, name: 'Scene planning beats', ownership: 'app-managed', content: `Planning only, distinct from manuscript facts. Use propose_scene_beat to suggest changes; approval is required.\n${JSON.stringify(input.context.sceneBeats)}` })] : []),
       ...historyParts,
     ],
-    structuredParts: [normalizeStructuredTools((input.tools ?? CHAT_TOOL_DEFINITIONS) as unknown as Array<Record<string, unknown>>)],
+    structuredParts: [normalizeStructuredTools(loreTypesForTools(input.tools ?? CHAT_TOOL_DEFINITIONS, input.loreTypes) as unknown as Array<Record<string, unknown>>)],
     dynamicSourceDedupe: dedupe.decisions,
   })
 }

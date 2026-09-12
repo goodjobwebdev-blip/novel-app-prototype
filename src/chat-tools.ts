@@ -1,3 +1,5 @@
+import { BUILTIN_LORE_TYPES } from './lore-types'
+import { requireLoreType } from './lore-types-service'
 import { sceneBeats } from './scene-beats'
 import { proseText, protectedRanges, rangeTouchesProtected } from './document-projection.ts'
 import type { ChatToolCall, ChatToolDefinition } from './chat-api'
@@ -27,7 +29,6 @@ import {
 const editableTypes = ['scene', 'note', 'codexEntry'] as const
 const editableTypeSet = new Set<string>(editableTypes)
 const MAX_REPLACEMENTS = 12
-const CODEX_CATEGORIES = ['Character', 'Place', 'Object', 'Event', 'Group', 'Other'] as const
 
 export const chatWorkspaceTools: ChatToolDefinition[] = [
   {
@@ -70,7 +71,7 @@ export const chatWorkspaceTools: ChatToolDefinition[] = [
         type: 'object',
         properties: {
           title: { type: 'string', description: 'Concise canonical name for the lore entry.' },
-          category: { type: 'string', enum: CODEX_CATEGORIES, description: 'Codex category.' },
+          category: { type: 'string', enum: BUILTIN_LORE_TYPES.map(type => type.id), description: 'Codex category.' },
           content: { type: 'string', description: 'Markdown body for the new Codex entry.' },
           summary: { type: 'string', description: 'Short explanation of why this lore entry should be created.' },
         },
@@ -232,6 +233,7 @@ export async function executeChatWorkspaceTool(bookId: string, call: ChatToolCal
           type: entity.type,
           title: titleFor(entity),
           category: entity.type === 'codexEntry' ? String(entity.category ?? 'Other') : undefined,
+          typeId: entity.typeId,
           updatedAt: entity.updatedAt,
           content: proseText(String(entity.content ?? '')),
           planningBlocks: entity.type === 'scene' ? sceneBeats(String(entity.content ?? '')).map(({ block }) => ({ type: 'scene_beat', id: block.id, text: block.text || '' })) : [],
@@ -242,7 +244,8 @@ export async function executeChatWorkspaceTool(bookId: string, call: ChatToolCal
 
     if (call.function.name === 'propose_codex_entry') {
       const title = typeof args.title === 'string' ? args.title.trim().replace(/\s+/g, ' ') : ''
-      const category = typeof args.category === 'string' && CODEX_CATEGORIES.includes(args.category as typeof CODEX_CATEGORIES[number]) ? args.category : 'Other'
+      const loreType = await requireLoreType(bookId, typeof args.category === 'string' ? args.category : 'lore-other')
+      const category = loreType.name
       const content = typeof args.content === 'string' ? args.content : ''
       if (!title) return { content: toolResult({ ok: false, error: 'Codex title cannot be empty.' }) }
       const existing = (await listEntitiesByBook(bookId, 'codexEntry'))
@@ -254,6 +257,7 @@ export async function executeChatWorkspaceTool(bookId: string, call: ChatToolCal
         id: makeProposalId('chat-codex-create'),
         title,
         category,
+        typeId: loreType.id,
         content,
         summary: typeof args.summary === 'string' ? args.summary.trim() : '',
         status: 'proposed',
@@ -376,7 +380,9 @@ export async function createChatCodexEntry(messageId: string, proposalId: string
     throw new Error('A Codex entry with this title now exists. The proposal was not created again.')
   }
 
-  const created = await createCodexEntry(message.bookId, proposal.title, proposal.category)
+  let created
+  try { created = await createCodexEntry(message.bookId, proposal.title, proposal.typeId ?? proposal.category) }
+  catch (error) { await setCodexCreationStatus(message.id, proposal.id, { status: 'stale' }); throw error }
   if (proposal.content) await saveDocumentContent(created.id, proposal.content)
   const appliedAt = Date.now()
   await setCodexCreationStatus(message.id, proposal.id, { status: 'created', entityId: created.id, appliedAt })

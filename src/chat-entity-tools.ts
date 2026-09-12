@@ -1,3 +1,5 @@
+import { BUILTIN_LORE_TYPES } from './lore-types'
+import { requireLoreType } from './lore-types-service'
 import type { ChatToolCall, ChatToolDefinition } from './chat-api'
 import { applyChatManagementProposal } from './chat-management-tools'
 import { loadProposalTargetOrMarkStale } from './chat-proposal-target'
@@ -21,7 +23,6 @@ import {
 
 const manageableTypes = ['note', 'codexEntry'] as const
 const manageableTypeSet = new Set<string>(manageableTypes)
-const CODEX_CATEGORIES = ['Character', 'Place', 'Object', 'Event', 'Group', 'Other'] as const
 
 export const chatEntityToolNames = new Set([
   'propose_note_create',
@@ -107,7 +108,7 @@ export const chatEntityTools: ChatToolDefinition[] = [
         type: 'object',
         properties: {
           entity_id: { type: 'string' },
-          category: { type: 'string', enum: CODEX_CATEGORIES },
+          category: { type: 'string', enum: BUILTIN_LORE_TYPES.map(type => type.id) },
           summary: { type: 'string' },
         },
         required: ['entity_id', 'category'],
@@ -255,8 +256,8 @@ export async function executeChatEntityTool(bookId: string, call: ChatToolCall):
       const entityId = typeof args.entity_id === 'string' ? args.entity_id : ''
       const entity = await manageableEntity(bookId, entityId)
       if (entity.type !== 'codexEntry') return { content: result({ ok: false, error: 'Only Codex entries have categories.' }) }
-      const category = typeof args.category === 'string' && CODEX_CATEGORIES.includes(args.category as typeof CODEX_CATEGORIES[number]) ? args.category : null
-      if (!category) return { content: result({ ok: false, error: 'Choose a valid Codex category.' }) }
+      const loreType = await requireLoreType(bookId, typeof args.category === 'string' ? args.category : '')
+      const category = loreType.name
       const proposal: ChatEntityActionProposal = {
         id: makeProposalId(),
         action: 'set_codex_category',
@@ -266,6 +267,7 @@ export async function executeChatEntityTool(bookId: string, call: ChatToolCall):
         expectedUpdatedAt: entity.updatedAt,
         previousCategory: String(entity.category ?? 'Other'),
         category,
+        typeId: loreType.id,
         summary: cleanTitle(args.summary),
         status: 'proposed',
         createdAt: Date.now(),
@@ -337,7 +339,7 @@ export async function applyChatEntityAction(messageId: string, proposalId: strin
 
   if (proposal.action === 'set_codex_category') {
     if (entity.type !== 'codexEntry') throw new Error('Only Codex entries have categories.')
-    await updateCodexCategory(entity.id, proposal.category || 'Other')
+    await updateCodexCategory(entity.id, proposal.typeId ?? proposal.category ?? 'lore-other')
     const appliedAt = Date.now()
     await setActionStatus(message.id, proposal.id, { status: 'applied', appliedAt })
     if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('arc-entity-changed', { detail: { bookId: message.bookId, entityId: entity.id } }))

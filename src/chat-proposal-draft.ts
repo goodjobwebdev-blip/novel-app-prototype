@@ -1,12 +1,12 @@
+import { BUILTIN_LORE_TYPES, type LoreType } from './lore-types.ts'
 import type { ChatCodexCreationProposal, ChatDocumentEditProposal, ChatEntityActionProposal, ChatOutlineActionProposal } from './chat-service'
 
 export type ProposalDraft = { originalDraft?: Record<string, string>; editedValues?: Record<string, string>; draftRevision?: number }
 export type EditableProposal = ChatDocumentEditProposal | ChatCodexCreationProposal | ChatOutlineActionProposal | ChatEntityActionProposal
 export type EditableProposalField = 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions'
-export type DraftField = { key: string; label: string; value: string; multiline?: boolean; required?: boolean; options?: string[] }
-const categories = ['Character', 'Place', 'Object', 'Event', 'Group', 'Other']
+export type DraftField = { key: string; label: string; value: string; multiline?: boolean; required?: boolean; options?: string[]; optionLabels?: Record<string, string> }
 
-export function proposalDraftFields(field: EditableProposalField, proposal: EditableProposal): DraftField[] {
+export function proposalDraftFields(field: EditableProposalField, proposal: EditableProposal, types: LoreType[] = BUILTIN_LORE_TYPES): DraftField[] {
   const result: DraftField[] = []
   const add = (key: string, label: string, value: unknown, multiline = false, required = false, options?: string[]) => result.push({ key, label, value: String(value ?? ''), multiline, required, options })
   if (field === 'documentEdits') {
@@ -16,7 +16,8 @@ export function proposalDraftFields(field: EditableProposalField, proposal: Edit
   } else if (field === 'codexCreations') {
     const p = proposal as ChatCodexCreationProposal
     add('title', 'Title', p.title, false, true)
-    add('category', 'Type', p.category, false, true, categories)
+    add(p.typeId ? 'typeId' : 'category', 'Type', p.typeId ?? p.category, false, true, types.map(type => p.typeId ? type.id : type.name))
+    result.at(-1)!.optionLabels = Object.fromEntries(types.map(type => [type.id, type.name]))
     add('content', 'Body', p.content, true)
   } else if (field === 'outlineActions') {
     const p = proposal as ChatOutlineActionProposal
@@ -26,7 +27,7 @@ export function proposalDraftFields(field: EditableProposalField, proposal: Edit
     const p = proposal as ChatEntityActionProposal
     if (p.action === 'rename' || p.action === 'create_note') add('newTitle', 'Title', p.newTitle || p.entityTitle, false, true)
     if (p.action === 'create_note') add('content', 'Note body', p.content, true)
-    if (p.action === 'set_codex_category') add('category', 'Type', p.category, false, true, categories)
+    if (p.action === 'set_codex_category') { add(p.typeId ? 'typeId' : 'category', 'Type', p.typeId ?? p.category, false, true, types.map(type => p.typeId ? type.id : type.name)); result.at(-1)!.optionLabels = Object.fromEntries(types.map(type => [type.id, type.name])) }
     const op = p.operation
     if (op?.kind === 'metadata' || op?.kind === 'scene_metadata') {
       for (const [key, value] of Object.entries(op.patch)) {
@@ -49,10 +50,10 @@ export function proposalDraftValues(field: EditableProposalField, proposal: Edit
 }
 
 /** Accept only editable values; targets, before-text, operation and revisions remain immutable. */
-export function editProposalDraft(field: EditableProposalField, current: EditableProposal, values: Record<string, string>, expectedRevision: number): EditableProposal {
+export function editProposalDraft(field: EditableProposalField, current: EditableProposal, values: Record<string, string>, expectedRevision: number, types: LoreType[] = BUILTIN_LORE_TYPES): EditableProposal {
   if (current.status !== 'proposed') throw new Error('Only pending proposals can be edited.')
   if ((current.draftRevision ?? 0) !== expectedRevision) throw new Error('This draft changed elsewhere. Reopen it before editing.')
-  const fields = proposalDraftFields(field, current)
+  const fields = proposalDraftFields(field, current, types)
   if (!fields.length || Object.keys(values).length !== fields.length || fields.some(item => typeof values[item.key] !== 'string') || Object.keys(values).some(key => !fields.some(item => item.key === key))) throw new Error('The draft contains unsupported changes.')
   for (const item of fields) {
     if (item.required && !values[item.key].trim()) throw new Error(`${item.label} cannot be empty.`)

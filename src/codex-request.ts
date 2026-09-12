@@ -48,6 +48,7 @@ Continue or expand the entry at the captured generation point.`,
 
 {% if entry.title %}Title: {{entry.title}}{% endif %}
 {% if entry.category %}Category: {{entry.category}}{% endif %}
+{% if entry.type_id %}Type ID: {{entry.type_id}}{% endif %}
 
 {% if entry.before_cursor %}# Before generation point
 {{entry.before_cursor}}{% endif %}
@@ -81,7 +82,7 @@ export type CodexRequestInput = {
   composition: PromptComposition
   book: BookPromptValues
   responseLength: string
-  entry: { id: string; title: string; category: string; content: string }
+  entry: { id: string; title: string; category: string; typeId?: string; content: string }
   insertionPosition: number
   context: PreparedContextValues
   instruction?: string
@@ -159,6 +160,7 @@ export function codexRequestValues(input: CodexRequestInput) {
     ...bookTemplateValues({ ...input.book, responseLength: input.responseLength }),
     'entry.title': input.entry.title,
     'entry.category': input.entry.category,
+    'entry.type_id': input.entry.typeId ?? '',
     'entry.content': input.entry.content,
     'entry.before_cursor': input.entry.content.slice(0, insertionPosition),
     'entry.after_cursor': input.entry.content.slice(insertionPosition),

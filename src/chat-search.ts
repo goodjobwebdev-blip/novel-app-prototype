@@ -27,7 +27,7 @@ export function searchBookEntities(entities: ArcEntity[], args: Record<string, u
     return {
       id: entity.id, type: entity.type, title: String(entity.title ?? 'Untitled'), parentId: entity.parentId,
       ...(entity.type === 'codexEntry' ? { scope: codexScopeLabel(entity), series_source_id: entity.seriesSourceId } : {}),
-      category: entity.category, updatedAt: entity.updatedAt, archived: Number(entity.archivedAt) > 0,
+      category: entity.category, typeId: entity.typeId, updatedAt: entity.updatedAt, archived: Number(entity.archivedAt) > 0,
       preview: `${start ? '…' : ''}${body.slice(start, start + 320)}${body.length > start + 320 ? '…' : ''}`,
     }
   })

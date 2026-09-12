@@ -70,6 +70,7 @@ export const promptVariables: PromptVariable[] = [
   { name: 'target.source', description: 'Exact authoritative source material selected for this Summary', scopes: ['summarize'], stability: 'turn-dynamic', canonical: true },
   { name: 'target.previous_summary', description: 'Existing summary when re-summarizing', scopes: ['summarize'], stability: 'turn-dynamic', canonical: true },
   { name: 'entry.title', description: 'Current Codex entry title', scopes: ['lore'], stability: 'turn-dynamic', canonical: true },
+  { name: 'entry.type_id', description: 'Stable ID of the current Codex lore type', scopes: ['lore'], stability: 'turn-dynamic', canonical: true },
   { name: 'entry.category', description: 'Current Codex entry category', scopes: ['lore'], stability: 'turn-dynamic', canonical: true },
   { name: 'entry.content', description: 'Current/existing Codex entry Markdown', scopes: ['lore'], stability: 'turn-dynamic', canonical: true },
   { name: 'entry.before_cursor', description: 'Codex entry text before the captured generation point', scopes: ['lore'], stability: 'turn-dynamic', canonical: true },

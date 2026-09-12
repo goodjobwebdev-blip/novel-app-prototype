@@ -1,3 +1,4 @@
+import { ensureLoreTypesWithDb, resolveLoreType } from './lore-types'
 import { database, getEntity, type BookEntity, type CodexEntryEntity, type CodexDependencyEdge } from './persistence'
 import { copyCodexMedia, detachedCodex, seriesTransaction, synchronizeSeriesCodex } from './series-codex'
 const notify = (bookId: string, entityId?: string) => { if (typeof window !== 'undefined') { window.dispatchEvent(new CustomEvent('arc-entity-changed', { detail: { bookId, entityId } })); window.dispatchEvent(new Event('arc-series-codex-changed')) } }
@@ -44,6 +45,8 @@ export async function promoteCodexToSeries(bookId: string, entryId: string) {
     const series = book?.seriesId ? await db.table('entities').get(book.seriesId) : undefined
     const entry = await db.table('entities').get(entryId) as CodexEntryEntity | undefined
     if (!series || series.type !== 'series' || entry?.type !== 'codexEntry' || entry.bookId !== bookId || entry.seriesSourceId) throw new Error('Choose a book-only entry in a series book.')
+    const seriesType = resolveLoreType(await ensureLoreTypesWithDb(db, series.id), entry.typeId ?? entry.category)
+    if (!seriesType) throw new Error('This is a book-only lore type. Assign a series type before sharing the entry.')
     const existing = await db.table('entities').where('bookId').equals(series.id).toArray() as CodexEntryEntity[]
     if (existing.some(item => item.type === 'codexEntry' && item.title.trim().toLocaleLowerCase() === entry.title.trim().toLocaleLowerCase())) throw new Error(`A series entry named “${entry.title}” already exists. Rename this local entry or use the existing source; no content was overwritten.`)
     const outgoing = await db.table('codexDependencies').where('[bookId+sourceId]').equals([bookId, entryId]).toArray() as CodexDependencyEdge[]
@@ -55,7 +58,7 @@ export async function promoteCodexToSeries(bookId: string, entryId: string) {
     }
     const id = `codex-${crypto.randomUUID()}`, now = Date.now()
     const media = await copyCodexMedia(db, entry, id, series.id)
-    const source: CodexEntryEntity = { ...detachedCodex(entry), ...media, id, bookId: series.id, parentId: series.id, codexScope: 'series', updatedAt: now, sourceRevision: now }
+    const source: CodexEntryEntity = { ...detachedCodex(entry), ...media, id, bookId: series.id, parentId: series.id, codexScope: 'series', typeId: seriesType.id, category: seriesType.name, updatedAt: now, sourceRevision: now }
     await db.table('entities').put(source)
     for (const edge of outgoing) await db.table('codexDependencies').put({ ...edge, id: `dependency-${crypto.randomUUID()}`, bookId: series.id, sourceId: id, targetId: targets.get(edge.targetId)! })
     await db.table('entities').put({ ...entry, codexScope: 'inherited', seriesSourceId: source.id, seriesSourceSeriesId: series.id, seriesSnapshotSignature: undefined })
@@ -70,8 +73,8 @@ export async function readSeriesSource(bookId: string, sourceId: string) {
   const edges = await db.table('codexDependencies').where('[bookId+sourceId]').equals([source.bookId, sourceId]).toArray() as CodexDependencyEdge[]
   return { ...state, source, edges }
 }
-export type SeriesSourceDraft = Pick<CodexEntryEntity, 'title' | 'content' | 'category' | 'autoIncludeTriggers'> & { edges: Array<Pick<CodexDependencyEdge, 'targetId' | 'relationLabel' | 'includeWithSource'>> }
-export function seriesSourceDraft(source: CodexEntryEntity, edges: CodexDependencyEdge[]): SeriesSourceDraft { return { title: source.title, content: source.content, category: source.category, autoIncludeTriggers: [...(source.autoIncludeTriggers ?? [])], edges: edges.map(({ targetId, relationLabel, includeWithSource }) => ({ targetId, relationLabel, includeWithSource })) } }
+export type SeriesSourceDraft = Pick<CodexEntryEntity, 'title' | 'content' | 'category' | 'typeId' | 'autoIncludeTriggers'> & { edges: Array<Pick<CodexDependencyEdge, 'targetId' | 'relationLabel' | 'includeWithSource'>> }
+export function seriesSourceDraft(source: CodexEntryEntity, edges: CodexDependencyEdge[]): SeriesSourceDraft { return { title: source.title, content: source.content, category: source.category, typeId: source.typeId, autoIncludeTriggers: [...(source.autoIncludeTriggers ?? [])], edges: edges.map(({ targetId, relationLabel, includeWithSource }) => ({ targetId, relationLabel, includeWithSource })) } }
 export async function saveSeriesSource(bookId: string, sourceId: string, before: SeriesSourceDraft, draft: SeriesSourceDraft) {
   const db = await database()
   await seriesTransaction(db, async () => {
@@ -87,9 +90,11 @@ export async function saveSeriesSource(bookId: string, sourceId: string, before:
       if (!target || target.codexScope !== 'series' || target.bookId !== source.bookId || target.id === source.id || targets.has(target.id)) throw new Error('Relationships must target distinct entries in this series.')
       targets.add(target.id)
     }
+    const type = resolveLoreType(await ensureLoreTypesWithDb(db, source.bookId), draft.typeId ?? draft.category)
+    if (!type) throw new Error('Choose a series lore type. Book-only types cannot be assigned to a series source.')
     const { edges: _edges, ...fields } = draft
     const now = Math.max(Date.now(), source.updatedAt + 1, (source.sourceRevision ?? 0) + 1)
-    await db.table('entities').put({ ...source, ...fields, title: draft.title.trim(), sourceRevision: now, updatedAt: now })
+    await db.table('entities').put({ ...source, ...fields, typeId: type.id, category: type.name, title: draft.title.trim(), sourceRevision: now, updatedAt: now })
     await db.table('codexDependencies').where('[bookId+sourceId]').equals([source.bookId, sourceId]).delete()
     for (const edge of draft.edges) await db.table('codexDependencies').put({ ...edge, id: `dependency-${crypto.randomUUID()}`, bookId: source.bookId, sourceId, createdAt: now, updatedAt: now })
   }); await synchronizeSeriesCodex(db, bookId); notify(bookId)
