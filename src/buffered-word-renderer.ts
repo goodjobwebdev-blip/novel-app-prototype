@@ -57,8 +57,10 @@ export function createBufferedWordRenderer({
       return true
     } catch (error) {
       failure = error
-      onError?.(error)
       complete(error)
+      // onError may synchronously abort the request. Settle the failure first
+      // so its abort listener cannot turn a failed insertion into success.
+      onError?.(error)
       return false
     }
   }
