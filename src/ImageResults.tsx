@@ -36,7 +36,7 @@ function JobResult({ job, chat }: { job: ImageJob; chat: boolean }) {
   if (job.decision === 'discarded') return <p className="image-help">{kind === 'video' ? 'Video' : 'Image'} discarded</p>
   return <div className="image-job-result">{asset ? <ImageAssetPreview asset={asset} /> : <p>{loadError || `Loading ${kind}…`}</p>}<div className="image-actions">{!job.decision && asset && <><button disabled={busy} type="button" onClick={() => { void action(() => decideImageJob(job.id, true)) }}>Keep {kind}</button><button disabled={busy} type="button" onClick={() => { void action(async () => { await decideImageJob(job.id, false); if (!chat) await clearImageQueue([job.id]) }) }}>Discard</button></>}{job.decision === 'kept' && <span>Saved to gallery</span>}{chat && <button disabled={busy} type="button" onClick={() => { void action(() => hideImageFromChat(job.id)) }}><Trash2 size={16} /> Remove from chat</button>}</div>{error && <p role="alert">{error}</p>}</div>
 }
-export default function ImageJobs({ proposalId, messageId, direct = false }: { proposalId?: string; messageId?: string; direct?: boolean }) {
+export default function ImageJobs({ proposalId, messageId, direct = false, showPrompt = false }: { proposalId?: string; messageId?: string; direct?: boolean; showPrompt?: boolean }) {
   const { data: jobs, error } = useImageQuery(listImageJobs, [], [])
   const [limit, setLimit] = useState(30), [clearing, setClearing] = useState(false)
   const [now, setNow] = useState(Date.now()), [actionError, setActionError] = useState('')
@@ -70,7 +70,7 @@ export default function ImageJobs({ proposalId, messageId, direct = false }: { p
   const jobCard = (job: ImageJob) => <article className="image-job" key={job.id}>
     <header><strong>{job.modelAlias}</strong><span>{job.status === 'running' ? `Generating · ${Math.max(0, Math.floor((now - (job.startedAt ?? now)) / 1000))} s` : job.status === 'queued' ? `Queued · #${jobs.filter((item) => item.provider === job.provider && item.status === 'queued').findIndex((item) => item.id === job.id) + 1}` : job.status}</span></header>
     <small>{job.task?.endsWith('video') ? `${job.video?.resolution ?? `${job.size.width} × ${job.size.height}`}${job.video?.duration ? ` · ${job.video.duration} s` : ''}` : `${job.size.width} × ${job.size.height}`}{!proposalId && !direct && job.bookTitle ? ` · ${job.bookTitle}` : ''}</small>
-    {!proposalId && !direct && <p className="image-prompt-preview">{job.prompt}</p>}
+    {(showPrompt || (!proposalId && !direct)) && <p className="image-prompt-preview">{job.prompt}</p>}
     {job.error && <p role="alert">{job.error}</p>}
     {job.status === 'completed' && <JobResult job={job} chat={Boolean(proposalId || direct)} />}
     <div className="image-actions">

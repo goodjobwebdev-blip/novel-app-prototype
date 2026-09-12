@@ -1,4 +1,5 @@
 export type ImageProvider = 'nanogpt' | 'openai' | 'pruna'
+export const IMAGE_QUEUE_CONCURRENCY = 3
 export type GenerationTask = 'text-to-image' | 'image-to-image' | 'text-to-video' | 'image-to-video'
 export type MediaKind = 'image' | 'video'
 export type OpenAIImageQuality = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'auto'

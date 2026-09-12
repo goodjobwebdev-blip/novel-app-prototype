@@ -85,8 +85,11 @@
 .image-generate-view { display: grid; gap: 8px; }
 .image-composer,
 .image-queue-pane { min-width: 0; }
-.image-generation-controls { display: grid; }
-.image-generation-pickers { display: grid; grid-template-columns: 1fr; gap: 0; }
+/* Source galleries and native file inputs must not set the form's minimum width. */
+.image-generation-controls { display: grid; grid-template-columns: minmax(0, 1fr); width: 100%; }
+.image-generation-controls > *,
+.image-generation-controls label { min-width: 0; }
+.image-generation-pickers { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
 .image-model-picker { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; }
 .image-model-picker span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .image-model-picker svg { flex: none; }
@@ -114,6 +117,8 @@
 .image-job-group > h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
 .image-job-group > h3 span { display: inline-grid; min-width: 24px; min-height: 24px; place-items: center; padding: 0 6px; border-radius: 999px; background: var(--surface-2); color: var(--soft); font-size: 12px; }
 .image-job-list { display: grid; gap: 10px; }
+.image-proposal-queue { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+.image-proposal-queue > h3 { margin: 0 0 12px; }
 .image-job { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .image-job > small { display: block; }
 .image-job > header > strong { overflow-wrap: anywhere; }
@@ -225,9 +230,10 @@
 .image-task-options button[aria-pressed=true] { border-color: var(--accent); background: var(--surface-2); }
 .image-source-picker { margin: 14px 0; padding: 12px; border: 1px solid var(--line); border-radius: 12px; }
 .image-source-picker h3 { margin: 0; }
-.image-source-upload input { padding: 8px; }
-.image-source-library { display: flex; max-height: 150px; gap: 8px; overflow: auto; padding: 4px 0; }
-.image-source-library button { min-width: 130px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.image-source-upload input { max-width: 100%; padding: 8px; }
+.image-source-library { display: flex; width: 100%; min-width: 0; max-height: 150px; gap: 8px; overflow: auto; padding: 4px 0; }
+.image-source-library button { flex: 0 0 180px; max-width: 100%; overflow: hidden; white-space: nowrap; }
+.image-source-library button span { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .image-source-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin: 8px 0; padding: 0; list-style: none; }
 .image-source-list li { position: relative; display: grid; min-width: 0; gap: 4px; padding: 6px; border: 1px solid var(--line); border-radius: 10px; }
 .image-source-list img { width: 100%; aspect-ratio: 1; border-radius: 6px; object-fit: cover; }

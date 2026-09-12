@@ -85,8 +85,8 @@ test('editable chat proposal → repeated generation → navigate → keep → c
     assert.equal(document.querySelectorAll('.image-model-options button').length, 1)
     await act(async () => document.querySelector('.image-model-options button').click())
     await act(async () => { const select = document.querySelector('select'); select.value = '1344x768'; select.dispatchEvent(new dom.window.Event('change', { bubbles: true })) })
-    await click('Accept proposal')
-    await settle(() => Boolean(button('Generate')))
+    assert.equal(button('Accept proposal'), undefined)
+    assert.ok(button('Generate'))
     assert.equal((await store.listImageJobs()).length, 0)
     await click('Generate')
     await settle(() => button('Generate') && !button('Generate').disabled)
@@ -94,6 +94,7 @@ test('editable chat proposal → repeated generation → navigate → keep → c
     await settle(() => document.querySelectorAll('.image-job').length === 2)
     const before = await store.listImageJobs()
     assert.ok(before.every((j) => j.prompt === 'Edited moonlit gate' && j.provider === 'pruna' && j.size.value === '1344x768'))
+    assert.ok(document.querySelector('dialog[aria-label="Generation tool"] .image-proposal-queue'))
     // Unmount the chat, as navigation does, while its durable jobs run.
     await act(async () => root.unmount())
     await runImageQueue('pruna', deps)
@@ -326,4 +327,69 @@ test('media enhancement preserves original text, chips do not send, and late res
     assert.match(document.body.textContent, /Out of date/)
     assert.equal((await store.listImageJobs()).filter(job => job.prompt === previous).length, 0)
   } finally { await act(async () => root.unmount()) }
+})
+
+
+test('Generate approves once and keeps the popup open for parallel jobs, edited drafts, and result review', async () => {
+  configure()
+  const db = await p.database()
+  await db.table('imageJobs').clear()
+  const { book } = await p.createBook(initialAiSettings, 'Popup queue')
+  const conversation = await createChat(book.id)
+  const proposal = executeImageProposal({ id: 'popup-call', type: 'function', function: { name: 'propose_image_generation', arguments: JSON.stringify({ prompt: 'First version' }) } }).imageGeneration
+  const message = await createChatMessage(conversation, 'assistant', '', { imageGenerations: [proposal] })
+  const root = createRoot(document.getElementById('root'))
+  const started = [], releases = new Map()
+  let draining
+  const popup = () => document.querySelector('dialog[aria-label="Generation tool"]')
+  const popupButton = text => [...popup().querySelectorAll('button')].find(item => item.textContent.trim() === text)
+  try {
+    await act(async () => root.render(h(Card, { message, proposal })))
+    await click('Open generation tool')
+    await settle(() => Boolean(button('Generate')) && !button('Generate').disabled)
+    assert.equal((await store.listImageJobs()).length, 0)
+    assert.match(popup().textContent, /Your queued generations and results will appear here/)
+    // A rapid double click is one submission; the next settled click is a new job.
+    await act(async () => { button('Generate').click(); button('Generate').click() })
+    await settle(() => Boolean(button('Generate')) && !button('Generate').disabled && popup().querySelectorAll('.image-job').length === 1)
+    assert.equal((await p.getEntity(message.id)).imageGenerations[0].status, 'accepted')
+    await act(async () => {
+      draining = runImageQueue('openai', { ...deps, generate: async job => {
+        started.push(job)
+        await new Promise(resolve => releases.set(job.id, resolve))
+        return { image: png }
+      } })
+    })
+    await settle(() => started.length === 1)
+    await input(popup().querySelector('textarea'), 'Second version')
+    await click('Generate')
+    await settle(() => started.length === 2 && Boolean(button('Generate')) && !button('Generate').disabled)
+    assert.deepEqual(started.map(job => job.prompt), ['First version', 'Second version'])
+    await settle(() => popup().querySelectorAll('.image-job').length === 2)
+    assert.ok([...popup().querySelectorAll('.image-job')].every(card => card.textContent.includes('Generating')))
+    assert.match(popup().textContent, /First version/)
+    assert.match(popup().textContent, /Second version/)
+    // Complete only the second result while the first is still in flight.
+    await act(async () => releases.get(started[1].id)())
+    await settle(() => Boolean(popupButton('Keep image')))
+    await act(async () => popupButton('Keep image').click())
+    await settle(() => popup().textContent.includes('Saved to gallery'))
+    assert.equal(popup().querySelector('textarea').value, 'Second version')
+    await act(async () => releases.get(started[0].id)())
+    await act(async () => draining)
+    await settle(() => Boolean(popupButton('Discard')))
+    await act(async () => popupButton('Discard').click())
+    await settle(() => popup().textContent.includes('Image discarded'))
+    await click('Close tool')
+    await settle(() => !popup())
+    await settle(() => document.body.textContent.includes('Saved to gallery'))
+    await click('Open generation tool')
+    await settle(() => Boolean(popup()))
+    assert.equal(popup().querySelector('textarea').value, 'Second version')
+    await settle(() => popup().textContent.includes('Saved to gallery'))
+  } finally {
+    releases.forEach(resolve => resolve())
+    if (draining) await act(async () => draining)
+    await act(async () => root.unmount())
+  }
 })
