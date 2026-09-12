@@ -1,3 +1,5 @@
+import { boundedChatRounds, normalizeChatRoundLimit } from './chat-round-limit'
+import { projectProse } from './document-projection'
 import ProposalDraftEditor from './ProposalDraftEditor'
 import type { ReactNode } from 'react'
 import { groupChatAnswers, answerProse } from './chat-answer-groups'
@@ -33,7 +35,7 @@ import GenerationActions from './GenerationActions'
 import PromptTemplateEditor from './PromptTemplateEditor'
 import PromptPresetControls from './PromptPresetControls'
 import { chatMatchesBookSelection, onlyChatsForBook, reloadMatchesBookSelection } from './chat-book-guard'
-import { chatHistoryPrefixMatches } from './chat-history-guard'
+import { chatHistoryPrefixMatches, chatHistorySignature } from './chat-history-guard'
 import {
   abortAllChatGenerations,
   abortChatGeneration,
@@ -50,6 +52,8 @@ import {
 import { runChatSendPipeline } from './chat-send-pipeline'
 import {
   createChat,
+  claimChatContinuation,
+  type ChatContinuation,
   createChatMessage,
   deleteChat,
   deleteMessageAndFollowing,
@@ -139,6 +143,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   const summaryProposalOwnerRef = useRef<{ id: string; controller: AbortController } | null>(null)
   const [phase, setPhase] = useState<GenerationPhase | null>(null)
   const [elapsed, setElapsed] = useState(0)
+  const [roundProgress, setRoundProgress] = useState({ round: 0, limit: 8 })
   const [streamedContent, setStreamedContent] = useState('')
   const [streamedThoughts, setStreamedThoughts] = useState('')
   const [liveThoughtsOpen, setLiveThoughtsOpen] = useState(false)
@@ -542,6 +547,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     history: ChatMessageEntity[],
     reservedOwner?: ChatGenerationOwner,
     preparedInputs?: PreparedAssistantGeneration,
+    continuation?: ChatContinuation,
   ) {
     const candidateOwner = reservedOwner ?? reserveGeneration(activeChat)
     if (!candidateOwner) {
@@ -551,6 +557,10 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     const owner: ChatGenerationOwner = candidateOwner
     const controller = owner.controller
     const sourceBookId = activeChat.bookId
+    const maxRounds = normalizeChatRoundLimit(activeChat.maxModelRounds)
+    if (generationOwnsCurrentUi(owner)) setRoundProgress({ round: 0, limit: maxRounds })
+    const requestHistory = continuation ? history.filter(message => continuation.baseHistoryIds.includes(message.id)) : history
+    let lastRoundMessage: ChatMessageEntity | null = null
     let completed = false
     let unexpectedFailure = false
     let historyInvalidated = false
@@ -580,7 +590,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       const hasWorkspaceProposal = Boolean(extras.imageGenerations?.length || extras.documentEdits?.length || extras.codexCreations?.length || extras.outlineActions?.length || extras.entityActions?.length)
       await ensureSourceHistoryStillCurrent()
       if (!roundContent && !roundThoughts && !hasWorkspaceProposal && !toolActivity.length && status === 'complete') return null
-      return createChatMessage(activeChat, 'assistant', roundContent, {
+      lastRoundMessage = await createChatMessage(activeChat, 'assistant', roundContent, {
         thoughts: roundThoughts || undefined,
         status, responseId, roundNumber, toolActivity,
         imageGenerations: extras.imageGenerations,
@@ -589,6 +599,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
         outlineActions: extras.outlineActions,
         entityActions: extras.entityActions,
       })
+      return lastRoundMessage
     }
 
     function workspaceProposalIds(extras: Pick<ChatMessageEntity, 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations'>) {
@@ -650,12 +661,20 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     }
 
     try {
-      const prepared = preparedInputs ?? await prepareAssistantGeneration(activeChat, history, owner)
+      const prepared = preparedInputs ?? await prepareAssistantGeneration(activeChat, requestHistory, owner)
       assertGenerationOwnerCurrent(owner, activeChat)
       const { settings } = prepared
-      const baseRequest = buildNormalizedRequest(activeChat, history, prepared)
-      const runtimeParts: NormalizedRequestPart[] = []
-      for (let round = 0; round < 8 && !controller.signal.aborted; round += 1) {
+      const baseRequest = buildNormalizedRequest(activeChat, requestHistory, prepared)
+      const runtimeParts: NormalizedRequestPart[] = continuation ? structuredClone(continuation.runtimeParts) : []
+      if (continuation) {
+        const outcomes = history.filter(message => !continuation.baseHistoryIds.includes(message.id)).flatMap(message => (['documentEdits', 'codexCreations', 'outlineActions', 'entityActions', 'imageGenerations'] as const).flatMap(field => (message[field] ?? []).map(item => {
+          const { originalDraft: _original, ...outcome } = item as typeof item & { originalDraft?: unknown }
+          return { kind: field, ...outcome }
+        })))
+        runtimeParts.push(normalizeRuntimeMessagePart({ id: `chat-continuation-${responseId}`, sourceKind: 'app-managed', ownership: 'app-managed', name: 'Continue with current proposal states', message: { role: 'user', content: `Continue the same response using the saved tool results. Do not repeat completed tool calls. Pending proposals are not applied; the following current proposal states supersede earlier tool summaries: ${projectProse(JSON.stringify(outcomes)).text}` } }))
+      }
+      for (const round of boundedChatRounds(maxRounds, controller.signal)) {
+        if (generationOwnsCurrentUi(owner)) setRoundProgress({ round: round + 1, limit: maxRounds })
         const normalizedRequest = appendChatRuntimeMessages(baseRequest, runtimeParts)
         const finalizedRequest = finalizeChatProviderRequest(normalizedRequest)
         if (generationOwnsCurrentUi(owner)) {
@@ -701,7 +720,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
         if (result.toolCalls.length) {
           setOwnedGenerationPhase(owner, 'using-tools')
           runtimeParts.push(normalizeRuntimeMessagePart({
-            id: `chat-tool-round-${round + 1}-assistant`, sourceKind: 'app-managed', ownership: 'app-managed', name: `Tool round ${round + 1} assistant call`,
+            id: `chat-tool-round-${responseId}-${round + 1}-assistant`, sourceKind: 'app-managed', ownership: 'app-managed', name: `Tool round ${round + 1} assistant call`,
             message: { role: 'assistant', content: activeRoundContent || null, ...(activeRoundThoughts ? { reasoning_content: activeRoundThoughts } : {}), tool_calls: result.toolCalls },
           }))
           const roundProposals: ChatDocumentEditProposal[] = []
@@ -714,28 +733,28 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
             if (call.function.name === 'propose_image_generation') {
               const execution = executeImageProposal(call)
               if (execution.imageGeneration) activeRoundExtras.imageGenerations = [...(activeRoundExtras.imageGenerations ?? []), execution.imageGeneration]
-              runtimeParts.push(normalizeRuntimeMessagePart({ id: `chat-tool-${call.id}`, sourceKind: 'app-managed', ownership: 'app-managed', name: call.function.name, message: { role: 'tool', tool_call_id: call.id, content: execution.content } }))
+              runtimeParts.push(normalizeRuntimeMessagePart({ id: `chat-tool-${responseId}-${call.id}`, sourceKind: 'app-managed', ownership: 'app-managed', name: call.function.name, message: { role: 'tool', tool_call_id: call.id, content: execution.content } }))
             } else if (chatManagementToolNames.has(call.function.name)) {
               const execution = await executeChatManagementTool(sourceBookId, call)
               if (execution.entityAction) {
                 roundEntityActions.push(execution.entityAction)
                 activeRoundExtras.entityActions = roundEntityActions
               }
-              runtimeParts.push(normalizeRuntimeMessagePart({ id: `chat-tool-${call.id}`, sourceKind: 'app-managed', ownership: 'app-managed', name: call.function.name, message: { role: 'tool', tool_call_id: call.id, content: execution.content } }))
+              runtimeParts.push(normalizeRuntimeMessagePart({ id: `chat-tool-${responseId}-${call.id}`, sourceKind: 'app-managed', ownership: 'app-managed', name: call.function.name, message: { role: 'tool', tool_call_id: call.id, content: execution.content } }))
             } else if (chatOutlineToolNames.has(call.function.name)) {
               const execution = await executeChatOutlineTool(sourceBookId, call)
               if (execution.outlineAction) {
                 roundOutlineActions.push(execution.outlineAction)
                 activeRoundExtras.outlineActions = roundOutlineActions
               }
-              runtimeParts.push(normalizeRuntimeMessagePart({ id: `chat-tool-${call.id}`, sourceKind: 'app-managed', ownership: 'app-managed', name: call.function.name, message: { role: 'tool', tool_call_id: call.id, content: execution.content } }))
+              runtimeParts.push(normalizeRuntimeMessagePart({ id: `chat-tool-${responseId}-${call.id}`, sourceKind: 'app-managed', ownership: 'app-managed', name: call.function.name, message: { role: 'tool', tool_call_id: call.id, content: execution.content } }))
             } else if (chatEntityToolNames.has(call.function.name)) {
               const execution = await executeChatEntityTool(sourceBookId, call)
               if (execution.entityAction) {
                 roundEntityActions.push(execution.entityAction)
                 activeRoundExtras.entityActions = roundEntityActions
               }
-              runtimeParts.push(normalizeRuntimeMessagePart({ id: `chat-tool-${call.id}`, sourceKind: 'app-managed', ownership: 'app-managed', name: call.function.name, message: { role: 'tool', tool_call_id: call.id, content: execution.content } }))
+              runtimeParts.push(normalizeRuntimeMessagePart({ id: `chat-tool-${responseId}-${call.id}`, sourceKind: 'app-managed', ownership: 'app-managed', name: call.function.name, message: { role: 'tool', tool_call_id: call.id, content: execution.content } }))
             } else {
               const execution = await executeChatWorkspaceTool(sourceBookId, call)
               if (execution.proposal) {
@@ -746,7 +765,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
                 roundCodexCreations.push(execution.codexCreation)
                 activeRoundExtras.codexCreations = roundCodexCreations
               }
-              runtimeParts.push(normalizeRuntimeMessagePart({ id: `chat-tool-${call.id}`, sourceKind: 'app-managed', ownership: 'app-managed', name: call.function.name, message: { role: 'tool', tool_call_id: call.id, content: execution.content } }))
+              runtimeParts.push(normalizeRuntimeMessagePart({ id: `chat-tool-${responseId}-${call.id}`, sourceKind: 'app-managed', ownership: 'app-managed', name: call.function.name, message: { role: 'tool', tool_call_id: call.id, content: execution.content } }))
             }
           }
 
@@ -767,7 +786,11 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
         completed = true
         break
       }
-      if (!completed && !controller.signal.aborted) throw new Error('The assistant used too many workspace tool steps. Ask it to make a smaller edit.')
+      if (!completed && !controller.signal.aborted && lastRoundMessage) {
+        const persisted = await listChatMessages(sourceBookId, activeChat.id)
+        const saved = await updateChatMessage((lastRoundMessage as ChatMessageEntity).id, { status: 'limited', continuation: { baseHistoryIds: requestHistory.map(message => message.id), historySignature: chatHistorySignature(persisted), runtimeParts: structuredClone(runtimeParts), maxRounds } })
+        if (generationOwnsCurrentUi(owner)) setMessages(current => current.map(message => message.id === saved.id ? saved : message))
+      }
     } catch (error) {
       const aborted = controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')
       if (historyInvalidated) {
@@ -788,6 +811,23 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       finishGenerationOwner(owner)
       const refreshed = await getChat(activeChat.id).catch(() => undefined)
       if (refreshed?.bookId === sourceBookId) applyIfCurrentChat(activeChat, () => setChat(refreshed))
+    }
+  }
+
+  async function continueResponse(message: ChatMessageEntity) {
+    if (!chat || !isCurrentChat(chat) || generating) return
+    const sourceChat = chat
+    const owner = reserveGeneration(sourceChat)
+    if (!owner) return
+    try {
+      const captured = await claimChatContinuation(sourceChat.bookId, sourceChat.id, message.id)
+      assertGenerationOwnerCurrent(owner, sourceChat)
+      await runAssistantGeneration(sourceChat, captured.history, owner, undefined, captured.continuation)
+      await reloadMessages()
+    } catch (error) {
+      finishGenerationOwner(owner)
+      onToast(error instanceof Error ? error.message : 'Could not continue this response.')
+      await reloadMessages().catch(() => undefined)
     }
   }
 
@@ -1078,7 +1118,8 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
             {editingId === message.id ? <InlineMessageEdit value={editingValue} onChange={setEditingValue} onCancel={() => setEditingId('')} onSave={() => { void saveEdit(message, false) }} /> : <>
               {message.thoughts && <details className="chat-thoughts" open={openThoughtMessageIds.has(message.id)} onToggle={(event) => setPersistedThoughtsOpen(message.id, event.currentTarget.open)}><summary>Thoughts</summary><div>{message.thoughts}</div></details>}
               <div className="chat-assistant-body">{message.content ? <MarkdownMessage content={message.content} /> : null}</div>
-              {message.status && message.status !== 'complete' && <small className="chat-message-status">{message.status === 'failed' ? 'Interrupted' : 'Stopped'}</small>}
+              {message.status && message.status !== 'complete' && <small className="chat-message-status">{message.status === 'limited' ? `Limit reached · ${message.continuation?.maxRounds ?? message.roundNumber ?? 8} model rounds` : message.status === 'failed' ? 'Interrupted' : 'Stopped'}</small>}
+              {message.continuation && !message.continuedAt && messages.at(-1)?.id === message.id && <button type="button" disabled={generating} onClick={() => { void continueResponse(message) }}>Continue</button>}
               <div className="message-tools"><button type="button" onClick={() => { void copyMessage(message) }}>{copiedMessageId === message.id ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />} {copiedMessageId === message.id ? 'Copied' : 'Copy'}</button><button type="button" disabled={generating || Boolean(summaryProposalId)} title={summaryProposalId ? 'Stop summary generation before changing history' : generating ? 'Stop the current response before editing history' : undefined} onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" onClick={() => { void fork(message) }}><GitFork aria-hidden="true" /> Fork</button><button type="button" onClick={() => { void readAloud(message) }}><Volume2 aria-hidden="true" /> Read aloud</button><button type="button" disabled={generating || Boolean(summaryProposalId)} onClick={() => { void regenerate(message) }}><RefreshCw aria-hidden="true" /> Regenerate</button><button type="button" disabled={generating || Boolean(summaryProposalId)} title={summaryProposalId ? 'Stop summary generation before changing history' : generating ? 'Stop the current response before deleting history' : undefined} onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
             </>}
           </div> : editingId === message.id ? <InlineMessageEdit value={editingValue} onChange={setEditingValue} onCancel={() => setEditingId('')} onSave={() => { void saveEdit(message, false) }} onSaveAndRegenerate={() => { void saveEdit(message, true) }} /> : <>
@@ -1127,6 +1168,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           {group.messages.length > 1 && <div className="message-tools chat-answer-tools"><button type="button" onClick={() => { void copyMessage({ ...group.messages.at(-1)!, content: answerProse(group.messages) }) }}>Copy full answer</button><button type="button" onClick={() => { void readAloud({ ...group.messages.at(-1)!, content: answerProse(group.messages) }) }}>Read full answer aloud</button></div>}
         </section>)}
         {generating && <article className="message assistant streaming"><div className="chat-message-stack chat-live-generation">
+          <details className="chat-answer-activity"><summary>Activity</summary><p>Round {roundProgress.round || 1} of {roundProgress.limit}</p></details>
           <div className="chat-live-status"><i /><span>{generationPhaseLabel(phase)} · {formatElapsed(elapsed)}</span></div>
           {streamedThoughts && <details className="chat-thoughts" open={liveThoughtsOpen} onToggle={(event) => setLiveThoughtsOpen(event.currentTarget.open)}><summary>Thoughts</summary><div>{streamedThoughts}</div></details>}
           {streamedContent && <div className="chat-assistant-body"><MarkdownMessage content={streamedContent} /></div>}
@@ -1141,6 +1183,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
         <summary><span>Generation settings</span><small>Model · context · system prompt</small><ChevronDown aria-hidden="true" /></summary>
         <div className="chat-config-row">
           <ChatModelPicker value={chat.model} models={sortedModels} onChange={(modelId) => { void changeModel(modelId) }} />
+          <label className="chat-round-limit"><span>Max model rounds per response</span><select aria-label="Max model rounds per response" value={normalizeChatRoundLimit(chat.maxModelRounds)} onChange={event => { const captured = chat; void updateChat(captured.id, { maxModelRounds: Number(event.target.value) }).then(updated => applyIfCurrentChat(captured, () => setChat(updated))).catch(error => onToast(error.message)) }}>{Array.from({ length: 32 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</select><small>One model request is one round, even with several tool calls. Changes apply to the next run.</small></label>
           <label className={`chat-context-limit ${contextLimitInputError(limitDraft) ? 'invalid' : ''}`}><span>Context cap</span><input value={limitDraft} onChange={(event) => setLimitDraft(event.target.value)} onBlur={() => { void saveEffectiveContextLimit() }} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} placeholder="Model max" inputMode="text" aria-label="Chat effective context cap" /><small>{contextLimitInputError(limitDraft) || 'Empty uses the model maximum. 32k / 1m supported.'}</small></label>
           <button className="chat-system-prompt-button" type="button" onClick={() => { setCompositionDraft(clonePromptComposition(chat.promptComposition)); setPromptOpen(true) }}><Bot aria-hidden="true" /><span>Request composition</span></button>
           {modelStatus && <small className="chat-model-status">{modelStatus}</small>}

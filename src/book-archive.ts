@@ -175,6 +175,7 @@ export function copyBookArchive(data: BookArchiveData, newId = () => crypto.rand
   }
   const entities = data.entities.map((entity) => {
     const copy = remap(entity) as ArcEntity
+    if (copy.type === 'chatMessage') { delete copy.continuation; delete copy.continuedAt }
     // Old chat proposals cannot safely apply to a newly imported book.
     if (copy.type === 'chatMessage') for (const key of ['documentEdits', 'codexCreations', 'outlineActions', 'entityActions', 'imageGenerations']) {
       if (Array.isArray(copy[key])) copy[key] = (copy[key] as any[]).map((proposal) => ({ ...proposal, status: 'stale' }))

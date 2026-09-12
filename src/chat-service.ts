@@ -1,3 +1,6 @@
+import { normalizeChatRoundLimit, validateChatRoundLimit } from './chat-round-limit'
+import { chatHistorySignature } from './chat-history-guard'
+import type { NormalizedRequestPart } from './prompt-composition'
 import { editProposalDraft, type EditableProposal, type EditableProposalField, type ProposalDraft } from './chat-proposal-draft'
 import type { ChatImageProposal, ImageJob } from './image-generation-types'
 import { loadAiSettings, type AiSettings } from './ai-settings'
@@ -32,9 +35,11 @@ export type ChatEntity = ArcEntity & {
   thinking: boolean
   contextProfile: GenerationContextProfile
   lastMessagePreview?: string
+  maxModelRounds?: number
 }
 
-export type ChatMessageStatus = 'complete' | 'stopped' | 'failed'
+export type ChatMessageStatus = 'complete' | 'stopped' | 'failed' | 'limited'
+export type ChatContinuation = { baseHistoryIds: string[]; historySignature: string; runtimeParts: NormalizedRequestPart[]; maxRounds: number }
 export type ChatCodexCreationStatus = 'proposed' | 'applying' | 'created' | 'rejected' | 'duplicate' | 'stale'
 export type ChatCodexCreationProposal = ProposalDraft & {
   id: string
@@ -114,6 +119,8 @@ export type ChatMessageEntity = ArcEntity & {
   responseId?: string
   toolActivity?: string[]
   roundNumber?: number
+  continuation?: ChatContinuation
+  continuedAt?: number
   imageGenerations?: ChatImageProposal[]
   documentEdits?: ChatDocumentEditProposal[]
   codexCreations?: ChatCodexCreationProposal[]
@@ -173,14 +180,16 @@ export async function getChat(chatId: string): Promise<ChatEntity | undefined> {
   const chat = entity as ChatEntity
   const compositionNeedsNormalization = !chat.promptComposition || !Array.isArray(chat.promptComposition.predefinedMessages)
   const limitNeedsMigration = typeof chat.effectiveContextLimit !== 'string'
-  if (!compositionNeedsNormalization && !limitNeedsMigration) return chat
+  const roundsNeedMigration = chat.maxModelRounds !== normalizeChatRoundLimit(chat.maxModelRounds)
+  if (!compositionNeedsNormalization && !limitNeedsMigration && !roundsNeedMigration) return chat
   return chatWriteQueue.run(chatId, () => updateEntityAtomically<ChatEntity>(chatId, (current) => {
     if (current.type !== 'chat') throw new Error('Chat is no longer available.')
     const currentCompositionNeedsNormalization = !current.promptComposition || !Array.isArray(current.promptComposition.predefinedMessages)
     const currentLimitNeedsMigration = typeof current.effectiveContextLimit !== 'string'
-    if (!currentCompositionNeedsNormalization && !currentLimitNeedsMigration) return current
+    if (!currentCompositionNeedsNormalization && !currentLimitNeedsMigration && current.maxModelRounds === normalizeChatRoundLimit(current.maxModelRounds)) return current
     return {
       ...current,
+      maxModelRounds: normalizeChatRoundLimit(current.maxModelRounds),
       promptComposition: normalizePromptComposition(current.promptComposition),
       effectiveContextLimit: currentLimitNeedsMigration ? '' : current.effectiveContextLimit,
     }
@@ -205,6 +214,7 @@ export async function createChat(bookId: string, title = 'New chat'): Promise<Ch
     effectiveContextLimit: settings.chatModel.trim() ? '' : settings.mainEffectiveContextLimit,
     promptComposition: clonePromptComposition(settings.promptCompositions.assistant),
     thinking: false,
+    maxModelRounds: normalizeChatRoundLimit(defaults.chatMaxModelRounds),
     contextProfile: profileForNewChat(contextSettings.profiles.chat),
     createdAt: now,
     updatedAt: now,
@@ -214,7 +224,8 @@ export async function createChat(bookId: string, title = 'New chat'): Promise<Ch
   return chat
 }
 
-export async function updateChat(chatId: string, patch: Partial<Pick<ChatEntity, 'title' | 'model' | 'modelContextLength' | 'effectiveContextLimit' | 'promptComposition' | 'thinking' | 'contextProfile' | 'lastMessagePreview'>>): Promise<ChatEntity> {
+export async function updateChat(chatId: string, patch: Partial<Pick<ChatEntity, 'title' | 'model' | 'modelContextLength' | 'effectiveContextLimit' | 'promptComposition' | 'thinking' | 'contextProfile' | 'lastMessagePreview' | 'maxModelRounds'>>): Promise<ChatEntity> {
+  if (patch.maxModelRounds !== undefined) validateChatRoundLimit(patch.maxModelRounds)
   const patchSnapshot = {
     ...patch,
     ...(patch.promptComposition ? { promptComposition: clonePromptComposition(patch.promptComposition) } : {}),
@@ -278,7 +289,7 @@ async function touchFromMessages(bookId: string, chatId: string, autoTitle?: str
   })
 }
 
-export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntity['role'], content: string, extra: Pick<ChatMessageEntity, 'thoughts' | 'status' | 'responseId' | 'toolActivity' | 'roundNumber' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations'> = {}): Promise<ChatMessageEntity> {
+export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntity['role'], content: string, extra: Pick<ChatMessageEntity, 'thoughts' | 'status' | 'responseId' | 'toolActivity' | 'roundNumber' | 'continuation' | 'continuedAt' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations'> = {}): Promise<ChatMessageEntity> {
   const messages = await listChatMessages(chat.bookId, chat.id)
   const now = Date.now()
   const message: ChatMessageEntity = {
@@ -294,6 +305,8 @@ export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntit
     responseId: extra.responseId,
     toolActivity: extra.toolActivity ? [...extra.toolActivity] : undefined,
     roundNumber: extra.roundNumber,
+    continuation: extra.continuation ? structuredClone(extra.continuation) : undefined,
+    continuedAt: extra.continuedAt,
     imageGenerations: extra.imageGenerations?.map((proposal) => ({ ...proposal })),
     documentEdits: extra.documentEdits?.map((proposal) => ({ ...proposal, edits: proposal.edits?.map((edit) => ({ ...edit })) })),
     codexCreations: extra.codexCreations?.map((proposal) => ({ ...proposal })),
@@ -312,7 +325,7 @@ export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntit
   return message
 }
 
-export async function updateChatMessage(messageId: string, patch: Partial<Pick<ChatMessageEntity, 'content' | 'thoughts' | 'status' | 'responseId' | 'toolActivity' | 'roundNumber' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations'>>): Promise<ChatMessageEntity> {
+export async function updateChatMessage(messageId: string, patch: Partial<Pick<ChatMessageEntity, 'content' | 'thoughts' | 'status' | 'responseId' | 'toolActivity' | 'roundNumber' | 'continuation' | 'continuedAt' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations'>>): Promise<ChatMessageEntity> {
   const snapshot = structuredClone(patch)
   const next = await updateEntityAtomically<ChatMessageEntity>(messageId, current => {
     if (current.type !== 'chatMessage') throw new Error('Message is no longer available.')
@@ -320,6 +333,18 @@ export async function updateChatMessage(messageId: string, patch: Partial<Pick<C
   })
   await touchFromMessages(next.bookId, next.parentId)
   return next
+}
+
+export async function claimChatContinuation(bookId: string, chatId: string, messageId: string) {
+  const db = await database()
+  return db.transaction('rw', db.table('entities'), async () => {
+    const message = await db.table('entities').get(messageId) as ChatMessageEntity | undefined
+    if (!message || message.type !== 'chatMessage' || message.bookId !== bookId || message.parentId !== chatId || !message.continuation || message.continuedAt) throw new Error('This continuation is no longer available.')
+    const history = (await listChatMessages(bookId, chatId))
+    if (history.at(-1)?.id !== messageId || chatHistorySignature(history) !== message.continuation.historySignature) throw new Error('Chat history changed. Continue is available only from the unchanged latest response.')
+    await db.table('entities').update(messageId, { continuedAt: Date.now() })
+    return { history, continuation: structuredClone(message.continuation) }
+  })
 }
 
 export async function saveChatProposalDraft(bookId: string, chatId: string, messageId: string, field: EditableProposalField, proposalId: string, values: Record<string, string>, expectedRevision: number) {
@@ -395,6 +420,7 @@ export async function forkChat(source: ChatEntity, throughOrder: number): Promis
       ...message,
       id: messageId,
       parentId: fork.id,
+      continuation: undefined, continuedAt: undefined,
       imageGenerations: message.imageGenerations?.map((p) => ({ ...p, status: 'stale' })),
       documentEdits: snapshotProposalListForFork(message.documentEdits),
       codexCreations: snapshotProposalListForFork(message.codexCreations),

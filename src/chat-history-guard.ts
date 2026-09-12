@@ -23,3 +23,7 @@ export function chatHistoryPrefixMatches(expected: ChatHistoryGuardMessage[], cu
   }
   return true
 }
+
+export function chatHistorySignature(messages: ChatHistoryGuardMessage[]) {
+  return JSON.stringify(messages.map(stableHistoryMessage))
+}
