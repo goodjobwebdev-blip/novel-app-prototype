@@ -30,6 +30,7 @@ import './mobile-control-hardening.css'
 import './ai-settings-ux.css'
 import './generation-actions.css'
 import './theme-accents.css'
+import './composer.css'
 
 applyStoredUiSettings()
 

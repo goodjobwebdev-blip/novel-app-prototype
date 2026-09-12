@@ -1,3 +1,4 @@
+import Composer from './Composer'
 import { startImageQueue } from './image-queue'
 import ImageWorkspace, { createImageWorkspaceState, type ImageWorkspaceState } from './ImageWorkspace'
 import { useImageQuery } from './image-hooks'
@@ -5,7 +6,7 @@ import { listImageJobs } from './image-store'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { createPortal, flushSync } from 'react-dom'
+import { createPortal } from 'react-dom'
 import {
   ArrowDown,
   ArrowLeft,
@@ -213,7 +214,6 @@ export default function Workspace() {
   const [rightTab, setRightTab] = useState<RightTab>('outline')
   const [chatPanel, setChatPanel] = useState<ChatPanel>('list')
   const [activeChatId, setActiveChatId] = useState('')
-  const [arcOpen, setArcOpen] = useState(false)
   const [storyMarkdown, setStoryMarkdown] = useState(initialStoryMarkdown)
   const [arcPrompt, setArcPrompt] = useState('')
   const [lorePrompt, setLorePrompt] = useState('')
@@ -247,6 +247,7 @@ export default function Workspace() {
   const [codexDependencies, setCodexDependencies] = useState<CodexDependencyEdge[]>([])
   const [summaryStates, setSummaryStates] = useState<Record<string, SummaryState>>({})
   const [activeDocument, setActiveDocument] = useState<EditableEntity | null>(null)
+  useEffect(() => { setGenerationDetails(null); setGenerationDetailsOpen(false) }, [activeDocument?.id, currentBook?.id])
   const [editorRevision, setEditorRevision] = useState(0)
   const [activeSceneId, setActiveSceneId] = useState<string | null>(null)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
@@ -1082,10 +1083,7 @@ export default function Workspace() {
   }
 
   function compactLoreExcerpt(markdown: string, title: string, limit = 700) {
-    const lines = markdown.trim().split('\n')
-    const firstHeading = lines[0]?.replace(/^#{1,6}\s+/, '').trim()
-    if (firstHeading?.localeCompare(title.trim(), undefined, { sensitivity: 'base' }) === 0) lines.shift()
-    const text = lines.join('\n').trim()
+    const text = markdown.trim()
     if (text.length <= limit) return text || '_No description provided._'
     const cut = text.slice(0, limit)
     const boundary = Math.max(cut.lastIndexOf('\n\n'), cut.lastIndexOf(' '))
@@ -1402,6 +1400,8 @@ export default function Workspace() {
       estimatedRequestTokens: requestSnapshot.estimatedRequestTokens,
       modelContextTokens: requestSnapshot.modelContextTokens,
     })
+    const runDocumentId = activeDocument.id
+    const ownsRun = () => generationAbortRef.current === controller && activeDocumentIdRef.current === runDocumentId
     let status: 'complete' | 'cancelled' | 'error' = 'complete'
     const renderer = createBufferedWordRenderer({
       delayMs: generationWordDelayMs(settings),
@@ -1430,8 +1430,8 @@ export default function Workspace() {
         onResponse: () => {
           if (!controller.signal.aborted) setGenerationActivityPhase('thinking')
         },
-        onThoughts: appendGenerationThoughts,
-        onMetadata: updateGenerationMetadata,
+        onThoughts: (text) => { if (ownsRun()) appendGenerationThoughts(text) },
+        onMetadata: (metadata) => { if (ownsRun()) updateGenerationMetadata(metadata) },
       })
       await renderer.finish()
       if (controller.signal.aborted) status = 'cancelled'
@@ -1631,7 +1631,7 @@ export default function Workspace() {
     const input = target?.element ?? promptRef.current
     const documentId = activeDocumentIdRef.current
     if (!documentId || !activeDocument || activeDocument.type === 'summary' || generationActive) return false
-    if (!target) flushSync(() => setArcOpen(true))
+    if (!target) promptRef.current?.focus()
     const isLore = activeDocument.type === 'codexEntry'
     const base = target?.value ?? (isLore ? lorePrompt : arcPrompt)
     const setPrompt = isLore ? setLorePrompt : setArcPrompt
@@ -1779,9 +1779,16 @@ export default function Workspace() {
         {activeDocument ? <MarkdownEditor key={`${activeDocument.id}-${editorRevision}`} ref={editorRef} value={storyMarkdown} onChange={handleStoryChange} onHistoryChange={setEditorHistory} ariaLabel={`${activeDocument.title} Markdown editor`} readOnly={activeCodexArchived || activeSummarySourceArchived} mentionTerms={activeDocument.type === 'scene' ? codexMentionIndex : []} onMentionClick={activeDocument.type === 'scene' ? openLoreMention : undefined} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No document selected</strong><p>Choose a Scene, Note, Codex entry, or Summary from the book workspace.</p><button type="button" onClick={() => setRightOpen(true)}>Open Book Workspace</button></div>}
       </article> : currentBook ? <ChatView bookId={currentBook.id} chatId={activeChatId} bookPromptValues={toBookPromptValues(currentBook, seriesList)} currentSceneId={activeSceneId} onChatChange={openChat} onToast={showToast} /> : <section className="conversation chat-empty"><MessageCircle aria-hidden="true" /><p>Open a book before starting a chat.</p></section>}
 
-      {screen === 'editor' && (activeDocument?.type === 'scene' || (activeDocument?.type === 'codexEntry' && !activeCodexArchived)) && !arcOpen && <div className="editor-bottom"><button type="button" onClick={() => setArcOpen(true)} aria-label="Open generation input"><PanelBottomOpen aria-hidden="true" /></button><GenerateControl isGenerating={generationActive} phase={generationPhase} elapsedSeconds={generationElapsedSeconds} sttState={sttState} ttsState={ttsState} canUndo={editorHistory.canUndo} canRedo={editorHistory.canRedo} onOpenDetails={() => setGenerationDetailsOpen(true)} onGenerate={generate} onStop={stopGeneration} onMicro={() => { void dictateEditor() }} onMicro2={() => { void dictateInstruction() }} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} onReadAloud={() => { void readCurrentDocument() }} readAloudDisabled={activeDocument?.type === 'scene' && !lastGeneratedPassage.trim()} readAloudTitle={activeDocument?.type === 'scene' ? 'Read latest generated passage' : 'Read full Codex entry'} /></div>}
+
       {screen === 'editor' && activeDocument?.type === 'summary' && !activeSummarySourceArchived && <div className="summary-generate-wrap"><button className="summary-generate" type="button" onClick={generationActive ? stopGeneration : generate}>{generationActive ? <Square aria-hidden="true" fill="currentColor" /> : <RefreshCw aria-hidden="true" />} {generationActive ? 'Stop' : openSummaryState === 'missing' ? 'Summarize' : 'Re-summarize'}</button></div>}
-      {screen === 'editor' && (activeDocument?.type === 'scene' || (activeDocument?.type === 'codexEntry' && !activeCodexArchived)) && arcOpen && <section className="arc-drawer"><div className="arc-generation-header">{generationActive && generationPhase ? <GenerationActivityStrip phase={generationPhase} elapsedSeconds={generationElapsedSeconds} placement="drawer" onOpenDetails={() => setGenerationDetailsOpen(true)} /> : <span className="arc-generation-idle">Ready to generate</span>}<button type="button" onClick={() => setArcOpen(false)} aria-label="Close generation input"><X aria-hidden="true" /></button></div><div className="arc-compose"><div className="arc-prompt-field"><ExpandableTextInput ref={promptRef} value={activeDocument.type === 'codexEntry' ? lorePrompt : arcPrompt} onChange={activeDocument.type === 'codexEntry' ? setLorePrompt : setArcPrompt} readOnly={sttState.target === 'instruction' && ['requesting-permission', 'recording', 'recording-live', 'stopping', 'transcribing', 'finalizing'].includes(sttState.status)} aria-label="generation prompt" dialogTitle="Edit generation prompt" onDictate={dictateInstruction} dictationStatus={sttState.target === 'instruction' ? sttState.status : 'idle'} dictationError={sttState.target === 'instruction' ? sttState.error : undefined} dictationDisabled={generationActive} onStopDictation={stopSttSession} onCancelDictation={cancelSttSession} /></div><GenerateControl inDrawer isGenerating={generationActive} phase={generationPhase} elapsedSeconds={generationElapsedSeconds} sttState={sttState} ttsState={ttsState} canUndo={editorHistory.canUndo} canRedo={editorHistory.canRedo} onOpenDetails={() => setGenerationDetailsOpen(true)} onGenerate={generate} onStop={stopGeneration} onMicro={() => { void dictateEditor() }} onMicro2={() => { void dictateInstruction() }} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} onReadAloud={() => { void readCurrentDocument() }} readAloudDisabled={activeDocument?.type === 'scene' && !lastGeneratedPassage.trim()} readAloudTitle={activeDocument?.type === 'scene' ? 'Read latest generated passage' : 'Read full Codex entry'} /></div></section>}
+      {screen === 'editor' && (activeDocument?.type === 'scene' || (activeDocument?.type === 'codexEntry' && !activeCodexArchived)) && <Composer key={activeDocument.id} className="workspace-composer" strip={
+        <details className="chat-config-strip">
+          <summary><span role="status">{generationActive && generationPhase ? `${generationPhaseLabel(generationPhase)} · ${generationElapsedSeconds}s` : generationDetails ? `${generationDetails.status === 'complete' ? 'Complete' : generationDetails.status === 'cancelled' ? 'Stopped' : 'Failed'} · ${generationElapsedSeconds}s` : 'Ready to generate'}</span><small>Thoughts and status</small><ChevronDown aria-hidden="true" /></summary>
+          <div className="composer-status-body">
+            {generationDetails ? <><p>{generationDetails.provider} · {generationDetails.requestedModel} · {generationDetails.targetTitle}</p>{generationDetails.thoughts ? <pre>{generationDetails.thoughts}</pre> : <p>No thoughts provided by this model.</p>}<button type="button" onClick={() => setGenerationDetailsOpen(true)}>Request details</button></> : <p>Start a generation to see its status and any thoughts provided by the model.</p>}
+          </div>
+        </details>
+      }><div className="arc-prompt-field"><ExpandableTextInput ref={promptRef} value={activeDocument.type === 'codexEntry' ? lorePrompt : arcPrompt} onChange={activeDocument.type === 'codexEntry' ? setLorePrompt : setArcPrompt} readOnly={sttState.target === 'instruction' && ['requesting-permission', 'recording', 'recording-live', 'stopping', 'transcribing', 'finalizing'].includes(sttState.status)} aria-label="generation prompt" dialogTitle="Edit generation prompt" onDictate={dictateInstruction} dictationStatus={sttState.target === 'instruction' ? sttState.status : 'idle'} dictationError={sttState.target === 'instruction' ? sttState.error : undefined} dictationDisabled={generationActive} onStopDictation={stopSttSession} onCancelDictation={cancelSttSession} /></div><GenerateControl inDrawer isGenerating={generationActive} phase={generationPhase} elapsedSeconds={generationElapsedSeconds} sttState={sttState} ttsState={ttsState} canUndo={editorHistory.canUndo} canRedo={editorHistory.canRedo} onOpenDetails={() => setGenerationDetailsOpen(true)} onGenerate={generate} onStop={stopGeneration} onMicro={() => { void dictateEditor() }} onMicro2={() => { void dictateInstruction() }} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} onReadAloud={() => { void readCurrentDocument() }} readAloudDisabled={activeDocument?.type === 'scene' && !lastGeneratedPassage.trim()} readAloudTitle={activeDocument?.type === 'scene' ? 'Read latest generated passage' : 'Read full Codex entry'} /></Composer>}
 
       {rightOpen && <aside className="book-panel">
         <header><div><small>{formatSeries(currentBook, seriesList)}</small><strong>{currentBook?.title ?? 'Untitled Book'}</strong></div><div className="book-panel-header-actions">{activeSceneId && <button type="button" onClick={() => { void loadScene(activeSceneId) }} aria-label="Return to Scene" title="Return to Scene"><CornerUpLeft aria-hidden="true" /></button>}<button type="button" onClick={() => setRightOpen(false)} aria-label="Close book workspace"><X aria-hidden="true" /></button></div></header>

@@ -34,5 +34,5 @@ test('mobile Codex preview uses a bounded bottom sheet and scoped typography', (
   assert.match(codexMentionStyles, /\.codex-mention-popover \{ left: 10px !important; right: 10px; top: auto !important; bottom:/)
   assert.match(codexMentionStyles, /\.codex-mention-markdown h1, \.codex-mention-markdown h2, \.codex-mention-markdown h3/)
   assert.match(codexMentionStyles, /\.codex-mention-close \{ appearance: none;/)
-  assert.match(workspace, /firstHeading\?\.localeCompare\(title\.trim\(\), undefined, \{ sensitivity: 'base' \}\) === 0/)
+  assert.doesNotMatch(workspace, /lines\.shift\(\)/, 'Author-written headings are retained in the preview')
 })
