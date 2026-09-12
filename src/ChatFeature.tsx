@@ -1,3 +1,4 @@
+import Composer from './Composer'
 import { executeImageProposal } from './image-tools'
 import ImageProposalCard from './ImageProposalCard'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -1104,8 +1105,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
 
     {generating && !followOutput && <button className="chat-follow-output" type="button" onClick={jumpToLatest}>↓ New content</button>}
 
-    <section className="chat-composer functional-chat-composer">
-      <details className="chat-config-strip">
+    <Composer strip={<details className="chat-config-strip">
         <summary><span>Generation settings</span><small>Model · context · system prompt</small><ChevronDown aria-hidden="true" /></summary>
         <div className="chat-config-row">
           <ChatModelPicker value={chat.model} models={sortedModels} onChange={(modelId) => { void changeModel(modelId) }} />
@@ -1113,8 +1113,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           <button className="chat-system-prompt-button" type="button" onClick={() => { setCompositionDraft(clonePromptComposition(chat.promptComposition)); setPromptOpen(true) }}><Bot aria-hidden="true" /><span>Request composition</span></button>
           {modelStatus && <small className="chat-model-status">{modelStatus}</small>}
         </div>
-      </details>
-      <div className="chat-compose-row">
+      </details>}>
         <ExpandableTextInput ref={inputRef} value={draft} onChange={setDraft} readOnly={sttState.target === 'chat' && ['requesting-permission', 'recording', 'recording-live', 'stopping', 'transcribing', 'finalizing'].includes(sttState.status)} onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault()
@@ -1122,8 +1121,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           }
         }} placeholder="Ask about the book…" aria-label="Chat message" dialogTitle="Write chat message" onDictate={dictateMessage} dictationStatus={sttState.target === 'chat' ? sttState.status : 'idle'} dictationError={sttState.target === 'chat' ? sttState.error : undefined} dictationDisabled={generating} onStopDictation={stopSttSession} onCancelDictation={cancelSttSession} />
         <ChatGenerateButton sttState={sttState} generating={generating} phase={phase} elapsed={elapsed} thinking={chat.thinking} onGenerate={() => { void send() }} onStop={stop} onMicro={() => { void dictateMessage() }} onThinking={setThinking} />
-      </div>
-    </section>
+    </Composer>
 
     {promptOpen && <div className="chat-prompt-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setPromptOpen(false) }}>
       <section className="chat-prompt-dialog" role="dialog" aria-modal="true" aria-labelledby="chat-prompt-title">

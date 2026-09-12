@@ -1,0 +1,14 @@
+.composer-shell { background: var(--panel); }
+.workspace-screen .story-editor, .workspace-screen .conversation { padding-bottom: calc(var(--composer-height, 160px) + 48px); }
+.composer-shell .composer-status-body { padding: .75rem; max-height: min(30dvh, 18rem); overflow: auto; color: var(--soft); font-size: .8rem; }
+.composer-status-body pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; }
+.composer-status-body p { margin: 0 0 .5rem; }
+.composer-status-body button { width: auto; height: auto; min-height: 44px; margin: 0; padding: .4rem .75rem; border-radius: .6rem; }
+.composer-shell .arc-prompt-field { min-width: 0; }
+.composer-shell .arc-prompt-field .expandable-text-input { width: 100%; }
+.composer-shell .arc-prompt-field textarea { max-height: min(20dvh, 9rem); }
+.composer-shell > .chat-config-strip > summary { min-height: 36px; }
+@media (max-width: 720px) {
+  .composer-shell > .chat-config-strip > summary { min-height: 36px; }
+  .composer-shell .composer-status-body { max-height: 23dvh; }
+}
