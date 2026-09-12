@@ -44,6 +44,7 @@ export async function streamChatCompletion(request, onChunk, signal) {
   if (beforeReturn) await beforeReturn(calls.length);
   signal.throwIfAborted();
   onChunk({ content: 'Round ' + calls.length });
+  if (mode === 'brainstorm') { mode = 'complete'; return { toolCalls: [{ id: 'brainstorm-call', type: 'function', function: { name: 'present_brainstorm', arguments: JSON.stringify({ topic: 'The next scene', options: [{ title: 'Explore', description: 'Follow the river' }, { title: 'Wait', description: 'Watch the gate' }] }) } }] }; }
   return mode === 'complete' ? { toolCalls: [] } : { toolCalls: Array.from({ length: toolsPerRound }, (_, index) => ({ id: 'call-' + calls.length + '-' + index, type: 'function', function: { name: 'propose_note_create', arguments: JSON.stringify({ title: 'Draft ' + calls.length + '-' + index, content: 'Unapplied body' }) } })) };
 }
 `)
@@ -158,4 +159,39 @@ test('new chats copy global rounds while saved and legacy chats remain predictab
   assert.equal((await chatService.getChat(first.id)).maxModelRounds, 8)
   await assert.rejects(() => chatService.updateChat(first.id, { maxModelRounds: 1.5 }), /whole number/)
   ai.saveAiSettings(ai.initialAiSettings)
+})
+
+
+test('brainstorm selection and saved edits cause no request; explicit submission uses chosen values once', async () => {
+  const f = await fixture(8)
+  api.configure('brainstorm')
+  const root = createRoot(document.getElementById('root'))
+  try {
+    await act(async () => root.render(view(f)))
+    await send()
+    await settle(() => Boolean(button('Send selection')) && Boolean(button('Send')))
+    assert.equal(api.calls.length, 2)
+    await act(async () => document.querySelector('.chat-brainstorm input[type=checkbox]').click())
+    await settle(() => !button('Generate more').disabled)
+    const input = document.querySelector('textarea[aria-label="Your own brainstorm option"]')
+    await act(async () => { Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set.call(input, 'Also look for footprints'); input.dispatchEvent(new dom.window.Event('input', { bubbles: true })) })
+    await click('Save option edits')
+    await settle(() => !button('Generate more').disabled)
+    assert.equal(api.calls.length, 2)
+    let history = await chatService.listChatMessages(f.book.id, f.chat.id)
+    const card = history.find(message => message.brainstorms?.length).brainstorms[0]
+    assert.equal(card.selectedIds.length, 1)
+    assert.equal(card.customOption, 'Also look for footprints')
+    await click('Send selection')
+    await settle(() => api.calls.length === 3 && Boolean(button('Send')))
+    history = await chatService.listChatMessages(f.book.id, f.chat.id)
+    assert.equal(history.filter(message => message.role === 'user').length, 2)
+    assert.match(history.filter(message => message.role === 'user').at(-1).content, /Explore\nFollow the river/)
+    assert.match(history.filter(message => message.role === 'user').at(-1).content, /Also look for footprints/)
+    assert.doesNotMatch(history.filter(message => message.role === 'user').at(-1).content, /Watch the gate/)
+    await settle(() => !button('Generate more').disabled)
+    await click('Generate more')
+    await settle(() => api.calls.length === 4 && Boolean(button('Send')))
+    assert.equal(document.querySelectorAll('.chat-brainstorm-options article').length, 2)
+  } finally { await act(async () => root.unmount()) }
 })

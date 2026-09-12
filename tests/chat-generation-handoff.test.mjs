@@ -90,7 +90,7 @@ test('ChatFeature reserves per-Chat generation ownership before accepted Send pe
   assert.match(source, /createChatGenerationOwner\(sourceChat\.bookId, sourceChat\.id\)/)
   assert.match(source, /registerChatGeneration\(generationOwnersRef\.current, owner\)/)
   assert.match(source, /runChatSendPipeline\(/)
-  const sendStart = source.indexOf('  async function send() {')
+  const sendStart = source.indexOf('  async function send(')
   const stopStart = source.indexOf('\n  function stop()', sendStart)
   assert.ok(sendStart >= 0 && stopStart > sendStart)
   const send = source.slice(sendStart, stopStart)
