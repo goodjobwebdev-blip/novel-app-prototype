@@ -1,3 +1,4 @@
+import MediaPromptEditor from './MediaPromptEditor'
 import { useState } from 'react'
 import { ChevronDown, Search, X } from 'lucide-react'
 import IllustrationModal from './IllustrationModal'
@@ -24,7 +25,7 @@ async function sourceFromBlob(blob: Blob, id: string, name?: string): Promise<Ge
     return { id, name, mime, data: blob.slice(0, blob.size, mime), width: bitmap.width, height: bitmap.height }
   } finally { bitmap.close() }
 }
-export default function ImageGenerationControls({ value, onChange, disabled = false, sourceAssets = [] }: { value: ImageDraft; onChange: (value: ImageDraft) => void; disabled?: boolean; sourceAssets?: GalleryImage[] }) {
+export default function ImageGenerationControls({ value, onChange, disabled = false, sourceAssets = [], bookId }: { bookId?: string; value: ImageDraft; onChange: (value: ImageDraft) => void; disabled?: boolean; sourceAssets?: GalleryImage[] }) {
   const settings = useImageSettings()
   const [sourceError, setSourceError] = useState('')
   const task = generationTask(value)
@@ -58,7 +59,7 @@ export default function ImageGenerationControls({ value, onChange, disabled = fa
   const addAsset = async (asset: GalleryImage) => addSource(await sourceFromBlob(asset.image, asset.id, asset.prompt || asset.modelAlias || 'Gallery image'))
   return <fieldset className="image-generation-controls" disabled={disabled}>
     <div className="image-task-options" role="group" aria-label="Generation type">{(Object.keys(generationTaskNames) as GenerationTask[]).map((option) => <button type="button" key={option} aria-pressed={task === option} onClick={() => selectTask(option)}>{generationTaskNames[option]}</button>)}</div>
-    <label>Prompt<textarea rows={5} maxLength={32000} value={value.prompt} onChange={(event) => onChange({ ...value, prompt: event.target.value })} placeholder={isVideo ? 'Describe the motion, scene, and camera…' : needsSource ? 'Describe how to transform the source image…' : 'Describe your illustration…'} /></label>
+    <MediaPromptEditor key={bookId ?? 'global'} value={value} onChange={onChange} bookId={bookId} capability={favorite ? `${favorite.name}: ${favorite.description ?? ''}. Tasks: ${modelTasks(favorite).join(', ')}.` : 'No media model selected'} />
     <div className="image-generation-pickers">
       <label>Model<ImageModelPicker value={favorite?.alias ?? ''} models={compatible} onChange={chooseModel} /></label>
       {!isVideo && <label>Size<select value={value.size} onChange={(event) => onChange({ ...value, size: event.target.value })}>{!favorite?.enabledSizes.includes(value.size) && <option value={value.size}>{value.size || 'Choose size'} — unavailable</option>}{favorite?.sizes.filter((size) => favorite.enabledSizes.includes(size.value)).map((size) => <option key={size.value} value={size.value}>{imageRatio(size)} · {size.width} × {size.height}</option>)}</select></label>}

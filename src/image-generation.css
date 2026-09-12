@@ -246,3 +246,12 @@
 .chat-media-card { margin-top: .75rem; min-width: 0; }
 .chat-media-card > .image-prompt-preview { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .chat-media-card > small { display: block; color: var(--soft); margin: .35rem 0; }
+
+.media-prompt-editor { display: grid; gap: .6rem; min-width: 0; }
+.media-prompt-editor > label, .media-prompt-editor > div > label { display: grid; gap: .35rem; }
+.media-prompt-editor pre { max-height: 18rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; }
+.media-prompt-editor details > summary { cursor: pointer; color: var(--soft); padding: .4rem 0; }
+.media-prompt-editor .media-prompt-source { display: flex; flex-wrap: wrap; gap: 1rem; border: 1px solid var(--line); padding: .5rem .7rem; }
+.media-prompt-editor .media-prompt-source label { display: flex; align-items: center; gap: .4rem; }
+.media-prompt-editor .media-prompt-source input { width: 1rem; min-height: 1rem; padding: 0; margin: 0; }
+.media-prompt-editor [role=status]:empty { display: none; }

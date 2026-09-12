@@ -291,3 +291,39 @@ test('discard removes an unwanted result from the generation queue immediately',
     assert.equal(await db.table('galleryImages').count(), 0)
   } finally { await act(async () => root.unmount()) }
 })
+
+test('media enhancement preserves original text, chips do not send, and late results keep newer edits', async () => {
+  const ai = await moduleAt('ai-settings')
+  const fake = await moduleAt('fake-provider')
+  const { default: Prompt } = await moduleAt('MediaPromptEditor')
+  const config = ai.copyAiSettings(ai.initialAiSettings)
+  config.provider = 'fake'; config.supportModel = 'fake/test'; config.supportModelContextLength = 33000
+  ai.saveAiSettings(config)
+  fake.clearFakeProviderTrace()
+  function ControlledPrompt() {
+    const [value, onChange] = React.useState({ prompt: 'Moonlit harbor', alias: 'Visual', size: '1024x1024', enhancementTemplate: 'Improve this prompt. [DELAY_MS:0]' })
+    return h(Prompt, { value, onChange, capability: 'Still images' })
+  }
+  const root = createRoot(document.getElementById('root'))
+  try {
+    await act(async () => root.render(h(ControlledPrompt)))
+    await click('Enhance with guidance')
+    await click('Vintage illustration')
+    assert.equal(fake.getFakeProviderTrace().length, 0)
+    await click('Enhance with this guidance')
+    await settle(() => document.body.textContent.includes('Enhanced draft ready'))
+    const original = document.querySelector('textarea[aria-label="Original media prompt"]')
+    const enhanced = document.querySelector('textarea[aria-label="Enhanced media prompt"]')
+    assert.equal(original.value, 'Moonlit harbor')
+    assert.ok(enhanced.value)
+    const previous = enhanced.value
+    await input(document.querySelector('textarea[aria-label="Enhancement instructions"]'), 'Improve slowly. [DELAY_MS:30]')
+    await click('Enhance')
+    await input(original, 'Newer original edit')
+    await settle(() => document.body.textContent.includes('draft changed while enhancing'))
+    assert.equal(original.value, 'Newer original edit')
+    assert.equal(enhanced.value, previous)
+    assert.match(document.body.textContent, /Out of date/)
+    assert.equal((await store.listImageJobs()).filter(job => job.prompt === previous).length, 0)
+  } finally { await act(async () => root.unmount()) }
+})

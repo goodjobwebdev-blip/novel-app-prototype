@@ -1,3 +1,4 @@
+import { selectedMediaPrompt } from './media-prompt'
 import { useState } from 'react'
 import type { AiSettings } from './ai-settings'
 import { loadAiSettings } from './ai-settings'
@@ -36,8 +37,8 @@ function Generate({ bookId, onSettings }: { bookId?: string; onSettings: () => v
   const settings = useImageSettings()
   const [draft, setDraft] = useState<ImageDraft>(() => { const s = loadImageSettings(), favorite = s.favorites.find((f) => f.alias === s.defaultAlias); return { prompt: '', alias: favorite?.alias || '', size: favorite?.defaultSize || '1024x1024' } })
   const [error, setError] = useState(''), [busy, setBusy] = useState(false)
-  const generate = async () => { setBusy(true); setError(''); try { await enqueueImageJob(resolveImageSpec(draft.prompt, draft.alias, draft.size), { bookId }) } catch (e) { setError(e instanceof Error ? e.message : 'Could not queue image.') } finally { setBusy(false) } }
-  return <section><ImageGenerationControls value={draft} onChange={setDraft} disabled={busy} />{!settings.favorites.length && <button type="button" onClick={onSettings}>Set up image models</button>}<button type="button" disabled={busy || !settings.favorites.length} onClick={() => { void generate() }}>Generate</button>{error && <p role="alert">{error}</p>}<p className="image-help">Each tap queues one image. The queue continues while you switch chats or books. Keep the app open while generating; interrupted requests are never automatically resubmitted.</p><h2>Generation queue</h2><ImageJobs /></section>
+  const generate = async () => { setBusy(true); setError(''); try { await enqueueImageJob(resolveImageSpec(selectedMediaPrompt(draft), draft.alias, draft.size), { bookId }) } catch (e) { setError(e instanceof Error ? e.message : 'Could not queue image.') } finally { setBusy(false) } }
+  return <section><ImageGenerationControls bookId={bookId} value={draft} onChange={setDraft} disabled={busy} />{!settings.favorites.length && <button type="button" onClick={onSettings}>Set up image models</button>}<button type="button" disabled={busy || !settings.favorites.length} onClick={() => { void generate() }}>Generate</button>{error && <p role="alert">{error}</p>}<p className="image-help">Each tap queues one image. The queue continues while you switch chats or books. Keep the app open while generating; interrupted requests are never automatically resubmitted.</p><h2>Generation queue</h2><ImageJobs /></section>
 }
 export default function ImagePanel({ bookId, ai = loadAiSettings() }: { bookId?: string; ai?: AiSettings }) {
   const [tab, setTab] = useState<'generate' | 'gallery' | 'settings'>('generate')

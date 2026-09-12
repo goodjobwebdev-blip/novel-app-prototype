@@ -1,3 +1,4 @@
+import { useMediaWorkspaceDraft } from './useMediaWorkspaceDraft'
 import SynonymsDialog from './SynonymsDialog'
 import SelectionTools from './SelectionTools'
 import QuickRewriteDialog from './QuickRewriteDialog'
@@ -16,7 +17,7 @@ import { sceneWritingValues } from './scene-writing'
 import { applyChatManagementChange } from './persistence'
 import Composer from './Composer'
 import { startImageQueue } from './image-queue'
-import ImageWorkspace, { createImageWorkspaceState, type ImageWorkspaceState } from './ImageWorkspace'
+import ImageWorkspace from './ImageWorkspace'
 import { useImageQuery } from './image-hooks'
 import { listImageJobs } from './image-store'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -225,7 +226,7 @@ export default function Workspace() {
   useEffect(() => startImageQueue(), [])
   const [returnScreen, setReturnScreen] = useState<Screen>('home')
   const [imageReturnScreen, setImageReturnScreen] = useState<ContentScreen>('home')
-  const [imageWorkspaceState, setImageWorkspaceState] = useState<ImageWorkspaceState>(createImageWorkspaceState)
+  const [imageWorkspaceState, setImageWorkspaceState, imageDraftError] = useMediaWorkspaceDraft()
   const [rightOpen, setRightOpen] = useState(false)
   const [rightTab, setRightTab] = useState<RightTab>('outline')
   const [chatPanel, setChatPanel] = useState<ChatPanel>('list')
@@ -1791,6 +1792,7 @@ export default function Workspace() {
     return <ImageWorkspace
       bookId={imageBook?.id}
       bookTitle={imageBook?.title}
+      storageError={imageDraftError}
       state={imageWorkspaceState}
       onStateChange={setImageWorkspaceState}
       onBack={() => setScreen(imageReturnScreen)}

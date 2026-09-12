@@ -131,7 +131,7 @@ export function resolveImageSpec(prompt: string, alias?: string, size?: string, 
     ...(Number.isFinite(video.seed) ? { seed: Math.round(video.seed!) } : {}),
     ...(video.draft !== undefined ? { draft: Boolean(video.draft) } : {}),
   } : undefined
-  return { prompt: prompt.trim(), modelAlias: model.alias, provider: model.provider, model: model.id, size: { ...chosen }, task, sources: sources.map((source) => ({ ...source })), ...(cleanVideo ? { video: cleanVideo } : {}), ...(model.provider === 'openai' ? { quality: model.quality ?? (/^gpt-image-2\.5-/.test(model.id) ? 'auto' : 'low'), moderation: model.moderation ?? 'low' } : {}) }
+  return { prompt, modelAlias: model.alias, provider: model.provider, model: model.id, size: { ...chosen }, task, sources: sources.map((source) => ({ ...source })), ...(cleanVideo ? { video: cleanVideo } : {}), ...(model.provider === 'openai' ? { quality: model.quality ?? (/^gpt-image-2\.5-/.test(model.id) ? 'auto' : 'low'), moderation: model.moderation ?? 'low' } : {}) }
 }
 export function imageFavorite(model: ImageModel, used: FavoriteImageModel[]): FavoriteImageModel {
   const base = `${model.provider}/${model.id}`.slice(0, 58)
