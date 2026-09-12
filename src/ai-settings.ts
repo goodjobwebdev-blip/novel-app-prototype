@@ -1,3 +1,4 @@
+import { normalizeChatRoundLimit } from './chat-round-limit'
 import type { ProviderProfile } from './provider-profiles'
 import { PROMPT_COMPOSITION_SCHEMA_VERSION, clonePromptComposition, compositionsFromLegacyPrompts, legacyPromptMirror, normalizePromptCompositions, withSystemPrompt, type PromptComposition, type PromptCompositions, type PromptCompositionScope } from './prompt-composition'
 import { defaultStoryPromptComposition, upgradeDefaultStoryPromptComposition } from './story-request'
@@ -55,6 +56,7 @@ export type AiSettings = {
   supportModel: string
   supportModelContextLength?: number
   chatModel: string
+  chatMaxModelRounds: number
   chatModelContextLength?: number
   codexModel: string
   codexModelContextLength?: number
@@ -308,6 +310,7 @@ export const initialAiSettings: AiSettings = {
   mainEffectiveContextLimit: '',
   supportModel: '',
   chatModel: '',
+  chatMaxModelRounds: 8,
   codexModel: '',
   codexEffectiveContextLimit: '',
   generationWordDelayMs: String(DEFAULT_GENERATION_WORD_DELAY_MS),
@@ -436,6 +439,7 @@ export function normalizeAiSettings(value?: StoredAiSettings): AiSettings {
     codexEffectiveContextLimit: typeof value?.codexEffectiveContextLimit === 'string' ? value.codexEffectiveContextLimit : '',
     favorites: Array.isArray(value?.favorites) ? [...value.favorites] : [],
     generationWordDelayMs: normalizeGenerationWordDelay(value?.generationWordDelayMs),
+    chatMaxModelRounds: normalizeChatRoundLimit(value?.chatMaxModelRounds),
     chatModel: typeof value?.chatModel === 'string' ? value.chatModel : '',
     chatModelContextLength: Number.isFinite(value?.chatModelContextLength) ? value?.chatModelContextLength : undefined,
     mainModelContextLength: Number.isFinite(value?.mainModelContextLength) ? value?.mainModelContextLength : undefined,

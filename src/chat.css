@@ -193,3 +193,7 @@
 .chat-proposal-draft button { min-height: 38px; padding: .45rem .65rem; color: var(--ink); background: var(--glass); border: 1px solid var(--line); border-radius: .5rem; }
 .chat-proposal-draft footer { display: flex; flex-wrap: wrap; gap: .45rem; margin-top: .6rem; }
 @media (max-width: 720px) { .chat-proposal-draft-columns { grid-template-columns: minmax(0,1fr); } }
+
+.chat-round-limit { display: grid; gap: .3rem; max-width: 24rem; }
+.chat-round-limit select { width: 5rem; padding: .4rem; background: var(--canvas); color: var(--ink); border: 1px solid var(--line); border-radius: .45rem; }
+.chat-round-limit small { color: var(--soft); font-size: .72rem; }
