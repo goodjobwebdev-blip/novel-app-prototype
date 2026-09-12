@@ -238,6 +238,7 @@ export default function Workspace() {
   const [activeChatId, setActiveChatId] = useState('')
   const [storyMarkdown, setStoryMarkdown] = useState(initialStoryMarkdown)
   const [arcPrompt, setArcPrompt] = useState('')
+  const [drawerCollapsed, setDrawerCollapsed] = useState(false)
   const [lorePrompt, setLorePrompt] = useState('')
   const [codexTriggerDraft, setCodexTriggerDraft] = useState('')
   const [chatEdit, setChatEdit] = useState(false)
@@ -1917,14 +1918,14 @@ export default function Workspace() {
 
 
       {screen === 'editor' && activeDocument?.type === 'summary' && !activeSummarySourceArchived && <div className="summary-generate-wrap"><button className="summary-generate" type="button" onClick={generationActive ? stopGeneration : generate}>{generationActive ? <Square aria-hidden="true" fill="currentColor" /> : <RefreshCw aria-hidden="true" />} {generationActive ? 'Stop' : openSummaryState === 'missing' ? 'Summarize' : 'Re-summarize'}</button></div>}
-      {screen === 'editor' && (activeDocument?.type === 'scene' || (activeDocument?.type === 'codexEntry' && !activeCodexArchived && activeDocument.codexScope !== 'inherited')) && <Composer key={activeDocument.id} className="workspace-composer" strip={
-        <details className="chat-config-strip">
+      {screen === 'editor' && (activeDocument?.type === 'scene' || (activeDocument?.type === 'codexEntry' && !activeCodexArchived && activeDocument.codexScope !== 'inherited')) && <Composer key={activeDocument.id} className={`workspace-composer ${drawerCollapsed ? 'is-collapsed' : ''}`} strip={
+        <div className="workspace-composer-header" hidden={drawerCollapsed}><details className="chat-config-strip">
           <summary><span role="status">{generationActive && generationPhase ? `${generationPhaseLabel(generationPhase)} · ${generationElapsedSeconds}s` : generationDetails ? `${generationDetails.status === 'complete' ? 'Complete' : generationDetails.status === 'cancelled' ? 'Stopped' : 'Failed'} · ${generationElapsedSeconds}s` : 'Ready to generate'}</span><small>Thoughts and status</small><ChevronDown aria-hidden="true" /></summary>
           <div className="composer-status-body">
             {generationDetails ? <><p>{generationDetails.provider} · {generationDetails.requestedModel} · {generationDetails.targetTitle}</p>{generationDetails.thoughts ? <pre>{generationDetails.thoughts}</pre> : <p>No thoughts provided by this model.</p>}<button type="button" onClick={() => setGenerationDetailsOpen(true)}>Request details</button></> : <p>Start a generation to see its status and any thoughts provided by the model.</p>}
           </div>
-        </details>
-      }><div className="arc-prompt-field"><ExpandableTextInput ref={promptRef} value={activeDocument.type === 'codexEntry' ? lorePrompt : arcPrompt} onChange={activeDocument.type === 'codexEntry' ? setLorePrompt : setArcPrompt} readOnly={sttState.target === 'instruction' && ['requesting-permission', 'recording', 'recording-live', 'stopping', 'transcribing', 'finalizing'].includes(sttState.status)} aria-label="generation prompt" dialogTitle="Edit generation prompt" onDictate={dictateInstruction} dictationStatus={sttState.target === 'instruction' ? sttState.status : 'idle'} dictationError={sttState.target === 'instruction' ? sttState.error : undefined} dictationDisabled={generationActive} onStopDictation={stopSttSession} onCancelDictation={cancelSttSession} /></div><GenerateControl inDrawer isGenerating={generationActive} phase={generationPhase} elapsedSeconds={generationElapsedSeconds} sttState={sttState} ttsState={ttsState} canUndo={editorHistory.canUndo} canRedo={editorHistory.canRedo} onOpenDetails={() => setGenerationDetailsOpen(true)} onGenerate={generate} onStop={stopGeneration} onMicro={() => { void dictateEditor() }} onMicro2={() => { void dictateInstruction() }} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} onReadAloud={() => { void readCurrentDocument() }} readAloudDisabled={activeDocument?.type === 'scene' && !lastGeneratedPassage.trim()} readAloudTitle={activeDocument?.type === 'scene' ? 'Read latest generated passage' : 'Read full Codex entry'} /></Composer>}
+        </details><button type="button" className="composer-collapse" onClick={() => setDrawerCollapsed(true)} aria-label="Hide instruction drawer" title="Hide instruction drawer"><ChevronDown aria-hidden="true" /></button></div>
+      }><div className="arc-prompt-field" hidden={drawerCollapsed}><ExpandableTextInput ref={promptRef} value={activeDocument.type === 'codexEntry' ? lorePrompt : arcPrompt} onChange={activeDocument.type === 'codexEntry' ? setLorePrompt : setArcPrompt} readOnly={sttState.target === 'instruction' && ['requesting-permission', 'recording', 'recording-live', 'stopping', 'transcribing', 'finalizing'].includes(sttState.status)} aria-label="generation prompt" dialogTitle="Edit generation prompt" onDictate={dictateInstruction} dictationStatus={sttState.target === 'instruction' ? sttState.status : 'idle'} dictationError={sttState.target === 'instruction' ? sttState.error : undefined} dictationDisabled={generationActive} onStopDictation={stopSttSession} onCancelDictation={cancelSttSession} /></div><GenerateControl inDrawer={!drawerCollapsed} drawerCollapsed={drawerCollapsed} onToggleDrawer={() => setDrawerCollapsed(value => !value)} isGenerating={generationActive} phase={generationPhase} elapsedSeconds={generationElapsedSeconds} sttState={sttState} ttsState={ttsState} canUndo={editorHistory.canUndo} canRedo={editorHistory.canRedo} onOpenDetails={() => setGenerationDetailsOpen(true)} onGenerate={generate} onStop={stopGeneration} onMicro={() => { void dictateEditor() }} onMicro2={() => { void dictateInstruction() }} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} onReadAloud={() => { void readCurrentDocument() }} readAloudDisabled={activeDocument?.type === 'scene' && !lastGeneratedPassage.trim()} readAloudTitle={activeDocument?.type === 'scene' ? 'Read latest generated passage' : 'Read full Codex entry'} /></Composer>}
 
       {rightOpen && <aside className="book-panel">
         <header><div><small>{formatSeries(currentBook, seriesList)}</small><strong>{currentBook?.title ?? 'Untitled Book'}</strong></div><div className="book-panel-header-actions">{activeSceneId && <button type="button" onClick={() => { void loadScene(activeSceneId) }} aria-label="Return to Scene" title="Return to Scene"><CornerUpLeft aria-hidden="true" /></button>}<button type="button" onClick={() => setRightOpen(false)} aria-label="Close book workspace"><X aria-hidden="true" /></button></div></header>
@@ -2086,8 +2087,10 @@ function GenerationActivityStrip({ phase, elapsedSeconds, placement, onOpenDetai
   </button>
 }
 
-function GenerateControl({ inDrawer = false, isGenerating, phase, elapsedSeconds, sttState, ttsState, canUndo, canRedo, onOpenDetails, onGenerate, onStop, onMicro, onMicro2, onUndo, onRedo, onRegenerate, onReadAloud, readAloudDisabled, readAloudTitle }: {
+function GenerateControl({ inDrawer = false, drawerCollapsed = false, onToggleDrawer, isGenerating, phase, elapsedSeconds, sttState, ttsState, canUndo, canRedo, onOpenDetails, onGenerate, onStop, onMicro, onMicro2, onUndo, onRedo, onRegenerate, onReadAloud, readAloudDisabled, readAloudTitle }: {
   inDrawer?: boolean
+  drawerCollapsed?: boolean
+  onToggleDrawer?: () => void
   isGenerating: boolean
   phase: GenerationPhase | null
   elapsedSeconds: number
@@ -2151,6 +2154,7 @@ function GenerateControl({ inDrawer = false, isGenerating, phase, elapsedSeconds
   }
 
   return <div className="generate-control-shell"><GenerationActions label="Generate" onGenerate={onGenerate} actions={[
+    ...(onToggleDrawer ? [{ id: 'drawer', label: drawerCollapsed ? 'Show instruction drawer' : 'Hide instruction drawer', icon: <ChevronDown aria-hidden="true" />, onSelect: onToggleDrawer }] : []),
     { id: 'instruction', label: 'Dictate instruction', icon: <Mic aria-hidden="true" />, onSelect: onMicro2 },
     { id: 'editor', label: 'Dictate editor', icon: <Mic aria-hidden="true" />, onSelect: onMicro },
     { id: 'regenerate', label: 'Regenerate', icon: <RefreshCw aria-hidden="true" />, onSelect: onRegenerate },
