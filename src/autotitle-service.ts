@@ -1,3 +1,4 @@
+import { proseText, proseEntities } from './document-projection.ts'
 import { generationContextDiagnostics, type ContextDiagnostics } from './context-service'
 import { fetchTextProviderModelContextLength, streamTextProviderCompletion } from './text-provider'
 import type { AiSettings } from './ai-settings'
@@ -174,7 +175,7 @@ export async function prepareAutotitleRequest(bookId: string, targetId: string, 
   if (!modelContextLength) {
     modelContextLength = await fetchTextProviderModelContextLength({ provider: settings.provider, apiKey: settings.apiKey.trim(), baseUrl: settings.baseUrl, model }).catch(() => undefined)
   }
-  const context = await contextForTarget(bookEntity as BookEntity, targetEntity, entities)
+  const context = await contextForTarget(bookEntity as BookEntity, { ...targetEntity, content: proseText(String(targetEntity.content ?? '')) }, proseEntities(entities))
   const language = typeof bookEntity.language === 'string' ? bookEntity.language : ''
   const systemPrompt = systemPromptFor(targetEntity.type as AutotitleTargetType, language)
   const userMessage = `# Target\n${targetEntity.type}: ${targetEntity.title}\n\n# Automatic context\n${context}\n\nReturn one suitable title/name.`

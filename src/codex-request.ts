@@ -1,3 +1,4 @@
+import { projectProse } from './document-projection.ts'
 import { bookTemplateValues, type BookPromptValues } from './prompt-template.ts'
 import {
   assembleCompositionRequest,
@@ -147,6 +148,8 @@ export function codexAutomaticContext(input: CodexRequestInput) {
 }
 
 export function codexRequestValues(input: CodexRequestInput) {
+  const prose = projectProse(input.entry.content)
+  input = { ...input, entry: { ...input.entry, content: prose.text }, insertionPosition: prose.sourceToProse(input.insertionPosition) }
   const insertionPosition = clampInsertion(input.entry.content, input.insertionPosition)
   const { additional } = sourcesFor(input)
   const additionalText = input.context.additionalSources !== undefined
@@ -169,6 +172,8 @@ export function codexRequestValues(input: CodexRequestInput) {
 }
 
 export function assembleCodexGenerationRequest(input: CodexRequestInput): NormalizedAssembledRequest {
+  const prose = projectProse(input.entry.content)
+  input = { ...input, entry: { ...input.entry, content: prose.text }, insertionPosition: prose.sourceToProse(input.insertionPosition) }
   const { automatic, automaticCodex, storySources, sceneSource, additional, dedupe, exclusions } = sourcesFor(input)
   const request = assembleCompositionRequest({
     composition: input.composition,

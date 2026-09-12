@@ -1,3 +1,4 @@
+import { projectProse } from './document-projection.ts'
 import { sceneWritingTemplateValues, type SceneWritingOverrides } from './scene-writing.ts'
 import { bookTemplateValues, type BookPromptValues } from './prompt-template.ts'
 import {
@@ -189,6 +190,8 @@ function sourcesFor(input: StoryRequestInput) {
 }
 
 export function storyRequestValues(input: StoryRequestInput) {
+  const prose = projectProse(input.sceneText)
+  input = { ...input, sceneText: prose.text, insertionPosition: prose.sourceToProse(input.insertionPosition) }
   const insertionPosition = clampInsertion(input.sceneText, input.insertionPosition)
   const { additional } = sourcesFor(input)
   const additionalText = input.context.additionalSources !== undefined
@@ -209,6 +212,8 @@ export function storyRequestValues(input: StoryRequestInput) {
 }
 
 export function assembleStoryGenerationRequest(input: StoryRequestInput): NormalizedAssembledRequest {
+  const prose = projectProse(input.sceneText)
+  input = { ...input, sceneText: prose.text, insertionPosition: prose.sourceToProse(input.insertionPosition) }
   const { automatic, additional, dedupe } = sourcesFor(input)
   const request = assembleCompositionRequest({
     composition: input.composition,

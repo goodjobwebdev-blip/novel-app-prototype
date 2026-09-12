@@ -1,3 +1,5 @@
+import { editorBlockPreview } from './EditorBlockPreview'
+import { rangeTouchesProtected, protectedRanges, type LocatedBlock } from './document-projection.ts'
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import { defaultKeymap, history, historyKeymap, isolateHistory, redo, redoDepth, undo, undoDepth } from '@codemirror/commands'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
@@ -24,7 +26,11 @@ export type CodexMentionClick = {
   rect: { left: number; top: number; right: number; bottom: number; width: number; height: number }
 }
 
+export type EditorSelectionSnapshot = { revision: number; document: string; from: number; to: number; text: string }
+
 type MarkdownEditorProps = {
+  bookId?: string
+  onEditBlock?: (item: LocatedBlock) => void
   value: string
   onChange: (value: string) => void
   ariaLabel?: string
@@ -36,6 +42,8 @@ type MarkdownEditorProps = {
 }
 
 export type MarkdownEditorHandle = {
+  captureSelection: (from?: number, to?: number) => EditorSelectionSnapshot | null
+  replaceRange: (snapshot: EditorSelectionSnapshot, insert: string, allowProtected?: boolean) => boolean
   captureGenerationContext: () => GenerationContext | null
   beginGeneration: (mode?: 'generate' | 'regenerate', placement?: 'append' | 'replace') => GenerationContext | null
   appendGenerationChunk: (text: string) => boolean
@@ -122,7 +130,7 @@ function intersects(from: number, to: number, blocked: Array<{ from: number; to:
 }
 
 function mentionBlockedRanges(state: EditorState) {
-  const blocked: Array<{ from: number; to: number }> = []
+  const blocked: Array<{ from: number; to: number }> = protectedRanges(state.doc.toString())
   syntaxTree(state).iterate({
     enter(node) {
       if (/Code|URL|LinkMark/i.test(node.name)) blocked.push({ from: node.from, to: node.to })
@@ -198,7 +206,7 @@ const generationHighlightField = StateField.define<DecorationSet>({
 
 function buildLivePreviewDecorations(state: EditorState): DecorationSet {
   const activeLine = state.doc.lineAt(state.selection.main.head).number
-  const tables = markdownTableRanges(state)
+  const tables = [...markdownTableRanges(state), ...protectedRanges(state.doc.toString())]
   const ranges: any[] = []
   const hide = (from: number, to: number) => {
     if (to > from) ranges.push(Decoration.replace({}).range(from, to))
@@ -447,12 +455,15 @@ function runHistoryCommand(view: EditorView | null, command: (target: EditorView
 }
 
 const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor(
-  { value, onChange, ariaLabel = 'Markdown editor', className = '', readOnly = false, mentionTerms = [], onMentionClick, onHistoryChange },
+  { value, onChange, bookId = '', onEditBlock, ariaLabel = 'Markdown editor', className = '', readOnly = false, mentionTerms = [], onMentionClick, onHistoryChange },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<EditorView | null>(null)
+  const documentRevisionRef = useRef(0)
   const onChangeRef = useRef(onChange)
+  const onEditBlockRef = useRef(onEditBlock)
+  onEditBlockRef.current = onEditBlock
   const onHistoryChangeRef = useRef(onHistoryChange)
   const mentionTermsRef = useRef(mentionTerms)
   const onMentionClickRef = useRef(onMentionClick)
@@ -470,13 +481,29 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
   }, [mentionTerms])
 
   useImperativeHandle(ref, () => ({
+    captureSelection: (from, to) => {
+      const view = viewRef.current
+      if (!view) return null
+      const selection = view.state.selection.main
+      const start = from ?? selection.from, end = to ?? selection.to
+      if (start < 0 || end < start || end > view.state.doc.length) return null
+      return { revision: documentRevisionRef.current, document: view.state.doc.toString(), from: start, to: end, text: view.state.sliceDoc(start, end) }
+    },
+    replaceRange: (snapshot, insert, allowProtected = false) => {
+      const view = viewRef.current
+      if (!view || view.state.readOnly || activeGenerationRef.current || activeDictationRef.current || documentRevisionRef.current !== snapshot.revision || view.state.doc.toString() !== snapshot.document) return false
+      if (!allowProtected && (rangeTouchesProtected(snapshot.document, snapshot.from, snapshot.to) || protectedRanges(insert).length)) return false
+      view.dispatch({ changes: { from: snapshot.from, to: snapshot.to, insert }, selection: { anchor: snapshot.from + insert.length }, annotations: [Transaction.userEvent.of('input.replace'), isolateHistory.of('full')] })
+      view.focus()
+      return true
+    },
     captureGenerationContext: () => {
       const view = viewRef.current
       return view ? { sceneText: view.state.doc.toString(), insertionPosition: view.state.selection.main.head } : null
     },
     beginGeneration: (mode = 'generate', placement = 'append') => {
       const view = viewRef.current
-      if (!view || activeGenerationRef.current) return null
+      if (!view || activeGenerationRef.current || activeDictationRef.current || view.state.readOnly || rangeTouchesProtected(view.state.doc.toString(), view.state.selection.main.head)) return null
       const session = beginGeneration(view, mode, latestGenerationRef.current, placement)
       if (!session) return null
       view.dispatch({ effects: setGenerationHighlight.of(null) })
@@ -598,6 +625,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       extensions: [
         markdown({ base: markdownLanguage }),
         markdownTablePreview,
+        editorBlockPreview(bookId, (item) => onEditBlockRef.current?.(item), readOnly),
         EditorState.readOnly.of(readOnly),
         editableCompartmentRef.current.of(EditorView.editable.of(!readOnly)),
         history(),
@@ -620,6 +648,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
         EditorView.lineWrapping,
         EditorView.contentAttributes.of({ 'aria-label': ariaLabel, spellcheck: 'true' }),
         EditorView.updateListener.of(update => {
+          if (update.docChanged) documentRevisionRef.current += 1
           if (update.docChanged && !update.transactions.some((transaction) => transaction.annotation(dictationProvisional))) onChangeRef.current(update.state.doc.toString())
           if (update.docChanged || update.transactions.length) {
             onHistoryChangeRef.current?.({ canUndo: undoDepth(update.state) > 0, canRedo: redoDepth(update.state) > 0 })

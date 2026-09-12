@@ -1,3 +1,4 @@
+import { PROSE_PROJECTION_VERSION } from './document-projection.ts'
 import { sceneWritingValues, validateSceneWritingPatch, type SceneWritingOverrides, type SceneWritingField } from './scene-writing'
 import type { GalleryImage, ImageJob } from './image-generation-types'
 import { metadataValues, validateMetadataPatch, type ChatManagementOperation } from './chat-management-schema'
@@ -698,7 +699,7 @@ export async function saveSummaryContent(summaryIdValue: string, content: string
       if (message?.type !== 'chatMessage' || message.bookId !== current.bookId || !proposals?.some((item) => item.id === approval.proposalId && item.status === 'applying')) throw new Error('The summary approval is no longer active. The previous summary was kept.')
     }
     if (expected && (current.updatedAt !== expected.updatedAt || current.content !== expected.content)) throw new Error('The summary changed during generation. Its newer content was kept.')
-    const updated: SummaryEntity = { ...current, content, summarizedSourceRevision: sourceRevision, updatedAt: Date.now() }
+    const updated: SummaryEntity = { ...current, content, proseProjectionVersion: PROSE_PROJECTION_VERSION, summarizedSourceRevision: sourceRevision, updatedAt: Date.now() }
     await db.table('entities').put(updated)
     await touchAncestors(db, current.bookId, updated.updatedAt)
     return updated
