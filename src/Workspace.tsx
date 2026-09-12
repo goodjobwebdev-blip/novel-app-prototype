@@ -1546,6 +1546,7 @@ export default function Workspace() {
       await streamTextProviderCompletion({
         provider: requestSnapshot.provider,
         task: isCodex ? 'codex' : 'story',
+        thinkingEffort: isCodex ? settings.codexThinkingEffort : settings.mainThinkingEffort,
         apiKey: settings.apiKey.trim(),
         baseUrl: requestSnapshot.baseUrl,
         model: requestSnapshot.model,
@@ -1659,6 +1660,7 @@ export default function Workspace() {
       await streamTextProviderCompletion({
         provider: settings.provider,
         task: 'summary',
+        thinkingEffort: settings.supportThinkingEffort,
         apiKey: settings.apiKey.trim(),
         baseUrl: settings.baseUrl,
         model: settings.supportModel,

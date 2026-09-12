@@ -47,7 +47,8 @@ export async function streamTextProviderCompletion(
       task: request.task,
       model: request.model,
       messages: textProviderMessages(request),
-      thinking: request.thinking === true,
+      thinking: request.thinking === true || (request.thinkingEffort !== undefined && request.thinkingEffort !== 'default'),
+      thinkingEffort: request.thinkingEffort,
     }, {
       onResponse: lifecycle.onResponse,
       onContent: onChunk,

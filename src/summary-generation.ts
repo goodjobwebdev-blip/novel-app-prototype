@@ -54,7 +54,7 @@ export async function regenerateEntitySummary(bookId: string, entityId: string, 
   const summary = await getOrCreateSummary(entity)
   const { settings, source, messages } = await prepareSummaryGeneration(book, summary, signal)
   let generated = ''
-  await streamTextProviderCompletion({ provider: settings.provider, task: 'summary', apiKey: settings.apiKey.trim(), baseUrl: settings.baseUrl, model: settings.supportModel, systemPrompt: '', userMessage: '', messages }, (chunk) => { generated += chunk }, signal)
+  await streamTextProviderCompletion({ provider: settings.provider, task: 'summary', thinkingEffort: settings.supportThinkingEffort, apiKey: settings.apiKey.trim(), baseUrl: settings.baseUrl, model: settings.supportModel, systemPrompt: '', userMessage: '', messages }, (chunk) => { generated += chunk }, signal)
   signal.throwIfAborted()
   if (!generated.trim()) throw new Error('The summary model returned no text. The previous summary was kept.')
   const latestSource = await buildSummarySource(entityId)

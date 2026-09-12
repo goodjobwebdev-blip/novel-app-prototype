@@ -62,7 +62,7 @@ export async function generateSynonyms(capture: QuickToolCapture, existing: Syno
   const { settings, model, request } = await prepareSynonymRequest(capture, existing, signal)
   onRequest?.({ model, request })
   let output = ''
-  await streamTextProviderCompletion({ provider: settings.provider, task: 'story', apiKey: settings.apiKey, baseUrl: settings.baseUrl, model, systemPrompt: '', userMessage: '', messages: request.providerMessages }, (text) => { output += text }, signal)
+  await streamTextProviderCompletion({ provider: settings.provider, task: 'story', thinkingEffort: settings.mainThinkingEffort, apiKey: settings.apiKey, baseUrl: settings.baseUrl, model, systemPrompt: '', userMessage: '', messages: request.providerMessages }, (text) => { output += text }, signal)
   signal.throwIfAborted()
   return parseSynonyms(output, capture.snapshot.text, existing)
 }
