@@ -1,3 +1,4 @@
+import { deleteTtsCacheOwners } from './tts-cache.ts'
 import { applyAuthorPlanOperation, authorPlanning } from './author-planning'
 import type { CodexCheckpoint, TimelineSummary } from './codex-timeline'
 import { ensureLoreTypesWithDb, resolveLoreType } from './lore-types.ts'
@@ -960,7 +961,7 @@ export async function collectEntityTreeIds(id: string): Promise<string[]> {
 export async function deleteEntityTree(id: string): Promise<string[]> {
   const db = await database()
   const linked = await db.table('entities').get(id) as CodexEntryEntity | undefined
-  if (linked?.type === 'codexEntry' && linked.seriesSourceId) { await db.table('entities').update(id, { hiddenInBook: true }); return [id] }
+  if (linked?.type === 'codexEntry' && linked.seriesSourceId) { await db.table('entities').update(id, { hiddenInBook: true }); await deleteTtsCacheOwners([id]).catch(() => undefined); return [id] }
   let deletedIds: string[] = []
   await db.transaction('rw', db.table('entities'), db.table('snapshots'), db.table('codexDependencies'), db.table('illustrations'), db.table('illustrationUndo'), db.table('imageJobs'), db.table('galleryImages'), async () => {
     const { root, ids } = await collectEntityTreeIdsWithDb(db, id)
@@ -978,13 +979,14 @@ export async function deleteEntityTree(id: string): Promise<string[]> {
     if (dependencyIds.length) await db.table('codexDependencies').bulkDelete(dependencyIds)
     await touchAncestors(db, root?.parentId, Date.now())
   })
+  await deleteTtsCacheOwners(deletedIds).catch(() => undefined)
   return deletedIds
 }
 
 export async function deleteEntity(id: string) {
   const db = await database()
   const linked = await db.table('entities').get(id) as CodexEntryEntity | undefined
-  if (linked?.type === 'codexEntry' && linked.seriesSourceId) { await db.table('entities').update(id, { hiddenInBook: true }); return }
+  if (linked?.type === 'codexEntry' && linked.seriesSourceId) { await db.table('entities').update(id, { hiddenInBook: true }); await deleteTtsCacheOwners([id]).catch(() => undefined); return }
   await db.transaction('rw', db.table('entities'), db.table('codexDependencies'), db.table('illustrations'), db.table('illustrationUndo'), db.table('imageJobs'), db.table('galleryImages'), async () => {
     await deleteImageJobsWithDb(db, [id])
     await db.table('illustrations').where('entryId').equals(id).delete()
@@ -996,6 +998,7 @@ export async function deleteEntity(id: string) {
     const dependencyIds = dependencies.filter((edge) => edge.sourceId === id || edge.targetId === id).map((edge) => edge.id)
     if (dependencyIds.length) await db.table('codexDependencies').bulkDelete(dependencyIds)
   })
+  await deleteTtsCacheOwners([id]).catch(() => undefined)
 }
 
 export async function saveDocumentContent(entityId: string, content: string, expected?: { bookId?: string; updatedAt: number; content: string }) {

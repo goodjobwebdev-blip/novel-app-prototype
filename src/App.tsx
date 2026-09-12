@@ -1,3 +1,4 @@
+import TtsCacheSettings from './TtsCacheSettings'
 import { captureCharacterFrame, type CharacterFrame } from './character-chat'
 import { availableChatTools } from './chat-tool-availability'
 import { sceneWritingValues, resolveSceneWriting } from './scene-writing'
@@ -840,7 +841,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
           </div>
         </> : <GlobalContextDefaults value={contextSettings} saved={contextSaved} saveError={contextSaveError} onRetry={() => { void saveContextDefaults() }} onChange={updateContextDefaults} />)
           : settingsTab === 'images' ? <ImageSettingsPanel ref={imageSettingsRef} ai={settings} onDirtyChange={setImageSettingsDirty} />
-          : settingsTab === 'speech' ? <SpeechSettingsPanel settings={settings} scope={isBookSettings ? 'book' : 'defaults'} onChange={(speech) => update('speech', speech)} />
+          : settingsTab === 'speech' ? <SpeechSettingsPanel bookId={book?.id} settings={settings} scope={isBookSettings ? 'book' : 'defaults'} onChange={(speech) => update('speech', speech)} />
           : <SettingsPlaceholder tab={settingsTab} scope={isBookSettings ? 'book' : 'defaults'} />}
       </section>
     </main>
@@ -1150,7 +1151,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
   </section>
 }
 
-function SpeechSettingsPanel({ settings, scope, onChange }: { settings: AiSettings; scope: 'book' | 'defaults'; onChange: (speech: AiSettings['speech']) => void }) {
+function SpeechSettingsPanel({ bookId, settings, scope, onChange }: { bookId?: string; settings: AiSettings; scope: 'book' | 'defaults'; onChange: (speech: AiSettings['speech']) => void }) {
   const [models, setModels] = useState<SpeechModel[]>([])
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
@@ -1280,6 +1281,7 @@ function SpeechSettingsPanel({ settings, scope, onChange }: { settings: AiSettin
 
   return <section className="speech-settings">
     <header className="page-heading"><div><p>{scope === 'book' ? 'Book Speech' : 'Default Speech'}</p><h1 id="page-title">Speech</h1><span>{scope === 'book' ? 'Independent TTS and dictation settings for this book.' : 'Copied into each new book, then edited independently.'}</span></div><Volume2 aria-hidden="true" /></header>
+    <TtsCacheSettings bookId={bookId} />
     <section className="settings-card">
       <div className="card-heading"><div><span>01</span><h2>Speech credentials</h2></div><p>Speech credentials are separate from text AI.</p></div>
       <div className="speech-settings-grid">

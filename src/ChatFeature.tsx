@@ -818,7 +818,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
         activeRoundPersisted = Boolean(saved)
         commitVisibleRound(saved, Boolean(activeRoundThoughts))
         if (saved?.content && settings.speech.readAloudAfterGeneration) {
-          void startTtsSession(settings.speech, saved.content, `Chat · ${activeChat.title}`).catch((error) => onToast(error instanceof Error ? error.message : 'Automatic read aloud failed.'))
+          void startTtsSession(settings.speech, saved.content, `Chat · ${activeChat.title}`, { bookId: sourceBookId, entityId: saved.id }).catch((error) => onToast(error instanceof Error ? error.message : 'Automatic read aloud failed.'))
         }
         completed = true
         break
@@ -1144,7 +1144,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     try {
       const settings = await getChatBookAiSettings(sourceChat.bookId)
       if (!isCurrentChat(sourceChat)) return
-      await startTtsSession(settings.speech, message.content, `Chat · ${sourceChat.title}`)
+      await startTtsSession(settings.speech, message.content, `Chat · ${sourceChat.title}`, { bookId: sourceChat.bookId, entityId: message.id, entityIds: groupChatAnswers(messages).find(group => group.messages.some(item => item.id === message.id))?.messages.map(item => item.id) })
     } catch (error) {
       onToast(error instanceof Error ? error.message : 'Could not start text to speech.')
     }
