@@ -1,3 +1,4 @@
+import { codexScopeLabel } from './series-codex.ts'
 import { sceneBeats } from './scene-beats'
 import { proseText, proseEntities } from './document-projection.ts'
 import { getBookContextSettings, isCodexEntryArchived, listCodexDependencies, listEntitiesByBook, type ArcEntity, type CodexEntryEntity, type GenerationContextProfile, type GenerationContextType, type StructuralEntity, type SummaryEntity } from './persistence'
@@ -217,7 +218,7 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
   })
   const automaticText = automaticEntries.map((item) => {
     const representation = automaticRepresentations.find((candidate) => candidate.entryId === item.entry.id)!
-    return `### ${item.entry.category}: ${item.entry.title}\n\n${representation.content}`
+    return `### ${item.entry.category}: ${item.entry.title} (${codexScopeLabel(item.entry)})\n\n${representation.content}`
   }).join('\n\n')
   const automaticSection = automaticText ? section('Automatic Codex', automaticText) : ''
 
@@ -227,7 +228,7 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
   const codex: AdditionalContextSection[] = selectedCodex.map((item) => {
     const representation = manualRepresentations.find((candidate) => candidate.entryId === item.id)!
     return {
-      text: section(`Codex — ${String(item.category ?? 'Other')}: ${item.title ?? 'Untitled'}`, representation.content),
+      text: section(`Codex — ${String(item.category ?? 'Other')}: ${item.title ?? 'Untitled'} (${codexScopeLabel(item)})`, representation.content),
       id: item.id,
       updatedAt: item.updatedAt,
       stabilityRank: 1,

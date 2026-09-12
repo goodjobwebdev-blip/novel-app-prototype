@@ -1,3 +1,5 @@
+import { detachedCodex } from './series-codex.ts'
+import type { CodexEntryEntity } from './persistence'
 import { documentBlocks, remapDocumentBlocks } from './document-projection.ts'
 import type { GalleryImage, ImageJob } from './image-generation-types'
 import type { ArcEntity, BookArchiveData, Illustration } from './persistence'
@@ -150,6 +152,7 @@ export async function decodeBookArchive(file: Blob): Promise<BookArchiveData> {
 /** Import as a new book; preserve text verbatim while remapping structural references. */
 export function copyBookArchive(data: BookArchiveData, newId = () => crypto.randomUUID()): { data: BookArchiveData; bookId: string } {
   const ids = new Map<string, string>()
+  data = { ...data, entities: data.entities.map(entity => entity.type === 'codexEntry' ? detachedCodex(entity as CodexEntryEntity) : entity) }
   for (const entity of data.entities) if (entity.type !== 'settings' && entity.type !== 'summary') ids.set(entity.id, `${entity.type}-${newId()}`)
   for (const entity of data.entities) {
     if (entity.type === 'settings') {
