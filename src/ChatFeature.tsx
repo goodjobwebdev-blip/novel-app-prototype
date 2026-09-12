@@ -1517,7 +1517,7 @@ export function ChatSidebar({ bookId, activeChatId, onOpen, currentSceneId, care
   }
 
   return <section className="chat-sidebar"><div className="panel-title"><div><small>Conversations</small><h2>Chats</h2></div><button type="button" onClick={() => { void add() }} aria-label="Start new chat"><Plus aria-hidden="true" /></button></div>
-    <button type="button" onClick={() => setCharacterSetup(true)}>New character chat</button>
+    <button className="new-character-chat" type="button" onClick={() => setCharacterSetup(true)}><MessageCircle aria-hidden="true" />New character chat</button>
     {characterSetup && <CharacterChatSetup bookId={bookId} currentSceneId={currentSceneId} caret={caret} onClose={() => setCharacterSetup(false)} onOpen={onOpen} />}
     <label className="chat-sidebar-search"><Search aria-hidden="true" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search chats" /></label>
     <div className="chat-sidebar-list">{visible.map((chat) => <article className={`chat-row-wrap ${activeChatId === chat.id ? 'selected' : ''}`} key={chat.id}>

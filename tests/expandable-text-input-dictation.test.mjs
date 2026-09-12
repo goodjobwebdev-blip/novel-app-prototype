@@ -139,3 +139,39 @@ test('closing invalidates delayed transcription and start failures stay inside t
     assert.deepEqual(applied, [])
   } finally { await act(async () => root.unmount()) }
 })
+
+test('expanded drafts survive keyboard viewport changes and retain prompt hints', async () => {
+  const viewport = new dom.window.EventTarget()
+  viewport.height = 760
+  viewport.offsetTop = 0
+  Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport })
+  const applied = []
+  const root = createRoot(document.getElementById('root'))
+  try {
+    await act(async () => root.render(React.createElement(ExpandableTextInput, {
+      value: 'Original prompt', onChange: value => applied.push(value),
+      'aria-label': 'Media prompt', placeholder: 'Describe your image or video…', maxLength: 32000,
+    })))
+    await click('Expand Media prompt')
+    const backdrop = document.querySelector('.expandable-text-backdrop')
+    const expanded = document.querySelector('[aria-label="Expanded Media prompt"]')
+    assert.equal(expanded.placeholder, 'Describe your image or video…')
+    assert.equal(expanded.maxLength, 32000)
+    await input(expanded, 'A moonlit harbor')
+    viewport.height = 330
+    viewport.offsetTop = 25
+    await act(async () => viewport.dispatchEvent(new dom.window.Event('resize')))
+    assert.equal(backdrop.style.getPropertyValue('--expanded-viewport-height'), '330px')
+    assert.equal(backdrop.style.getPropertyValue('--expanded-viewport-top'), '25px')
+    assert.equal(expanded.value, 'A moonlit harbor')
+    await click('Apply')
+    assert.deepEqual(applied, ['A moonlit harbor'])
+    assert.equal(document.querySelector('[role="dialog"]'), null)
+    viewport.height = 760
+    await act(async () => viewport.dispatchEvent(new dom.window.Event('resize')))
+    assert.equal(backdrop.style.getPropertyValue('--expanded-viewport-height'), '330px', 'Closed dialog no longer listens to the viewport')
+  } finally {
+    await act(async () => root.unmount())
+    delete window.visualViewport
+  }
+})
