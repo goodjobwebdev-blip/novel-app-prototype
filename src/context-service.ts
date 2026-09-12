@@ -1,3 +1,4 @@
+import { proseText, proseEntities } from './document-projection.ts'
 import { getBookContextSettings, isCodexEntryArchived, listCodexDependencies, listEntitiesByBook, type ArcEntity, type CodexEntryEntity, type GenerationContextProfile, type GenerationContextType, type StructuralEntity, type SummaryEntity } from './persistence'
 import { automaticCodexMatches, type CodexTriggerSceneMatch } from './codex-trigger-service'
 import { cascadeAutomaticCodexDependencies } from './codex-dependency-cascade'
@@ -125,7 +126,8 @@ function additionalContextOrder(a: AdditionalContextSection, b: AdditionalContex
 }
 
 export async function buildContextValues(options: BuildOptions): Promise<PreparedContextValues> {
-  const [entities, contextSettings, dependencyEdges] = await Promise.all([listEntitiesByBook(options.bookId), getBookContextSettings(options.bookId), listCodexDependencies(options.bookId)])
+  const [rawEntities, contextSettings, dependencyEdges] = await Promise.all([listEntitiesByBook(options.bookId), getBookContextSettings(options.bookId), listCodexDependencies(options.bookId)])
+  const entities = proseEntities(rawEntities)
   const outline = orderedOutline(options.bookId, entities)
   const scenes = outline.filter((item) => item.type === 'scene')
   const anchorSceneId = options.currentSceneId || contextSettings.lastOpenedSceneId || undefined
@@ -133,7 +135,7 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
   const currentIndex = anchorSceneId ? scenes.findIndex((item) => item.id === anchorSceneId) : -1
   const currentScene = currentIndex >= 0 ? scenes[currentIndex] : undefined
   const previousScene = currentIndex > 0 ? scenes[currentIndex - 1] : undefined
-  const liveCurrentText = options.currentSceneText !== undefined && options.currentSceneId === anchorSceneId ? options.currentSceneText : String(currentScene?.content ?? '')
+  const liveCurrentText = proseText(options.currentSceneText !== undefined && options.currentSceneId === anchorSceneId ? options.currentSceneText : String(currentScene?.content ?? ''))
   const storyAnchorEnabled = options.type === 'scene' || options.type === 'chat' || (options.type === 'codex' && options.profile.includeLastScene)
   const previousSceneText = storyAnchorEnabled && options.profile.includePreviousSceneWhenEmpty && currentScene && !liveCurrentText.trim()
     ? String(previousScene?.content ?? '')

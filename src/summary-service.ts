@@ -1,3 +1,4 @@
+import { proseText, proseEntities } from './document-projection.ts'
 import {
   getEntity,
   listEntitiesByBook,
@@ -15,6 +16,7 @@ export type SummaryState = 'missing' | 'current' | 'outdated'
 export type SummarySourceEntity = StructuralEntity | CodexEntryEntity
 
 export type SummarySource = {
+  previousSummary?: string
   source: SummarySourceEntity
   content: string
   sourceRevision: number
@@ -48,7 +50,7 @@ function sortedChildren(entities: ArcEntity[], parentId: string, type: Structura
 }
 
 function summariesBySource(entities: ArcEntity[]) {
-  return new Map(entities.filter(isSummary).map((summary) => [summary.sourceEntityId, summary]))
+  return new Map(proseEntities(entities).filter(isSummary).map((summary) => [summary.sourceEntityId, summary]))
 }
 
 function sourceRevision(source: SummarySourceEntity, entities: ArcEntity[], summaries: Map<string, SummaryEntity>): number {
@@ -92,7 +94,7 @@ export async function getSummaryStateMap(bookId: string): Promise<Record<string,
 
 function sceneSource(scene: StructuralEntity, summary: SummaryEntity | undefined, state: SummaryState) {
   const usesSummary = state === 'current' && Boolean(summary?.content.trim())
-  const content = usesSummary ? summary!.content.trim() : String(scene.content ?? '').trim()
+  const content = usesSummary ? summary!.content.trim() : proseText(String(scene.content ?? '')).trim()
   return {
     content: `## Scene: ${scene.title}\n\n${content || '_No content_'}`,
     diagnostic: {
@@ -121,16 +123,16 @@ function chapterSource(chapter: StructuralEntity, entities: ArcEntity[], summari
 export async function buildSummarySource(sourceId: string): Promise<SummarySource> {
   const source = await getEntity<ArcEntity>(sourceId)
   if (!source || !isSummarySource(source)) throw new Error('The summary source is no longer available.')
-  const entities = await listEntitiesByBook(source.bookId)
+  const entities = proseEntities(await listEntitiesByBook(source.bookId))
   const summaries = summariesBySource(entities)
   let content: string
   let diagnostics: DynamicContextSource[]
 
   if (source.type === 'codexEntry') {
-    content = `# Codex entry: ${source.title}\n\nCategory: ${source.category}\n\n${String(source.content ?? '').trim() || '_No content_'}`
+    content = `# Codex entry: ${source.title}\n\nCategory: ${source.category}\n\n${proseText(String(source.content ?? '')).trim() || '_No content_'}`
     diagnostics = [{ sourceId: source.id, title: source.title, type: 'codexEntry', category: source.category, representation: 'Full Codex body + metadata', content, reason: 'Authoritative Codex source; Summary preference never replaces canon here' }]
   } else if (source.type === 'scene') {
-    content = `# Scene: ${source.title}\n\n${String(source.content ?? '').trim() || '_No content_'}`
+    content = `# Scene: ${source.title}\n\n${proseText(String(source.content ?? '')).trim() || '_No content_'}`
     diagnostics = [{ sourceId: source.id, title: source.title, type: 'scene', representation: 'Full Scene body', content, reason: 'Authoritative current Scene source' }]
   } else if (source.type === 'chapter') {
     const selected = chapterSource(source, entities, summaries)
@@ -152,7 +154,7 @@ export async function buildSummarySource(sourceId: string): Promise<SummarySourc
     diagnostics = selected.flatMap((item) => item.diagnostics)
   }
 
-  return { source, content, sourceRevision: sourceRevision(source, entities, summaries), diagnostics }
+  return { source, content, previousSummary: summaries.get(source.id)?.content ?? '', sourceRevision: sourceRevision(source, entities, summaries), diagnostics }
 }
 
 export function codexContextRepresentation(entry: CodexEntryEntity, entities: ArcEntity[]): CodexContextRepresentation {
@@ -170,7 +172,7 @@ export function codexContextRepresentation(entry: CodexEntryEntity, entities: Ar
     title: entry.title,
     representation: 'Full entry',
     ...(fallbackReason ? { fallbackReason } : {}),
-    content: String(entry.content ?? '').trim() || '_No description provided._',
+    content: proseText(String(entry.content ?? '')).trim() || '_No description provided._',
   }
 }
 

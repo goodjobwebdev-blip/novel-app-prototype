@@ -1,3 +1,4 @@
+import { proseText, protectedRanges, rangeTouchesProtected } from './document-projection.ts'
 import type { ChatToolCall, ChatToolDefinition } from './chat-api'
 import { searchBookEntities } from './chat-search'
 import { entitySearchProperties } from './chat-management-tools'
@@ -177,6 +178,7 @@ function applyExactReplacements(content: string, edits: ChatTextReplacement[]) {
     if (count === 0) throw new Error('One requested old_text passage is no longer present. Read the document again before proposing the edit.')
     if (count > 1) throw new Error(`One requested old_text passage is ambiguous (${count} exact matches). Use a larger unique passage.`)
     const index = next.indexOf(edit.oldText)
+    if (rangeTouchesProtected(next, index, index + edit.oldText.length) || protectedRanges(edit.newText).length) throw new Error('AI edits may only change prose outside image and private blocks.')
     next = `${next.slice(0, index)}${edit.newText}${next.slice(index + edit.oldText.length)}`
   }
   return next
@@ -230,7 +232,7 @@ export async function executeChatWorkspaceTool(bookId: string, call: ChatToolCal
           title: titleFor(entity),
           category: entity.type === 'codexEntry' ? String(entity.category ?? 'Other') : undefined,
           updatedAt: entity.updatedAt,
-          content: String(entity.content ?? ''),
+          content: proseText(String(entity.content ?? '')),
           ...dependencyMetadata,
         },
       }) }
@@ -289,6 +291,7 @@ export async function executeChatWorkspaceTool(bookId: string, call: ChatToolCal
       if (!Number.isFinite(expectedUpdatedAt) || expectedUpdatedAt !== entity.updatedAt) {
         return { content: toolResult({ ok: false, error: 'The document changed since it was read. Read it again and retry with the new updatedAt value.', currentUpdatedAt: entity.updatedAt }) }
       }
+      if (protectedRanges(String(entity.content ?? '')).length || (typeof args.new_content === 'string' && protectedRanges(args.new_content).length)) throw new Error('This document contains protected blocks. Propose localized prose edits instead.')
       if (typeof args.new_content !== 'string') return { content: toolResult({ ok: false, error: 'new_content must be a string.' }) }
       const proposal: ChatDocumentEditProposal = {
         id: makeProposalId(),
@@ -331,6 +334,7 @@ export async function applyChatDocumentEdit(messageId: string, proposalId: strin
   const currentContent = String(entity.content ?? '')
   let nextContent: string
   try {
+    if (proposal.mode === 'replace_document' && (protectedRanges(currentContent).length || protectedRanges(proposal.newContent ?? '').length)) throw new Error('Whole-document rewrites cannot replace protected blocks. Request localized prose edits.')
     nextContent = proposal.mode === 'replace_document'
       ? proposal.newContent ?? ''
       : applyExactReplacements(currentContent, proposal.edits ?? [])

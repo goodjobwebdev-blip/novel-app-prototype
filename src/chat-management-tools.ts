@@ -1,3 +1,4 @@
+import { proseEntities } from './document-projection.ts'
 import { sceneWritingFields, sceneWritingLabels, sceneWritingValues, validateSceneWritingPatch, resolveSceneWriting } from './scene-writing'
 import type { ChatToolCall, ChatToolDefinition } from './chat-api'
 import { transitionChatMessageProposal, type ChatEntityActionProposal, type ChatMessageEntity } from './chat-service'
@@ -108,7 +109,7 @@ export async function executeChatManagementTool(bookId: string, call: ChatToolCa
       const entities = await listEntitiesByBook(bookId)
       const summary = entities.find((e): e is SummaryEntity => e.type === 'summary' && e.sourceEntityId === entity.id)
       const state = summaryStateForSource(entity, entities)
-      if (name === 'read_summary') return { content: JSON.stringify({ ok: true, entityId: entity.id, title: entity.title, state, summaryId: summary?.id ?? null, content: summary?.content ?? '', updatedAt: summary?.updatedAt ?? null }) }
+      if (name === 'read_summary') return { content: JSON.stringify({ ok: true, entityId: entity.id, title: entity.title, state, summaryId: summary?.id ?? null, content: proseEntities(entities).find((item) => item.id === summary?.id)?.content ?? '', updatedAt: summary?.updatedAt ?? null }) }
       if (isCodexEntryArchived(entity)) throw new Error('Restore this Codex entry before regenerating its summary.')
       item = proposal(entity, 'regenerate_summary', { kind: 'summary' }, args, [{ field: 'Summary', before: state, after: 'Regenerate from the current source using Book summary settings' }])
     } else throw new Error(`Unknown tool: ${name}`)

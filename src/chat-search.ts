@@ -1,3 +1,4 @@
+import { proseText } from './document-projection.ts'
 import type { ArcEntity } from './persistence'
 
 export const searchableTypes = ['scene', 'note', 'codexEntry', 'chapter', 'act'] as const
@@ -16,10 +17,10 @@ export function searchBookEntities(entities: ArcEntity[], args: Record<string, u
     && (args.include_archived === true || !(entity.type === 'codexEntry' && Number(entity.archivedAt) > 0))
     && (!Array.isArray(types) || !types.length || types.includes(entity.type))
     && (args.parent_id === undefined || entity.parentId === args.parent_id)
-    && (!query || `${entity.title ?? ''} ${entity.category ?? ''} ${entity.content ?? ''}`.toLocaleLowerCase().includes(query)),
+    && (!query || `${entity.title ?? ''} ${entity.category ?? ''} ${proseText(String(entity.content ?? ''))}`.toLocaleLowerCase().includes(query)),
   ).sort((a, b) => String(a.title ?? '').localeCompare(String(b.title ?? '')) || a.id.localeCompare(b.id))
   const results = matches.slice(Number(offset), Number(offset) + Number(limit)).map((entity) => {
-    const body = String(entity.content ?? '').replace(/\s+/g, ' ')
+    const body = proseText(String(entity.content ?? '')).replace(/\s+/g, ' ')
     const hit = query ? body.toLocaleLowerCase().indexOf(query) : -1
     const start = Math.max(0, hit - 100)
     return {

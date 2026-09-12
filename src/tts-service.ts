@@ -1,3 +1,4 @@
+import { proseText } from './document-projection.ts'
 import type { SpeechSettings } from './ai-settings'
 
 export type SpeechModel = {
@@ -130,7 +131,7 @@ export async function fetchSpeechModels(apiKey = '', signal?: AbortSignal): Prom
 }
 
 export function normalizeSpeakableText(markdown: string) {
-  return markdown
+  return proseText(markdown)
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')

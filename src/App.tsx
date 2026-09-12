@@ -649,7 +649,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
         'target.type': summaryPreviewSource.source.type === 'codexEntry' ? 'Codex entry' : summaryPreviewSource.source.type[0].toUpperCase() + summaryPreviewSource.source.type.slice(1),
         'target.title': summaryPreviewSource.source.title,
         'target.source': summaryPreviewSource.content,
-        'target.previous_summary': book.currentSummary.content,
+        'target.previous_summary': summaryPreviewSource.previousSummary ?? '',
       }
     : basePromptPreviewValues
   const activePromptDiagnostics = promptTemplateDiagnostics(activePrompt, promptTab, promptPreviewValues)
@@ -666,7 +666,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
         composition: settings.promptCompositions.summarize,
         book: { ...book.promptValues, responseLength: settings.responseLengths.summary },
         responseLength: settings.responseLengths.summary,
-        summary: { id: book.currentSummary.id, content: book.currentSummary.content },
+        summary: { id: book.currentSummary.id, content: summaryPreviewSource.previousSummary ?? '' },
         target: { id: summaryPreviewSource.source.id, type: summaryPreviewSource.source.type, title: summaryPreviewSource.source.title, source: summaryPreviewSource.content },
         sourceDiagnostics: summaryPreviewSource.diagnostics,
       })
@@ -918,7 +918,7 @@ function ContextSaveStatus({ saved, error, onRetry }: { saved: boolean; error: s
 function SummaryContextSettings({ book, source, error, settings }: { book: NonNullable<AiSettingsProps['book']>; source: SummarySource | null; error: string; settings: AiSettings }) {
   const summary = book.currentSummary!
   const metadata = { ...(book.promptValues ?? { title: book.title, series: '', seriesOrder: '', overview: '', genre: '', style: '', pov: '', tense: '', language: '' }), responseLength: settings.responseLengths.summary }
-  const request = source ? assembleSummaryGenerationRequest({ composition: settings.promptCompositions.summarize, book: metadata, responseLength: settings.responseLengths.summary, summary: { id: summary.id, content: summary.content }, target: { id: source.source.id, type: source.source.type, title: source.source.title, source: source.content }, sourceDiagnostics: source.diagnostics }) : null
+  const request = source ? assembleSummaryGenerationRequest({ composition: settings.promptCompositions.summarize, book: metadata, responseLength: settings.responseLengths.summary, summary: { id: summary.id, content: source.previousSummary ?? '' }, target: { id: source.source.id, type: source.source.type, title: source.source.title, source: source.content }, sourceDiagnostics: source.diagnostics }) : null
   const promptErrors = [settings.promptCompositions.summarize.systemPrompt, ...settings.promptCompositions.summarize.predefinedMessages.filter(message => message.enabled).map(message => message.template)].flatMap(template => promptTemplateDiagnostics(template, 'summarize')).filter(diagnostic => diagnostic.severity === 'error')
   const diagnostics = request && settings.supportModel.trim() && !promptErrors.length ? generationContextDiagnostics(settings.supportModel, settings.supportModelContextLength, '', normalizedRequestDiagnosticText(request)) : null
   return <section className="context-defaults-settings"><header className="page-heading"><div><p>Summary source</p><h1 id="page-title">Summary context</h1><span>{source?.source.title || 'Loading source…'} · {book.title} · Read-only</span></div></header>
@@ -1024,8 +1024,8 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
     storyNormalizedRequest = assembleStoryGenerationRequest({
       composition: settings.promptCompositions.story,
       book: metadata,
-      sceneText: preview.currentSceneText,
-      insertionPosition: insertionPosition ?? preview.currentSceneText.length,
+      sceneText: currentDocumentText ?? String(currentDocument?.content ?? preview.currentSceneText),
+      insertionPosition: insertionPosition ?? (currentDocumentText ?? String(currentDocument?.content ?? preview.currentSceneText)).length,
       sceneOverrides: sceneWritingValues(currentDocument),
       context: preview,
       responseLength: settings.responseLengths.story,

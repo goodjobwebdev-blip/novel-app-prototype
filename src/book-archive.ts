@@ -1,3 +1,4 @@
+import { documentBlocks, remapDocumentBlocks } from './document-projection.ts'
 import type { GalleryImage, ImageJob } from './image-generation-types'
 import type { ArcEntity, BookArchiveData, Illustration } from './persistence'
 import { assertImageFile } from './illustration-image'
@@ -160,6 +161,7 @@ export function copyBookArchive(data: BookArchiveData, newId = () => crypto.rand
   for (const asset of data.galleryImages ?? []) ids.set(asset.id, `generated-${newId()}`)
   for (const job of data.imageJobs ?? []) ids.set(job.id, `image-job-${newId()}`)
   for (const image of data.illustrations) ids.set(image.id, `image-${newId()}`)
+  for (const row of [...data.entities, ...data.snapshots]) for (const item of documentBlocks(row.content ?? '')) if (!ids.has(item.block.id)) ids.set(item.block.id, `block-${newId()}`)
   const remap = (value: any, key = '', depth = 0): any => {
     if (depth > 80) throw new Error('This backup contains excessively nested data.')
     if (Array.isArray(value)) return REF_ARRAYS.has(key) ? value.map((id) => ids.get(id)).filter(Boolean) : value.map((item) => remap(item, '', depth + 1))
@@ -167,6 +169,7 @@ export function copyBookArchive(data: BookArchiveData, newId = () => crypto.rand
       if (value instanceof Blob) return value
       return Object.fromEntries(Object.entries(value).map(([name, item]) => [name, remap(item, name, depth + 1)]))
     }
+    if (typeof value === 'string' && key === 'content') return remapDocumentBlocks(value, ids)
     if (typeof value === 'string' && (REF_KEYS.has(key) || key === 'id')) return ids.get(value) ?? (key === 'id' ? value : '')
     return value
   }
