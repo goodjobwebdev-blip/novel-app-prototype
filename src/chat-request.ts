@@ -1,3 +1,4 @@
+import { chatSkillParts, type CapturedChatSkill } from './chat-skills'
 import { brainstormTools } from './chat-brainstorm'
 import { projectProse } from './document-projection'
 import type { ProposalDraft } from './chat-proposal-draft'
@@ -111,6 +112,7 @@ export function assembleChatGenerationRequest(input: {
   book: BookPromptValues
   context: PreparedContextValues
   history: ChatRequestHistoryItem[]
+  skills?: CapturedChatSkill[]
   tools?: ChatToolDefinition[]
 }): NormalizedAssembledRequest {
   const values = chatRequestValues(input.book, input.context)
@@ -119,7 +121,8 @@ export function assembleChatGenerationRequest(input: {
     ? source(input.context.currentSceneId || 'chat-current-scene', input.context.currentSceneTitle || 'Current scene', input.context.currentSceneText, 'Current Chat story anchor')
     : source(input.context.previousSceneId || 'chat-previous-scene', input.context.previousSceneTitle || 'Previous scene', input.context.previousSceneText, 'Previous-Scene fallback for empty Chat anchor')
   const automaticSources = [...storySources, ...sceneSources, ...(input.context.automaticSources ?? [])]
-  const dedupe = dedupeDynamicSources(automaticSources, input.context.additionalSources ?? [])
+  const skillIds = new Set(input.skills?.map(skill => skill.id) ?? [])
+  const dedupe = dedupeDynamicSources(automaticSources, (input.context.additionalSources ?? []).filter(item => !skillIds.has(item.sourceId)))
   values['context.additional'] = dedupe.additional.map((item) => item.content.trim()).filter(Boolean).join('\n\n')
   const latestUserIndex = input.history.at(-1)?.role === 'user' ? input.history.length - 1 : -1
   const historyParts = input.history.map((message, index) => normalizeRuntimeMessagePart({
@@ -146,6 +149,7 @@ export function assembleChatGenerationRequest(input: {
       'context.additional': dedupe.additional,
     },
     after: [
+      ...chatSkillParts(input.skills),
       ...(input.context.sceneBeats?.length ? [normalizeAppManagedPart({ id: 'scene-planning-beats', role: 'system', sourceKind: 'app-managed', sourceId: input.context.currentSceneId, name: 'Scene planning beats', ownership: 'app-managed', content: `Planning only, distinct from manuscript facts. Use propose_scene_beat to suggest changes; approval is required.\n${JSON.stringify(input.context.sceneBeats)}` })] : []),
       ...historyParts,
     ],

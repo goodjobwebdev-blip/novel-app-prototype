@@ -36,6 +36,7 @@ export type ChatEntity = ArcEntity & {
   thinking: boolean
   contextProfile: GenerationContextProfile
   lastMessagePreview?: string
+  skillNoteIds?: string[]
   maxModelRounds?: number
 }
 
@@ -217,6 +218,7 @@ export async function createChat(bookId: string, title = 'New chat'): Promise<Ch
     promptComposition: clonePromptComposition(settings.promptCompositions.assistant),
     thinking: false,
     maxModelRounds: normalizeChatRoundLimit(defaults.chatMaxModelRounds),
+    skillNoteIds: [],
     contextProfile: profileForNewChat(contextSettings.profiles.chat),
     createdAt: now,
     updatedAt: now,
@@ -226,10 +228,11 @@ export async function createChat(bookId: string, title = 'New chat'): Promise<Ch
   return chat
 }
 
-export async function updateChat(chatId: string, patch: Partial<Pick<ChatEntity, 'title' | 'model' | 'modelContextLength' | 'effectiveContextLimit' | 'promptComposition' | 'thinking' | 'contextProfile' | 'lastMessagePreview' | 'maxModelRounds'>>): Promise<ChatEntity> {
+export async function updateChat(chatId: string, patch: Partial<Pick<ChatEntity, 'title' | 'model' | 'modelContextLength' | 'effectiveContextLimit' | 'promptComposition' | 'thinking' | 'contextProfile' | 'lastMessagePreview' | 'maxModelRounds' | 'skillNoteIds'>>): Promise<ChatEntity> {
   if (patch.maxModelRounds !== undefined) validateChatRoundLimit(patch.maxModelRounds)
   const patchSnapshot = {
     ...patch,
+    ...(patch.skillNoteIds ? { skillNoteIds: [...new Set(patch.skillNoteIds)] } : {}),
     ...(patch.promptComposition ? { promptComposition: clonePromptComposition(patch.promptComposition) } : {}),
     ...(patch.contextProfile ? { contextProfile: copyProfile(patch.contextProfile) } : {}),
   }
