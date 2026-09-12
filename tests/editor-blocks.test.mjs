@@ -101,3 +101,19 @@ test('rewrite examples edit the instruction; Go previews without applying and re
   assert.equal(closed.length, 1)
   await act(async () => root.unmount())
 })
+
+test('selection actions stay compact and open above a selection near the viewport bottom', async () => {
+  buildSync({ entryPoints: [new URL('../src/SelectionTools.tsx', import.meta.url).pathname], jsx: 'automatic', bundle: true, packages: 'external', format: 'esm', outfile: `${directory}/selection-tools.mjs`, loader: { '.css': 'empty' }, logLevel: 'silent' })
+  const { default: Tools } = await import(pathToFileURL(`${directory}/selection-tools.mjs`))
+  const root = createRoot(document.getElementById('root')), calls = []
+  const selection = { snapshot: { editorId: 'editor', revision: 1, document: 'The blue door', from: 4, to: 8, text: 'blue' }, rect: { left: 20, top: 620, bottom: 710 }, protected: false }
+  await act(async () => root.render(React.createElement(Tools, { selection, open: tool => calls.push(tool.id) })))
+  assert.equal(document.querySelectorAll('[role="toolbar"] button').length, 1)
+  await act(async () => document.querySelector('[role="toolbar"] button').click())
+  const toolbar = document.querySelector('[role="toolbar"]')
+  assert.ok(parseFloat(toolbar.style.top) + parseFloat(toolbar.style.maxHeight) < selection.rect.top)
+  const synonyms = [...toolbar.querySelectorAll('button')].find(button => button.textContent === 'Synonyms')
+  await act(async () => synonyms.click())
+  assert.deepEqual(calls, ['synonyms'])
+  await act(async () => root.unmount())
+})

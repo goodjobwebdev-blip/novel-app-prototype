@@ -73,3 +73,8 @@ body:has([role="dialog"]) .selection-tools { display: none; }
 .workspace-composer.is-collapsed { left: auto; right: 0; width: auto; border: 0; background: transparent; backdrop-filter: none; box-shadow: none; pointer-events: none; }
 .workspace-composer.is-collapsed > .chat-compose-row { display: flex; justify-content: flex-end; }
 .workspace-composer.is-collapsed .generate-control-shell { pointer-events: auto; }
+.selection-tools { width: 128px; flex-direction: column; flex-wrap: nowrap; padding: 2px; overflow-y: auto; background: var(--surface); }
+.selection-tools.expanded { width: 204px; }
+.selection-tools button { min-height: 40px; flex: none; text-align: left; padding: .4rem .65rem; font: 500 12px ui-sans-serif, system-ui, sans-serif; }
+.selection-tools span { padding: .5rem; }
+.note-editor-actions { position: fixed; right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); z-index: 50; }

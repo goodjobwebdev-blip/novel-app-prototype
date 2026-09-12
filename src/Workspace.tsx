@@ -1,3 +1,4 @@
+import { ImagePlus } from 'lucide-react'
 import CodexTemplates from './CodexTemplates'
 import { LoreTypeSelect, LoreTypesManager, useLoreTypes } from './LoreTypesControls'
 import { CodexScopeControls, SeriesCodexManager } from './SeriesCodexControls'
@@ -253,6 +254,7 @@ export default function Workspace() {
   const [selectedProse, setSelectedProse] = useState<{ documentId: string; selection: EditorSelectionInfo } | null>(null)
   const [quickTool, setQuickTool] = useState<{ tool: QuickTool; capture: QuickToolCapture } | null>(null)
   const [showBeats, setShowBeats] = useState(() => loadUiSettings().sceneBeats !== false)
+  const [imageInsertRequest, setImageInsertRequest] = useState<string | null>(null)
   const [beatRewrite, setBeatRewrite] = useState<{ documentId: string; snapshot: EditorSelectionSnapshot; instruction: string } | null>(null)
   useEffect(() => { const sync = () => setShowBeats(loadUiSettings().sceneBeats !== false); window.addEventListener(UI_SETTINGS_EVENT, sync); window.addEventListener('storage', sync); return () => { window.removeEventListener(UI_SETTINGS_EVENT, sync); window.removeEventListener('storage', sync) } }, [])
   const [toast, setToast] = useState<ToastMessage | null>(null)
@@ -1375,7 +1377,7 @@ export default function Workspace() {
     }
 
     const editor = editorRef.current
-    if (!isCodex && mode === 'generate' && showBeats && arcPrompt.trim() && editor) {
+    if (!isCodex && mode === 'generate' && loadUiSettings().saveArcAsBeat !== false && arcPrompt.trim() && editor) {
       const snapshot = editor.captureSelection()
       if (!snapshot) return
       try {
@@ -1912,11 +1914,12 @@ export default function Workspace() {
         {activeDocument?.type === 'codexEntry' && activeDocument.codexScope !== 'inherited' && !activeCodexArchived && <CodexTemplates key={activeDocument.id} bookId={activeDocument.bookId} targetId={activeDocument.id} typeId={activeDocument.typeId ?? activeDocument.category} body={storyMarkdown} editor={editorRef} disabled={generationActive} />}
         {activeDocument?.type === 'codexEntry' && <CodexDependenciesMetadata key={`dependencies-${activeDocument.id}`} source={activeDocument} entries={codexEntries} edges={codexDependencies} readOnly={activeCodexArchived || activeDocument.codexScope === 'inherited'} onAdd={(targetId) => addCodexDependency(activeDocument.id, targetId)} onUpdate={changeCodexDependency} onRemove={deleteCodexDependency} onOpen={(entryId) => { void loadDocument(entryId) }} />}
         {activeDocument?.type === 'summary' && summaryContextIndicator && <div className="summary-context-indicator">{summaryContextIndicator}</div>}
-        {activeDocument && currentBook && ['scene', 'note', 'codexEntry'].includes(activeDocument.type) && !activeCodexArchived && activeDocument.codexScope !== 'inherited' && <EditorBlocks key={activeDocument.id} bookId={currentBook.id} editor={editorRef} disabled={generationActive} onEditRequestHandled={() => setBlockEditRequest(null)} showBeats={showBeats && activeDocument.type === 'scene'} editRequest={blockEditRequest?.documentId === activeDocument.id && blockEditRequest.snapshot.document === storyMarkdown ? blockEditRequest : null} />}
+        {activeDocument && currentBook && ['scene', 'note', 'codexEntry'].includes(activeDocument.type) && !activeCodexArchived && activeDocument.codexScope !== 'inherited' && <EditorBlocks key={activeDocument.id} bookId={currentBook.id} editor={editorRef} disabled={generationActive} onEditRequestHandled={() => setBlockEditRequest(null)} insertImage={imageInsertRequest === activeDocument.id} onInsertHandled={() => setImageInsertRequest(null)} editRequest={blockEditRequest?.documentId === activeDocument.id && blockEditRequest.snapshot.document === storyMarkdown ? blockEditRequest : null} />}
         {activeDocument ? <MarkdownEditor key={`${activeDocument.id}-${editorRevision}`} ref={editorRef} onSelectionChange={(selection) => setSelectedProse(selection ? { documentId: activeDocument.id, selection } : null)} bookId={currentBook?.id} showBeats={showBeats} onBeatAction={actOnBeat} onEditBlock={(item) => { const snapshot = editorRef.current?.captureSelection(item.from, item.to); if (snapshot) setBlockEditRequest({ documentId: activeDocument.id, item, snapshot }) }} value={storyMarkdown} onChange={handleStoryChange} onHistoryChange={setEditorHistory} ariaLabel={`${activeDocument.title} Markdown editor`} readOnly={activeCodexArchived || activeSummarySourceArchived || activeDocument.codexScope === 'inherited'} mentionTerms={activeDocument.type === 'scene' ? codexMentionIndex : []} onMentionClick={activeDocument.type === 'scene' ? openLoreMention : undefined} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No document selected</strong><p>Choose a Scene, Note, Codex entry, or Summary from the book workspace.</p><button type="button" onClick={() => setRightOpen(true)}>Open Book Workspace</button></div>}
       </article> : currentBook ? <ChatView bookId={currentBook.id} chatId={activeChatId} bookPromptValues={toBookPromptValues(currentBook, seriesList)} currentSceneId={activeSceneId} onChatChange={openChat} onToast={showToast} /> : <section className="conversation chat-empty"><MessageCircle aria-hidden="true" /><p>Open a book before starting a chat.</p></section>}
 
 
+      {screen === 'editor' && activeDocument?.type === 'note' && <div className="note-editor-actions"><GenerationActions label="Editor actions" menuOnly onGenerate={() => {}} actions={[{ id: 'image', label: 'Insert image', icon: <ImagePlus aria-hidden="true" />, onSelect: () => setImageInsertRequest(activeDocument.id) }]} /></div>}
       {screen === 'editor' && activeDocument?.type === 'summary' && !activeSummarySourceArchived && <div className="summary-generate-wrap"><button className="summary-generate" type="button" onClick={generationActive ? stopGeneration : generate}>{generationActive ? <Square aria-hidden="true" fill="currentColor" /> : <RefreshCw aria-hidden="true" />} {generationActive ? 'Stop' : openSummaryState === 'missing' ? 'Summarize' : 'Re-summarize'}</button></div>}
       {screen === 'editor' && (activeDocument?.type === 'scene' || (activeDocument?.type === 'codexEntry' && !activeCodexArchived && activeDocument.codexScope !== 'inherited')) && <Composer key={activeDocument.id} className={`workspace-composer ${drawerCollapsed ? 'is-collapsed' : ''}`} strip={
         <div className="workspace-composer-header" hidden={drawerCollapsed}><details className="chat-config-strip">
@@ -1925,7 +1928,7 @@ export default function Workspace() {
             {generationDetails ? <><p>{generationDetails.provider} · {generationDetails.requestedModel} · {generationDetails.targetTitle}</p>{generationDetails.thoughts ? <pre>{generationDetails.thoughts}</pre> : <p>No thoughts provided by this model.</p>}<button type="button" onClick={() => setGenerationDetailsOpen(true)}>Request details</button></> : <p>Start a generation to see its status and any thoughts provided by the model.</p>}
           </div>
         </details><button type="button" className="composer-collapse" onClick={() => setDrawerCollapsed(true)} aria-label="Hide instruction drawer" title="Hide instruction drawer"><ChevronDown aria-hidden="true" /></button></div>
-      }><div className="arc-prompt-field" hidden={drawerCollapsed}><ExpandableTextInput ref={promptRef} value={activeDocument.type === 'codexEntry' ? lorePrompt : arcPrompt} onChange={activeDocument.type === 'codexEntry' ? setLorePrompt : setArcPrompt} readOnly={sttState.target === 'instruction' && ['requesting-permission', 'recording', 'recording-live', 'stopping', 'transcribing', 'finalizing'].includes(sttState.status)} aria-label="generation prompt" dialogTitle="Edit generation prompt" onDictate={dictateInstruction} dictationStatus={sttState.target === 'instruction' ? sttState.status : 'idle'} dictationError={sttState.target === 'instruction' ? sttState.error : undefined} dictationDisabled={generationActive} onStopDictation={stopSttSession} onCancelDictation={cancelSttSession} /></div><GenerateControl inDrawer={!drawerCollapsed} drawerCollapsed={drawerCollapsed} onToggleDrawer={() => setDrawerCollapsed(value => !value)} isGenerating={generationActive} phase={generationPhase} elapsedSeconds={generationElapsedSeconds} sttState={sttState} ttsState={ttsState} canUndo={editorHistory.canUndo} canRedo={editorHistory.canRedo} onOpenDetails={() => setGenerationDetailsOpen(true)} onGenerate={generate} onStop={stopGeneration} onMicro={() => { void dictateEditor() }} onMicro2={() => { void dictateInstruction() }} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} onReadAloud={() => { void readCurrentDocument() }} readAloudDisabled={activeDocument?.type === 'scene' && !lastGeneratedPassage.trim()} readAloudTitle={activeDocument?.type === 'scene' ? 'Read latest generated passage' : 'Read full Codex entry'} /></Composer>}
+      }><div className="arc-prompt-field" hidden={drawerCollapsed}><ExpandableTextInput ref={promptRef} value={activeDocument.type === 'codexEntry' ? lorePrompt : arcPrompt} onChange={activeDocument.type === 'codexEntry' ? setLorePrompt : setArcPrompt} readOnly={sttState.target === 'instruction' && ['requesting-permission', 'recording', 'recording-live', 'stopping', 'transcribing', 'finalizing'].includes(sttState.status)} aria-label="generation prompt" dialogTitle="Edit generation prompt" onDictate={dictateInstruction} dictationStatus={sttState.target === 'instruction' ? sttState.status : 'idle'} dictationError={sttState.target === 'instruction' ? sttState.error : undefined} dictationDisabled={generationActive} onStopDictation={stopSttSession} onCancelDictation={cancelSttSession} /></div><GenerateControl inDrawer={!drawerCollapsed} drawerCollapsed={drawerCollapsed} onToggleDrawer={() => setDrawerCollapsed(value => !value)} onInsertImage={() => setImageInsertRequest(activeDocument.id)} isGenerating={generationActive} phase={generationPhase} elapsedSeconds={generationElapsedSeconds} sttState={sttState} ttsState={ttsState} canUndo={editorHistory.canUndo} canRedo={editorHistory.canRedo} onOpenDetails={() => setGenerationDetailsOpen(true)} onGenerate={generate} onStop={stopGeneration} onMicro={() => { void dictateEditor() }} onMicro2={() => { void dictateInstruction() }} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} onReadAloud={() => { void readCurrentDocument() }} readAloudDisabled={activeDocument?.type === 'scene' && !lastGeneratedPassage.trim()} readAloudTitle={activeDocument?.type === 'scene' ? 'Read latest generated passage' : 'Read full Codex entry'} /></Composer>}
 
       {rightOpen && <aside className="book-panel">
         <header><div><small>{formatSeries(currentBook, seriesList)}</small><strong>{currentBook?.title ?? 'Untitled Book'}</strong></div><div className="book-panel-header-actions">{activeSceneId && <button type="button" onClick={() => { void loadScene(activeSceneId) }} aria-label="Return to Scene" title="Return to Scene"><CornerUpLeft aria-hidden="true" /></button>}<button type="button" onClick={() => setRightOpen(false)} aria-label="Close book workspace"><X aria-hidden="true" /></button></div></header>
@@ -2087,10 +2090,11 @@ function GenerationActivityStrip({ phase, elapsedSeconds, placement, onOpenDetai
   </button>
 }
 
-function GenerateControl({ inDrawer = false, drawerCollapsed = false, onToggleDrawer, isGenerating, phase, elapsedSeconds, sttState, ttsState, canUndo, canRedo, onOpenDetails, onGenerate, onStop, onMicro, onMicro2, onUndo, onRedo, onRegenerate, onReadAloud, readAloudDisabled, readAloudTitle }: {
+function GenerateControl({ inDrawer = false, drawerCollapsed = false, onToggleDrawer, onInsertImage, isGenerating, phase, elapsedSeconds, sttState, ttsState, canUndo, canRedo, onOpenDetails, onGenerate, onStop, onMicro, onMicro2, onUndo, onRedo, onRegenerate, onReadAloud, readAloudDisabled, readAloudTitle }: {
   inDrawer?: boolean
   drawerCollapsed?: boolean
   onToggleDrawer?: () => void
+  onInsertImage?: () => void
   isGenerating: boolean
   phase: GenerationPhase | null
   elapsedSeconds: number
@@ -2154,6 +2158,7 @@ function GenerateControl({ inDrawer = false, drawerCollapsed = false, onToggleDr
   }
 
   return <div className="generate-control-shell"><GenerationActions label="Generate" onGenerate={onGenerate} actions={[
+    ...(onInsertImage ? [{ id: 'image', label: 'Insert image', icon: <ImagePlus aria-hidden="true" />, onSelect: onInsertImage }] : []),
     ...(onToggleDrawer ? [{ id: 'drawer', label: drawerCollapsed ? 'Show instruction drawer' : 'Hide instruction drawer', icon: <ChevronDown aria-hidden="true" />, onSelect: onToggleDrawer }] : []),
     { id: 'instruction', label: 'Dictate instruction', icon: <Mic aria-hidden="true" />, onSelect: onMicro2 },
     { id: 'editor', label: 'Dictate editor', icon: <Mic aria-hidden="true" />, onSelect: onMicro },
