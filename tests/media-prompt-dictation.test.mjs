@@ -8,6 +8,9 @@ import 'fake-indexeddb/auto'
 
 const dom = new JSDOM('<div id="root"></div>', { url: 'https://arc.test/' })
 for (const key of ['window', 'document', 'HTMLElement', 'Event', 'CustomEvent', 'localStorage']) globalThis[key] = dom.window[key]
+// Native dialog lifecycle is supplied by the browser; JSDOM needs these hooks.
+dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true }
+dom.window.HTMLDialogElement.prototype.close = function () { this.open = false }
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 globalThis.requestAnimationFrame = callback => setTimeout(callback, 0)
 globalThis.cancelAnimationFrame = clearTimeout

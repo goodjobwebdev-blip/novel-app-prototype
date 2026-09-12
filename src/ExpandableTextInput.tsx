@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type ForwardedRef,
+  type KeyboardEvent,
   type TextareaHTMLAttributes,
 } from 'react'
 import { Expand, Mic, Square, X } from 'lucide-react'
@@ -60,7 +61,7 @@ const ExpandableTextInput = forwardRef<HTMLTextAreaElement, ExpandableTextInputP
   const compactRef = useRef<HTMLTextAreaElement | null>(null)
   const expandedRef = useRef<HTMLTextAreaElement | null>(null)
   const dialogRef = useRef<HTMLElement | null>(null)
-  const backdropRef = useRef<HTMLDivElement | null>(null)
+  const backdropRef = useRef<HTMLDialogElement | null>(null)
   const cancelDictationRef = useRef<HTMLButtonElement | null>(null)
   const openRef = useRef(false)
   const expandedDictationRef = useRef(false)
@@ -69,6 +70,15 @@ const ExpandableTextInput = forwardRef<HTMLTextAreaElement, ExpandableTextInputP
   const titleId = useId()
   const dictationActive = expandedDictation && ['requesting-permission', 'recording', 'recording-live', 'stopping', 'transcribing', 'finalizing'].includes(dictationStatus)
   const recording = dictationStatus === 'recording' || dictationStatus === 'recording-live'
+
+  useEffect(() => {
+    if (!open) return
+    // The native top layer sits above both custom popups and other modal
+    // dialogs. A body portal with a z-index can remain hidden or inert there.
+    const modal = backdropRef.current!
+    modal.showModal()
+    return () => modal.close()
+  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -97,30 +107,28 @@ const ExpandableTextInput = forwardRef<HTMLTextAreaElement, ExpandableTextInputP
     return () => cancelAnimationFrame(frame)
   }, [open])
 
-  useEffect(() => {
-    if (!open) return
-    function handleDialogKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        closeDialog()
-        return
-      }
-      if (event.key !== 'Tab') return
-      const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]), textarea:not([disabled])') ?? [])]
-      if (!focusable.length) return
-      const first = focusable[0]
-      const last = focusable[focusable.length - 1]
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault()
-        first.focus()
-      }
+  function handleDialogKeyDown(event: KeyboardEvent<HTMLDialogElement>) {
+    // React events still bubble to the input's parent through a portal.
+    // Keep the parent popup's Escape handler and focus trap out of this one.
+    event.stopPropagation()
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeDialog()
+      return
     }
-    document.addEventListener('keydown', handleDialogKeyDown)
-    return () => document.removeEventListener('keydown', handleDialogKeyDown)
-  }, [open, dictationActive])
+    if (event.key !== 'Tab') return
+    const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]), textarea:not([disabled])') ?? [])]
+    if (!focusable.length) return
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
 
   useEffect(() => {
     if (expandedDictation && ['cancelled', 'failed', 'completed'].includes(dictationStatus)) setExpandedDictationOwned(false)
@@ -233,14 +241,21 @@ const ExpandableTextInput = forwardRef<HTMLTextAreaElement, ExpandableTextInputP
       </button>
     </div>
     {open && createPortal(
-      <div
+      <dialog
         ref={backdropRef}
         className="expandable-text-backdrop"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        onKeyDown={handleDialogKeyDown}
+        onCancel={(event) => { event.preventDefault(); event.stopPropagation(); closeDialog() }}
+        onClick={(event) => event.stopPropagation()}
         onPointerDown={(event) => {
+          event.stopPropagation()
           if (event.target === event.currentTarget) closeDialog()
         }}
       >
-        <section ref={dialogRef} className="expandable-text-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+        <section ref={dialogRef} className="expandable-text-dialog">
           <header>
             <h2 id={titleId}>{dialogTitle}</h2>
             <button type="button" onClick={closeDialog} aria-label="Close expanded editor" title="Close expanded editor">
@@ -258,7 +273,7 @@ const ExpandableTextInput = forwardRef<HTMLTextAreaElement, ExpandableTextInputP
             <button className="expandable-text-apply" type="button" onClick={applyDraft} disabled={expandedDictation}>Apply</button>
           </footer>
         </section>
-      </div>,
+      </dialog>,
       document.body,
     )}
   </>
