@@ -1,6 +1,7 @@
 import { thinkingRequestParameters, type ThinkingEffort } from './thinking-effort'
 import { bookTemplateValues, renderPromptTemplate, type BookPromptValues } from './prompt-template'
 import type { NormalizedProviderMessage } from './prompt-composition'
+import { consumeCompletionStream, fetchCompletionResponse, readCompletionError } from './completion-stream'
 
 export type StoryPromptValues = {
   book: BookPromptValues
@@ -200,7 +201,7 @@ export async function streamNanoGPTCompletion(
 ) {
   const messages = nanoGPTCompletionMessages(request)
 
-  const response = await fetch(completionEndpoint(request.baseUrl), {
+  const response = await fetchCompletionResponse(completionEndpoint(request.baseUrl), {
     method: 'POST',
     headers: {
       Accept: 'text/event-stream',
@@ -214,19 +215,13 @@ export async function streamNanoGPTCompletion(
       ...thinkingRequestParameters('nanogpt', true, request.thinkingEffort),
       stream_options: { include_usage: true },
     }),
-    signal,
-  })
+  }, signal)
 
   if (!response.ok) {
-    const payload = await response.json().catch(() => null)
+    const payload = await readCompletionError(response, signal)
     throw new Error(providerError(response.status, payload, request.apiKey))
   }
   if (!response.body) throw new Error('NanoGPT returned an empty streaming response.')
-  lifecycle.onResponse?.()
-
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
   let receivedText = false
 
   const consumeLine = (line: string) => {
@@ -237,9 +232,11 @@ export async function streamNanoGPTCompletion(
     const payload = JSON.parse(data) as unknown
     const metadata = streamMetadata(payload)
     if (hasMetadata(metadata)) lifecycle.onMetadata?.(metadata)
+    signal.throwIfAborted()
     const delta = (payload as { choices?: Array<{ delta?: Record<string, unknown> }> }).choices?.[0]?.delta
     const thoughts = delta ? reasoningText(delta) : ''
     if (thoughts) lifecycle.onThoughts?.(thoughts)
+    signal.throwIfAborted()
     const text = chunkText(payload)
     if (text) {
       receivedText = true
@@ -248,23 +245,7 @@ export async function streamNanoGPTCompletion(
     return false
   }
 
-  let done = false
-  while (!done) {
-    const read = await reader.read()
-    buffer += decoder.decode(read.value, { stream: !read.done })
-    const lines = buffer.split(/\r?\n/)
-    buffer = lines.pop() ?? ''
-    for (const line of lines) {
-      if (consumeLine(line)) {
-        done = true
-        break
-      }
-    }
-    if (read.done) {
-      if (buffer) consumeLine(buffer)
-      break
-    }
-  }
+  await consumeCompletionStream(response.body, signal, consumeLine, lifecycle.onResponse)
 
   if (!receivedText) throw new Error('NanoGPT completed without returning generated text.')
 }
