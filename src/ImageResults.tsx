@@ -88,7 +88,7 @@ export default function ImageJobs({ proposalId, messageId }: { proposalId?: stri
     </div>}
     {(error || actionError) && <p role="alert">{error || actionError}</p>}
     {!visible.length && !proposalId && <p className="image-help">Your generation queue is empty.</p>}
-    {groups.map((group) => <section className="image-job-group" aria-labelledby={`image-job-group-${group.title.toLowerCase().replace(' ', '-')}`} key={group.title}>
+    {proposalId ? <div className="image-job-list">{visible.map(jobCard)}</div> : groups.map((group) => <section className="image-job-group" aria-labelledby={`image-job-group-${group.title.toLowerCase().replace(' ', '-')}`} key={group.title}>
       <h3 id={`image-job-group-${group.title.toLowerCase().replace(' ', '-')}`}>{group.title}<span>{group.jobs.length}</span></h3>
       <div className="image-job-list">{group.jobs.map(jobCard)}</div>
     </section>)}

@@ -54,13 +54,28 @@ export type ImageGenerationSpec = OpenAIImageOptions & {
   sources?: GenerationSource[]
   video?: VideoGenerationOptions
 }
+export type MediaGenerationDraft = {
+  prompt: string
+  alias: string
+  size: string
+  task?: GenerationTask
+  sources?: GenerationSource[]
+  resolution?: string
+  duration?: number
+  aspectRatio?: string
+  fps?: number
+  numFrames?: number
+  seed?: number
+  draftVideo?: boolean
+}
 export type ChatImageProposal = {
   id: string; prompt: string; modelAlias: string; size: string
+  draft?: MediaGenerationDraft
   task?: GenerationTask
   status: 'proposed' | 'accepted' | 'rejected' | 'stale'; createdAt: number
 }
 export type ImageJob = ImageGenerationSpec & {
-  id: string; bookId?: string; bookTitle?: string; chatId?: string; messageId?: string; proposalId?: string
+  id: string; bookId?: string; bookTitle?: string; chatId?: string; messageId?: string; proposalId?: string; submissionId?: string
   status: 'queued' | 'running' | 'completed' | 'failed' | 'interrupted' | 'cancelled'
   createdAt: number; startedAt?: number; completedAt?: number; error?: string
   assetId?: string; decision?: 'kept' | 'discarded'; hiddenInChat?: boolean; hiddenInQueue?: boolean

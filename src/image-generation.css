@@ -242,3 +242,7 @@
   .image-codex-action { align-items: stretch; flex-direction: column; }
   .image-codex-action > button { width: 100%; }
 }
+
+.chat-media-card { margin-top: .75rem; min-width: 0; }
+.chat-media-card > .image-prompt-preview { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.chat-media-card > small { display: block; color: var(--soft); margin: .35rem 0; }
