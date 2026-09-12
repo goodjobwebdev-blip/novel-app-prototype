@@ -170,3 +170,15 @@
 .chat-management-change > div { margin: 6px 0; }
 .chat-management-change > div > span { font-size: 12px; opacity: .7; }
 .chat-management-change pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; margin: 4px 0; }
+
+/* One response, with its original model rounds available in ordered activity. */
+.chat-answer-group { min-width: 0; width: 100%; max-width: 100%; }
+.chat-answer-activity { margin: .6rem 0; color: var(--soft); }
+.chat-answer-activity > summary { cursor: pointer; padding: .5rem 0; font-size: .78rem; }
+.chat-activity-round { min-width: 0; border-left: 2px solid var(--line); padding: .6rem 0 .6rem .8rem; }
+.chat-activity-round > small { display: block; margin-bottom: .5rem; overflow-wrap: anywhere; }
+.chat-answer-group .message-tools { display: flex; flex-wrap: wrap; }
+.functional-chat .messages, .functional-chat .message, .chat-markdown { max-width: 100%; min-width: 0; }
+.chat-markdown pre, .chat-markdown .markdown-table-scroll { box-sizing: border-box; width: 100%; }
+.chat-answer-tools button { min-height: 40px; background: transparent; border: 0; color: var(--soft); }
+.chat-follow-output { background: var(--canvas); color: var(--ink); }
