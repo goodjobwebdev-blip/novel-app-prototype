@@ -29,6 +29,7 @@ export type CustomUiTheme = {
 }
 
 export type UiSettings = {
+  highlightDialogue?: boolean
   sceneBeats?: boolean
   saveArcAsBeat?: boolean
   editor: UiTypography
@@ -151,6 +152,7 @@ export const builtInThemes: BuiltInTheme[] = [
 ]
 
 export const defaultUiSettings: UiSettings = {
+  highlightDialogue: false,
   sceneBeats: true,
   saveArcAsBeat: true,
   editor: { fontFamily: 'Literata', fontSize: 19, lineHeight: 1.78, fontWeight: 400 },
@@ -233,6 +235,7 @@ export function loadUiSettings(): UiSettings {
       ? stored.activeThemeId
       : defaultUiSettings.activeThemeId
     return {
+      highlightDialogue: stored.highlightDialogue === true,
       sceneBeats: stored.sceneBeats !== false,
       saveArcAsBeat: stored.saveArcAsBeat ?? (stored.sceneBeats !== false),
       editor: sanitizeTypography(stored.editor, defaultUiSettings.editor),
@@ -247,6 +250,7 @@ export function loadUiSettings(): UiSettings {
 
 export function saveUiSettings(settings: UiSettings) {
   const next: UiSettings = {
+    highlightDialogue: settings.highlightDialogue === true,
     sceneBeats: settings.sceneBeats !== false,
     saveArcAsBeat: settings.saveArcAsBeat !== false,
     editor: sanitizeTypography(settings.editor, defaultUiSettings.editor),

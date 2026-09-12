@@ -130,6 +130,28 @@ select {
   background: var(--selection) !important;
 }
 
+.markdown-editor .cm-dialogue,
+.ui-dialogue-preview .cm-dialogue {
+  color: var(--accent-bright);
+}
+
+.ui-dialogue-preview {
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: .65rem;
+  background: var(--editor-surface);
+  color: var(--ink);
+  font: var(--editor-font-weight) var(--editor-font-size)/var(--editor-line-height) var(--editor-font-family);
+}
+
+.ui-editor-settings > label {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  min-height: 44px;
+}
+
 .expandable-text-input textarea,
 .expandable-text-dialog textarea,
 .arc-drawer textarea,

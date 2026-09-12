@@ -4,6 +4,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import { defaultKeymap, history, historyKeymap, isolateHistory, redo, redoDepth, undo, undoDepth } from '@codemirror/commands'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { markdownTablePreview } from './MarkdownTablePreview'
+import { dialogueHighlight } from './DialogueHighlight'
 import { markdownTableRanges } from './markdown-tables'
 import { syntaxTree } from '@codemirror/language'
 import { Annotation, Compartment, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state'
@@ -34,6 +35,7 @@ type MarkdownEditorProps = {
   onSelectionChange?: (selection: EditorSelectionInfo | null) => void
   bookId?: string
   showBeats?: boolean
+  highlightDialogue?: boolean
   onBeatAction?: (item: LocatedBlock, action: 'generate' | 'rebind') => void
   onEditBlock?: (item: LocatedBlock) => void
   value: string
@@ -461,7 +463,7 @@ function runHistoryCommand(view: EditorView | null, command: (target: EditorView
 }
 
 const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor(
-  { value, onChange, bookId = '', onEditBlock, showBeats = true, onBeatAction, onSelectionChange, ariaLabel = 'Markdown editor', className = '', readOnly = false, mentionTerms = [], onMentionClick, onHistoryChange },
+  { value, onChange, bookId = '', onEditBlock, showBeats = true, highlightDialogue = false, onBeatAction, onSelectionChange, ariaLabel = 'Markdown editor', className = '', readOnly = false, mentionTerms = [], onMentionClick, onHistoryChange },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null)
@@ -472,6 +474,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
   onSelectionChangeRef.current = onSelectionChange
   const onChangeRef = useRef(onChange)
   const blockCompartmentRef = useRef(new Compartment())
+  const dialogueCompartmentRef = useRef(new Compartment())
   const onBeatActionRef = useRef(onBeatAction)
   onBeatActionRef.current = onBeatAction
   const onEditBlockRef = useRef(onEditBlock)
@@ -496,6 +499,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
   }
 
   useEffect(() => { onChangeRef.current = onChange }, [onChange])
+  useEffect(() => { viewRef.current?.dispatch({ effects: dialogueCompartmentRef.current.reconfigure(highlightDialogue ? dialogueHighlight : []) }) }, [highlightDialogue])
   useEffect(() => { onHistoryChangeRef.current = onHistoryChange }, [onHistoryChange])
   useEffect(() => { onMentionClickRef.current = onMentionClick }, [onMentionClick])
   useEffect(() => {
@@ -657,6 +661,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       extensions: [
         markdown({ base: markdownLanguage }),
         markdownTablePreview,
+        dialogueCompartmentRef.current.of(highlightDialogue ? dialogueHighlight : []),
         blockCompartmentRef.current.of(editorBlockPreview(bookId, (item) => onEditBlockRef.current?.(item), readOnly, showBeats, (item, action) => onBeatActionRef.current?.(item, action))),
         EditorState.readOnly.of(readOnly),
         editableCompartmentRef.current.of(EditorView.editable.of(!readOnly)),
