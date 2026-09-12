@@ -8,7 +8,7 @@ const MAX_MANIFEST = 64 * 1024 * 1024
 const MAX_ARCHIVE = 2_000_000_000
 const TYPES = new Set(['book', 'series', 'act', 'chapter', 'scene', 'note', 'codexEntry', 'summary', 'chat', 'chatMessage', 'settings'])
 const REF_KEYS = new Set(['bookId', 'entryId', 'parentId', 'seriesId', 'sourceEntityId', 'entityId', 'sourceId', 'targetId', 'primaryImageId', 'assetId', 'messageId', 'chatId', 'lastOpenedSceneId', 'sourceParentId', 'targetParentId', 'beforeId'])
-const REF_ARRAYS = new Set(['structuralIds', 'noteIds', 'codexEntryIds', 'sourceIds'])
+const REF_ARRAYS = new Set(['skillNoteIds', 'structuralIds', 'noteIds', 'codexEntryIds', 'sourceIds'])
 
 type StoredGalleryImage = Omit<GalleryImage, 'image' | 'thumbnail'> & { imageSize: number; imageType: string; thumbnailSize: number; thumbnailType: string }
 type StoredImage = Omit<Illustration, 'image' | 'thumbnail'> & { imageSize: number; imageType: string; thumbnailSize: number; thumbnailType: string }
@@ -164,6 +164,7 @@ export function copyBookArchive(data: BookArchiveData, newId = () => crypto.rand
   for (const row of [...data.entities, ...data.snapshots]) for (const item of documentBlocks(row.content ?? '')) if (!ids.has(item.block.id)) ids.set(item.block.id, `block-${newId()}`)
   const remap = (value: any, key = '', depth = 0): any => {
     if (depth > 80) throw new Error('This backup contains excessively nested data.')
+    if (Array.isArray(value) && key === 'skillNoteIds') return value.map(id => ids.get(id) ?? `missing-skill-${id}`)
     if (Array.isArray(value)) return REF_ARRAYS.has(key) ? value.map((id) => ids.get(id)).filter(Boolean) : value.map((item) => remap(item, '', depth + 1))
     if (value && typeof value === 'object') {
       if (value instanceof Blob) return value

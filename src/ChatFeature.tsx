@@ -1,3 +1,5 @@
+import ChatSkillsPicker from './ChatSkillsPicker'
+import { prepareChatSkillContext, type CapturedChatSkill } from './chat-skills'
 import BrainstormCard from './BrainstormCard'
 import { executeBrainstormTool } from './chat-brainstorm'
 import { boundedChatRounds, normalizeChatRoundLimit } from './chat-round-limit'
@@ -132,6 +134,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   const [modelStatus, setModelStatus] = useState('')
   const [promptOpen, setPromptOpen] = useState(false)
   const [compositionDraft, setCompositionDraft] = useState<PromptComposition>({ systemPrompt: '', predefinedMessages: [] })
+  const [promptPreviewSkills, setPromptPreviewSkills] = useState<CapturedChatSkill[]>([])
   const [promptPreviewContext, setPromptPreviewContext] = useState<Awaited<ReturnType<typeof buildContextValues>> | null>(null)
   const [lastNormalizedRequest, setLastNormalizedRequest] = useState<NormalizedAssembledRequest | null>(null)
   const [lastFinalizedRequest, setLastFinalizedRequest] = useState<FinalizedChatProviderRequest | null>(null)
@@ -276,12 +279,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       setPromptPreviewContext(null)
       return () => { cancelled = true }
     }
-    buildContextValues({
-      bookId: chat.bookId,
-      type: 'chat',
-      currentSceneId: currentSceneId || undefined,
-      profile: chat.contextProfile,
-    }).then((context) => { if (!cancelled && isCurrentChat(chat)) setPromptPreviewContext(context) })
+    prepareChatSkillContext(chat, currentSceneId || undefined).then(({ context, skills }) => { if (!cancelled && isCurrentChat(chat)) { setPromptPreviewContext(context); setPromptPreviewSkills(skills) } })
       .catch(() => { if (!cancelled) setPromptPreviewContext(null) })
     return () => { cancelled = true }
   }, [promptOpen, chat?.id, chat?.updatedAt, currentSceneId])
@@ -424,6 +422,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   type PreparedAssistantGeneration = {
     settings: Awaited<ReturnType<typeof getChatBookAiSettings>>
     context: Awaited<ReturnType<typeof buildContextValues>>
+    skills: CapturedChatSkill[]
   }
 
   function generationOwnsCurrentUi(owner: ChatGenerationOwner) {
@@ -485,6 +484,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       composition: activeChat.promptComposition,
       book: bookPromptValues,
       context: prepared.context,
+      skills: prepared.skills,
       history,
       tools: CHAT_TOOL_DEFINITIONS,
     })
@@ -513,21 +513,17 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     const instructionsWarning = chatWorkspaceInstructionsWarning(activeChat.promptComposition)
     if (instructionsWarning) onToast(instructionsWarning)
 
+    let skills: CapturedChatSkill[]
     let context: Awaited<ReturnType<typeof buildContextValues>>
     try {
-      context = await buildContextValues({
-        bookId: activeChat.bookId,
-        type: 'chat',
-        currentSceneId: currentSceneId || undefined,
-        profile: activeChat.contextProfile,
-      })
+      ;({ context, skills } = await prepareChatSkillContext(activeChat, currentSceneId || undefined))
     } catch (error) {
       assertGenerationOwnerCurrent(owner, activeChat)
       throw new Error(error instanceof Error ? error.message : 'Chat context could not be prepared.')
     }
     assertGenerationOwnerCurrent(owner, activeChat)
 
-    const prepared = { settings, context }
+    const prepared = { settings, context, skills }
     const normalizedRequest = buildNormalizedRequest(activeChat, history, prepared)
     const finalizedRequest = finalizeChatProviderRequest(normalizedRequest)
     const diagnostics = generationContextDiagnostics(activeChat.model, activeChat.modelContextLength, activeChat.effectiveContextLimit, finalizedRequest.diagnosticText)
@@ -1150,7 +1146,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   const compositionTemplates = [compositionDraft.systemPrompt, ...compositionDraft.predefinedMessages.filter((message) => message.enabled).map((message) => message.template)]
   const compositionDiagnostics = compositionTemplates.flatMap((template) => promptTemplateDiagnostics(template, 'assistant', promptPreviewContext ? chatRequestValues(bookPromptValues, promptPreviewContext) : bookTemplateValues(bookPromptValues)))
   const draftNormalizedRequest = chat && promptPreviewContext
-    ? assembleChatGenerationRequest({ composition: compositionDraft, book: bookPromptValues, context: promptPreviewContext, history: messages, tools: CHAT_TOOL_DEFINITIONS })
+    ? assembleChatGenerationRequest({ composition: compositionDraft, book: bookPromptValues, context: promptPreviewContext, skills: promptPreviewSkills, history: messages, tools: CHAT_TOOL_DEFINITIONS })
     : null
   const previewRequest = promptOpen ? draftNormalizedRequest : lastNormalizedRequest
   const previewFinalizedRequest = previewRequest ? finalizeChatProviderRequest(previewRequest) : null
@@ -1193,6 +1189,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
         <summary><span>Generation settings</span><small>Model · context · system prompt</small><ChevronDown aria-hidden="true" /></summary>
         <div className="chat-config-row">
           <ChatModelPicker value={chat.model} models={sortedModels} onChange={(modelId) => { void changeModel(modelId) }} />
+          <ChatSkillsPicker key={chat.id} chat={chat} onChange={updated => applyIfCurrentChat(chat, () => setChat(updated))} />
           <label className="chat-round-limit"><span>Max model rounds per response</span><select aria-label="Max model rounds per response" value={normalizeChatRoundLimit(chat.maxModelRounds)} onChange={event => { const captured = chat; void updateChat(captured.id, { maxModelRounds: Number(event.target.value) }).then(updated => applyIfCurrentChat(captured, () => setChat(updated))).catch(error => onToast(error.message)) }}>{Array.from({ length: 32 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</select><small>One model request is one round, even with several tool calls. Changes apply to the next run.</small></label>
           <label className={`chat-context-limit ${contextLimitInputError(limitDraft) ? 'invalid' : ''}`}><span>Context cap</span><input value={limitDraft} onChange={(event) => setLimitDraft(event.target.value)} onBlur={() => { void saveEffectiveContextLimit() }} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} placeholder="Model max" inputMode="text" aria-label="Chat effective context cap" /><small>{contextLimitInputError(limitDraft) || 'Empty uses the model maximum. 32k / 1m supported.'}</small></label>
           <button className="chat-system-prompt-button" type="button" onClick={() => { setCompositionDraft(clonePromptComposition(chat.promptComposition)); setPromptOpen(true) }}><Bot aria-hidden="true" /><span>Request composition</span></button>

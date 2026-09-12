@@ -46,7 +46,7 @@ test('automatic Chat context order and stable identity deduplication are explici
   const previous = request.indexOf('section(`Previous scene')
   const codex = request.indexOf("section('Automatic Codex'")
   assert.ok(story >= 0 && current > story && previous > current && codex > previous)
-  assert.match(request, /dedupeDynamicSources\(automaticSources, input\.context\.additionalSources/)
+  assert.match(request, /dedupeDynamicSources\(automaticSources, \(input\.context\.additionalSources/)
   assert.match(request, /dynamicSourceDedupe: dedupe\.decisions/)
 })
 

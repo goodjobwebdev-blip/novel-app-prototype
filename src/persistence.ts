@@ -69,7 +69,7 @@ export type BookMetadata = {
 }
 export type BookEntity = ArcEntity & { type: 'book'; title: string } & Partial<Omit<BookMetadata, 'title'>>
 export type SeriesEntity = ArcEntity & { type: 'series'; title: string }
-export type NoteEntity = ArcEntity & { type: 'note'; bookId: string; parentId: string; title: string; content: string }
+export type NoteEntity = ArcEntity & { type: 'note'; bookId: string; parentId: string; title: string; content: string; useAsChatSkill?: boolean }
 export type CodexEntryEntity = ArcEntity & { type: 'codexEntry'; bookId: string; parentId: string; title: string; category: string; content: string; primaryImageId?: string; archivedAt?: number; preferSummaryForContext?: boolean; sourceRevision?: number; autoIncludeTriggers?: string[] }
 export type SummaryEntity = ArcEntity & {
   type: 'summary'

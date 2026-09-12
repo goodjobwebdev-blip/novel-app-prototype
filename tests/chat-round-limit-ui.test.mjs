@@ -195,3 +195,26 @@ test('brainstorm selection and saved edits cause no request; explicit submission
     assert.equal(document.querySelectorAll('.chat-brainstorm-options article').length, 2)
   } finally { await act(async () => root.unmount()) }
 })
+
+test('actual chat sends capture ordered skill content once across rounds and refresh it on the next send', async () => {
+  const f = await fixture(8)
+  const skills = await moduleAt('chat-skills')
+  const note = await skills.copyStarterChatSkill(f.book.id, 'copy')
+  await p.saveDocumentContent(note.id, 'Captured skill sentinel')
+  f.chat = await chatService.updateChat(f.chat.id, { skillNoteIds: [note.id], contextProfile: { ...f.chat.contextProfile, noteIds: [note.id] } })
+  api.configure('tools', async count => { if (count === 1) await p.saveDocumentContent(note.id, 'Next request sentinel'); if (count === 2) api.setMode('complete') })
+  const root = createRoot(document.getElementById('root'))
+  try {
+    await act(async () => root.render(view(f)))
+    await send()
+    await settle(() => api.calls.length === 2 && Boolean(button('Send')))
+    for (const request of api.calls) {
+      assert.equal(JSON.stringify(request.messages).split('Captured skill sentinel').length - 1, 1)
+      assert.doesNotMatch(JSON.stringify(request.messages), /Next request sentinel/)
+    }
+    await send()
+    await settle(() => api.calls.length === 3 && Boolean(button('Send')))
+    assert.match(JSON.stringify(api.calls[2].messages), /Next request sentinel/)
+    assert.doesNotMatch(JSON.stringify(api.calls[2].messages), /Captured skill sentinel/)
+  } finally { await act(async () => root.unmount()) }
+})
