@@ -1,3 +1,4 @@
+import { editProposalDraft, type EditableProposal, type EditableProposalField, type ProposalDraft } from './chat-proposal-draft'
 import type { ChatImageProposal, ImageJob } from './image-generation-types'
 import { loadAiSettings, type AiSettings } from './ai-settings'
 import { clonePromptComposition, normalizePromptComposition, type PromptComposition } from './prompt-composition'
@@ -35,7 +36,7 @@ export type ChatEntity = ArcEntity & {
 
 export type ChatMessageStatus = 'complete' | 'stopped' | 'failed'
 export type ChatCodexCreationStatus = 'proposed' | 'applying' | 'created' | 'rejected' | 'duplicate' | 'stale'
-export type ChatCodexCreationProposal = {
+export type ChatCodexCreationProposal = ProposalDraft & {
   id: string
   title: string
   category: string
@@ -46,7 +47,7 @@ export type ChatCodexCreationProposal = {
   appliedAt?: number
   entityId?: string
 }
-export type ChatEntityActionProposal = {
+export type ChatEntityActionProposal = ProposalDraft & {
   id: string
   action: 'create_note' | 'rename' | 'delete' | 'set_codex_category' | 'update_metadata' | 'update_dependency' | 'update_triggers' | 'regenerate_summary'
   entityId?: string
@@ -66,7 +67,7 @@ export type ChatEntityActionProposal = {
   createdAt: number
   appliedAt?: number
 }
-export type ChatOutlineActionProposal = {
+export type ChatOutlineActionProposal = ProposalDraft & {
   id: string
   action: 'create' | 'rename' | 'move' | 'delete'
   entityId?: string
@@ -87,7 +88,7 @@ export type ChatOutlineActionProposal = {
   appliedAt?: number
 }
 export type ChatTextReplacement = { oldText: string; newText: string }
-export type ChatDocumentEditProposal = {
+export type ChatDocumentEditProposal = ProposalDraft & {
   id: string
   entityId: string
   entityType: 'scene' | 'note' | 'codexEntry'
@@ -312,11 +313,26 @@ export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntit
 }
 
 export async function updateChatMessage(messageId: string, patch: Partial<Pick<ChatMessageEntity, 'content' | 'thoughts' | 'status' | 'responseId' | 'toolActivity' | 'roundNumber' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations'>>): Promise<ChatMessageEntity> {
-  const current = await getEntity<ArcEntity>(messageId)
-  if (!current || current.type !== 'chatMessage') throw new Error('Message is no longer available.')
-  const next = { ...current, ...patch, updatedAt: Date.now() } as ChatMessageEntity
-  await putEntity(next)
+  const snapshot = structuredClone(patch)
+  const next = await updateEntityAtomically<ChatMessageEntity>(messageId, current => {
+    if (current.type !== 'chatMessage') throw new Error('Message is no longer available.')
+    return { ...current, ...snapshot, updatedAt: Date.now() }
+  })
   await touchFromMessages(next.bookId, next.parentId)
+  return next
+}
+
+export async function saveChatProposalDraft(bookId: string, chatId: string, messageId: string, field: EditableProposalField, proposalId: string, values: Record<string, string>, expectedRevision: number) {
+  const snapshot = structuredClone(values)
+  const next = await updateEntityAtomically<ChatMessageEntity>(messageId, current => {
+    if (current.type !== 'chatMessage' || current.bookId !== bookId || current.parentId !== chatId) throw new Error('The original chat is no longer available.')
+    const proposals = current[field] as EditableProposal[] | undefined
+    const selected = proposals?.find(proposal => proposal.id === proposalId)
+    if (!selected) throw new Error('This proposal is no longer available.')
+    const edited = editProposalDraft(field, selected, snapshot, expectedRevision)
+    return { ...current, [field]: proposals!.map(proposal => proposal.id === proposalId ? edited : proposal), updatedAt: Date.now() }
+  })
+  notifyChatChange(bookId)
   return next
 }
 

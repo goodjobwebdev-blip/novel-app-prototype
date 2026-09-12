@@ -1,3 +1,5 @@
+import ProposalDraftEditor from './ProposalDraftEditor'
+import type { ReactNode } from 'react'
 import { groupChatAnswers, answerProse } from './chat-answer-groups'
 import Composer from './Composer'
 import { executeImageProposal } from './image-tools'
@@ -1088,10 +1090,10 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
 
   function renderWorkspaceCards(message: ChatMessageEntity) {
     return <div key={message.id}>
-              {message.documentEdits?.length ? <div className="chat-document-edits">{message.documentEdits.map((proposal) => <DocumentEditCard key={proposal.id} proposal={proposal} onApply={() => { void applyProposal(message, proposal) }} onReject={() => { void rejectProposal(message, proposal) }} />)}</div> : null}
-              {message.codexCreations?.length ? <div className="chat-document-edits">{message.codexCreations.map((proposal) => <CodexCreationCard key={proposal.id} proposal={proposal} onCreate={() => { void createCodexProposal(message, proposal) }} onReject={() => { void rejectCodexProposal(message, proposal) }} />)}</div> : null}
-              {message.outlineActions?.length ? <div className="chat-document-edits">{message.outlineActions.map((proposal) => <OutlineActionCard key={proposal.id} proposal={proposal} onApply={() => { void applyOutlineProposal(message, proposal) }} onReject={() => { void rejectOutlineProposal(message, proposal) }} />)}</div> : null}
-              {message.entityActions?.length ? <div className="chat-document-edits">{message.entityActions.map((proposal) => <EntityActionCard key={proposal.id} proposal={proposal} running={summaryProposalId === proposal.id} summaryBusy={Boolean(summaryProposalId)} onStop={() => summaryProposalOwnerRef.current?.controller.abort()} onApply={() => { void applyEntityProposal(message, proposal) }} onReject={() => { void rejectEntityProposal(message, proposal) }} />)}</div> : null}
+              {message.documentEdits?.length ? <div className="chat-document-edits">{message.documentEdits.map((proposal) => <DocumentEditCard key={proposal.id} editor={<ProposalDraftEditor message={message} field="documentEdits" proposal={proposal} onSaved={reloadMessages} />} proposal={proposal} onApply={() => { void applyProposal(message, proposal) }} onReject={() => { void rejectProposal(message, proposal) }} />)}</div> : null}
+              {message.codexCreations?.length ? <div className="chat-document-edits">{message.codexCreations.map((proposal) => <CodexCreationCard key={proposal.id} editor={<ProposalDraftEditor message={message} field="codexCreations" proposal={proposal} onSaved={reloadMessages} />} proposal={proposal} onCreate={() => { void createCodexProposal(message, proposal) }} onReject={() => { void rejectCodexProposal(message, proposal) }} />)}</div> : null}
+              {message.outlineActions?.length ? <div className="chat-document-edits">{message.outlineActions.map((proposal) => <OutlineActionCard key={proposal.id} editor={<ProposalDraftEditor message={message} field="outlineActions" proposal={proposal} onSaved={reloadMessages} />} proposal={proposal} onApply={() => { void applyOutlineProposal(message, proposal) }} onReject={() => { void rejectOutlineProposal(message, proposal) }} />)}</div> : null}
+              {message.entityActions?.length ? <div className="chat-document-edits">{message.entityActions.map((proposal) => <EntityActionCard key={proposal.id} editor={<ProposalDraftEditor message={message} field="entityActions" proposal={proposal} onSaved={reloadMessages} />} proposal={proposal} running={summaryProposalId === proposal.id} summaryBusy={Boolean(summaryProposalId)} onStop={() => summaryProposalOwnerRef.current?.controller.abort()} onApply={() => { void applyEntityProposal(message, proposal) }} onReject={() => { void rejectEntityProposal(message, proposal) }} />)}</div> : null}
     </div>
   }
 
@@ -1264,7 +1266,7 @@ function ChatModelPicker({ value, models, onChange }: { value: string; models: C
   </div>
 }
 
-function EntityActionCard({ proposal, onApply, onReject, running = false, summaryBusy = false, onStop }: { proposal: ChatEntityActionProposal; onApply: () => void; onReject: () => void; running?: boolean; summaryBusy?: boolean; onStop?: () => void }) {
+function EntityActionCard({ editor, proposal, onApply, onReject, running = false, summaryBusy = false, onStop }: { proposal: ChatEntityActionProposal; editor?: ReactNode; onApply: () => void; onReject: () => void; running?: boolean; summaryBusy?: boolean; onStop?: () => void }) {
   const actionLabels: Record<ChatEntityActionProposal['action'], string> = { create_note: 'Create', rename: 'Rename', delete: 'Delete', set_codex_category: 'Change category', update_metadata: 'Update metadata', update_dependency: 'Update dependency', update_triggers: 'Update triggers', regenerate_summary: 'Regenerate summary' }
   const actionLabel = actionLabels[proposal.action]
   const typeLabel = proposal.entityType === 'codexEntry' ? 'Codex' : proposal.entityType.charAt(0).toUpperCase() + proposal.entityType.slice(1)
@@ -1281,11 +1283,12 @@ function EntityActionCard({ proposal, onApply, onReject, running = false, summar
       {proposal.action === 'regenerate_summary' && <p>Uses the summary prompt and Support model currently selected in Book AI settings. The previous summary is saved in version history.</p>}
       {proposal.error && <p role="alert">{proposal.error}</p>}
     </div>
+    {editor}
     {running ? <footer><button type="button" onClick={onStop}>Stop</button></footer> : proposal.status === 'proposed' && <footer><button type="button" onClick={onReject}>Reject</button><button disabled={proposal.action === 'regenerate_summary' && summaryBusy} className={proposal.action === 'delete' ? 'danger' : 'primary'} type="button" onClick={onApply}>{actionLabel}</button></footer>}
   </section>
 }
 
-function OutlineActionCard({ proposal, onApply, onReject }: { proposal: ChatOutlineActionProposal; onApply: () => void; onReject: () => void }) {
+function OutlineActionCard({ editor, proposal, onApply, onReject }: { proposal: ChatOutlineActionProposal; editor?: ReactNode; onApply: () => void; onReject: () => void }) {
   const actionLabel = proposal.action === 'create' ? 'Create' : proposal.action === 'rename' ? 'Rename' : proposal.action === 'move' ? 'Move' : 'Delete'
   const statusLabel = proposal.status === 'proposed' ? 'Needs approval' : proposal.status === 'applying' ? 'Applying…' : proposal.status === 'applied' ? 'Applied' : proposal.status === 'stale' ? 'Outline changed' : 'Rejected'
   const typeLabel = proposal.entityType[0].toUpperCase() + proposal.entityType.slice(1)
@@ -1298,28 +1301,31 @@ function OutlineActionCard({ proposal, onApply, onReject }: { proposal: ChatOutl
       {proposal.action === 'move' && <p>Move to <strong>{proposal.targetParentTitle || 'target parent'}</strong>{proposal.beforeTitle ? <> before <strong>{proposal.beforeTitle}</strong></> : <> at the end</>}.</p>}
       {proposal.action === 'delete' && <p>Delete this item and its empty descendants. Non-empty Scene content blocks deletion.</p>}
     </div>
+    {editor}
     {proposal.status === 'proposed' && <footer><button type="button" onClick={onReject}>Reject</button><button className={proposal.action === 'delete' ? 'danger' : 'primary'} type="button" onClick={onApply}>{actionLabel}</button></footer>}
   </section>
 }
 
-function CodexCreationCard({ proposal, onCreate, onReject }: { proposal: ChatCodexCreationProposal; onCreate: () => void; onReject: () => void }) {
+function CodexCreationCard({ editor, proposal, onCreate, onReject }: { proposal: ChatCodexCreationProposal; editor?: ReactNode; onCreate: () => void; onReject: () => void }) {
   const statusLabel = proposal.status === 'proposed' ? 'Ready to create' : proposal.status === 'applying' ? 'Creating…' : proposal.status === 'created' ? 'Created' : proposal.status === 'duplicate' ? 'Already exists' : proposal.status === 'stale' ? 'Historical' : 'Rejected'
   return <section className={`chat-document-edit chat-codex-creation ${proposal.status}`}>
     <header><div><small>New Codex · {proposal.category}</small><strong>{proposal.title}</strong></div><span>{statusLabel}</span></header>
     {proposal.summary && <p>{proposal.summary}</p>}
     <details><summary>View entry</summary><div className="chat-document-diff"><pre className="new">{proposal.content || '[empty entry]'}</pre></div></details>
+    {editor}
     {proposal.status === 'proposed' && <footer><button type="button" onClick={onReject}>Reject</button><button className="primary" type="button" onClick={onCreate}>Create</button></footer>}
   </section>
 }
 
-function DocumentEditCard({ proposal, onApply, onReject }: { proposal: ChatDocumentEditProposal; onApply: () => void; onReject: () => void }) {
+function DocumentEditCard({ editor, proposal, onApply, onReject }: { proposal: ChatDocumentEditProposal; editor?: ReactNode; onApply: () => void; onReject: () => void }) {
   const statusLabel = proposal.status === 'proposed' ? 'Ready to apply' : proposal.status === 'applying' ? 'Applying…' : proposal.status === 'applied' ? 'Applied' : proposal.status === 'stale' ? 'Document changed' : 'Rejected'
   return <section className={`chat-document-edit ${proposal.status}`}>
-    <header><div><small>${proposal.entityType === 'codexEntry' ? 'Codex' : proposal.entityType === 'scene' ? 'Scene' : 'Note'}</small><strong>{proposal.entityTitle}</strong></div><span>{statusLabel}</span></header>
+    <header><div><small>{proposal.entityType === 'codexEntry' ? 'Codex' : proposal.entityType === 'scene' ? 'Scene' : 'Note'}</small><strong>{proposal.entityTitle}</strong></div><span>{statusLabel}</span></header>
     {proposal.summary && <p>{proposal.summary}</p>}
     <details><summary>View changes</summary><div className="chat-document-diff">
       {proposal.mode === 'replace_document' ? <><small>Whole document replacement</small><pre className="new">{proposal.newContent}</pre></> : proposal.edits?.map((edit, index) => <section key={index}><small>Change {index + 1}</small><pre className="old">{edit.oldText}</pre><pre className="new">{edit.newText || '[delete]'}</pre></section>)}
     </div></details>
+    {editor}
     {proposal.status === 'proposed' && <footer><button type="button" onClick={onReject}>Reject</button><button className="primary" type="button" onClick={onApply}>Apply</button></footer>}
   </section>
 }

@@ -182,3 +182,14 @@
 .chat-markdown pre, .chat-markdown .markdown-table-scroll { box-sizing: border-box; width: 100%; }
 .chat-answer-tools button { min-height: 40px; background: transparent; border: 0; color: var(--soft); }
 .chat-follow-output { background: var(--canvas); color: var(--ink); }
+
+.chat-proposal-draft { padding: .65rem .8rem; }
+.chat-proposal-draft p { font-size: .8rem; color: var(--soft); }
+.chat-proposal-draft-columns { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 1rem; }
+.chat-proposal-draft-columns > div { min-width: 0; }
+.chat-proposal-draft label { display: grid; gap: .35rem; margin-bottom: .6rem; }
+.chat-proposal-draft pre { max-height: 20rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; }
+.chat-proposal-draft :is(input,select) { width: 100%; background: var(--canvas); border: 1px solid var(--line); color: var(--ink); padding: .5rem; border-radius: .4rem; }
+.chat-proposal-draft button { min-height: 38px; padding: .45rem .65rem; color: var(--ink); background: var(--glass); border: 1px solid var(--line); border-radius: .5rem; }
+.chat-proposal-draft footer { display: flex; flex-wrap: wrap; gap: .45rem; margin-top: .6rem; }
+@media (max-width: 720px) { .chat-proposal-draft-columns { grid-template-columns: minmax(0,1fr); } }
