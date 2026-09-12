@@ -1,3 +1,4 @@
+import { groupChatAnswers, answerProse } from './chat-answer-groups'
 import Composer from './Composer'
 import { executeImageProposal } from './image-tools'
 import ImageProposalCard from './ImageProposalCard'
@@ -138,7 +139,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   const [elapsed, setElapsed] = useState(0)
   const [streamedContent, setStreamedContent] = useState('')
   const [streamedThoughts, setStreamedThoughts] = useState('')
-  const [liveThoughtsOpen, setLiveThoughtsOpen] = useState(true)
+  const [liveThoughtsOpen, setLiveThoughtsOpen] = useState(false)
   const [openThoughtMessageIds, setOpenThoughtMessageIds] = useState<Set<string>>(new Set())
   const [followOutput, setFollowOutput] = useState(true)
   const [sttState, setSttState] = useState<SttState>(() => getSttState())
@@ -177,7 +178,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     setPhase(null)
     setStreamedContent('')
     setStreamedThoughts('')
-    setLiveThoughtsOpen(true)
+    setLiveThoughtsOpen(false)
     setOpenThoughtMessageIds(new Set())
     followOutputRef.current = true
     setFollowOutput(true)
@@ -235,7 +236,6 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   }, [generating])
 
   useEffect(() => {
-    if (!generating) return
     const updateFollowState = () => {
       const root = document.documentElement
       const distanceFromBottom = root.scrollHeight - (window.scrollY + window.innerHeight)
@@ -247,7 +247,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     window.addEventListener('scroll', updateFollowState, { passive: true })
     updateFollowState()
     return () => window.removeEventListener('scroll', updateFollowState)
-  }, [generating])
+  }, [chatId])
 
   useEffect(() => {
     if (!followOutputRef.current) return
@@ -438,7 +438,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     setPhase('sending')
     setStreamedContent('')
     setStreamedThoughts('')
-    setLiveThoughtsOpen(true)
+    setLiveThoughtsOpen(false)
     followOutputRef.current = true
     setFollowOutput(true)
   }
@@ -557,6 +557,9 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     let activeRoundExtras: Pick<ChatMessageEntity, 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations'> = {}
     let activeRoundPersisted = false
     let activeRoundStartedAt = Date.now()
+    const responseId = crypto.randomUUID()
+    let roundNumber = 0
+    let toolActivity: string[] = []
 
     async function ensureSourceHistoryStillCurrent() {
       const durableHistory = await listChatMessages(sourceBookId, activeChat.id)
@@ -573,11 +576,11 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       status: ChatMessageStatus = 'complete',
     ) {
       const hasWorkspaceProposal = Boolean(extras.imageGenerations?.length || extras.documentEdits?.length || extras.codexCreations?.length || extras.outlineActions?.length || extras.entityActions?.length)
-      if (roundContent || roundThoughts || hasWorkspaceProposal) await ensureSourceHistoryStillCurrent()
-      if (!roundContent && !roundThoughts && !hasWorkspaceProposal) return null
+      await ensureSourceHistoryStillCurrent()
+      if (!roundContent && !roundThoughts && !hasWorkspaceProposal && !toolActivity.length && status === 'complete') return null
       return createChatMessage(activeChat, 'assistant', roundContent, {
         thoughts: roundThoughts || undefined,
-        status,
+        status, responseId, roundNumber, toolActivity,
         imageGenerations: extras.imageGenerations,
         documentEdits: extras.documentEdits,
         codexCreations: extras.codexCreations,
@@ -623,7 +626,15 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     }
 
     async function persistInterruptedRound(status: Exclude<ChatMessageStatus, 'complete'>) {
-      if (activeRoundPersisted) return
+      if (activeRoundPersisted) {
+        const persisted = await listChatMessages(sourceBookId, activeChat.id)
+        const last = persisted.filter(message => message.responseId === responseId).at(-1)
+        if (last) {
+          const saved = await updateChatMessage(last.id, { status })
+          if (generationOwnsCurrentUi(owner)) setMessages(current => current.map(message => message.id === saved.id ? saved : message))
+        }
+        return
+      }
       const existing = await findAlreadyPersistedRound()
       if (existing) {
         activeRoundPersisted = true
@@ -652,6 +663,8 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
         const roundDiagnostics = generationContextDiagnostics(activeChat.model, activeChat.modelContextLength, activeChat.effectiveContextLimit, finalizedRequest.diagnosticText)
         if (!roundDiagnostics.limitValid) throw new Error(roundDiagnostics.limitError ?? 'The Chat context cap is invalid.')
         if (!roundDiagnostics.fits) throw new Error(`Chat context exceeded its usable budget after workspace tool results (~${roundDiagnostics.requestTokens.toLocaleString()} / ${roundDiagnostics.usableInputTokens.toLocaleString()} input tokens). Reduce context or raise the cap; Arc will not remove older turns automatically.`)
+        roundNumber = round + 1
+        toolActivity = []
         activeRoundContent = ''
         activeRoundThoughts = ''
         activeRoundExtras = {}
@@ -695,6 +708,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           const roundEntityActions: ChatEntityActionProposal[] = []
           for (const call of result.toolCalls) {
             controller.signal.throwIfAborted()
+            toolActivity.push(call.function.name)
             if (call.function.name === 'propose_image_generation') {
               const execution = executeImageProposal(call)
               if (execution.imageGeneration) activeRoundExtras.imageGenerations = [...(activeRoundExtras.imageGenerations ?? []), execution.imageGeneration]
@@ -762,7 +776,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       }
     } finally {
       const stopped = controller.signal.aborted
-      if (!historyInvalidated && !activeRoundPersisted && (stopped || unexpectedFailure)) {
+      if (!historyInvalidated && (stopped || unexpectedFailure)) {
         try {
           await persistInterruptedRound(stopped ? 'stopped' : 'failed')
         } catch {
@@ -1056,6 +1070,31 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     }
   }
 
+  function renderRound(message: ChatMessageEntity) {
+    return <article className={`message ${message.role === 'user' ? 'user' : 'assistant'}`} key={message.id}>
+          {message.role === 'assistant' ? <div className="chat-message-stack">
+            {editingId === message.id ? <InlineMessageEdit value={editingValue} onChange={setEditingValue} onCancel={() => setEditingId('')} onSave={() => { void saveEdit(message, false) }} /> : <>
+              {message.thoughts && <details className="chat-thoughts" open={openThoughtMessageIds.has(message.id)} onToggle={(event) => setPersistedThoughtsOpen(message.id, event.currentTarget.open)}><summary>Thoughts</summary><div>{message.thoughts}</div></details>}
+              <div className="chat-assistant-body">{message.content ? <MarkdownMessage content={message.content} /> : null}</div>
+              {message.status && message.status !== 'complete' && <small className="chat-message-status">{message.status === 'failed' ? 'Interrupted' : 'Stopped'}</small>}
+              <div className="message-tools"><button type="button" onClick={() => { void copyMessage(message) }}>{copiedMessageId === message.id ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />} {copiedMessageId === message.id ? 'Copied' : 'Copy'}</button><button type="button" disabled={generating || Boolean(summaryProposalId)} title={summaryProposalId ? 'Stop summary generation before changing history' : generating ? 'Stop the current response before editing history' : undefined} onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" onClick={() => { void fork(message) }}><GitFork aria-hidden="true" /> Fork</button><button type="button" onClick={() => { void readAloud(message) }}><Volume2 aria-hidden="true" /> Read aloud</button><button type="button" disabled={generating || Boolean(summaryProposalId)} onClick={() => { void regenerate(message) }}><RefreshCw aria-hidden="true" /> Regenerate</button><button type="button" disabled={generating || Boolean(summaryProposalId)} title={summaryProposalId ? 'Stop summary generation before changing history' : generating ? 'Stop the current response before deleting history' : undefined} onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
+            </>}
+          </div> : editingId === message.id ? <InlineMessageEdit value={editingValue} onChange={setEditingValue} onCancel={() => setEditingId('')} onSave={() => { void saveEdit(message, false) }} onSaveAndRegenerate={() => { void saveEdit(message, true) }} /> : <>
+            <div className="bubble chat-markdown-bubble"><MarkdownMessage content={message.content} /></div>
+            <div className="message-tools"><button type="button" onClick={() => { void copyMessage(message) }}>{copiedMessageId === message.id ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />} {copiedMessageId === message.id ? 'Copied' : 'Copy'}</button><button type="button" disabled={generating || Boolean(summaryProposalId)} title={summaryProposalId ? 'Stop summary generation before changing history' : generating ? 'Stop the current response before editing history' : undefined} onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" disabled={generating || Boolean(summaryProposalId)} title={summaryProposalId ? 'Stop summary generation before changing history' : generating ? 'Stop the current response before deleting history' : undefined} onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
+          </>}
+        </article>
+  }
+
+  function renderWorkspaceCards(message: ChatMessageEntity) {
+    return <div key={message.id}>
+              {message.documentEdits?.length ? <div className="chat-document-edits">{message.documentEdits.map((proposal) => <DocumentEditCard key={proposal.id} proposal={proposal} onApply={() => { void applyProposal(message, proposal) }} onReject={() => { void rejectProposal(message, proposal) }} />)}</div> : null}
+              {message.codexCreations?.length ? <div className="chat-document-edits">{message.codexCreations.map((proposal) => <CodexCreationCard key={proposal.id} proposal={proposal} onCreate={() => { void createCodexProposal(message, proposal) }} onReject={() => { void rejectCodexProposal(message, proposal) }} />)}</div> : null}
+              {message.outlineActions?.length ? <div className="chat-document-edits">{message.outlineActions.map((proposal) => <OutlineActionCard key={proposal.id} proposal={proposal} onApply={() => { void applyOutlineProposal(message, proposal) }} onReject={() => { void rejectOutlineProposal(message, proposal) }} />)}</div> : null}
+              {message.entityActions?.length ? <div className="chat-document-edits">{message.entityActions.map((proposal) => <EntityActionCard key={proposal.id} proposal={proposal} running={summaryProposalId === proposal.id} summaryBusy={Boolean(summaryProposalId)} onStop={() => summaryProposalOwnerRef.current?.controller.abort()} onApply={() => { void applyEntityProposal(message, proposal) }} onReject={() => { void rejectEntityProposal(message, proposal) }} />)}</div> : null}
+    </div>
+  }
+
   const compositionTemplates = [compositionDraft.systemPrompt, ...compositionDraft.predefinedMessages.filter((message) => message.enabled).map((message) => message.template)]
   const compositionDiagnostics = compositionTemplates.flatMap((template) => promptTemplateDiagnostics(template, 'assistant', promptPreviewContext ? chatRequestValues(bookPromptValues, promptPreviewContext) : bookTemplateValues(bookPromptValues)))
   const draftNormalizedRequest = chat && promptPreviewContext
@@ -1076,24 +1115,15 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       <header><small>Book chat</small><h1>{chat.title}</h1></header>
       <div className="messages">
         {!messages.length && !generating && <div className="chat-first-message"><Feather aria-hidden="true" /><strong>Start this conversation</strong><p>The model, prompt, and context are saved independently for this chat.</p></div>}
-        {messages.map((message) => <article className={`message ${message.role === 'user' ? 'user' : 'assistant'}`} key={message.id}>
-          {message.role === 'assistant' ? <div className="chat-message-stack">
-            {editingId === message.id ? <InlineMessageEdit value={editingValue} onChange={setEditingValue} onCancel={() => setEditingId('')} onSave={() => { void saveEdit(message, false) }} /> : <>
-              {message.thoughts && <details className="chat-thoughts" open={openThoughtMessageIds.has(message.id)} onToggle={(event) => setPersistedThoughtsOpen(message.id, event.currentTarget.open)}><summary>Thoughts</summary><div>{message.thoughts}</div></details>}
-              <div className="chat-assistant-body">{message.content ? <MarkdownMessage content={message.content} /> : (message.imageGenerations?.length || message.documentEdits?.length || message.codexCreations?.length || message.outlineActions?.length || message.entityActions?.length ? <em>Workspace proposal</em> : <em>No final answer returned.</em>)}</div>
-              {message.imageGenerations?.map((proposal) => <ImageProposalCard key={proposal.id} message={message} proposal={proposal} />)}
-              {message.documentEdits?.length ? <div className="chat-document-edits">{message.documentEdits.map((proposal) => <DocumentEditCard key={proposal.id} proposal={proposal} onApply={() => { void applyProposal(message, proposal) }} onReject={() => { void rejectProposal(message, proposal) }} />)}</div> : null}
-              {message.codexCreations?.length ? <div className="chat-document-edits">{message.codexCreations.map((proposal) => <CodexCreationCard key={proposal.id} proposal={proposal} onCreate={() => { void createCodexProposal(message, proposal) }} onReject={() => { void rejectCodexProposal(message, proposal) }} />)}</div> : null}
-              {message.outlineActions?.length ? <div className="chat-document-edits">{message.outlineActions.map((proposal) => <OutlineActionCard key={proposal.id} proposal={proposal} onApply={() => { void applyOutlineProposal(message, proposal) }} onReject={() => { void rejectOutlineProposal(message, proposal) }} />)}</div> : null}
-              {message.entityActions?.length ? <div className="chat-document-edits">{message.entityActions.map((proposal) => <EntityActionCard key={proposal.id} proposal={proposal} running={summaryProposalId === proposal.id} summaryBusy={Boolean(summaryProposalId)} onStop={() => summaryProposalOwnerRef.current?.controller.abort()} onApply={() => { void applyEntityProposal(message, proposal) }} onReject={() => { void rejectEntityProposal(message, proposal) }} />)}</div> : null}
-              {message.status && message.status !== 'complete' && <small className="chat-message-status">{message.status === 'failed' ? 'Interrupted' : 'Stopped'}</small>}
-              <div className="message-tools"><button type="button" onClick={() => { void copyMessage(message) }}>{copiedMessageId === message.id ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />} {copiedMessageId === message.id ? 'Copied' : 'Copy'}</button><button type="button" disabled={generating || Boolean(summaryProposalId)} title={summaryProposalId ? 'Stop summary generation before changing history' : generating ? 'Stop the current response before editing history' : undefined} onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" onClick={() => { void fork(message) }}><GitFork aria-hidden="true" /> Fork</button><button type="button" onClick={() => { void readAloud(message) }}><Volume2 aria-hidden="true" /> Read aloud</button><button type="button" disabled={generating || Boolean(summaryProposalId)} onClick={() => { void regenerate(message) }}><RefreshCw aria-hidden="true" /> Regenerate</button><button type="button" disabled={generating || Boolean(summaryProposalId)} title={summaryProposalId ? 'Stop summary generation before changing history' : generating ? 'Stop the current response before deleting history' : undefined} onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
-            </>}
-          </div> : editingId === message.id ? <InlineMessageEdit value={editingValue} onChange={setEditingValue} onCancel={() => setEditingId('')} onSave={() => { void saveEdit(message, false) }} onSaveAndRegenerate={() => { void saveEdit(message, true) }} /> : <>
-            <div className="bubble chat-markdown-bubble"><MarkdownMessage content={message.content} /></div>
-            <div className="message-tools"><button type="button" onClick={() => { void copyMessage(message) }}>{copiedMessageId === message.id ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />} {copiedMessageId === message.id ? 'Copied' : 'Copy'}</button><button type="button" disabled={generating || Boolean(summaryProposalId)} title={summaryProposalId ? 'Stop summary generation before changing history' : generating ? 'Stop the current response before editing history' : undefined} onClick={() => beginEdit(message)}><Pencil aria-hidden="true" /> Edit</button><button type="button" disabled={generating || Boolean(summaryProposalId)} title={summaryProposalId ? 'Stop summary generation before changing history' : generating ? 'Stop the current response before deleting history' : undefined} onClick={() => { void deleteFrom(message) }}><Trash2 aria-hidden="true" /> Delete</button></div>
-          </>}
-        </article>)}
+        {groupChatAnswers(messages).map(group => group.role === 'user' ? renderRound(group.messages[0]) : <section className="chat-answer-group" key={group.id} aria-label="Assistant answer">
+          {renderRound(group.messages.at(-1)!)}
+          {(group.messages.length > 1 || group.messages.some(message => message.toolActivity?.length)) && <details className="chat-answer-activity"><summary>Activity · {group.messages.length} {group.messages.length === 1 ? 'round' : 'rounds'}</summary>
+            {group.messages.map((message, index) => <div className="chat-activity-round" key={message.id}><small>Round {message.roundNumber ?? index + 1}{message.toolActivity?.length ? ` · ${message.toolActivity.join(' · ')}` : ''}</small>{index < group.messages.length - 1 && renderRound(message)}</div>)}
+          </details>}
+          {group.messages.map(renderWorkspaceCards)}
+          {group.messages.flatMap(message => (message.imageGenerations ?? []).map(proposal => <ImageProposalCard key={proposal.id} message={message} proposal={proposal} />))}
+          {group.messages.length > 1 && <div className="message-tools chat-answer-tools"><button type="button" onClick={() => { void copyMessage({ ...group.messages.at(-1)!, content: answerProse(group.messages) }) }}>Copy full answer</button><button type="button" onClick={() => { void readAloud({ ...group.messages.at(-1)!, content: answerProse(group.messages) }) }}>Read full answer aloud</button></div>}
+        </section>)}
         {generating && <article className="message assistant streaming"><div className="chat-message-stack chat-live-generation">
           <div className="chat-live-status"><i /><span>{generationPhaseLabel(phase)} · {formatElapsed(elapsed)}</span></div>
           {streamedThoughts && <details className="chat-thoughts" open={liveThoughtsOpen} onToggle={(event) => setLiveThoughtsOpen(event.currentTarget.open)}><summary>Thoughts</summary><div>{streamedThoughts}</div></details>}
@@ -1103,7 +1133,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       </div>
     </section>
 
-    {generating && !followOutput && <button className="chat-follow-output" type="button" onClick={jumpToLatest}>↓ New content</button>}
+    {!followOutput && <button className="chat-follow-output" type="button" onClick={jumpToLatest}>↓ New content</button>}
 
     <Composer strip={<details className="chat-config-strip">
         <summary><span>Generation settings</span><small>Model · context · system prompt</small><ChevronDown aria-hidden="true" /></summary>
