@@ -1,6 +1,7 @@
 import { thinkingRequestParameters, type ThinkingEffort } from './thinking-effort'
 import type { AiProvider } from './ai-settings'
 import { streamFakeProvider } from './fake-provider'
+import { consumeCompletionStream, fetchCompletionResponse, readCompletionError } from './completion-stream'
 
 export type ChatToolCall = {
   id: string
@@ -175,7 +176,7 @@ export async function streamChatCompletion(
   }
   Object.assign(body, thinkingRequestParameters(request.provider, request.thinking, request.thinkingEffort))
 
-  const response = await fetch(completionEndpoint(request.baseUrl), {
+  const response = await fetchCompletionResponse(completionEndpoint(request.baseUrl), {
     method: 'POST',
     headers: {
       Accept: 'text/event-stream',
@@ -183,19 +184,13 @@ export async function streamChatCompletion(
       Authorization: `Bearer ${request.apiKey.trim()}`,
     },
     body: JSON.stringify(body),
-    signal,
-  })
+  }, signal)
 
   if (!response.ok) {
-    const payload = await response.json().catch(() => null)
+    const payload = await readCompletionError(response, signal)
     throw new Error(errorMessage(response.status, payload, request.apiKey))
   }
   if (!response.body) throw new Error('The provider returned an empty streaming response.')
-  onResponse?.()
-
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
   let received = false
   let finishReason: string | undefined
   let usage: ChatCompletionUsage = {}
@@ -236,23 +231,7 @@ export async function streamChatCompletion(
     return false
   }
 
-  let done = false
-  while (!done) {
-    const read = await reader.read()
-    buffer += decoder.decode(read.value, { stream: !read.done })
-    const lines = buffer.split(/\r?\n/)
-    buffer = lines.pop() ?? ''
-    for (const line of lines) {
-      if (consumeLine(line)) {
-        done = true
-        break
-      }
-    }
-    if (read.done) {
-      if (buffer) consumeLine(buffer)
-      break
-    }
-  }
+  await consumeCompletionStream(response.body, signal, consumeLine, onResponse)
 
   if (!received) throw new Error('The provider completed without returning a response.')
   const toolCalls = [...accumulated.entries()]
