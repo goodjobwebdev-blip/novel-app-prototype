@@ -1,0 +1,27 @@
+/* Shared action colors follow the palette, including custom accents. */
+.generation-actions .play.generation-primary,
+.summary-generate,
+.image-ui .image-primary-action,
+.image-modal button.image-primary {
+  background: var(--accent);
+  color: var(--on-accent, #000);
+  border-color: var(--accent);
+}
+:is(.generation-actions .play.generation-primary, .summary-generate, .image-ui .image-primary-action, .image-modal button.image-primary):hover:not(:disabled),
+:is(.generation-actions .play.generation-primary, .summary-generate, .image-ui .image-primary-action, .image-modal button.image-primary):active:not(:disabled) {
+  background: var(--accent-bright);
+  color: var(--on-accent-bright, #000);
+}
+:is(.generation-primary, .summary-generate, .image-primary-action):focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+:is(.generation-primary, .summary-generate, .image-primary-action):disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+.generation-stop-circle, .play.generating {
+  background: var(--danger) !important;
+  color: var(--on-danger, #000) !important;
+  border-color: var(--danger);
+}
