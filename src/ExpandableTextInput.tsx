@@ -18,6 +18,7 @@ export type ExpandableTextInputDictationTarget = {
   selectionEnd: number
   isValid: () => boolean
   setValue: (value: string) => boolean
+  reportError: (message: string) => void
   focus: (cursor: number) => void
 }
 
@@ -26,6 +27,7 @@ type ExpandableTextInputProps = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>
   onChange: (value: string) => void
   dialogTitle?: string
   onDictate?: (target: ExpandableTextInputDictationTarget) => Promise<boolean>
+  dictationError?: string
   dictationStatus?: SttStatus
   dictationDisabled?: boolean
   onStopDictation?: () => void
@@ -43,6 +45,7 @@ const ExpandableTextInput = forwardRef<HTMLTextAreaElement, ExpandableTextInputP
   dialogTitle = 'Edit prompt',
   onDictate,
   dictationStatus = 'idle',
+  dictationError,
   dictationDisabled = false,
   onStopDictation,
   onCancelDictation,
@@ -52,6 +55,8 @@ const ExpandableTextInput = forwardRef<HTMLTextAreaElement, ExpandableTextInputP
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState(value)
   const [expandedDictation, setExpandedDictation] = useState(false)
+  const [error, setError] = useState('')
+  const attemptedDictationRef = useRef(false)
   const compactRef = useRef<HTMLTextAreaElement | null>(null)
   const expandedRef = useRef<HTMLTextAreaElement | null>(null)
   const dialogRef = useRef<HTMLElement | null>(null)
@@ -100,7 +105,8 @@ const ExpandableTextInput = forwardRef<HTMLTextAreaElement, ExpandableTextInputP
 
   useEffect(() => {
     if (expandedDictation && ['cancelled', 'failed', 'completed'].includes(dictationStatus)) setExpandedDictationOwned(false)
-  }, [dictationStatus, expandedDictation])
+    if (openRef.current && attemptedDictationRef.current && dictationStatus === 'failed' && dictationError) setError(dictationError)
+  }, [dictationStatus, dictationError, expandedDictation])
 
   useEffect(() => () => {
     if (expandedDictationRef.current) onCancelDictationRef.current?.()
@@ -117,19 +123,22 @@ const ExpandableTextInput = forwardRef<HTMLTextAreaElement, ExpandableTextInputP
 
   function openDialog() {
     setDraft(value)
+    setError('')
+    attemptedDictationRef.current = false
     openRef.current = true
     setOpen(true)
   }
 
   function closeDialog() {
-    if (expandedDictationRef.current) onCancelDictation?.()
     openRef.current = false
+    if (expandedDictationRef.current) onCancelDictation?.()
     setExpandedDictationOwned(false)
     setOpen(false)
     returnFocus()
   }
 
   function applyDraft() {
+    if (expandedDictationRef.current) return
     onChange(draft)
     openRef.current = false
     setOpen(false)
@@ -139,6 +148,8 @@ const ExpandableTextInput = forwardRef<HTMLTextAreaElement, ExpandableTextInputP
   async function startExpandedDictation() {
     const element = expandedRef.current
     if (!element || !onDictate || dictationDisabled) return
+    setError('')
+    attemptedDictationRef.current = true
     const target: ExpandableTextInputDictationTarget = {
       element,
       value: draft,
@@ -150,6 +161,7 @@ const ExpandableTextInput = forwardRef<HTMLTextAreaElement, ExpandableTextInputP
         setDraft(nextValue)
         return true
       },
+      reportError: (message) => { if (openRef.current) setError(message) },
       focus: (cursor) => {
         requestAnimationFrame(() => {
           if (!openRef.current || expandedRef.current !== element) return
@@ -159,7 +171,12 @@ const ExpandableTextInput = forwardRef<HTMLTextAreaElement, ExpandableTextInputP
       },
     }
     setExpandedDictationOwned(true)
-    if (!await onDictate(target)) setExpandedDictationOwned(false)
+    try {
+      if (!await onDictate(target)) setExpandedDictationOwned(false)
+    } catch (cause) {
+      target.reportError(cause instanceof Error ? cause.message : 'Could not start dictation.')
+      setExpandedDictationOwned(false)
+    }
   }
 
   function stopExpandedDictation() {
@@ -211,6 +228,7 @@ const ExpandableTextInput = forwardRef<HTMLTextAreaElement, ExpandableTextInputP
             </button>
           </header>
           <textarea ref={expandedRef} value={draft} onChange={(event) => setDraft(event.target.value)} aria-label={`Expanded ${ariaLabel}`} readOnly={textareaProps.readOnly || expandedDictation} disabled={textareaProps.disabled} spellCheck={textareaProps.spellCheck} />
+          {error && <p className="expandable-dictation-error" role="alert">{error}</p>}
           <footer>
             {onDictate && (expandedDictation ? <div className="expandable-dictation-status" role="status" aria-live="polite">
               <span><Mic aria-hidden="true" />{dictationLabel()}</span>

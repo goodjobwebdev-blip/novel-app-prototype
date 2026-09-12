@@ -39,6 +39,7 @@ test('Cancel works while microphone permission is pending and late permission ca
   try {
     const pending = startSttSession(speech, {
       kind: 'chat',
+      presentation: 'expanded',
       label: 'Dictate message',
       isValid: () => true,
       onFinal: () => { finalized += 1 },
@@ -47,10 +48,12 @@ test('Cancel works while microphone permission is pending and late permission ca
     await new Promise((resolve) => setTimeout(resolve, 0))
     assert.equal(permissionRequested, true)
     assert.equal(getSttState().status, 'requesting-permission')
+    assert.equal(getSttState().presentation, 'expanded')
 
     cancelSttSession()
     assert.equal(getSttState().status, 'cancelled')
     assert.equal(cancelled, 1)
+    assert.equal(getSttState().presentation, 'expanded')
 
     resolvePermission({ getTracks: () => [{ stop: () => { stoppedTracks += 1 } }] })
     await pending

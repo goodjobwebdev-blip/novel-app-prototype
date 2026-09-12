@@ -387,6 +387,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       if (!targetIsValid()) return false
       await startSttSession(settings.speech, {
         kind: 'chat',
+        presentation: target ? 'expanded' : undefined,
         label: 'Dictate message',
         isValid: targetIsValid,
         onProvisional: (transcript) => {
@@ -403,7 +404,9 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       return true
     } catch (error) {
       setTargetValue(base)
-      onToast(error instanceof Error ? error.message : 'Could not start message dictation.')
+      const message = error instanceof Error ? error.message : 'Could not start message dictation.'
+      if (target) target.reportError(message)
+      else onToast(message)
       return false
     }
   }
@@ -1117,7 +1120,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
             event.preventDefault()
             void send()
           }
-        }} placeholder="Ask about the book…" aria-label="Chat message" dialogTitle="Write chat message" onDictate={dictateMessage} dictationStatus={sttState.target === 'chat' ? sttState.status : 'idle'} dictationDisabled={generating} onStopDictation={stopSttSession} onCancelDictation={cancelSttSession} />
+        }} placeholder="Ask about the book…" aria-label="Chat message" dialogTitle="Write chat message" onDictate={dictateMessage} dictationStatus={sttState.target === 'chat' ? sttState.status : 'idle'} dictationError={sttState.target === 'chat' ? sttState.error : undefined} dictationDisabled={generating} onStopDictation={stopSttSession} onCancelDictation={cancelSttSession} />
         <ChatGenerateButton sttState={sttState} generating={generating} phase={phase} elapsed={elapsed} thinking={chat.thinking} onGenerate={() => { void send() }} onStop={stop} onMicro={() => { void dictateMessage() }} onThinking={setThinking} />
       </div>
     </section>
@@ -1316,7 +1319,7 @@ function ChatGenerateButton({ sttState, generating, phase, elapsed, thinking, on
 }) {
   if (generating) return <div className="chat-generation-running"><span><i />{generationPhaseLabel(phase)} · {formatElapsed(elapsed)}</span><button className="play generating" type="button" onClick={onStop} aria-label="Stop chat generation"><Square aria-hidden="true" fill="currentColor" /></button></div>
 
-  if (sttState.target === 'chat' && ['requesting-permission', 'recording', 'recording-live', 'stopping', 'transcribing', 'finalizing'].includes(sttState.status)) {
+  if (sttState.presentation !== 'expanded' && sttState.target === 'chat' && ['requesting-permission', 'recording', 'recording-live', 'stopping', 'transcribing', 'finalizing'].includes(sttState.status)) {
     const recording = sttState.status === 'recording' || sttState.status === 'recording-live'
     return <div className="chat-dictation-controls" role="status" aria-live="polite">
       <span><Mic aria-hidden="true" />{recording ? 'Listening…' : sttState.status === 'requesting-permission' ? 'Connecting…' : 'Transcribing…'}</span>

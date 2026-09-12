@@ -911,3 +911,15 @@
 .arc-drawer .generation-primary > span { display: none; }
 .arc-drawer > .arc-generation-header button.generation-activity-strip.drawer { gap: 6px; letter-spacing: .01em; }
 .generation-activity-strip { letter-spacing: .01em; }
+
+/* Circular speech actions retain optical centering at every control size. */
+.expandable-dictation-status button, .tts-status-actions button,
+.generate-mode-actions button, .chat-dictation-controls button {
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.expandable-dictation-status button svg, .tts-status-actions button svg,
+.generate-mode-actions button svg, .chat-dictation-controls button svg {
+  display: block; flex: 0 0 auto; margin: 0;
+}
+.tts-status-actions .lucide-play { transform: translateX(1px); }
+.expandable-dictation-error { color: var(--danger, #d66); margin: 0; padding: 8px 16px; }

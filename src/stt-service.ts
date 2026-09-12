@@ -20,6 +20,7 @@ export type SttState = {
   status: SttStatus
   label: string
   target: SttTargetKind | null
+  presentation?: 'expanded'
   provider?: SttProvider
   model?: string
   live: boolean
@@ -29,6 +30,7 @@ export type SttState = {
 
 export type SttTarget = {
   kind: SttTargetKind
+  presentation?: 'expanded'
   label: string
   isValid: () => boolean
   onProvisional?: (text: string) => void
@@ -281,6 +283,7 @@ function sessionState(session: ActiveSession, status: SttStatus, patch: Partial<
     status,
     label: session.target.label,
     target: session.target.kind,
+    presentation: session.target.presentation,
     provider: session.model.provider,
     model: session.model.modelId,
     live: session.model.supportsLive && session.settings.streamTranscription,
@@ -494,7 +497,7 @@ export async function startSttSession(settings: SpeechSettings, target: SttTarge
   }
   const session: ActiveSession = { id, controller, target, settings, model: fallbackModel, chunks: [] }
   active = session
-  emit({ status: 'requesting-permission', label: target.label, target: target.kind, provider: fallbackModel.provider, model: fallbackModel.modelId, live: settings.streamTranscription && fallbackModel.supportsLive, startedAt: Date.now() })
+  emit({ status: 'requesting-permission', label: target.label, target: target.kind, presentation: target.presentation, provider: fallbackModel.provider, model: fallbackModel.modelId, live: settings.streamTranscription && fallbackModel.supportsLive, startedAt: Date.now() })
 
   let catalog: SttModel[] = []
   try {
@@ -577,6 +580,6 @@ export function cancelSttSession() {
   try { if (session.recorder?.state === 'recording') session.recorder.stop() } catch { /* noop */ }
   session.target.onCancel?.()
   cleanupSession(session)
-  emit({ status: 'cancelled', label: session.target.label, target: session.target.kind, provider: session.model.provider, model: session.model.modelId, live: session.model.supportsLive && session.settings.streamTranscription })
+  emit({ status: 'cancelled', label: session.target.label, target: session.target.kind, presentation: session.target.presentation, provider: session.model.provider, model: session.model.modelId, live: session.model.supportsLive && session.settings.streamTranscription })
 }
 
