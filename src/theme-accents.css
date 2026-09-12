@@ -3,14 +3,14 @@
 .summary-generate,
 .image-ui .image-primary-action,
 .image-modal button.image-primary {
-  background: var(--accent);
-  color: var(--on-accent, #000);
-  border-color: var(--accent);
+  background: var(--accent) !important;
+  color: var(--on-accent, #000) !important;
+  border-color: var(--accent) !important;
 }
 :is(.generation-actions .play.generation-primary, .summary-generate, .image-ui .image-primary-action, .image-modal button.image-primary):hover:not(:disabled),
 :is(.generation-actions .play.generation-primary, .summary-generate, .image-ui .image-primary-action, .image-modal button.image-primary):active:not(:disabled) {
-  background: var(--accent-bright);
-  color: var(--on-accent-bright, #000);
+  background: var(--accent-bright) !important;
+  color: var(--on-accent-bright, #000) !important;
 }
 :is(.generation-primary, .summary-generate, .image-primary-action):focus-visible {
   outline: 2px solid var(--ink);
