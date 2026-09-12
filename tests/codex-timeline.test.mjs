@@ -1,0 +1,111 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { registerHooks } from 'node:module'
+import { existsSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import 'fake-indexeddb/auto'
+const storage = new Map()
+globalThis.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)), removeItem: key => storage.delete(key) }
+registerHooks({ resolve(specifier, context, nextResolve) { if (specifier.startsWith('.') && context.parentURL?.startsWith('file:')) { const url = new URL(specifier + '.ts', context.parentURL); if (existsSync(fileURLToPath(url))) return nextResolve(url.href, context) } return nextResolve(specifier, context) } })
+const p = await import('../src/persistence.ts'), service = await import('../src/codex-timeline-service.ts'), timeline = await import('../src/codex-timeline.ts')
+const seriesService = await import('../src/series-codex-service.ts')
+const { initialAiSettings } = await import('../src/ai-settings.ts')
+const { metadataValues } = await import('../src/chat-management-schema.ts')
+const { copyBookArchive, encodeBookArchive, decodeBookArchive } = await import('../src/book-archive.ts')
+const { buildContextValues } = await import('../src/context-service.ts')
+const { codexContextRepresentation } = await import('../src/summary-service.ts')
+const { searchBookEntities } = await import('../src/chat-search.ts')
+async function fixture() {
+  const { book } = await p.createBook(initialAiSettings, 'Timeline')
+  const chapter = await p.createStructuralEntity('chapter', book.id, book.id, 'Chapter')
+  const scenes = []; for (let i = 0; i < 4; i++) scenes.push(await p.createStructuralEntity('scene', book.id, chapter.id, 'Checkpoint scene '+i))
+  const entry = await p.createCodexEntry(book.id, 'Traveler')
+  await p.saveDocumentContent(entry.id, 'Baseline alive. <!-- Private secret -->')
+  const points = [1, 3].map((i, j) => ({ id: 'checkpoint-'+crypto.randomUUID(), label: j ? 'Future secret label' : 'First change', sceneId: scenes[i].id, anchorBookId: book.id, content: j ? 'FUTURE_SECRET' : 'Traveler has arrived.', revision: Date.now() }))
+  await service.saveCodexCheckpoints(book.id, entry.id, [], points)
+  return { book, chapter, scenes, entry: await p.getEntity(entry.id), points }
+}
+test('baseline and latest eligible states follow scene IDs, including reordering and deleted anchors', async () => {
+  const f = await fixture()
+  const at = async i => service.resolveEntryAt(f.entry.id, { bookId: f.book.id, sceneId: f.scenes[i].id })
+  assert.match((await at(0)).content, /Baseline alive/); assert.doesNotMatch((await at(0)).content, /Private secret/)
+  assert.equal((await at(1)).content, 'Traveler has arrived.'); assert.equal((await at(2)).content, 'Traveler has arrived.'); assert.equal((await at(3)).content, 'FUTURE_SECRET')
+  await (await p.database()).table('entities').update(f.scenes[3].id, { order: -1 })
+  assert.equal((await at(0)).content, 'FUTURE_SECRET')
+  await p.deleteEntityTree(f.scenes[3].id)
+  assert.match((await at(0)).content, /Baseline alive/)
+  const kept = await p.getEntity(f.entry.id)
+  assert.equal(kept.checkpoints.length, 2)
+  assert.equal(timeline.checkpointPlaced(kept.checkpoints[1], await service.readTimelineWorld(f.book.id)), false)
+})
+test('resolved requests, summaries and search snippets never concatenate future states', async () => {
+  const f = await fixture(), db = await p.database()
+  const summary = await p.getOrCreateSummary(f.entry)
+  await p.saveSummaryContent(summary.id, 'FUTURE_SECRET from an unversioned summary', Number.MAX_SAFE_INTEGER)
+  await db.table('entities').update(f.entry.id, { preferSummaryForContext: true })
+  const profile = { ...p.defaultBookContextSettings.profiles.scene, codexEntryIds: [f.entry.id] }
+  const prepared = await buildContextValues({ bookId: f.book.id, type: 'scene', currentSceneId: f.scenes[2].id, profile })
+  assert.match(JSON.stringify(prepared), /Traveler has arrived/)
+  assert.doesNotMatch(JSON.stringify(prepared), /FUTURE_SECRET|Future secret label|Private secret/)
+  const entities = timeline.resolveTimelineEntities(await p.listEntitiesByBook(f.book.id), { bookId: f.book.id, sceneId: f.scenes[2].id }, await service.readTimelineWorld(f.book.id))
+  assert.equal(searchBookEntities(entities, { query: 'FUTURE_SECRET', types: ['codexEntry'] }).total, 0)
+  const entry = entities.find(item => item.id === f.entry.id)
+  assert.equal(entry.checkpoints, undefined); assert.equal(entry.timelineSummaries, undefined)
+  assert.equal(codexContextRepresentation(entry, entities).content, 'Traveler has arrived.')
+  await service.saveCodexCheckpoints(f.book.id, f.entry.id, f.entry.checkpoints, f.entry.checkpoints.map(point => ({ ...point, content: 'Changed later by author' })))
+  assert.match(JSON.stringify(prepared), /Traveler has arrived/)
+})
+test('state summary reuse requires the exact body, story order, and cutoff mode', async () => {
+  const f = await fixture(), world = await service.readTimelineWorld(f.book.id), cutoff = { bookId: f.book.id, sceneId: f.scenes[2].id }
+  const state = timeline.resolveCodexState(f.entry, cutoff, world)
+  const entry = { ...f.entry, timelineSummaries: [{ checkpointId: state.checkpointId, sourceText: state.content, orderSignature: state.orderSignature, mode: 'cutoff', content: 'Safe summary' }] }
+  assert.equal(timeline.resolveCodexState(entry, cutoff, world).summary, 'Safe summary')
+  assert.equal(timeline.resolveCodexState(entry, cutoff, world, 'strict').summary, undefined)
+  const reordered = { ...world, outline: world.outline.map(e => e.id === f.scenes[0].id ? { ...e, order: 100 } : e) }
+  assert.equal(timeline.resolveCodexState(entry, cutoff, reordered).summary, undefined)
+  entry.checkpoints = entry.checkpoints.map(point => point.id === state.checkpointId ? { ...point, content: 'Changed' } : point)
+  assert.equal(timeline.resolveCodexState(entry, cutoff, world).summary, undefined)
+})
+test('series timelines require explicit order; overrides retain independent checkpoint copies', async () => {
+  const f = await fixture(), { book: second } = await p.createBook(initialAiSettings, 'Second'), series = await p.createSeries('Timeline series')
+  await p.updateBookMetadata(f.book.id, { ...metadataValues(f.book), seriesId: series.id })
+  await p.updateBookMetadata(second.id, { ...metadataValues(second), seriesId: series.id })
+  const chapter = await p.createStructuralEntity('chapter', second.id, second.id), scene = await p.createStructuralEntity('scene', second.id, chapter.id)
+  const source = await seriesService.promoteCodexToSeries(f.book.id, f.entry.id)
+  let proxy = (await p.listEntitiesByBook(second.id, 'codexEntry')).find(e => e.seriesSourceId === source.id)
+  await assert.rejects(() => service.resolveEntryAt(proxy.id, { bookId: second.id, sceneId: scene.id }), /distinct numeric series order/)
+  for (const [book, order] of [[f.book, '1'], [second, '2']]) await p.updateBookMetadata(book.id, { ...metadataValues(book), seriesId: series.id, seriesOrder: order })
+  assert.equal((await service.resolveEntryAt(proxy.id, { bookId: second.id, sceneId: scene.id })).content, 'FUTURE_SECRET')
+  await seriesService.editCodexForBook(second.id, proxy.id)
+  proxy = await p.getEntity(proxy.id)
+  await service.saveCodexCheckpoints(second.id, proxy.id, proxy.checkpoints, proxy.checkpoints.map(point => ({ ...point, content: 'Local state' })))
+  assert.equal((await p.getEntity(source.id)).checkpoints[1].content, 'FUTURE_SECRET')
+  assert.equal((await service.resolveEntryAt(proxy.id, { bookId: second.id, sceneId: scene.id })).content, 'Local state')
+})
+test('backup/import remaps local checkpoint anchors and preserves unresolved snapshots', async () => {
+  const f = await fixture()
+  await p.deleteEntityTree(f.scenes[3].id)
+  const decoded = await decodeBookArchive(await encodeBookArchive(await p.readBookArchive(f.book.id)))
+  const copy = copyBookArchive(decoded), imported = copy.data.entities.find(e => e.type === 'codexEntry')
+  const firstScene = copy.data.entities.find(e => e.type === 'scene' && e.title === f.scenes[1].title)
+  assert.notEqual(imported.checkpoints[0].id, f.points[0].id)
+  assert.equal(imported.checkpoints[0].anchorBookId, copy.bookId); assert.equal(imported.checkpoints[0].sceneId, firstScene.id)
+  assert.equal(imported.checkpoints[1].sceneId, 'missing-scene'); assert.equal(imported.checkpoints[1].content, 'FUTURE_SECRET')
+  await p.writeBookArchive(copy.data)
+  assert.equal((await service.resolveEntryAt(imported.id, { bookId: copy.bookId, sceneId: firstScene.id })).content, 'Traveler has arrived.')
+})
+
+test('author-chat cutoff intercepts Codex reads, searches, summaries and baseline edit attempts', async () => {
+  const { executeCodexCutoffRead } = await import('../src/chat-codex-cutoff.ts')
+  const f = await fixture(), world = await service.readTimelineWorld(f.book.id)
+  const entries = timeline.resolveTimelineEntities(await p.listEntitiesByBook(f.book.id, 'codexEntry'), { bookId: f.book.id, sceneId: f.scenes[2].id }, world)
+  const call = (name, args) => ({ id: name, type: 'function', function: { name, arguments: JSON.stringify(args) } })
+  const read = await executeCodexCutoffRead(f.book.id, call('read_entity', { entity_id: f.entry.id }), entries)
+  assert.match(read, /Traveler has arrived/); assert.doesNotMatch(read, /FUTURE_SECRET|Baseline alive/)
+  const summary = await executeCodexCutoffRead(f.book.id, call('read_summary', { entity_id: f.entry.id }), entries)
+  assert.equal(JSON.parse(summary).state, 'missing')
+  const results = await executeCodexCutoffRead(f.book.id, call('search_entities', { query: 'FUTURE_SECRET', types: ['codexEntry'] }), entries)
+  assert.equal(JSON.parse(results).total, 0)
+  const edit = await executeCodexCutoffRead(f.book.id, call('propose_document_edit', { entity_id: f.entry.id }), entries)
+  assert.equal(JSON.parse(edit).ok, false)
+})

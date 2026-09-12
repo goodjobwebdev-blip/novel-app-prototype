@@ -1,3 +1,4 @@
+import { executeCodexCutoffRead } from './chat-codex-cutoff'
 import type { LoreType } from './lore-types'
 import ChatSkillsPicker from './ChatSkillsPicker'
 import { prepareChatSkillContext, type CapturedChatSkill } from './chat-skills'
@@ -735,7 +736,10 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           for (const call of result.toolCalls) {
             controller.signal.throwIfAborted()
             toolActivity.push(call.function.name)
-            if (call.function.name === 'present_brainstorm') {
+            const cutoffRead = await executeCodexCutoffRead(sourceBookId, call, prepared.context.temporalCodex)
+            if (cutoffRead !== undefined) {
+              runtimeParts.push(normalizeRuntimeMessagePart({ id: `chat-tool-${responseId}-${call.id}`, sourceKind: 'app-managed', ownership: 'app-managed', name: call.function.name, message: { role: 'tool', tool_call_id: call.id, content: cutoffRead } }))
+            } else if (call.function.name === 'present_brainstorm') {
               const execution = executeBrainstormTool(call)
               if (execution.brainstorm) activeRoundExtras.brainstorms = [...(activeRoundExtras.brainstorms ?? []), execution.brainstorm]
               runtimeParts.push(normalizeRuntimeMessagePart({ id: `chat-tool-${responseId}-${call.id}`, sourceKind: 'app-managed', ownership: 'app-managed', name: call.function.name, message: { role: 'tool', tool_call_id: call.id, content: execution.content } }))

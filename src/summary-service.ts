@@ -158,6 +158,7 @@ export async function buildSummarySource(sourceId: string): Promise<SummarySourc
 }
 
 export function codexContextRepresentation(entry: CodexEntryEntity, entities: ArcEntity[]): CodexContextRepresentation {
+  if (entry.timelineResolved) return { entryId: entry.id, title: entry.title, representation: entry.preferSummaryForContext && typeof entry.timelineSummary === 'string' ? 'Summary' : 'Full entry', content: entry.preferSummaryForContext && typeof entry.timelineSummary === 'string' ? entry.timelineSummary : proseText(entry.content).trim() || '_No description provided._' }
   const summaries = summariesBySource(entities)
   const summary = summaries.get(entry.id)
   const state = stateFor(entry, summary, entities, summaries)

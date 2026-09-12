@@ -15,7 +15,7 @@ export function detachedCodex(entry: CodexEntryEntity): CodexEntryEntity {
 export function installSeriesCodexHooks(db: Dexie) {
   db.table('entities').hook('updating', (changes, _id, current: ArcEntity, transaction) => {
     if (syncing.has(transaction) || current.type !== 'codexEntry') return
-    const fields = ['title', 'content', 'category', 'autoIncludeTriggers', 'primaryImageId', 'archivedAt', 'preferSummaryForContext']
+    const fields = ['checkpoints', 'title', 'content', 'category', 'autoIncludeTriggers', 'primaryImageId', 'archivedAt', 'preferSummaryForContext']
     if (!fields.some(field => Object.keys(changes).some(key => key === field || key.startsWith(field + '.')))) return
     if (current.codexScope === 'inherited' && !('codexScope' in changes)) return { codexScope: 'override' }
     if (current.codexScope === 'series') { const revision = Math.max(Date.now(), Number(current.sourceRevision ?? 0) + 1, current.updatedAt + 1); return { sourceRevision: revision, updatedAt: revision } }
@@ -28,8 +28,9 @@ export async function seriesTransaction<T>(db: Dexie, action: () => Promise<T>):
   })
 }
 export async function copyCodexMedia(db: Dexie, source: CodexEntryEntity, targetId: string, bookId: string) {
-  let content = source.content
-  for (const item of documentBlocks(source.content).reverse()) {
+  async function copyBody(body: string) {
+  let content = body
+  for (const item of documentBlocks(body).reverse()) {
     if (!item.block.assetId) continue
     const asset = await db.table('galleryImages').get(item.block.assetId) as GalleryImage | undefined
     if (!asset || (asset.bookId && asset.bookId !== source.bookId)) throw new Error(`The image in “${source.title}” is missing. Restore it before sharing this entry.`)
@@ -37,6 +38,10 @@ export async function copyCodexMedia(db: Dexie, source: CodexEntryEntity, target
     await db.table('galleryImages').put({ ...asset, id, bookId, kept: true, sourceIds: [] })
     content = content.slice(0, item.from) + encodeDocumentBlock({ ...item.block, assetId: id }) + content.slice(item.to)
   }
+  return content
+  }
+  const content = await copyBody(source.content)
+  const checkpoints = source.checkpoints ? await Promise.all(source.checkpoints.map(async point => ({ ...point, content: await copyBody(point.content) }))) : undefined
   const illustration = await db.table('illustrations').where('entryId').equals(source.id).first() as Illustration | undefined
   await db.table('illustrations').where('entryId').equals(targetId).delete()
   let primaryImageId: string | undefined
@@ -44,7 +49,7 @@ export async function copyCodexMedia(db: Dexie, source: CodexEntryEntity, target
     primaryImageId = `series-image-${targetId}-${illustration.id}`
     await db.table('illustrations').put({ ...illustration, id: primaryImageId, entryId: targetId, bookId })
   }
-  return { content, primaryImageId }
+  return { content, primaryImageId, ...(checkpoints ? { checkpoints } : {}) }
 }
 async function removeProxy(db: Dexie, entry: CodexEntryEntity) {
   await db.table('entities').delete(entry.id)

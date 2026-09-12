@@ -10,7 +10,7 @@ const MAGIC = 'ARCBK001'
 const MAX_MANIFEST = 64 * 1024 * 1024
 const MAX_ARCHIVE = 2_000_000_000
 const TYPES = new Set(['book', 'series', 'act', 'chapter', 'scene', 'note', 'codexEntry', 'summary', 'chat', 'chatMessage', 'settings'])
-const REF_KEYS = new Set(['typeId', 'ownerId', 'bookId', 'entryId', 'parentId', 'seriesId', 'sourceEntityId', 'entityId', 'sourceId', 'targetId', 'primaryImageId', 'assetId', 'messageId', 'chatId', 'lastOpenedSceneId', 'sourceParentId', 'targetParentId', 'beforeId'])
+const REF_KEYS = new Set(['sceneId', 'anchorBookId', 'typeId', 'ownerId', 'bookId', 'entryId', 'parentId', 'seriesId', 'sourceEntityId', 'entityId', 'sourceId', 'targetId', 'primaryImageId', 'assetId', 'messageId', 'chatId', 'lastOpenedSceneId', 'sourceParentId', 'targetParentId', 'beforeId'])
 const REF_ARRAYS = new Set(['compatibleLoreTypeIds', 'skillNoteIds', 'structuralIds', 'noteIds', 'codexEntryIds', 'sourceIds'])
 
 type StoredGalleryImage = Omit<GalleryImage, 'image' | 'thumbnail'> & { imageSize: number; imageType: string; thumbnailSize: number; thumbnailType: string }
@@ -73,7 +73,7 @@ export async function decodeBookArchive(file: Blob): Promise<BookArchiveData> {
     if (entity.type === 'book') continue
     if (['act', 'chapter', 'scene', 'note', 'codexEntry', 'summary', 'chat'].includes(entity.type)) valid(typeof entity.title === 'string')
     if (['note', 'codexEntry', 'summary', 'chatMessage'].includes(entity.type)) valid(typeof entity.content === 'string')
-    if (entity.type === 'codexEntry') valid(typeof entity.category === 'string')
+    if (entity.type === 'codexEntry') { valid(typeof entity.category === 'string'); if (entity.checkpoints !== undefined) { valid(Array.isArray(entity.checkpoints) && entity.checkpoints.length <= 500); const seen = new Set(); for (const point of entity.checkpoints) { valid(point && typeof point.id === 'string' && !seen.has(point.id) && typeof point.label === 'string' && typeof point.anchorBookId === 'string' && typeof point.sceneId === 'string' && typeof point.content === 'string' && Number.isFinite(point.revision)); seen.add(point.id) } } }
     if (entity.type === 'settings') valid(['ai', 'context-book'].includes(String(entity.settingsType)) && entity.value && typeof entity.value === 'object')
     valid(entity.bookId === book.id && typeof entity.parentId === 'string' && byId.has(entity.parentId))
     const visited = new Set([entity.id])
@@ -171,6 +171,7 @@ export function copyBookArchive(data: BookArchiveData, newId = () => crypto.rand
   for (const asset of data.galleryImages ?? []) ids.set(asset.id, `generated-${newId()}`)
   for (const job of data.imageJobs ?? []) ids.set(job.id, `image-job-${newId()}`)
   for (const image of data.illustrations) ids.set(image.id, `image-${newId()}`)
+  for (const entity of data.entities) if (Array.isArray(entity.checkpoints)) for (const point of entity.checkpoints) { if (!ids.has(point.id)) ids.set(point.id, `checkpoint-${newId()}`); for (const item of documentBlocks(point.content ?? '')) if (!ids.has(item.block.id)) ids.set(item.block.id, `block-${newId()}`) }
   for (const row of [...data.entities, ...data.snapshots]) for (const item of documentBlocks(row.content ?? '')) if (!ids.has(item.block.id)) ids.set(item.block.id, `block-${newId()}`)
   const remap = (value: any, key = '', depth = 0): any => {
     if (depth > 80) throw new Error('This backup contains excessively nested data.')
@@ -187,6 +188,7 @@ export function copyBookArchive(data: BookArchiveData, newId = () => crypto.rand
   }
   const entities = data.entities.map((entity) => {
     const copy = remap(entity) as ArcEntity
+    if (copy.type === 'codexEntry') { delete copy.timelineSummaries; if (Array.isArray(copy.checkpoints)) copy.checkpoints = copy.checkpoints.map(point => ({ ...point, sceneId: point.sceneId || 'missing-scene', anchorBookId: point.anchorBookId || 'missing-book' })) }
     if (copy.type === 'chatMessage') { delete copy.continuation; delete copy.continuedAt }
     // Old chat proposals cannot safely apply to a newly imported book.
     if (copy.type === 'chatMessage') for (const key of ['documentEdits', 'codexCreations', 'outlineActions', 'entityActions', 'imageGenerations']) {
