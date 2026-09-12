@@ -30,6 +30,7 @@ export type CustomUiTheme = {
 
 export type UiSettings = {
   sceneBeats?: boolean
+  saveArcAsBeat?: boolean
   editor: UiTypography
   inputs: UiTypography
   activeThemeId: string
@@ -151,6 +152,7 @@ export const builtInThemes: BuiltInTheme[] = [
 
 export const defaultUiSettings: UiSettings = {
   sceneBeats: true,
+  saveArcAsBeat: true,
   editor: { fontFamily: 'Literata', fontSize: 19, lineHeight: 1.78, fontWeight: 400 },
   inputs: { fontFamily: 'Inter', fontSize: 15, lineHeight: 1.55, fontWeight: 400 },
   activeThemeId: 'very-dark',
@@ -232,6 +234,7 @@ export function loadUiSettings(): UiSettings {
       : defaultUiSettings.activeThemeId
     return {
       sceneBeats: stored.sceneBeats !== false,
+      saveArcAsBeat: stored.saveArcAsBeat ?? (stored.sceneBeats !== false),
       editor: sanitizeTypography(stored.editor, defaultUiSettings.editor),
       inputs: sanitizeTypography(stored.inputs, defaultUiSettings.inputs),
       activeThemeId,
@@ -245,6 +248,7 @@ export function loadUiSettings(): UiSettings {
 export function saveUiSettings(settings: UiSettings) {
   const next: UiSettings = {
     sceneBeats: settings.sceneBeats !== false,
+    saveArcAsBeat: settings.saveArcAsBeat !== false,
     editor: sanitizeTypography(settings.editor, defaultUiSettings.editor),
     inputs: sanitizeTypography(settings.inputs, defaultUiSettings.inputs),
     activeThemeId: settings.activeThemeId,
@@ -267,6 +271,7 @@ export function applyUiSettings(settings: UiSettings) {
   root.style.setProperty('--canvas', palette.background)
   root.style.setProperty('--deep', palette.background)
   root.style.setProperty('--surface', palette.elevated)
+  root.style.setProperty('--panel', palette.elevated)
   root.style.setProperty('--surface-2', palette.editor)
   root.style.setProperty('--editor-surface', palette.editor)
   root.style.setProperty('--ink', palette.text)

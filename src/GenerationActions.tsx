@@ -11,8 +11,9 @@ type Action = {
 }
 
 /** Shared by Chat, the floating editor control, and the instruction drawer. */
-export default function GenerationActions({ label, onGenerate, actions }: {
+export default function GenerationActions({ label, onGenerate, actions, menuOnly = false }: {
   label: string
+  menuOnly?: boolean
   onGenerate: () => void
   actions: Action[]
 }) {
@@ -96,6 +97,7 @@ export default function GenerationActions({ label, onGenerate, actions }: {
       }}
       onClick={() => {
         if (heldRef.current) { heldRef.current = false; return }
+        if (menuOnly) { focusFirstAction(); return }
         close()
         onGenerate()
       }}><Play aria-hidden="true" fill="currentColor" /><span>{label}</span></button>

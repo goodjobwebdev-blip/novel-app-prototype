@@ -10,8 +10,8 @@ import { prepareIllustration, checkStorageHeadroom } from './illustration-image'
 import type { GalleryImage } from './image-generation-types'
 
 export type BlockEditRequest = { documentId: string; item: LocatedBlock; snapshot: EditorSelectionSnapshot }
-export default function EditorBlocks({ bookId, editor, disabled, editRequest, showBeats = false, onEditRequestHandled }: {
-  onEditRequestHandled?: () => void; showBeats?: boolean; bookId: string; editor: RefObject<MarkdownEditorHandle | null>; disabled: boolean; editRequest: BlockEditRequest | null
+export default function EditorBlocks({ bookId, editor, disabled, editRequest, insertImage = false, onInsertHandled, onEditRequestHandled }: {
+  onEditRequestHandled?: () => void; insertImage?: boolean; onInsertHandled?: () => void; bookId: string; editor: RefObject<MarkdownEditorHandle | null>; disabled: boolean; editRequest: BlockEditRequest | null
 }) {
   const [draft, setDraft] = useState<{ block: DocumentBlock; snapshot: EditorSelectionSnapshot; existing: boolean } | null>(null)
   const [images, setImages] = useState<GalleryImage[]>([])
@@ -39,6 +39,7 @@ export default function EditorBlocks({ bookId, editor, disabled, editRequest, sh
     const at = { ...snapshot, to: snapshot.from, text: '' }
     setDraft({ block: { id: imageId('block'), type, text: '', alt: '', caption: '' }, snapshot: at, existing: false }); setError('')
   }
+  useEffect(() => { if (insertImage && !disabled) { start('image'); onInsertHandled?.() } }, [insertImage, disabled])
   const apply = (remove = false) => {
     if (!draft) return
     if (remove && draft.block.type === 'beat') {
@@ -54,7 +55,7 @@ export default function EditorBlocks({ bookId, editor, disabled, editRequest, sh
     setDraft(null)
   }
   return <>
-    <div className="editor-block-toolbar"><button type="button" disabled={disabled} onClick={() => start('image')}>Insert image</button><button type="button" disabled={disabled} onClick={() => start('comment')}>Private comment</button>{showBeats && <button type="button" disabled={disabled} onClick={() => start('beat')}>Scene beat</button>}{error && !draft && <span role="alert">{error}</span>}</div>
+    {error && !draft && <p role="alert">{error}</p>}
     {draft && createPortal(<div className="editor-block-backdrop"><section ref={dialog} role="dialog" aria-modal="true" aria-labelledby="editor-block-title" className="editor-block-dialog" onKeyDown={(event) => { if (event.key === 'Escape' && !busy) setDraft(null); if (event.key === 'Tab') { const controls = Array.from(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)') ?? []); const first = controls[0], last = controls.at(-1); if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() } } }}>
       <header><h2 id="editor-block-title">{draft.existing ? 'Edit' : 'Insert'} {draft.block.type === 'image' ? 'image' : draft.block.type === 'beat' ? 'scene beat' : 'private comment'}</h2><button type="button" disabled={busy} onClick={() => setDraft(null)} aria-label="Close block editor">×</button></header>
       <p>{draft.block.type === 'beat' ? 'Planning visible to Chat. Used as the instruction when generating this beat, and excluded from manuscript context and read aloud.' : 'This block stays in your book and backups. It is excluded from AI requests and read aloud.'}</p>
