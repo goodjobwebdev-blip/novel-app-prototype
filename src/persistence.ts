@@ -1,3 +1,4 @@
+import { sceneWritingValues, validateSceneWritingPatch, type SceneWritingOverrides, type SceneWritingField } from './scene-writing'
 import type { GalleryImage, ImageJob } from './image-generation-types'
 import { metadataValues, validateMetadataPatch, type ChatManagementOperation } from './chat-management-schema'
 import {
@@ -52,7 +53,7 @@ export type DocumentSnapshot = {
 
 export type StructuralEntityType = 'act' | 'chapter' | 'scene'
 export type SummarySourceType = StructuralEntityType | 'codexEntry'
-export type StructuralEntity = ArcEntity & { type: StructuralEntityType; bookId: string; parentId: string; order: number; title: string }
+export type StructuralEntity = ArcEntity & SceneWritingOverrides & { type: StructuralEntityType; bookId: string; parentId: string; order: number; title: string }
 export type BookMetadata = {
   title: string
   seriesId: string
@@ -1082,6 +1083,17 @@ export async function applyChatManagementChange(bookId: string, entityId: string
         if (series?.type !== 'series') throw new Error('The selected Series no longer exists.')
       } else if (patch.seriesOrder) throw new Error('A standalone Book cannot have a Series order.')
       await db.table('entities').update(entityId, { ...patch, ...(!seriesId ? { seriesOrder: '' } : {}), updatedAt: now })
+      return
+    }
+    if (operation.kind === 'scene_metadata') {
+      if (entity.type !== 'scene' || entity.bookId !== bookId) throw new Error('This Scene is not available in this Book.')
+      const patch = validateSceneWritingPatch(operation.patch)
+      const current = sceneWritingValues(entity)
+      for (const key of Object.keys(patch) as SceneWritingField[]) {
+        if (current[key] !== operation.before[key]) throw new Error(`Scene ${key} changed. Reopen settings and try again.`)
+      }
+      await db.table('entities').update(entityId, { ...patch, updatedAt: now })
+      await touchAncestors(db, bookId, now)
       return
     }
     if (entity.type !== 'codexEntry' || entity.bookId !== bookId || isCodexEntryArchived(entity)) throw new Error('The Codex entry is unavailable or archived.')

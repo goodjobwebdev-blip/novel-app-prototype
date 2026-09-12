@@ -1,3 +1,4 @@
+import { sceneWritingFields, sceneWritingLabels, sceneWritingValues, validateSceneWritingPatch, resolveSceneWriting } from './scene-writing'
 import type { ChatToolCall, ChatToolDefinition } from './chat-api'
 import { transitionChatMessageProposal, type ChatEntityActionProposal, type ChatMessageEntity } from './chat-service'
 import { applyChatManagementChange, getEntity, isCodexEntryArchived, listCodexDependencies, listEntitiesByBook, listSeries, type ArcEntity, type BookEntity, type CodexEntryEntity, type SummaryEntity } from './persistence'
@@ -23,6 +24,8 @@ export const entitySearchProperties = {
 export const chatManagementTools: ChatToolDefinition[] = [
   tool('read_book_metadata', 'Read all current Book metadata and available Series IDs/titles before proposing metadata changes.', {}),
   tool('propose_book_metadata_update', 'Propose changes to any Book metadata fields. Only supplied fields change; empty strings clear optional fields. seriesId must identify an existing Series, or be empty for standalone. Requires approval.', { changes: { type: 'object', properties: Object.fromEntries(bookMetadataFields.map((field) => [field, string])), additionalProperties: false }, summary: string }, ['changes']),
+  tool('read_scene_settings', 'Read explicit scene writing overrides and effective settings with their origin.', entityId, ['entity_id']),
+  tool('propose_scene_settings_update', 'Propose scene POV, tense, writingStyle or language overrides. Empty strings restore live inheritance from the Book. Requires approval.', { ...entityId, changes: { type: 'object', properties: Object.fromEntries(sceneWritingFields.map((field) => [field, string])), additionalProperties: false }, summary: string }, ['entity_id', 'changes']),
   tool('list_entities', 'List Scenes, Chapters, Acts, Notes and Codex entries without a search term. Results are paginated; use next_offset until null.', entitySearchProperties),
   tool('read_codex_settings', 'Read a Codex entry’s automatic inclusion triggers, outgoing dependencies, and incoming Needed by links. Edges are directional: including the source can include its dependency target.', entityId, ['entity_id']),
   tool('propose_codex_dependency', 'Propose creating, updating or removing a directional Codex dependency. Read settings first. source entity_id depends on target_id; include_with_source controls automatic inclusion of the target. Requires approval.', { ...entityId, target_id: string, action: { type: 'string', enum: ['create', 'update', 'remove'] }, relation_label: string, include_with_source: { type: 'boolean' }, summary: string }, ['entity_id', 'target_id', 'action']),
@@ -68,6 +71,14 @@ export async function executeChatManagementTool(bookId: string, call: ChatToolCa
       if (patch.seriesOrder && !(patch.seriesId ?? current.seriesId)) throw new Error('Choose a Series before setting its book order.')
       const before = Object.fromEntries(Object.keys(patch).map((key) => [key, current[key as keyof typeof current]]))
       item = proposal(book, 'update_metadata', { kind: 'metadata', patch, before }, args, Object.entries(patch).map(([field, after]) => ({ field: bookMetadataLabels[field as keyof typeof bookMetadataLabels], before: field === 'seriesId' ? series.find((s) => s.id === before[field])?.title ?? 'Standalone' : before[field], after: field === 'seriesId' ? series.find((s) => s.id === after)?.title ?? 'Standalone' : after })))
+    } else if (name === 'read_scene_settings' || name === 'propose_scene_settings_update') {
+      const entry = await getEntity(String(args.entity_id ?? ''))
+      if (!entry || entry.type !== 'scene' || entry.bookId !== bookId) throw new Error('This Scene is unavailable in this Book.')
+      const before = sceneWritingValues(entry)
+      const book = await bookEntity(bookId)
+      if (name === 'read_scene_settings') return { content: JSON.stringify({ ok: true, entityId: entry.id, overrides: before, effective: resolveSceneWriting({ pov: book.pointOfView, tense: book.tense, style: book.writingStyle, language: book.language }, before) }) }
+      const patch = validateSceneWritingPatch(args.changes)
+      item = proposal(entry, 'update_metadata', { kind: 'scene_metadata', patch, before }, args, Object.entries(patch).map(([field, after]) => ({ field: sceneWritingLabels[field as keyof typeof sceneWritingLabels], before: before[field as keyof typeof before] || 'Inherit from book', after: after || 'Inherit from book' })))
     } else if (name === 'read_codex_settings') {
       const entry = await codexEntity(bookId, args.entity_id, true)
       const [edges, entities] = await Promise.all([listCodexDependencies(bookId), listEntitiesByBook(bookId)])

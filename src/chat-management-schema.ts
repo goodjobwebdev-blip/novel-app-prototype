@@ -1,9 +1,11 @@
+import type { SceneWritingOverrides } from './scene-writing'
 import type { BookEntity, BookMetadata, CodexDependencyEdge } from './persistence'
 
 export const bookMetadataFields = ['title', 'seriesId', 'seriesOrder', 'overview', 'genre', 'writingStyle', 'pointOfView', 'tense', 'language'] as const
 export const bookMetadataLabels: Record<keyof BookMetadata, string> = { title: 'Title', seriesId: 'Series', seriesOrder: 'Book in series', overview: 'Overview', genre: 'Genre', writingStyle: 'Writing style', pointOfView: 'Point of view', tense: 'Tense', language: 'Language' }
 export type MetadataPatch = Partial<BookMetadata>
 export type ChatManagementOperation =
+  | { kind: 'scene_metadata'; patch: SceneWritingOverrides; before: SceneWritingOverrides }
   | { kind: 'metadata'; patch: MetadataPatch; before: MetadataPatch }
   | { kind: 'triggers'; triggers: string[]; before: string[] }
   | { kind: 'dependency'; action: 'create' | 'update' | 'remove'; targetId: string; relationLabel: string; includeWithSource: boolean; before: CodexDependencyEdge | null }

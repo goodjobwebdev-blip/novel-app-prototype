@@ -1,3 +1,4 @@
+import { sceneWritingValues, resolveSceneWriting } from './scene-writing'
 import ImageSettingsPanel, { type ImageSettingsPanelRef } from './ImageSettingsPanel'
 import SettingsSectionTabs from './SettingsSectionTabs'
 import { ContextSourcePicker, ContextSourceInventory, ContextBudget } from './ContextControls'
@@ -1025,7 +1026,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
       book: metadata,
       sceneText: preview.currentSceneText,
       insertionPosition: insertionPosition ?? preview.currentSceneText.length,
-      scenePov: typeof currentDocument?.pov === 'string' ? currentDocument.pov : undefined,
+      sceneOverrides: sceneWritingValues(currentDocument),
       context: preview,
       responseLength: settings.responseLengths.story,
       instruction: '',
@@ -1131,6 +1132,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
         {normalizedRequest?.dynamicSourceExclusions.length ? <div className="codex-context-representations"><strong>Excluded current target</strong>{normalizedRequest.dynamicSourceExclusions.map((decision, index) => <span key={`${decision.sourceId}-${index}`}><b>{decision.omitted.title || decision.sourceId}</b><em>Omitted because the current Codex target is represented through entry variables.</em></span>)}</div> : null}
         {normalizedRequest && <div className="context-budget"><strong>Likely reusable prefix: {likelyReusablePrefix(normalizedRequest.parts, (name) => promptVariables.find((variable) => variable.name === name)?.stability).partCount} message(s)</strong><span>Reuse stops before the first message that references turn-dynamic data.</span></div>}
         {chatNormalizedRequest?.structuredParts.map((part) => <details className="context-preview-raw" key={part.id}><summary>{part.name || 'Structured request data'} · App managed</summary><pre>{JSON.stringify(part.value, null, 2)}</pre></details>)}
+        {type === 'scene' && <section className="context-preview-rendered"><h3>Effective scene writing settings</h3>{Object.entries(resolveSceneWriting(metadata, sceneWritingValues(currentDocument))).map(([key, item]) => <p key={key}>{key}: {item.value || 'Not set'} · {item.origin}</p>)}</section>}
         <div className="context-preview-rendered">{requestMessages.map((message) => <section key={message.key} className={message.omitted ? 'omitted' : ''}><header><h3>{message.title}</h3><span>{message.detail}</span></header>{message.content ? <div className="context-preview-copy">{message.content}</div> : <p className="context-preview-empty">This message is empty.</p>}{message.references?.length ? <p className="context-preview-empty">References: {message.references.map((reference) => `{{${reference}}}`).join(', ')}</p> : null}{message.diagnostics?.length ? <ul>{message.diagnostics.map((diagnostic) => <li key={diagnostic}>{diagnostic}</li>)}</ul> : null}{message.reasoning && <div className="context-preview-copy"><strong>Reasoning</strong>\n\n{message.reasoning}</div>}</section>)}</div>
         <details className="context-preview-raw"><summary>View message stack</summary><pre>{exactPreview || '[No messages would be sent yet.]'}</pre></details>
       </> : <p className="context-preview-empty">Preparing preview…</p>}

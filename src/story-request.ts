@@ -1,3 +1,4 @@
+import { sceneWritingTemplateValues, type SceneWritingOverrides } from './scene-writing.ts'
 import { bookTemplateValues, type BookPromptValues } from './prompt-template.ts'
 import {
   assembleCompositionRequest,
@@ -26,7 +27,7 @@ Return only manuscript prose. Never add commentary, explanations, notes, introdu
 
 Follow the explicit generation instruction for what happens next. Unless that instruction deliberately changes direction, preserve established facts, characterization, relationships, chronology, setting, and other story continuity.
 
-Treat the nearby manuscript as the strongest guide to prose style, rhythm, pacing, dialogue, description, narrative voice, point of view, and tense. Book-level style guidance is secondary to the style actually established in the manuscript.
+Follow the effective scene writing settings for point of view, tense, style, and language unless the explicit generation instruction deliberately changes them. Scene overrides take precedence over conflicting book defaults or nearby prose. Use the nearby manuscript to guide rhythm, pacing, dialogue, and description within those settings.
 
 Be creatively proactive. Invent actions, dialogue, reactions, sensory details, transitions, minor details, and other material needed to move the story forward naturally, as long as they do not contradict the generation instruction or established story facts.
 
@@ -48,11 +49,10 @@ Do not rush toward resolution, revelation, or a scene ending unless the instruct
 {% if book.series_order %}Series position: Book {{book.series_order}}{% endif %}
 {% if book.overview %}Overview: {{book.overview}}{% endif %}
 {% if book.genre %}Genre: {{book.genre}}{% endif %}
-{% if book.style %}Book-level style guidance: {{book.style}}{% endif %}
-{% if book.pov %}Default point of view: {{book.pov}}{% endif %}
-{% if book.tense %}Default narrative tense: {{book.tense}}{% endif %}
-{% if book.language %}Language: {{book.language}}{% endif %}
-{% if scene.pov %}Current Scene point of view: {{scene.pov}}{% endif %}`,
+{% if scene.effective_style %}Writing style: {{scene.effective_style}} ({{scene.style_origin}}){% endif %}
+{% if scene.effective_pov %}Point of view: {{scene.effective_pov}} ({{scene.pov_origin}}){% endif %}
+{% if scene.effective_tense %}Narrative tense: {{scene.effective_tense}} ({{scene.tense_origin}}){% endif %}
+{% if scene.effective_language %}Language: {{scene.effective_language}} ({{scene.language_origin}}){% endif %}`,
     },
     {
       id: 'story-context',
@@ -96,22 +96,52 @@ Do not rush toward resolution, revelation, or a scene ending unless the instruct
   ],
 }
 
-/** Upgrade only unchanged defaults, including copies applied through a preset. */
+const previousStorySystemPrompt = `You are a fiction writer. Your output is inserted directly into the manuscript.
+
+Return only manuscript prose. Never add commentary, explanations, notes, introductions, headings, or discussion of the writing process.
+
+Follow the explicit generation instruction for what happens next. Unless that instruction deliberately changes direction, preserve established facts, characterization, relationships, chronology, setting, and other story continuity.
+
+Treat the nearby manuscript as the strongest guide to prose style, rhythm, pacing, dialogue, description, narrative voice, point of view, and tense. Book-level style guidance is secondary to the style actually established in the manuscript.
+
+Be creatively proactive. Invent actions, dialogue, reactions, sensory details, transitions, minor details, and other material needed to move the story forward naturally, as long as they do not contradict the generation instruction or established story facts.
+
+Use supplied context as knowledge and constraints, not as a checklist. Do not mention a fact merely because it appears in the context, and do not turn background information into unnecessary exposition.
+
+Do not repeat, paraphrase, summarize, or rewrite prose that already exists. Continue from the generation point. If the current scene is empty, begin a new scene naturally from the established story state.
+
+Advance the scene through concrete action, dialogue, perception, thought, and specific detail rather than explaining what the scene means.
+
+Do not rush toward resolution, revelation, or a scene ending unless the instruction or existing momentum calls for it.`
+const previousStoryBookTemplate = `{% if book.title %}Title: {{book.title}}{% endif %}
+{% if book.series %}Series: {{book.series}}{% endif %}
+{% if book.series_order %}Series position: Book {{book.series_order}}{% endif %}
+{% if book.overview %}Overview: {{book.overview}}{% endif %}
+{% if book.genre %}Genre: {{book.genre}}{% endif %}
+{% if book.style %}Book-level style guidance: {{book.style}}{% endif %}
+{% if book.pov %}Default point of view: {{book.pov}}{% endif %}
+{% if book.tense %}Default narrative tense: {{book.tense}}{% endif %}
+{% if book.language %}Language: {{book.language}}{% endif %}
+{% if scene.pov %}Current Scene point of view: {{scene.pov}}{% endif %}`
+
+/** Upgrade exact app defaults only. Keep authored text and preset-assigned IDs intact. */
 export function upgradeDefaultStoryPromptComposition(composition: PromptComposition): PromptComposition {
-  const previousMessages = defaultStoryPromptComposition.predefinedMessages.map((message) => (
-    message.id === 'story-context' ? { ...message, template: previousStoryContextTemplate } : message
-  ))
-  const isPreviousDefault = composition.systemPrompt === defaultStoryPromptComposition.systemPrompt
-    && composition.predefinedMessages.length === previousMessages.length
+  const candidates = [
+    { system: previousStorySystemPrompt, book: previousStoryBookTemplate, context: previousStoryContextTemplate },
+    { system: previousStorySystemPrompt, book: previousStoryBookTemplate, context: defaultStoryPromptComposition.predefinedMessages[1].template },
+    { system: defaultStoryPromptComposition.systemPrompt, book: defaultStoryPromptComposition.predefinedMessages[0].template, context: previousStoryContextTemplate },
+  ]
+  const unchanged = candidates.some((candidate) => composition.systemPrompt === candidate.system
+    && composition.predefinedMessages.length === defaultStoryPromptComposition.predefinedMessages.length
     && composition.predefinedMessages.every((message, index) => {
-      const previous = previousMessages[index]
-      // Preset application assigns new IDs, so compare the authored fields only.
-      return message.name === previous.name && message.role === previous.role
-        && message.enabled === previous.enabled && message.template === previous.template
-    })
-  if (!isPreviousDefault) return composition
+      const expected = defaultStoryPromptComposition.predefinedMessages[index]
+      const template = index === 0 ? candidate.book : index === 1 ? candidate.context : expected.template
+      return message.name === expected.name && message.role === expected.role && message.enabled === expected.enabled && message.template === template
+    }))
+  if (!unchanged) return composition
   const upgraded = clonePromptComposition(composition)
-  upgraded.predefinedMessages[1].template = defaultStoryPromptComposition.predefinedMessages[1].template
+  upgraded.systemPrompt = defaultStoryPromptComposition.systemPrompt
+  upgraded.predefinedMessages = upgraded.predefinedMessages.map((message, index) => ({ ...message, template: defaultStoryPromptComposition.predefinedMessages[index].template }))
   return upgraded
 }
 
@@ -122,6 +152,7 @@ export type StoryRequestInput = {
   sceneText: string
   insertionPosition: number
   scenePov?: string
+  sceneOverrides?: SceneWritingOverrides
   context: PreparedContextValues
   instruction?: string
 }
@@ -166,7 +197,7 @@ export function storyRequestValues(input: StoryRequestInput) {
   return {
     ...bookTemplateValues({ ...input.book, responseLength: input.responseLength }),
     'scene.text': input.sceneText,
-    'scene.pov': input.scenePov ?? '',
+    ...sceneWritingTemplateValues(input.book, { pov: input.scenePov, ...input.sceneOverrides }),
     'scene.previous_text': input.context.previousSceneText,
     'scene.before_cursor': input.sceneText.slice(0, insertionPosition),
     'scene.after_cursor': input.sceneText.slice(insertionPosition),

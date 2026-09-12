@@ -127,3 +127,15 @@ test('migration preserves customized, reordered, disabled, and extended composit
     assert.deepEqual(upgradeDefaultStoryPromptComposition(composition), composition)
   }
 })
+
+
+test('default requests use effective scene settings while raw book variables remain available', () => {
+  const input = { composition: defaultStoryPromptComposition, book, responseLength: '', sceneText: '', insertionPosition: 0, context, sceneOverrides: { pov: 'First person', tense: 'Present', language: 'French' } }
+  const text = assembleStoryGenerationRequest(input).providerMessages.map((m) => m.content).join('\n')
+  assert.match(text, /Point of view: First person \(Scene override\)/)
+  assert.match(text, /Narrative tense: Present \(Scene override\)/)
+  assert.match(text, /Writing style: Lyrical \(Book default\)/)
+  const custom = { systemPrompt: '{{book.pov}} / {{scene.pov}} / {{scene.effective_pov}}', predefinedMessages: [] }
+  assert.equal(assembleStoryGenerationRequest({ ...input, composition: custom }).providerMessages[0].content, 'Third person / First person / First person')
+  assert.deepEqual(upgradeDefaultStoryPromptComposition(custom), custom)
+})

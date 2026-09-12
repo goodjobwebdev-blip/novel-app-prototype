@@ -12,3 +12,14 @@
   .composer-shell > .chat-config-strip > summary { min-height: 36px; }
   .composer-shell .composer-status-body { max-height: 23dvh; }
 }
+.scene-title { font: 500 1.8rem var(--serif); }
+.scene-writing-settings { margin: .5rem 0 2rem; border: 1px solid var(--line); border-radius: .75rem; padding: .6rem; color: var(--soft); font: .8rem var(--sans, sans-serif); }
+.scene-writing-settings summary { display: flex; align-items: center; gap: .7rem; cursor: pointer; min-height: 32px; }
+.scene-writing-settings summary span { flex: 1; }
+.scene-writing-settings summary small { color: var(--accent); }
+.scene-writing-settings form { display: grid; gap: .65rem; margin-top: .75rem; }
+.scene-writing-settings label > span { display: block; margin-bottom: .3rem; }
+.scene-writing-settings label > div, .scene-writing-settings footer { display: flex; gap: .5rem; }
+.scene-writing-settings input { flex: 1; min-width: 0; }
+.scene-writing-settings button { border: 1px solid var(--line); border-radius: .5rem; background: var(--panel); padding: .4rem .7rem; min-height: 44px; color: var(--ink); }
+.scene-writing-settings footer { justify-content: flex-end; }
