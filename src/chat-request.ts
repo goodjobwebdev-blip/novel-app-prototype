@@ -1,3 +1,5 @@
+import { projectProse } from './document-projection'
+import type { ProposalDraft } from './chat-proposal-draft'
 import { chatImageTools } from './image-tools'
 import { imageModelInstructions } from './image-settings'
 import type { ChatToolDefinition } from './chat-api'
@@ -35,10 +37,10 @@ export type ChatRequestHistoryItem = {
   content: string
   thoughts?: string
   imageGenerations?: Array<{ prompt: string; status: string; modelAlias: string; size: string; task?: string }>
-  documentEdits?: Array<{ entityTitle: string; status: string }>
-  codexCreations?: Array<{ title: string; status: string }>
-  outlineActions?: Array<{ action: string; entityTitle: string; status: string }>
-  entityActions?: Array<{ action: string; entityTitle: string; status: string }>
+  documentEdits?: Array<ProposalDraft & { entityTitle: string; status: string }>
+  codexCreations?: Array<ProposalDraft & { title: string; status: string }>
+  outlineActions?: Array<ProposalDraft & { action: string; entityTitle: string; status: string }>
+  entityActions?: Array<ProposalDraft & { action: string; entityTitle: string; status: string }>
 }
 
 function stableProposalItems(items: string, statuses: string[]) {
@@ -64,7 +66,10 @@ export function chatHistoryContent(message: ChatRequestHistoryItem) {
   const entityActionState = message.role === 'assistant' && message.entityActions?.length
     ? `\n\n[Entity proposals: ${message.entityActions.map((proposal) => `${proposal.action} ${proposal.entityTitle}: ${proposal.status}`).join('; ')}]` : ''
   const imageState = message.imageGenerations?.length ? `\n\n[Visual proposals (generation requires user action): ${JSON.stringify(message.imageGenerations.map((proposal) => ({ prompt: proposal.prompt, status: proposal.status, modelAlias: proposal.modelAlias, size: proposal.size, task: proposal.task ?? 'text-to-image' })))}]` : ''
-  return stabilizeProposalHistory(`${imageState}${message.content}${editState}${creationState}${outlineState}${entityActionState}`)
+  const edited = [...(message.documentEdits ?? []), ...(message.codexCreations ?? []), ...(message.outlineActions ?? []), ...(message.entityActions ?? [])]
+    .filter(proposal => proposal.editedValues).map(proposal => ({ status: proposal.status, values: Object.fromEntries(Object.entries(proposal.editedValues!).map(([key, value]) => [key, projectProse(value).text])) }))
+  const editedState = edited.length ? `\n\n[User-edited proposal values (only applied/created statuses changed the workspace): ${JSON.stringify(edited)}]` : ''
+  return editedState + stabilizeProposalHistory(`${imageState}${message.content}${editState}${creationState}${outlineState}${entityActionState}`)
 }
 
 function section(title: string, content: string) {
