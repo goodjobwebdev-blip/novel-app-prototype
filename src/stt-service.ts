@@ -14,7 +14,7 @@ export type SttModel = {
   supportedLanguages?: string[]
 }
 
-export type SttTargetKind = 'editor' | 'instruction' | 'chat'
+export type SttTargetKind = 'editor' | 'instruction' | 'chat' | 'media-prompt'
 export type SttStatus = 'idle' | 'requesting-permission' | 'recording' | 'recording-live' | 'stopping' | 'transcribing' | 'finalizing' | 'cancelled' | 'failed' | 'completed'
 export type SttState = {
   status: SttStatus

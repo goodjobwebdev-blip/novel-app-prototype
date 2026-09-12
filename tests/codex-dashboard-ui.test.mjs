@@ -94,13 +94,22 @@ test('dashboard renders one bounded page, preserves selection across views, and 
     await act(async () => root.render(h(Dashboard, props)))
     assert.equal(document.querySelectorAll('.codex-dashboard-entry').length, 40)
     assert.equal(document.querySelectorAll('img').length, 0)
+    assert.equal(button('List').getAttribute('aria-pressed'), 'true')
+    assert.ok(document.querySelector('.codex-dashboard-results.list'))
     await click('Next page')
     assert.match(document.querySelector('.codex-dashboard-entry').textContent, /Entry 0040/)
     assert.match(document.querySelector('[aria-current="true"]').textContent, /Entry 0042/)
     await click('Cards')
+    assert.equal(button('Cards').getAttribute('aria-pressed'), 'true')
+    assert.equal(button('List').getAttribute('aria-pressed'), 'false')
+    assert.ok(document.querySelector('.codex-dashboard-results.cards'))
     assert.equal(document.querySelectorAll('.codex-dashboard-entry').length, 40)
     assert.match(document.querySelector('.codex-dashboard-entry').textContent, /Entry 0040/)
     assert.match(document.querySelector('[aria-current="true"]').textContent, /Entry 0042/)
+    await click('List')
+    assert.ok(document.querySelector('.codex-dashboard-results.list'))
+    assert.match(document.querySelector('[aria-current="true"]').textContent, /Entry 0042/)
+    await click('Cards')
     const search = document.querySelector('[aria-label="Search Codex"]')
     await act(async () => { Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set.call(search, 'Entry 1049'); search.dispatchEvent(new dom.window.Event('input', { bubbles: true })) })
     assert.equal(document.querySelectorAll('.codex-dashboard-entry').length, 1)
@@ -111,4 +120,90 @@ test('dashboard renders one bounded page, preserves selection across views, and 
     assert.equal(document.querySelector('[aria-label="Search Codex"]').value, 'Entry 1049')
     assert.equal(document.querySelectorAll('.codex-dashboard-entry').length, 1)
   } finally { await act(async () => root.unmount()) }
+})
+
+test('Codex Actions floats outside entries, selects the correct entry, and dismisses without changing selection', async () => {
+  const { book } = await fixture(8)
+  const entries = ['Alice', 'Bob'].map(title => ({ id: title, type: 'codexEntry', bookId: book.id, parentId: book.id, title, category: 'Character', typeId: 'lore-character', content: 'An entry', createdAt: 1, updatedAt: 1 }))
+  const selected = []
+  const props = { bookId: book.id, entries, activeId: 'Alice', summaryStates: {}, onCreate() {}, onOpen() {}, onOpenSummary() {}, onAutotitle() {}, onRename(entry) { selected.push(entry.id) }, onArchive() {}, onRestore() {}, onDelete() {}, onBeforeChange: async () => {}, onRefresh: async () => {} }
+  const root = createRoot(document.getElementById('root'))
+  const trigger = title => document.querySelector(`button[aria-label="Actions for ${title}"]`)
+  const menu = () => document.querySelector('[role="menu"]')
+  const open = async title => { await act(async () => trigger(title).click()); assert.ok(menu()) }
+  try {
+    await act(async () => root.render(h(Dashboard, props)))
+    const entryMarkup = document.querySelector('.codex-dashboard-entry').textContent
+    await open('Alice')
+    assert.equal(menu().parentElement, document.body, 'Overlay must be outside the scrolling cards')
+    assert.equal(document.querySelector('.codex-dashboard-entry').textContent, entryMarkup, 'Opening actions must not insert content into the entry')
+    assert.equal(trigger('Alice').getAttribute('aria-expanded'), 'true')
+    assert.equal(document.activeElement.textContent, 'Rename')
+    await act(async () => document.activeElement.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+    assert.equal(document.activeElement.textContent, 'Autotitle')
+    await act(async () => document.activeElement.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    assert.equal(menu(), null)
+    assert.equal(document.activeElement, trigger('Alice'))
+    await open('Alice')
+    await open('Bob')
+    assert.equal(document.querySelectorAll('[role="menu"]').length, 1)
+    assert.equal(trigger('Alice').getAttribute('aria-expanded'), 'false')
+    await click('Rename')
+    assert.deepEqual(selected, ['Bob'])
+    assert.equal(menu(), null)
+    assert.equal(document.activeElement, trigger('Bob'))
+    await open('Alice')
+    await act(async () => document.body.dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true })))
+    assert.equal(menu(), null)
+    await open('Alice')
+    await act(async () => menu().dispatchEvent(new dom.window.Event('scroll')))
+    assert.ok(menu(), 'Scrolling inside a long menu should keep it open')
+    await act(async () => document.getElementById('root').dispatchEvent(new dom.window.Event('scroll')))
+    assert.equal(menu(), null, 'Scrolling the underlying list should dismiss the menu')
+    await open('Alice')
+    await click('Cards')
+    assert.equal(menu(), null)
+    assert.match(document.querySelector('[aria-current="true"]').textContent, /Alice/)
+    await open('Bob')
+    await act(async () => root.unmount())
+    assert.equal(menu(), null, 'Closing the dashboard must remove its portal')
+  } finally { await act(async () => root.unmount()) }
+})
+
+test('Codex Actions stays within a narrow viewport and flips above low triggers', async () => {
+  const { default: ActionsMenu } = await moduleAt('CodexActionsMenu')
+  const originalRect = dom.window.HTMLElement.prototype.getBoundingClientRect
+  const scrollHeight = Object.getOwnPropertyDescriptor(dom.window.HTMLElement.prototype, 'scrollHeight')
+  const root = createRoot(document.getElementById('root'))
+  visualViewport.width = 320
+  visualViewport.height = 400
+  visualViewport.offsetLeft = 0
+  dom.window.HTMLElement.prototype.getBoundingClientRect = () => new dom.window.DOMRect(244, 350, 60, 44)
+  Object.defineProperty(dom.window.HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => 228 })
+  function Harness() {
+    const [open, setOpen] = React.useState(false)
+    const close = React.useCallback(() => setOpen(false), [])
+    return h(ActionsMenu, { title: 'Alice', open, onToggle: () => setOpen(value => !value), onClose: close, actions: ['Rename', 'Autotitle', 'Summarize baseline', 'Archive', 'Delete'].map(label => ({ label, onSelect() {} })) })
+  }
+  try {
+    await act(async () => root.render(h(Harness)))
+    await click('Actions')
+    const panel = document.querySelector('[role="menu"]')
+    assert.ok(parseFloat(panel.style.top) < 350, 'Low trigger should open above')
+    assert.ok(parseFloat(panel.style.left) >= 8)
+    assert.ok(parseFloat(panel.style.left) + parseFloat(panel.style.width) <= 312)
+    visualViewport.height = 180
+    dom.window.HTMLElement.prototype.getBoundingClientRect = () => new dom.window.DOMRect(4, 90, 60, 44)
+    await act(async () => visualViewport.dispatchEvent(new dom.window.Event('resize')))
+    assert.equal(parseFloat(panel.style.left), 8)
+    assert.ok(parseFloat(panel.style.top) + parseFloat(panel.style.maxHeight) <= 172, 'Constrain tall menus to available screen space')
+  } finally {
+    await act(async () => root.unmount())
+    dom.window.HTMLElement.prototype.getBoundingClientRect = originalRect
+    if (scrollHeight) Object.defineProperty(dom.window.HTMLElement.prototype, 'scrollHeight', scrollHeight)
+    else delete dom.window.HTMLElement.prototype.scrollHeight
+    visualViewport.height = 700
+    delete visualViewport.width
+    delete visualViewport.offsetLeft
+  }
 })
