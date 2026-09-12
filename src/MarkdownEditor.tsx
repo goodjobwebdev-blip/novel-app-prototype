@@ -26,9 +26,12 @@ export type CodexMentionClick = {
   rect: { left: number; top: number; right: number; bottom: number; width: number; height: number }
 }
 
-export type EditorSelectionSnapshot = { revision: number; document: string; from: number; to: number; text: string }
+export type EditorSelectionSnapshot = { editorId: string; revision: number; document: string; from: number; to: number; text: string }
+
+export type EditorSelectionInfo = { snapshot: EditorSelectionSnapshot; rect: { left: number; top: number; bottom: number }; protected: boolean }
 
 type MarkdownEditorProps = {
+  onSelectionChange?: (selection: EditorSelectionInfo | null) => void
   bookId?: string
   showBeats?: boolean
   onBeatAction?: (item: LocatedBlock, action: 'generate' | 'rebind') => void
@@ -458,12 +461,15 @@ function runHistoryCommand(view: EditorView | null, command: (target: EditorView
 }
 
 const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor(
-  { value, onChange, bookId = '', onEditBlock, showBeats = true, onBeatAction, ariaLabel = 'Markdown editor', className = '', readOnly = false, mentionTerms = [], onMentionClick, onHistoryChange },
+  { value, onChange, bookId = '', onEditBlock, showBeats = true, onBeatAction, onSelectionChange, ariaLabel = 'Markdown editor', className = '', readOnly = false, mentionTerms = [], onMentionClick, onHistoryChange },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<EditorView | null>(null)
   const documentRevisionRef = useRef(0)
+  const editorIdRef = useRef('')
+  const onSelectionChangeRef = useRef(onSelectionChange)
+  onSelectionChangeRef.current = onSelectionChange
   const onChangeRef = useRef(onChange)
   const blockCompartmentRef = useRef(new Compartment())
   const onBeatActionRef = useRef(onBeatAction)
@@ -478,12 +484,24 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
   const activeDictationRef = useRef<ActiveDictation | null>(null)
   const editableCompartmentRef = useRef(new Compartment())
 
+  function reportSelection(view: EditorView) {
+    view.requestMeasure({ key: onSelectionChangeRef, read: () => {
+      const range = view.state.selection.main
+      if (range.empty || view.state.readOnly || activeGenerationRef.current || activeDictationRef.current) return null
+      const from = view.coordsAtPos(range.from), to = view.coordsAtPos(range.to)
+      if (!from || !to) return null
+      const document = view.state.doc.toString()
+      return { snapshot: { editorId: editorIdRef.current, revision: documentRevisionRef.current, document, from: range.from, to: range.to, text: view.state.sliceDoc(range.from, range.to) }, rect: { left: Math.min(from.left, to.left), top: Math.min(from.top, to.top), bottom: Math.max(from.bottom, to.bottom) }, protected: rangeTouchesProtected(document, range.from, range.to) }
+    }, write: (selection) => onSelectionChangeRef.current?.(selection) })
+  }
+
   useEffect(() => { onChangeRef.current = onChange }, [onChange])
   useEffect(() => { onHistoryChangeRef.current = onHistoryChange }, [onHistoryChange])
   useEffect(() => { onMentionClickRef.current = onMentionClick }, [onMentionClick])
   useEffect(() => {
+    const changed = JSON.stringify(mentionTermsRef.current) !== JSON.stringify(mentionTerms)
     mentionTermsRef.current = mentionTerms
-    viewRef.current?.dispatch({ effects: setMentionTerms.of(mentionTerms) })
+    if (changed) viewRef.current?.dispatch({ effects: setMentionTerms.of(mentionTerms) })
   }, [mentionTerms])
 
   useEffect(() => { viewRef.current?.dispatch({ effects: blockCompartmentRef.current.reconfigure(editorBlockPreview(bookId, (item) => onEditBlockRef.current?.(item), readOnly, showBeats, (item, action) => onBeatActionRef.current?.(item, action))) }) }, [bookId, readOnly, showBeats])
@@ -499,11 +517,11 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       const selection = view.state.selection.main
       const start = from ?? selection.from, end = to ?? selection.to
       if (start < 0 || end < start || end > view.state.doc.length) return null
-      return { revision: documentRevisionRef.current, document: view.state.doc.toString(), from: start, to: end, text: view.state.sliceDoc(start, end) }
+      return { editorId: editorIdRef.current, revision: documentRevisionRef.current, document: view.state.doc.toString(), from: start, to: end, text: view.state.sliceDoc(start, end) }
     },
     replaceRange: (snapshot, insert, allowProtected = false) => {
       const view = viewRef.current
-      if (!view || view.state.readOnly || activeGenerationRef.current || activeDictationRef.current || documentRevisionRef.current !== snapshot.revision || view.state.doc.toString() !== snapshot.document) return false
+      if (!view || view.state.readOnly || activeGenerationRef.current || activeDictationRef.current || editorIdRef.current !== snapshot.editorId || documentRevisionRef.current !== snapshot.revision || view.state.doc.toString() !== snapshot.document) return false
       if (!allowProtected && (rangeTouchesProtected(snapshot.document, snapshot.from, snapshot.to) || protectedRanges(insert).length)) return false
       view.dispatch({ changes: { from: snapshot.from, to: snapshot.to, insert }, selection: { anchor: snapshot.from + insert.length }, annotations: [Transaction.userEvent.of('input.replace'), isolateHistory.of('full')] })
       view.focus()
@@ -520,6 +538,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       if (!session) return null
       view.dispatch({ effects: setGenerationHighlight.of(null) })
       activeGenerationRef.current = session
+      onSelectionChangeRef.current?.(null)
       return { sceneText: session.preDocument, insertionPosition: session.insertionPosition }
     },
     appendGenerationChunk: (text) => {
@@ -577,6 +596,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
         provisional: '',
       }
       activeDictationRef.current = session
+      onSelectionChangeRef.current?.(null)
       view.dispatch({ effects: editableCompartmentRef.current.reconfigure(EditorView.editable.of(false)) })
       return session.id
     },
@@ -641,7 +661,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
         EditorState.readOnly.of(readOnly),
         editableCompartmentRef.current.of(EditorView.editable.of(!readOnly)),
         history(),
-        keymap.of([...formattingKeymap(), ...defaultKeymap, ...historyKeymap]),
+        keymap.of([{ key: 'Shift-F10', run: (view) => { if (view.state.selection.main.empty) return false; reportSelection(view); requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('.selection-tools button')?.focus()); return true } }, ...formattingKeymap(), ...defaultKeymap, ...historyKeymap]),
         livePreview,
         generationHighlightField,
         mentionField,
@@ -661,6 +681,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
         EditorView.contentAttributes.of({ 'aria-label': ariaLabel, spellcheck: 'true' }),
         EditorView.updateListener.of(update => {
           if (update.docChanged) documentRevisionRef.current += 1
+          if (update.selectionSet || update.docChanged || update.viewportChanged) reportSelection(update.view)
           if (update.docChanged && !update.transactions.some((transaction) => transaction.annotation(dictationProvisional))) onChangeRef.current(update.state.doc.toString())
           if (update.docChanged || update.transactions.length) {
             onHistoryChangeRef.current?.({ canUndo: undoDepth(update.state) > 0, canRedo: redoDepth(update.state) > 0 })
@@ -677,12 +698,17 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       ],
     })
 
+    editorIdRef.current = crypto.randomUUID()
     const view = new EditorView({ state, parent: hostRef.current })
     viewRef.current = view
+    const repositionSelection = () => reportSelection(view)
+    window.addEventListener('scroll', repositionSelection, true)
     onHistoryChangeRef.current?.({ canUndo: undoDepth(view.state) > 0, canRedo: redoDepth(view.state) > 0 })
     if (mentionTermsRef.current.length) view.dispatch({ effects: setMentionTerms.of(mentionTermsRef.current) })
 
     return () => {
+      window.removeEventListener('scroll', repositionSelection, true)
+      onSelectionChangeRef.current?.(null)
       activeGenerationRef.current = null
       activeDictationRef.current = null
       view.destroy()

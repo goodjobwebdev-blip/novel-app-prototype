@@ -42,3 +42,10 @@
 .editor-block-beat button { margin-right: .4rem; margin-top: .4rem; }
 .prose-rewrite-dialog { width: min(100%, 780px); }
 .rewrite-original { font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 25dvh; overflow: auto; color: var(--soft); }
+.selection-tools { position: fixed; z-index: 65; display: flex; flex-wrap: wrap; gap: .3rem; width: max-content; max-width: calc(100vw - 20px); padding: .35rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--deep); color: var(--ink); box-shadow: 0 6px 24px #0004; }
+.selection-tools button { border: 0; border-radius: .5rem; background: transparent; color: inherit; padding: .4rem .7rem; min-height: 44px; cursor: pointer; }
+.selection-tools button:hover, .selection-tools button:focus-visible { background: var(--surface-2); outline: 2px solid var(--accent); }
+.selection-tools span { padding: .6rem; max-width: 20rem; font-size: .8rem; }
+body:has([role="dialog"]) .selection-tools { display: none; }
+.quick-tool-examples { display: flex; gap: .4rem; flex-wrap: wrap; }
+.quick-tool-examples button { font-size: .8rem; }

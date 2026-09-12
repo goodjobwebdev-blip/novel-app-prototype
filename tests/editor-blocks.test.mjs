@@ -69,3 +69,35 @@ test('beat visibility preserves source and history; replacement affects only bou
   assert.equal(ref.current.replaceRange(snapshot, 'Stale preview after undo'), false)
   await act(async () => root.unmount())
 })
+
+test('an identical document mounted in a new editor cannot accept an old selection result', async () => {
+  const root = createRoot(document.getElementById('root')), ref = React.createRef()
+  const props = { ref, value: 'Identical prose.', bookId: 'book-1', onChange: () => {} }
+  await act(async () => root.render(React.createElement(MarkdownEditor, { ...props, key: 'first' })))
+  const snapshot = ref.current.captureSelection(0, 9)
+  await act(async () => root.render(React.createElement(MarkdownEditor, { ...props, key: 'second' })))
+  assert.notEqual(ref.current.captureSelection().editorId, snapshot.editorId)
+  assert.equal(ref.current.replaceRange(snapshot, 'Obsolete'), false)
+  await act(async () => root.unmount())
+})
+
+test('rewrite examples edit the instruction; Go previews without applying and result remains editable', async () => {
+  buildSync({ entryPoints: [new URL('../src/ProseRewriteDialog.tsx', import.meta.url).pathname], jsx: 'automatic', bundle: true, packages: 'external', format: 'esm', outfile: `${directory}/dialog.mjs`, loader: { '.css': 'empty' }, logLevel: 'silent' })
+  const { default: Dialog } = await import(pathToFileURL(`${directory}/dialog.mjs`))
+  const root = createRoot(document.getElementById('root')), calls = [], applied = [], closed = []
+  const click = async (label) => { const button = [...document.querySelectorAll('button')].find((item) => item.textContent === label); assert.ok(button, label); await act(async () => button.click()) }
+  await act(async () => root.render(React.createElement(Dialog, { title: 'Make it more…', original: 'Old selected text', instruction: '', examples: ['Make it darker'], generateLabel: 'Go', generate: async (instruction, chunk, signal, preview) => { calls.push(instruction); preview?.({ model: 'Main test', request: { providerMessages: [{ role: 'user', content: instruction }] } }); chunk('New selected text') }, apply: (text) => { applied.push(text); return true }, close: () => closed.push(true) })))
+  await click('Make it darker')
+  assert.equal(document.querySelector('[aria-label="Rewrite instruction"]').value, 'Make it darker')
+  assert.deepEqual(calls, [])
+  await click('Go')
+  assert.deepEqual(calls, ['Make it darker'])
+  assert.deepEqual(applied, [])
+  assert.equal(document.querySelector('[aria-label="Replacement preview"]').value, 'New selected text')
+  assert.equal(document.querySelector('[aria-label="Replacement preview"]').readOnly, false)
+  assert.match(document.body.textContent, /Request preview · Main test/)
+  await click('Apply replacement')
+  assert.deepEqual(applied, ['New selected text'])
+  assert.equal(closed.length, 1)
+  await act(async () => root.unmount())
+})
