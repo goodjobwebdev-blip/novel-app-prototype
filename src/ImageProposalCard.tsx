@@ -1,3 +1,4 @@
+import { selectedMediaPrompt } from './media-prompt'
 import { useRef, useState } from 'react'
 import type { ChatMessageEntity } from './chat-service'
 import type { ChatImageProposal } from './image-generation-types'
@@ -44,7 +45,7 @@ export default function ImageProposalCard({ message, proposal }: { message: Chat
   const task = draft.task ?? 'text-to-image'
   const generate = async () => {
     await pendingSave.current
-    const spec = resolveImageSpec(draft.prompt, draft.alias, draft.size, undefined, undefined, task, draft.sources ?? [], { resolution: draft.resolution, duration: draft.duration, aspectRatio: draft.aspectRatio, fps: draft.fps, numFrames: draft.numFrames, seed: draft.seed, draft: draft.draftVideo })
+    const spec = resolveImageSpec(selectedMediaPrompt(draft), draft.alias, draft.size, undefined, undefined, task, draft.sources ?? [], { resolution: draft.resolution, duration: draft.duration, aspectRatio: draft.aspectRatio, fps: draft.fps, numFrames: draft.numFrames, seed: draft.seed, draft: draft.draftVideo })
     await enqueueImageJob(spec, { ...origin, submissionId: crypto.randomUUID() })
   }
   const latestJob = ownedJobs.at(-1)
@@ -52,15 +53,15 @@ export default function ImageProposalCard({ message, proposal }: { message: Chat
   return <section className="image-proposal image-ui chat-media-card">
     <header><strong>{generationTaskNames[value.draft?.task ?? value.task ?? 'text-to-image']}</strong><span role="status">{active.length ? `${active.length} queued / generating` : latestJob?.status ?? value.status}</span></header>
     <small>{value.draft?.alias ?? value.modelAlias}</small>
-    <p className="image-prompt-preview">{value.draft?.prompt ?? value.prompt}</p>
+    <p className="image-prompt-preview">{value.draft ? selectedMediaPrompt(value.draft) : value.prompt}</p>
     {['proposed', 'accepted'].includes(value.status) && <button type="button" disabled={busy} onClick={open}>Open generation tool</button>}
     {(error || readError) && <p role="alert">{error || readError}</p>}
     <ImageJobs proposalId={proposal.id} messageId={message.id} />
     {expanded && <IllustrationModal title="Generation tool" onClose={close} footer={<div className="image-actions">
       <button type="button" disabled={busy} onClick={close}>Close tool</button>
-      {value.status === 'proposed' ? <><button type="button" disabled={busy} onClick={() => { void action(async () => { await pendingSave.current; await setImageProposal(message.id, value.id, 'accepted', draft) }) }}>Accept proposal</button><button type="button" disabled={busy} onClick={() => { void action(async () => { await pendingSave.current; await setImageProposal(message.id, value.id, 'rejected'); setExpanded(false) }) }}>Reject</button></> : <button type="button" disabled={busy || !draft.prompt.trim()} onClick={() => { void action(generate) }}>Generate</button>}
+      {value.status === 'proposed' ? <><button type="button" disabled={busy} onClick={() => { void action(async () => { await pendingSave.current; await setImageProposal(message.id, value.id, 'accepted', draft) }) }}>Accept proposal</button><button type="button" disabled={busy} onClick={() => { void action(async () => { await pendingSave.current; await setImageProposal(message.id, value.id, 'rejected'); setExpanded(false) }) }}>Reject</button></> : <button type="button" disabled={busy || !selectedMediaPrompt(draft).trim()} onClick={() => { void action(generate) }}>Generate</button>}
     </div>}>
-      <div className="image-ui"><ImageGenerationControls value={draft} onChange={changeDraft} disabled={busy} sourceAssets={sourceAssets} />
+      <div className="image-ui"><ImageGenerationControls bookId={message.bookId} value={draft} onChange={changeDraft} disabled={busy} sourceAssets={sourceAssets} />
       <p className="image-help">{value.status === 'proposed' ? 'Accepting approves this draft. Press Generate to start a media request.' : 'Generate queues the shown prompt, model, options, and source images. Closing this dialog keeps your draft and queued work.'}</p>
       {error && <p role="alert">{error}</p>}</div>
     </IllustrationModal>}

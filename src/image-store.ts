@@ -1,3 +1,4 @@
+import { selectedMediaPrompt } from './media-prompt'
 import { KeyedAsyncQueue } from './keyed-async-queue'
 import type { MediaGenerationDraft } from './image-generation-types'
 import { database, getEntity, type ArcEntity, type Illustration } from './persistence'
@@ -175,8 +176,8 @@ export async function saveImageProposalDraft(origin: Required<Pick<ImageJobOrigi
   })
 }
 
-export async function setImageProposal(messageId: string, proposalId: string, status: 'accepted' | 'rejected', input?: { prompt: string; alias: string; size: string; task?: ImageGenerationSpec['task']; sources?: ImageGenerationSpec['sources']; resolution?: string; duration?: number; aspectRatio?: string; fps?: number; numFrames?: number; seed?: number; draftVideo?: boolean }) {
-  const spec = input ? resolveImageSpec(input.prompt, input.alias, input.size, undefined, undefined, input.task ?? 'text-to-image', input.sources ?? [], { resolution: input.resolution, duration: input.duration, aspectRatio: input.aspectRatio, fps: input.fps, numFrames: input.numFrames, seed: input.seed, draft: input.draftVideo }) : undefined
+export async function setImageProposal(messageId: string, proposalId: string, status: 'accepted' | 'rejected', input?: MediaGenerationDraft) {
+  const spec = input ? resolveImageSpec(selectedMediaPrompt(input), input.alias, input.size, undefined, undefined, input.task ?? 'text-to-image', input.sources ?? [], { resolution: input.resolution, duration: input.duration, aspectRatio: input.aspectRatio, fps: input.fps, numFrames: input.numFrames, seed: input.seed, draft: input.draftVideo }) : undefined
   const db = await database()
   await db.transaction('rw', db.table('entities'), async () => {
     const message = await db.table('entities').get(messageId)

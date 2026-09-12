@@ -1,3 +1,4 @@
+import { selectedMediaPrompt } from './media-prompt'
 import { useState, type KeyboardEvent } from 'react'
 import { ArrowLeft, Settings } from 'lucide-react'
 import ImageGenerationControls, { type ImageDraft } from './ImageGenerationControls'
@@ -45,14 +46,14 @@ export function ImageGenerateView({ bookId, state, onStateChange, onSettings }: 
   const validSize = Boolean(favorite?.enabledSizes.includes(state.draft.size) && favorite.sizes.some((size) => size.value === state.draft.size))
   const task = generationTask(state.draft)
   const needsSource = task === 'image-to-image' || task === 'image-to-video'
-  const canGenerate = Boolean(state.draft.prompt.trim() && favorite && validSize && (!needsSource || state.draft.sources?.length))
+  const canGenerate = Boolean(selectedMediaPrompt(state.draft).trim() && favorite && validSize && (!needsSource || state.draft.sources?.length))
   const setDraft = (draft: ImageDraft) => onStateChange({ ...state, draft })
   const generate = async () => {
     setBusy(true)
     setError('')
     setStatus('Queued')
     try {
-      await enqueueImageJob(resolveImageSpec(state.draft.prompt, state.draft.alias, state.draft.size, undefined, undefined, task, state.draft.sources ?? [], { resolution: state.draft.resolution, duration: state.draft.duration, aspectRatio: state.draft.aspectRatio, fps: state.draft.fps, numFrames: state.draft.numFrames, seed: state.draft.seed, draft: state.draft.draftVideo }), { bookId })
+      await enqueueImageJob(resolveImageSpec(selectedMediaPrompt(state.draft), state.draft.alias, state.draft.size, undefined, undefined, task, state.draft.sources ?? [], { resolution: state.draft.resolution, duration: state.draft.duration, aspectRatio: state.draft.aspectRatio, fps: state.draft.fps, numFrames: state.draft.numFrames, seed: state.draft.seed, draft: state.draft.draftVideo }), { bookId })
     } catch (reason) {
       setStatus('')
       setError(reason instanceof Error ? reason.message : 'Could not queue image.')
@@ -61,7 +62,7 @@ export function ImageGenerateView({ bookId, state, onStateChange, onSettings }: 
   return <section className="image-generate-view" aria-labelledby="image-generate-heading">
     <div className="image-composer">
       <h2 id="image-generate-heading">Create visual media</h2>
-      <ImageGenerationControls value={state.draft} onChange={setDraft} disabled={busy} sourceAssets={sourceAssets} />
+      <ImageGenerationControls bookId={bookId} value={state.draft} onChange={setDraft} disabled={busy} sourceAssets={sourceAssets} />
 
       {!settings.favorites.length && <button type="button" onClick={onSettings}>Set up image models</button>}
       <div className="image-generate-actions">
@@ -136,6 +137,7 @@ export function ImageGalleryView({ bookId, state, onStateChange }: Omit<ImageWor
 }
 
 export type ImageWorkspaceProps = {
+  storageError?: string
   bookId?: string
   bookTitle?: string
   state: ImageWorkspaceState
@@ -144,7 +146,7 @@ export type ImageWorkspaceProps = {
   onSettings: () => void
 }
 
-export default function ImageWorkspace({ bookId, bookTitle, state, onStateChange, onBack, onSettings }: ImageWorkspaceProps) {
+export default function ImageWorkspace({ bookId, bookTitle, state, onStateChange, onBack, onSettings, storageError }: ImageWorkspaceProps) {
   const tabs: ImageWorkspaceTab[] = ['generate', 'gallery']
   const selectTab = (tab: ImageWorkspaceTab) => onStateChange({ ...state, tab })
   const selectTabFromKeyboard = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
@@ -164,6 +166,7 @@ export default function ImageWorkspace({ bookId, bookTitle, state, onStateChange
       <div><h1 id="page-title">Images</h1>{bookTitle && <p>{bookTitle}</p>}</div>
       <button type="button" onClick={onSettings} aria-label="Image settings"><Settings aria-hidden="true" /><span>Settings</span></button>
     </header>
+    {storageError && <p role="alert">{storageError}</p>}
     <nav className="image-tabs" aria-label="Image workspace" role="tablist">
       <button type="button" role="tab" id="image-tab-generate" aria-selected={state.tab === 'generate'} aria-controls="image-panel-generate" tabIndex={state.tab === 'generate' ? 0 : -1} onKeyDown={(event) => selectTabFromKeyboard(event, 0)} onClick={() => selectTab('generate')}>Generate</button>
       <button type="button" role="tab" id="image-tab-gallery" aria-selected={state.tab === 'gallery'} aria-controls="image-panel-gallery" tabIndex={state.tab === 'gallery' ? 0 : -1} onKeyDown={(event) => selectTabFromKeyboard(event, 1)} onClick={() => selectTab('gallery')}>Gallery</button>

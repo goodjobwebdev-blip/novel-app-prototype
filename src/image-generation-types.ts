@@ -55,6 +55,12 @@ export type ImageGenerationSpec = OpenAIImageOptions & {
   video?: VideoGenerationOptions
 }
 export type MediaGenerationDraft = {
+  enhancedPrompt?: string
+  enhancementGuidance?: string
+  enhancementTemplate?: string
+  enhancementFingerprint?: string
+  enhancementMode?: 'standard' | 'guided'
+  promptSelection?: 'original' | 'enhanced'
   prompt: string
   alias: string
   size: string
