@@ -145,6 +145,49 @@ test('several tools in one completion consume one round and all proposals surviv
   } finally { await act(async () => root.unmount()) }
 })
 
+test('earlier chat prose and its proposal remain visible in order when the next round arrives and after reload', async t => {
+  const errors = [], originalError = console.error
+  t.mock.method(console, 'error', (...args) => { errors.push(args.join(' ')); originalError(...args) })
+  const f = await fixture(8)
+  let releaseNextRound
+  const nextRound = new Promise(resolve => { releaseNextRound = resolve })
+  api.configure('brainstorm', count => count === 2 ? nextRound : undefined)
+  let root = createRoot(document.getElementById('root'))
+  const body = text => [...document.querySelectorAll('.chat-assistant-body')].find(element => element.textContent === text)
+  const assertFullAnswer = () => {
+    const first = body('Round 1'), second = body('Round 2'), proposal = document.querySelector('.chat-brainstorm')
+    assert.ok(first && second && proposal, 'Both rounds and the proposal are rendered')
+    assert.ok(!first.closest('details:not([open])'), 'The earlier prose stays visible without opening Activity')
+    assert.ok(!second.closest('details:not([open])'))
+    assert.ok(first.compareDocumentPosition(proposal) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING, 'The proposal follows its original prose')
+    assert.ok(proposal.compareDocumentPosition(second) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING, 'Later prose follows the proposal')
+    assert.equal(document.querySelectorAll('.chat-brainstorm').length, 1)
+    assert.equal(document.querySelectorAll('.chat-answer-activity .chat-assistant-body').length, 0, 'Activity does not duplicate answer prose')
+  }
+  try {
+    await act(async () => root.render(view(f)))
+    await send()
+    await settle(() => api.calls.length === 2 && Boolean(document.querySelector('.chat-brainstorm')))
+    const first = body('Round 1')
+    assert.ok(first)
+    await act(async () => releaseNextRound())
+    await settle(() => Boolean(button('Send')) && !button('Send').disabled && Boolean(body('Round 2')))
+    assertFullAnswer()
+    assert.equal(first.isConnected, true, 'New rounds do not replace or move earlier rendered prose')
+    const saved = await chatService.listChatMessages(f.book.id, f.chat.id)
+    assert.deepEqual(saved.filter(message => message.role === 'assistant').map(message => message.content), ['Round 1', 'Round 2'])
+    await act(async () => root.unmount())
+    root = createRoot(document.getElementById('root'))
+    await act(async () => root.render(view(f)))
+    await settle(() => Boolean(body('Round 2')))
+    assertFullAnswer()
+    assert.ok(!errors.some(message => /same key/.test(message)), 'Round prose and proposal containers have separate identities')
+  } finally {
+    releaseNextRound()
+    await act(async () => root.unmount())
+  }
+})
+
 test('new chats copy global rounds while saved and legacy chats remain predictable', async () => {
   const config = ai.copyAiSettings(ai.initialAiSettings)
   config.chatMaxModelRounds = 3

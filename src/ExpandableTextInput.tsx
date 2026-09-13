@@ -123,9 +123,11 @@ const ExpandableTextInput = forwardRef<HTMLTextAreaElement, ExpandableTextInputP
   }, [open, dictationActive])
 
   useEffect(() => {
-    if (expandedDictation && ['cancelled', 'failed', 'completed'].includes(dictationStatus)) setExpandedDictationOwned(false)
+    // Only a service status change can end an attempt. A restart may still see
+    // the previous terminal status while its caller loads speech settings.
+    if (expandedDictationRef.current && ['cancelled', 'failed', 'completed'].includes(dictationStatus)) setExpandedDictationOwned(false)
     if (openRef.current && attemptedDictationRef.current && dictationStatus === 'failed' && dictationError) setError(dictationError)
-  }, [dictationStatus, dictationError, expandedDictation])
+  }, [dictationStatus, dictationError])
 
   useEffect(() => () => {
     if (expandedDictationRef.current) onCancelDictationRef.current?.()
