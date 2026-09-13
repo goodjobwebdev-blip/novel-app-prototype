@@ -7,7 +7,7 @@ import { markdownTablePreview } from './MarkdownTablePreview'
 import { dialogueHighlight } from './DialogueHighlight'
 import { markdownTableRanges } from './markdown-tables'
 import { syntaxTree } from '@codemirror/language'
-import { Annotation, Compartment, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state'
+import { Annotation, Compartment, EditorState, StateEffect, StateField, Transaction, type Text } from '@codemirror/state'
 import { findTriggerRanges, type CodexMentionTerm } from './codex-trigger-service'
 import { normalizeTranscriptForInsertion } from './stt-service'
 import {
@@ -96,6 +96,7 @@ type ActiveGeneration = {
 
 type ActiveDictation = { id: string; preDocument: string; from: number; to: number; provisional: string }
 const dictationProvisional = Annotation.define<boolean>()
+const externalValueUpdate = Annotation.define<boolean>()
 
 class ListMarkerWidget extends WidgetType {
   constructor(readonly label: string) { super() }
@@ -483,6 +484,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
   const onSelectionChangeRef = useRef(onSelectionChange)
   onSelectionChangeRef.current = onSelectionChange
   const onChangeRef = useRef(onChange)
+  const pendingLocalDocumentsRef = useRef<Text[]>([])
   const blockCompartmentRef = useRef(new Compartment())
   const dialogueCompartmentRef = useRef(new Compartment())
   const onBeatActionRef = useRef(onBeatAction)
@@ -672,6 +674,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
 
   useEffect(() => {
     if (!hostRef.current) return
+    pendingLocalDocumentsRef.current = []
 
     const state = EditorState.create({
       doc: value,
@@ -704,7 +707,10 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
         EditorView.updateListener.of(update => {
           if (update.docChanged) documentRevisionRef.current += 1
           if (update.selectionSet || update.docChanged || update.viewportChanged) reportSelection(update.view)
-          if (update.docChanged && !update.transactions.some((transaction) => transaction.annotation(dictationProvisional))) onChangeRef.current(update.state.doc.toString())
+          if (update.docChanged && !update.transactions.some((transaction) => transaction.annotation(dictationProvisional))) {
+            if (!update.transactions.some((transaction) => transaction.annotation(externalValueUpdate))) pendingLocalDocumentsRef.current.push(update.state.doc)
+            onChangeRef.current(update.state.doc.toString())
+          }
           if (update.docChanged || update.transactions.length) {
             onHistoryChangeRef.current?.({ canUndo: undoDepth(update.state) > 0, canRedo: redoDepth(update.state) > 0 })
           }
@@ -742,10 +748,21 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     const view = viewRef.current
     if (!view) return
     const current = view.state.doc.toString()
-    if (current === value) return
+    if (current === value) {
+      pendingLocalDocumentsRef.current = []
+      return
+    }
+    // A parent render can acknowledge an older onChange after more text has
+    // streamed in. Consume that echo without replacing the newer editor state.
+    const acknowledged = pendingLocalDocumentsRef.current.findIndex(document => document.toString() === value)
+    if (acknowledged >= 0) {
+      pendingLocalDocumentsRef.current.splice(0, acknowledged + 1)
+      return
+    }
+    pendingLocalDocumentsRef.current = []
     view.dispatch({
       changes: { from: 0, to: current.length, insert: value },
-      annotations: Transaction.addToHistory.of(false),
+      annotations: [Transaction.addToHistory.of(false), externalValueUpdate.of(true)],
     })
   }, [value])
 
