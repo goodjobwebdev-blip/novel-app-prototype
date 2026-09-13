@@ -648,9 +648,10 @@ export default function Workspace() {
 
     await ensureBookAiSettings(bookId, loadAiSettings())
     if (!bookOpenIntentRef.current.isCurrent(intent)) return
-    const [book, content] = await Promise.all([
+    const [book, content, contextSettings] = await Promise.all([
       getEntity<BookEntity>(bookId),
       readBookContent(bookId),
+      getBookContextSettings(bookId),
     ])
     if (!bookOpenIntentRef.current.isCurrent(intent)) return
     if (!book || book.type !== 'book') {
@@ -659,6 +660,7 @@ export default function Workspace() {
     }
 
     const scene = content.structural.find((entity) => entity.id === preferredSceneId && entity.type === 'scene')
+      ?? content.structural.find((entity) => entity.id === contextSettings.lastOpenedSceneId && entity.type === 'scene')
       ?? content.structural.find((entity) => entity.type === 'scene')
     if (scene) {
       await rememberLastOpenedScene(book.id, scene.id)
