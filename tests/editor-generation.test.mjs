@@ -56,6 +56,36 @@ test('finishing after the document changes cannot use stale cursor positions or 
 })
 
 for (const placement of ['append', 'replace']) {
+  test(`${placement}: delayed parent echoes cannot roll back a streaming generation`, async () => {
+    const { root, ref, props } = await mount()
+    const emitted = []
+    const controlled = { ...props, onChange: value => emitted.push(value) }
+    try {
+      await act(async () => root.render(React.createElement(MarkdownEditor, controlled)))
+      await act(async () => {
+        assert.ok(ref.current.beginGeneration('generate', placement))
+        ref.current.appendGenerationChunk('First. ')
+        ref.current.appendGenerationChunk('Second. ')
+      })
+      const firstEcho = emitted[0], secondEcho = emitted[1]
+      const latest = ref.current.captureSelection().document
+      // The parent commits the first onChange after the editor has already
+      // received another provider chunk, as can happen during a busy render.
+      await act(async () => root.render(React.createElement(MarkdownEditor, { ...controlled, value: firstEcho })))
+      assert.equal(ref.current.captureSelection().document, latest, 'An acknowledged earlier chunk must not replace newer generated text')
+      await act(async () => ref.current.appendGenerationChunk('Third.'))
+      await act(async () => root.render(React.createElement(MarkdownEditor, { ...controlled, value: secondEcho })))
+      const completed = (placement === 'append' ? 'Original.\n\n' : '') + 'First. Second. Third.'
+      await act(async () => assert.equal(ref.current.finishGeneration('complete').status, 'complete'))
+      await act(async () => root.render(React.createElement(MarkdownEditor, { ...controlled, value: completed })))
+      assert.equal(ref.current.captureSelection().document, completed)
+      await act(async () => assert.equal(ref.current.undo(), true))
+      assert.equal(ref.current.captureSelection().document, 'Original.')
+    } finally { await act(async () => root.unmount()) }
+  })
+}
+
+for (const placement of ['append', 'replace']) {
   test(`${placement}: line breaks split across chunks stay normalized, complete and undo as one passage`, async () => {
     const { root, ref } = await mount()
     try {

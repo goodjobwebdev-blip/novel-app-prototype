@@ -137,6 +137,36 @@ for (const phase of ['sending', 'thinking', 'writing', 'buffered']) {
   })
 }
 
+test('scrolling and moving the cursor during streaming preserve generation and its original insertion point', async t => {
+  let source
+  t.mock.method(globalThis, 'fetch', async () => new Response(new ReadableStream({
+    start(controller) { source = controller; controller.enqueue(encoder.encode(event({ content: 'First passage. ' }))) },
+  })))
+  const { root, scene } = await openWorkspace(settings())
+  try {
+    await click(generateButton())
+    await settle(() => view().state.doc.toString().includes('First passage.'))
+    await act(async () => {
+      view().dispatch({ selection: { anchor: 0 }, scrollIntoView: true })
+      window.dispatchEvent(new dom.window.Event('scroll'))
+      document.querySelector('.cm-scroller').dispatchEvent(new dom.window.Event('scroll', { bubbles: true }))
+    })
+    assert.equal(view().state.selection.main.head, 0)
+    await act(async () => source.enqueue(encoder.encode(event({ content: 'Second passage. ' }))))
+    await settle(() => view().state.doc.toString().includes('Second passage.'))
+    await act(async () => {
+      view().dispatch({ selection: { anchor: 0, head: 8 } })
+      source.enqueue(encoder.encode(event({ content: 'Third passage.' }) + 'data: [DONE]\n\n'))
+      source.close()
+    })
+    await settle(() => !stopButton())
+    const expected = 'Original scene.\n\nFirst passage. Second passage. Third passage.'
+    assert.equal(view().state.doc.toString(), expected)
+    assert.doesNotMatch(document.body.textContent, /scene changed while generation/)
+    await waitSaved(scene.id, expected)
+  } finally { await act(async () => root.unmount()) }
+})
+
 test('a real edit during streaming stops the old run without losing the edit or leaving Stop stuck', async t => {
   let source, requests = 0
   t.mock.method(globalThis, 'fetch', async () => {
