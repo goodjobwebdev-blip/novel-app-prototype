@@ -1169,7 +1169,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   }
 
   function renderWorkspaceCards(message: ChatMessageEntity) {
-    return <div key={message.id}>
+    return <div>
               {message.documentEdits?.length ? <div className="chat-document-edits">{message.documentEdits.map((proposal) => <DocumentEditCard key={proposal.id} editor={<ProposalDraftEditor message={message} field="documentEdits" proposal={proposal} onSaved={reloadMessages} />} proposal={proposal} onApply={() => { void applyProposal(message, proposal) }} onReject={() => { void rejectProposal(message, proposal) }} />)}</div> : null}
               {message.codexCreations?.length ? <div className="chat-document-edits">{message.codexCreations.map((proposal) => <CodexCreationCard key={proposal.id} editor={<ProposalDraftEditor message={message} field="codexCreations" proposal={proposal} onSaved={reloadMessages} />} proposal={proposal} onCreate={() => { void createCodexProposal(message, proposal) }} onReject={() => { void rejectCodexProposal(message, proposal) }} />)}</div> : null}
               {message.outlineActions?.length ? <div className="chat-document-edits">{message.outlineActions.map((proposal) => <OutlineActionCard key={proposal.id} editor={<ProposalDraftEditor message={message} field="outlineActions" proposal={proposal} onSaved={reloadMessages} />} proposal={proposal} onApply={() => { void applyOutlineProposal(message, proposal) }} onReject={() => { void rejectOutlineProposal(message, proposal) }} />)}</div> : null}
@@ -1199,14 +1199,16 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       <div className="messages">
         {!messages.length && !generating && <div className="chat-first-message"><Feather aria-hidden="true" /><strong>Start this conversation</strong><p>The model, prompt, and context are saved independently for this chat.</p></div>}
         {groupChatAnswers(messages).map(group => group.role === 'user' ? renderRound(group.messages[0]) : <section className="chat-answer-group" key={group.id} aria-label="Assistant answer">
-          {renderRound(group.messages.at(-1)!)}
+          {group.messages.map(message => <div key={message.id}>
+            {renderRound(message)}
+            {(message.brainstorms ?? []).map(brainstorm => <BrainstormCard key={brainstorm.id} message={message} brainstorm={brainstorm} disabled={generating} onSaved={reloadMessages} onSend={text => isCurrentChat({ id: message.parentId, bookId: message.bookId }) ? send(text) : Promise.resolve(false)} />)}
+            {renderWorkspaceCards(message)}
+            {message.directImageRequest && <section className="chat-media-card image-ui"><strong>Requested image</strong><ImageJobs messageId={message.id} direct /></section>}
+            {(message.imageGenerations ?? []).map(proposal => <ImageProposalCard key={proposal.id} message={message} proposal={proposal} />)}
+          </div>)}
           {(group.messages.length > 1 || group.messages.some(message => message.toolActivity?.length)) && <details className="chat-answer-activity"><summary>Activity · {group.messages.length} {group.messages.length === 1 ? 'round' : 'rounds'}</summary>
-            {group.messages.map((message, index) => <div className="chat-activity-round" key={message.id}><small>Round {message.roundNumber ?? index + 1}{message.toolActivity?.length ? ` · ${message.toolActivity.join(' · ')}` : ''}</small>{index < group.messages.length - 1 && renderRound(message)}</div>)}
+            {group.messages.map((message, index) => <div className="chat-activity-round" key={message.id}><small>Round {message.roundNumber ?? index + 1}{message.toolActivity?.length ? ` · ${message.toolActivity.join(' · ')}` : ''}</small></div>)}
           </details>}
-          {group.messages.flatMap(message => (message.brainstorms ?? []).map(brainstorm => <BrainstormCard key={brainstorm.id} message={message} brainstorm={brainstorm} disabled={generating} onSaved={reloadMessages} onSend={text => isCurrentChat({ id: message.parentId, bookId: message.bookId }) ? send(text) : Promise.resolve(false)} />))}
-          {group.messages.map(renderWorkspaceCards)}
-          {group.messages.filter(message => message.directImageRequest).map(message => <section key={message.id} className="chat-media-card image-ui"><strong>Requested image</strong><ImageJobs messageId={message.id} direct /></section>)}
-          {group.messages.flatMap(message => (message.imageGenerations ?? []).map(proposal => <ImageProposalCard key={proposal.id} message={message} proposal={proposal} />))}
           {group.messages.length > 1 && <div className="message-tools chat-answer-tools"><button type="button" onClick={() => { void copyMessage({ ...group.messages.at(-1)!, content: answerProse(group.messages) }) }}>Copy full answer</button><button type="button" onClick={() => { void readAloud({ ...group.messages.at(-1)!, content: answerProse(group.messages) }) }}>Read full answer aloud</button></div>}
         </section>)}
         {generating && <article className="message assistant streaming"><div className="chat-message-stack chat-live-generation">

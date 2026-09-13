@@ -140,6 +140,56 @@ test('closing invalidates delayed transcription and start failures stay inside t
   } finally { await act(async () => root.unmount()) }
 })
 
+for (const previousStatus of ['completed', 'cancelled', 'failed']) {
+  test(`expanded dictation can restart after ${previousStatus} while Chat settings load asynchronously`, async () => {
+    const applied = [], captured = []
+    let releaseStart
+    function RestartHarness() {
+      const [status, setStatus] = React.useState('idle')
+      const targetRef = React.useRef(null)
+      return React.createElement(ExpandableTextInput, {
+        value: 'Draft', onChange: value => applied.push(value), 'aria-label': 'Chat message',
+        dictationStatus: status,
+        dictationError: status === 'failed' ? 'Previous session failed' : undefined,
+        onDictate: async target => {
+          targetRef.current = target
+          captured.push(target)
+          // Chat loads book speech settings before the service emits its new status.
+          if (captured.length === 2) await new Promise(resolve => { releaseStart = resolve })
+          setStatus('recording-live')
+          return true
+        },
+        onStopDictation: () => {
+          const status = captured.length === 1 ? previousStatus : 'completed'
+          if (status === 'completed') targetRef.current.setValue(`${targetRef.current.value} voice ${captured.length}`)
+          setStatus(status)
+        },
+      })
+    }
+    const root = createRoot(document.getElementById('root'))
+    try {
+      await act(async () => root.render(React.createElement(RestartHarness)))
+      await click('Expand Chat message')
+      await click('Dictation')
+      await click('Stop dictation')
+      const retained = previousStatus === 'completed' ? 'Draft voice 1' : 'Draft'
+      assert.equal(document.querySelector('.expandable-text-dialog textarea').value, retained)
+      await click('Dictation')
+      assert.equal(button('Apply').disabled, true, 'The new attempt retains the expanded input while settings load')
+      assert.equal(document.querySelector('[role="alert"]'), null, 'A previous error does not return during restart')
+      await act(async () => releaseStart())
+      assert.ok(button('Stop dictation'), 'The second live session retains its recording controls')
+      assert.equal(captured[1].value, retained, 'The next session appends to the current expanded draft')
+      await click('Stop dictation')
+      await click('Apply')
+      assert.deepEqual(applied, [`${retained} voice 2`])
+    } finally {
+      releaseStart?.()
+      await act(async () => root.unmount())
+    }
+  })
+}
+
 test('expanded drafts survive keyboard viewport changes and retain prompt hints', async () => {
   const viewport = new dom.window.EventTarget()
   viewport.height = 760
