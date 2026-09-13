@@ -437,9 +437,15 @@
 
 .expandable-text-backdrop {
   position: fixed;
-  z-index: 200;
   inset: var(--expanded-viewport-top, 0px) 0 auto;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: none;
+  max-height: none;
   height: var(--expanded-viewport-height, 100dvh);
+  margin: 0;
+  border: 0;
+  color: var(--ink);
   padding: max(18px, env(safe-area-inset-top)) 14px max(18px, env(safe-area-inset-bottom));
   background: rgba(8, 9, 8, 0.72);
   backdrop-filter: blur(10px);
@@ -448,6 +454,9 @@
   place-items: center;
   overflow: auto;
 }
+
+.expandable-text-backdrop:not([open]) { display: none; }
+.expandable-text-backdrop::backdrop { background: transparent; }
 
 .expandable-text-dialog {
   width: min(100%, 720px);
