@@ -648,10 +648,9 @@ export default function Workspace() {
 
     await ensureBookAiSettings(bookId, loadAiSettings())
     if (!bookOpenIntentRef.current.isCurrent(intent)) return
-    const [book, content, contextSettings] = await Promise.all([
+    const [book, content] = await Promise.all([
       getEntity<BookEntity>(bookId),
       readBookContent(bookId),
-      getBookContextSettings(bookId),
     ])
     if (!bookOpenIntentRef.current.isCurrent(intent)) return
     if (!book || book.type !== 'book') {
@@ -659,9 +658,17 @@ export default function Workspace() {
       return
     }
 
+    const children = (parentId: string, type: StructuralEntityType) => content.structural
+      .filter((entity) => entity.parentId === parentId && entity.type === type)
+      .sort((a, b) => a.order - b.order)
+    // Match the Outline: ordered Acts, then chapters without an Act.
+    const chapters = [
+      ...children(book.id, 'act').flatMap((act) => children(act.id, 'chapter')),
+      ...children(book.id, 'chapter'),
+    ]
     const scene = content.structural.find((entity) => entity.id === preferredSceneId && entity.type === 'scene')
-      ?? content.structural.find((entity) => entity.id === contextSettings.lastOpenedSceneId && entity.type === 'scene')
-      ?? content.structural.find((entity) => entity.type === 'scene')
+      ?? chapters.flatMap((chapter) => children(chapter.id, 'scene')).at(-1)
+      ?? content.structural.filter((entity) => entity.type === 'scene').sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).at(-1)
     if (scene) {
       await rememberLastOpenedScene(book.id, scene.id)
       if (!bookOpenIntentRef.current.isCurrent(intent)) return
