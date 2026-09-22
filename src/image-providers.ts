@@ -203,7 +203,7 @@ async function pruna(job: ImageJob, key: string, signal: AbortSignal, onSubmitte
   let id = job.providerJobId
   if (!id) {
     const uploaded = await Promise.all((job.sources ?? []).map((source) => uploadPrunaSource(source, key, signal, fetcher)))
-    const data = await jsonResponse(await fetcher(`${PRUNA}/v1/predictions`, { method: 'POST', headers: { apikey: key, Model: model.id, 'Try-Sync': 'true', 'Content-Type': 'application/json' }, credentials: 'omit', redirect: 'error', signal, body: JSON.stringify({ input: prunaInput(job, uploaded) }) }), key)
+    const data = await jsonResponse(await fetcher(`${PRUNA}/v1/predictions`, { method: 'POST', headers: { apikey: key, Model: model.id, 'Content-Type': 'application/json' }, credentials: 'omit', redirect: 'error', signal, body: JSON.stringify({ input: prunaInput(job, uploaded) }) }), key)
     const state = status(data)
     if (SUCCESS.includes(state)) return data
     if (FAILURE.includes(state)) throw new Error(safeImageError(new Error(providerError(data, 'Pruna generation failed.')), key))
@@ -236,7 +236,15 @@ export async function generateProviderImage(job: ImageJob, key: string, signal: 
   }
   if (job.provider === 'nanogpt') return decodeOutput(await nano(job, key, signal, onSubmitted, fetcher, pause), 'nanogpt', key, signal, fetcher, kind)
   const model = prunaImageModels.find((candidate) => candidate.id === job.model)
-  return decodeOutput(await pruna(job, key, signal, onSubmitted, fetcher, pause), 'pruna', key, signal, fetcher, kind, model?.cost)
+  const prunaFetch: typeof fetch = async (input, init) => {
+    try { return await fetcher(input, init) }
+    catch (error) {
+      signal.throwIfAborted()
+      if (!(error instanceof TypeError)) throw error
+      throw new Error('Could not reach Pruna. Check your connection. If other providers work, Pruna may be blocking this site through its browser CORS policy. Ask Pruna to allow this site’s origin, or use a trusted server integration. Check your Pruna history before starting a new generation; the request may already have been accepted.')
+    }
+  }
+  return decodeOutput(await pruna(job, key, signal, onSubmitted, prunaFetch, pause), 'pruna', key, signal, prunaFetch, kind, model?.cost)
 }
 async function prepareVideo(video: Blob) {
   const url = URL.createObjectURL(video)
