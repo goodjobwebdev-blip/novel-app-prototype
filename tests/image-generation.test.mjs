@@ -274,7 +274,7 @@ test('Pruna submits an aspect ratio, persists async predictions, and decodes out
     const result = await providers.generateProviderImage(job('pruna', resume ? { providerJobId: 'existing-id' } : {}), 'pruna-key', new AbortController().signal, async (id) => submitted.push(id), async (url, init) => {
       calls.push({ url, init })
       if (init.method === 'POST') {
-        assert.equal(init.headers.Model, 'p-image'); assert.equal(init.headers['Try-Sync'], 'true')
+        assert.equal(init.headers.Model, 'p-image'); assert.equal(Object.keys(init.headers).some((name) => name.toLowerCase() === 'try-sync'), false)
         assert.deepEqual(JSON.parse(init.body), { input: { prompt: 'A gate', aspect_ratio: '1:1' } })
         return response({ id: 'existing-id' })
       }
@@ -618,4 +618,31 @@ test('failed queue persistence rolls back approval and rejected proposals cannot
   await store.setImageProposal(f.message.id, f.proposal.id, 'rejected')
   await assert.rejects(store.enqueueImageProposal(draft, f.origin), /Accept/)
   assert.equal((await store.listImageJobs()).length, 0)
+})
+
+
+test('Pruna network failures explain browser CORS without leaking keys or resubmitting', async () => {
+  for (const stage of ['submit', 'status', 'delivery']) {
+    let submissions = 0
+    const submitted = []
+    await assert.rejects(providers.generateProviderImage(job('pruna'), 'secret', new AbortController().signal, async (id) => submitted.push(id), async (url, init) => {
+      if (init.method === 'POST') {
+        submissions++
+        if (stage === 'submit') throw new TypeError('Failed to fetch secret')
+        return response({ id: 'saved-id' })
+      }
+      if (url.includes('/status/') && stage !== 'status') return response({ status: 'succeeded', generation_url: '/v1/predictions/delivery/saved-id' })
+      throw new TypeError('Failed to fetch secret')
+    }), (error) => error.message.includes('CORS') && !error.message.includes('secret'))
+    assert.equal(submissions, 1)
+    assert.deepEqual(submitted, stage === 'submit' ? [] : ['saved-id'])
+  }
+})
+
+test('Pruna cancellation stays an abort instead of a CORS error', async () => {
+  const controller = new AbortController()
+  await assert.rejects(providers.generateProviderImage(job('pruna'), 'key', controller.signal, async () => {}, async () => {
+    controller.abort()
+    throw new TypeError('Failed to fetch')
+  }), { name: 'AbortError' })
 })
