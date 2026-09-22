@@ -33,6 +33,14 @@ Sources: [NanoGPT image models](https://docs.nano-gpt.com/api-reference/endpoint
 
 Requests go directly from the browser to the selected provider. Provider CORS policy, account/model access, API changes, and balance still apply. Automated tests use provider fixtures; they do not make paid requests or prove live account access.
 
+### Pruna browser connectivity
+
+Pruna submissions use asynchronous mode (without `Try-Sync`) and save the prediction ID before polling. The `Try-Sync` header is not included in Pruna's observed CORS allowed headers, so sending it from a browser can cause `Failed to fetch` before submission.
+
+Removing that header alone does not guarantee browser access. On 2026-09-22, an OPTIONS preflight for `https://goodjobwebdev-blip.github.io` returned allowed headers `Accept,Authorization,Content-Type,apikey,Model`, but no `Access-Control-Allow-Origin`, even without `Try-Sync`. Pruna must allow the deployed site's origin for prediction, upload, status, and delivery requests, or the integration needs a trusted authenticated server. GitHub Pages cannot run that server. Do not use a public CORS proxy or `no-cors`: keys and source images must remain private, and opaque responses cannot be read by the app.
+
+Network errors now explain the possible CORS restriction. A browser fetch error cannot distinguish CORS from connectivity or a rejected redirect. Check Pruna's prediction history before starting a new generation to avoid duplicate charges; a recorded prediction ID can resume the existing job.
+
 ## Queue, badges, and recovery
 
 The Chat **Generation tool** popup contains a live queue for that proposal, including each queued prompt, progress, results, Keep/Discard, retry, and cancel controls. It stays open after Generate so you can edit the next draft, queue more generations, and review results without reopening the tool. Closing it preserves the draft and shows the same jobs below the chat proposal.
