@@ -23,7 +23,7 @@ test('AI settings expose one local Fake model without API key or endpoint fields
   assert.match(app, /fake: 'Fake \(testing\)'/)
   assert.match(app, /settings\.provider === 'fake' \? \{ models: \[FAKE_PROVIDER_MODEL\] \}/)
   assert.match(app, /if \(requestSettings\.provider === 'fake'\) \{[\s\S]*setModels\(\[FAKE_PROVIDER_MODEL\]\)[\s\S]*No network request was made/)
-  assert.match(app, /settings\.provider !== 'fake' && <label><span>API key/)
+  assert.match(app, /settings\.provider !== 'fake' && <label><span>\{settings\.provider === 'litellm' \? 'LiteLLM API key' : 'API key'\}/)
   assert.doesNotMatch(app, /settings\.provider === 'fake'.*Endpoint URL/)
   assert.match(app, /Testing provider — responses, errors, reasoning, and tool calls are generated locally and deterministically\. No text-AI network request is sent\./)
   assert.match(app, /Session only · last 20 Fake requests/)
@@ -39,8 +39,8 @@ test('Story, Codex, and Summary use the shared text provider boundary and diagno
   assert.match(textProvider, /nanoGPTCompletionMessages\(request\)/)
 })
 
-test('Autotitle accepts Fake and routes through the same local text provider boundary', () => {
-  assert.match(autotitle, /settings\.provider !== 'nanogpt' && settings\.provider !== 'fake'/)
+test('Autotitle accepts LiteLLM and Fake through the shared text provider boundary', () => {
+  assert.match(autotitle, /\['nanogpt', 'litellm', 'fake'\]\.includes\(settings\.provider\)/)
   assert.match(autotitle, /fetchTextProviderModelContextLength/)
   assert.match(autotitle, /streamTextProviderCompletion\(\{[\s\S]*task: 'autotitle'/)
 })
@@ -49,13 +49,14 @@ test('Chat loads Fake locally, skips key validation, and dispatches Fake before 
   assert.match(chatService, /if \(settings\.provider === 'fake'\) return \[\{ \.\.\.FAKE_PROVIDER_MODEL \}\]/)
   assert.match(chatFeature, /settings\.provider !== 'fake' && !settings\.apiKey\.trim\(\)/)
   const fakeBranch = chatApi.indexOf("if (request.provider === 'fake')")
-  const networkFetch = chatApi.indexOf('const response = await fetch(')
+  const networkFetch = chatApi.indexOf('const response = await fetchCompletionResponse(')
   assert.ok(fakeBranch >= 0 && networkFetch > fakeBranch)
   assert.match(chatApi, /const providerMessages = request\.messages[\s\S]*streamFakeProvider\(\{[\s\S]*messages: providerMessages,[\s\S]*tools: request\.tools,[\s\S]*thinking: request\.thinking/)
   assert.doesNotMatch(chatApi, /cacheFriendlyMessages|reorderSelectedBookContext/)
 })
 
-test('unsupported real providers remain unsupported for Story/Codex/Summary while Chat keeps existing provider behavior', () => {
-  assert.match(textProvider, /if \(request\.provider !== 'nanogpt'\) \{\n    throw new Error\('Text generation currently supports NanoGPT or Fake \(testing\) only\.'\)/)
-  assert.match(workspace, /settings\.provider !== 'nanogpt' && settings\.provider !== 'fake'/)
+test('LiteLLM routes Story, Codex, and Summary through the shared OpenAI-compatible chat transport', () => {
+  assert.match(textProvider, /if \(request\.provider === 'litellm'\) \{[\s\S]*return streamChatCompletion\(\{/)
+  assert.match(textProvider, /messages: textProviderMessages\(request\) as ChatCompletionMessage\[\]/)
+  assert.match(workspace, /\['nanogpt', 'litellm', 'fake'\]\.includes\(settings\.provider\)/)
 })

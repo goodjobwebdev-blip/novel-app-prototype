@@ -49,7 +49,7 @@ export async function generateTimelineSummary(bookId: string, entryId: string, c
   if (checkpointId !== 'baseline' && !checkpoint) throw new Error('This checkpoint no longer exists.')
   const sourceText = proseText(checkpoint?.content ?? entry.content), orderSignature = timelineOrderSignature(world)
   const settings = await getBookAiSettings(bookId, loadAiSettings().favorites)
-  if (!settings.supportModel || (settings.provider !== 'fake' && (settings.provider !== 'nanogpt' || !settings.apiKey))) throw new Error('Configure a Support model before summarizing.')
+  if (!settings.supportModel || !['nanogpt', 'litellm', 'fake'].includes(settings.provider) || (settings.provider !== 'fake' && !settings.apiKey.trim())) throw new Error('Configure a supported provider and Support model before summarizing.')
   let content = ''
   await streamTextProviderCompletion({ provider: settings.provider, task: 'summary', thinkingEffort: settings.supportThinkingEffort, apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.supportModel, systemPrompt: 'Summarize only the supplied story state. Preserve established facts and uncertainty. Do not infer future events or add outside knowledge. Return only the summary.', userMessage: sourceText }, chunk => { content += chunk }, signal)
   signal.throwIfAborted()

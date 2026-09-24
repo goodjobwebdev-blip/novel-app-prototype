@@ -27,7 +27,7 @@ export async function enhanceMediaPrompt(draft: MediaGenerationDraft, capability
   if (!draft.prompt.trim()) throw new Error('Enter an original prompt first.')
   const model = settings.supportModel.trim()
   if (!model) throw new Error('Choose a Support text model in AI settings to enhance prompts.')
-  if (!['nanogpt', 'fake'].includes(settings.provider)) throw new Error('Choose a supported text provider in AI settings.')
+  if (!['nanogpt', 'litellm', 'fake'].includes(settings.provider)) throw new Error('Choose a supported text provider in AI settings.')
   if (settings.provider !== 'fake' && !settings.apiKey.trim()) throw new Error('Add your text provider API key in AI settings.')
   const request = assembleMediaEnhancementRequest(draft, capability)
   const limit = settings.supportModelContextLength ?? await fetchTextProviderModelContextLength({ provider: settings.provider, apiKey: settings.apiKey, baseUrl: settings.baseUrl, model }).catch(() => undefined)

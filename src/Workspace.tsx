@@ -195,7 +195,7 @@ type GenerationDetails = NanoGPTStreamMetadata & {
   action: 'Generate' | 'Regenerate' | 'Summarize' | 'Re-summarize'
   targetTitle: string
   requestedModel: string
-  provider: 'NanoGPT' | 'Fake (testing)'
+  provider: 'NanoGPT' | 'LiteLLM' | 'Fake (testing)'
   startedAt: number
   finishedAt?: number
   status: GenerationPhase | 'complete' | 'cancelled' | 'error'
@@ -1366,12 +1366,12 @@ export default function Workspace() {
       return
     }
     if (activeDocumentIdRef.current !== activeDocument.id || currentBookIdRef.current !== currentBook.id) return
-    if (settings.provider !== 'nanogpt' && settings.provider !== 'fake') {
-      showToast('Text generation currently supports NanoGPT or Fake (testing) only. Choose one in Book settings.')
+    if (!['nanogpt', 'litellm', 'fake'].includes(settings.provider)) {
+      showToast('Text generation currently supports NanoGPT, LiteLLM, or Fake (testing). Choose one in Book settings.')
       return
     }
-    if (settings.provider === 'nanogpt' && !settings.apiKey.trim()) {
-      showToast('Add your NanoGPT API key in Book settings before generating.')
+    if (settings.provider !== 'fake' && !settings.apiKey.trim()) {
+      showToast(`Add your ${settings.provider === 'litellm' ? 'LiteLLM' : 'NanoGPT'} API key in Book settings before generating.`)
       return
     }
     const selectedModel = isCodex ? settings.codexModel.trim() || settings.mainModel.trim() : settings.mainModel.trim()
@@ -1535,7 +1535,7 @@ export default function Workspace() {
       action: mode === 'regenerate' ? 'Regenerate' : 'Generate',
       targetTitle: activeDocument.title,
       requestedModel: requestSnapshot.model,
-      provider: requestSnapshot.provider === 'fake' ? 'Fake (testing)' : 'NanoGPT',
+      provider: requestSnapshot.provider === 'fake' ? 'Fake (testing)' : requestSnapshot.provider === 'litellm' ? 'LiteLLM' : 'NanoGPT',
       estimatedRequestTokens: requestSnapshot.estimatedRequestTokens,
       modelContextTokens: requestSnapshot.modelContextTokens,
     })
@@ -1671,7 +1671,7 @@ export default function Workspace() {
         action: action === 'resummarize' ? 'Re-summarize' : 'Summarize',
         targetTitle: source.source.title,
         requestedModel: settings.supportModel,
-        provider: settings.provider === 'fake' ? 'Fake (testing)' : 'NanoGPT',
+        provider: settings.provider === 'fake' ? 'Fake (testing)' : settings.provider === 'litellm' ? 'LiteLLM' : 'NanoGPT',
         estimatedRequestTokens: diagnostics.requestTokens,
         modelContextTokens: diagnostics.modelContextTokens,
         startedAt: generationStartedAtRef.current,

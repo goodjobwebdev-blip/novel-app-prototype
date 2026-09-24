@@ -6,7 +6,7 @@ Images opened from the Library have no book context. Opening from the editor or 
 
 ## Set up and generate
 
-1. Open the Images gear, then in **Settings > Images** expand **Provider API keys**. An explicit visual-generation key takes priority. NanoGPT and OpenAI otherwise use the matching provider key in the originating book’s saved AI settings, then global AI defaults. Pruna has a separate key.
+1. Open the Images gear, then in **Settings > Images** expand **Provider API keys**. An explicit visual-generation key takes priority. NanoGPT and OpenAI otherwise use the matching provider key in the originating book’s saved AI settings, then global AI defaults. Pruna uses the LiteLLM connection from AI settings; its optional image-specific LiteLLM key overrides the AI-settings LiteLLM key.
 2. Expand **Add a favorite model**, then refresh models or load the curated Pruna catalog. Favorites record explicit T2I, I2I, T2V, and I2V capabilities, source limits, dimensions, video resolutions, and defaults. OpenAI GPT Image 2.5 favorites also support Low, Medium, High, Extra high, Maximum, and Auto quality.
 3. Choose **Text to image**, **Image to image**, **Text to video**, or **Image to video**. Source tasks accept uploads and kept gallery/Codex images. Selected source bytes are copied into the queued request and are not uploaded until Generate is pressed.
 4. Chat uses `propose_image_generation` with an optional `task`. Chat creates an editable proposal only; the user reviews the draft, selects source images if needed, and presses **Generate** to approve and queue it in one action. Approval and the queued request are saved together; a failed save leaves the proposal unapproved.
@@ -31,13 +31,21 @@ The Pruna catalog displays a flat estimated USD cost per successful image: `$0.0
 
 Sources: [NanoGPT image models](https://docs.nano-gpt.com/api-reference/endpoint/image-models), [OpenAI image generation and editing](https://platform.openai.com/docs/guides/images/image-generation), and the checked/curated Pruna API contracts used by the product.
 
-Requests go directly from the browser to the selected provider. Provider CORS policy, account/model access, API changes, and balance still apply. Automated tests use provider fixtures; they do not make paid requests or prove live account access.
+NanoGPT and OpenAI requests go directly from the browser to the selected provider. Pruna requests go through the configured LiteLLM gateway because Pruna does not allow this app’s browser origin through CORS. Provider CORS policy, account/model access, API changes, and balance still apply. Automated tests use provider fixtures; they do not make paid requests or prove live account access.
 
 ### Pruna browser connectivity
 
-Pruna submissions use asynchronous mode (without `Try-Sync`) and save the prediction ID before polling. Direct browser access is retained as a development fallback, but Pruna does not return an `Access-Control-Allow-Origin` header for the deployed GitHub Pages origin.
+Pruna submissions use asynchronous mode (without `Try-Sync`) and save the prediction ID before polling. Upload, prediction, status, and authenticated delivery requests all use a LiteLLM pass-through route, while Pruna file URLs embedded in prediction bodies remain upstream Pruna URLs.
 
-Production therefore supports a LiteLLM pass-through gateway. Set the public build variable `VITE_PRUNA_GATEWAY_URL` to the gateway prefix, such as `https://litellm.example.com/pruna`. The app sends the key entered under **Pruna gateway access key** as a LiteLLM Bearer token; the Pruna key stays on the VPS. Upload, prediction, status, and authenticated delivery requests all use the gateway, while Pruna file URLs embedded in prediction bodies remain upstream Pruna URLs.
+In **Settings > AI > Provider**:
+
+1. Select **LiteLLM**.
+2. Set **LiteLLM base URL** to `https://webdev.serveblog.net:9447/v1`.
+3. Enter a restricted LiteLLM virtual key under **LiteLLM API key**.
+
+The app derives the Pruna gateway from the URL origin, so that text base URL becomes `https://webdev.serveblog.net:9447/pruna`. This is runtime configuration stored in the browser; no Vite variable or deployment secret is required.
+
+In **Settings > Images > Provider API keys**, **Optional LiteLLM API key for images** may contain a separate restricted virtual key. Leave it empty to use the LiteLLM key saved in AI settings.
 
 A matching LiteLLM configuration is:
 
@@ -53,14 +61,14 @@ general_settings:
         apikey: "os.environ/PRUNA_API_KEY"
 ```
 
-Set these LiteLLM process environment variables without exposing them to the Vite build:
+Set these variables only in the LiteLLM process environment on the VPS; do not expose them to Vite or this repository:
 
 ```dotenv
-PRUNA_API_KEY=<provider secret>
-LITELLM_CORS_ORIGINS=https://goodjobwebdev-blip.github.io
+PRUNA_API_KEY=<Pruna provider secret>
+LITELLM_CORS_ORIGINS=https://webdev.serveblog.net:9446,https://goodjobwebdev-blip.github.io
 ```
 
-The gateway must be available over HTTPS. Confirm that an unauthenticated request to the pass-through route returns `401`; custom pass-through authentication can depend on the installed LiteLLM version or edition. Never use the LiteLLM master key in the browser. Use a restricted virtual key with a small budget and rate limits. For GitHub Pages, create the repository Actions variable `PRUNA_GATEWAY_URL`; `.github/workflows/deploy.yml` passes it to Vite during the build. For local development, copy `.env.example` to `.env.local` and set the same public gateway URL.
+CORS origins contain only scheme, hostname, and port—not the GitHub Pages `/novel-app-prototype/` path. The gateway must be available over HTTPS. Confirm that an unauthenticated request to the pass-through route returns `401`; custom pass-through authentication can depend on the installed LiteLLM version or edition. Never use the LiteLLM master key in the browser. Use restricted virtual keys with small budgets and rate limits.
 
 A browser network error can still represent gateway CORS, connectivity, TLS, or a rejected redirect. Check Pruna's prediction history before starting a new generation to avoid duplicate charges; a recorded prediction ID can resume the existing job. Do not use a public CORS proxy or `no-cors`: source images are private and opaque responses cannot be read by the app.
 

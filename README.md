@@ -10,7 +10,7 @@ Working behavior on `main` includes:
 
 - local books, shared series, Acts, Chapters, Scenes, Notes, Codex entries, summaries, Chats, and Chat messages persisted in IndexedDB;
 - Markdown editing with autosave, local document snapshots, and editor undo/redo integration;
-- book-scoped AI settings plus global defaults for OpenRouter, nano-gpt.com, OpenAI, and OpenAI-compatible endpoints;
+- book-scoped AI settings plus global defaults for OpenRouter, nano-gpt.com, OpenAI, LiteLLM, and OpenAI-compatible endpoints;
 - Main, Support, optional Codex, and optional Chat model selection (new chats use Chat when selected, otherwise Main), cached provider model lists, favorites, editable prompts, and configurable streamed-writing pace;
 - Scene continuation, summary generation, and whole-body Codex generation;
 - generation-type-specific Context Management with automatic context, explicit additional context, model-budget checks, and a rendered request preview for Story, Codex, and Chat;
@@ -47,7 +47,7 @@ In **AI settings > Models**, choose a model role and its **Thinking effort**. De
 
 In a chat's **Generation settings**, enable **Customize thinking** and choose an effort. It applies to the next Send, regeneration, or Continue and stays fixed across that response's tool rounds. Disabling customization preserves the selected effort for later and sends no reasoning override; the provider may still reason by default. Legacy chats retain their previous Thinking toggle and use Provider default until an effort is selected.
 
-Text generation uses the Main effort for writing and quick tools, Codex effort for worldbuilding, and Support effort for summaries and titles. NanoGPT and OpenRouter receive `reasoning.effort`; OpenAI and custom OpenAI-compatible chat endpoints receive `reasoning_effort`. Provider default omits an explicit effort. Not every model supports every level, and unsupported settings may be rejected by the provider. Fake (testing) records the selected effort in its session trace without making a network request.
+Text generation uses the Main effort for writing and quick tools, Codex effort for worldbuilding, and Support effort for summaries and titles. NanoGPT and OpenRouter receive `reasoning.effort`; OpenAI, LiteLLM, and custom OpenAI-compatible chat endpoints receive `reasoning_effort`. Provider default omits an explicit effort. Not every model supports every level, and unsupported settings may be rejected by the provider. Fake (testing) records the selected effort in its session trace without making a network request.
 
 Provider references: [NanoGPT reasoning](https://docs.nano-gpt.com/api-reference/miscellaneous/extended-thinking), [OpenRouter reasoning](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens), [OpenAI Chat Completions](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create).
 

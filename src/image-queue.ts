@@ -1,17 +1,21 @@
 import { checkStorageHeadroom } from './illustration-image'
 import { loadAiSettings } from './ai-settings'
 import { getBookAiSettings } from './persistence'
-import { IMAGE_PROVIDERS, resolveImageKey } from './image-settings'
+import { IMAGE_PROVIDERS, resolveImageKey, resolvePrunaGatewayUrl } from './image-settings'
 import { claimImageJob, completeImageJob, getEntity, IMAGE_STORE_CHANGED, listImageJobs, notifyImageStore, patchOwnedImageJob, recoverImageJobs } from './image-store'
 import { generateProviderImage, prepareGeneratedImage, safeImageError } from './image-providers'
 import { IMAGE_QUEUE_CONCURRENCY, generationTask, type ImageJob, type ImageProvider } from './image-generation-types'
 
 const active = new Map<string, AbortController>()
 let stopQueue: (() => void) | undefined
-export type ImageQueueDependencies = { generate: typeof generateProviderImage; prepare: typeof prepareGeneratedImage; key: (job: ImageJob) => Promise<string> }
+export type ImageQueueDependencies = { generate: typeof generateProviderImage; prepare: typeof prepareGeneratedImage; key: (job: ImageJob) => Promise<string | { key: string; gatewayUrl: string }> }
 const dependencies: ImageQueueDependencies = {
   generate: generateProviderImage, prepare: prepareGeneratedImage,
-  key: async (job) => resolveImageKey(job.provider, undefined, job.bookId ? await getBookAiSettings(job.bookId, loadAiSettings().favorites) : loadAiSettings()),
+  key: async (job) => {
+    const ai = job.bookId ? await getBookAiSettings(job.bookId, loadAiSettings().favorites) : loadAiSettings()
+    const key = resolveImageKey(job.provider, undefined, ai)
+    return job.provider === 'pruna' ? { key, gatewayUrl: resolvePrunaGatewayUrl(ai) } : key
+  },
 }
 async function runClaimedImageJob(job: ImageJob, owner: string, deps: ImageQueueDependencies) {
   const controller = new AbortController()
@@ -23,8 +27,9 @@ async function runClaimedImageJob(job: ImageJob, owner: string, deps: ImageQueue
     if (job.messageId && !await getEntity(job.messageId)) throw new Error('The source chat message was deleted.')
     const video = generationTask(job).endsWith('video')
     await checkStorageHeadroom((video ? 200 : 20) * 1024 * 1024)
-    key = await deps.key(job)
-    const output = await deps.generate(job, key, AbortSignal.any([controller.signal, AbortSignal.timeout((video ? 20 : 10) * 60_000)]), async (id) => {
+    const credentials = await deps.key(job)
+    key = typeof credentials === 'string' ? credentials : credentials.key
+    const output = await deps.generate(job, credentials, AbortSignal.any([controller.signal, AbortSignal.timeout((video ? 20 : 10) * 60_000)]), async (id) => {
       if (!await patchOwnedImageJob(job.id, owner, { providerJobId: id })) throw new Error('The job was cancelled before its provider ID could be saved.')
     })
     controller.signal.throwIfAborted()

@@ -10,8 +10,8 @@ import { fetchTextProviderModelContextLength, streamTextProviderCompletion, text
 export async function prepareSceneBeatRequest(input: { bookId: string; book: BookPromptValues; scene: StructuralEntity; source: string; from: number; to: number; instruction: string }, signal: AbortSignal) {
   const settings = await getBookAiSettings(input.bookId, loadAiSettings().favorites)
   signal.throwIfAborted()
-  if (settings.provider !== 'fake' && settings.provider !== 'nanogpt') throw new Error('Choose a text provider in Book AI settings.')
-  if (settings.provider === 'nanogpt' && !settings.apiKey.trim()) throw new Error('Add your API key in Book AI settings.')
+  if (!['nanogpt', 'litellm', 'fake'].includes(settings.provider)) throw new Error('Choose a text provider in Book AI settings.')
+  if (settings.provider !== 'fake' && !settings.apiKey.trim()) throw new Error('Add your API key in Book AI settings.')
   const model = settings.mainModel.trim()
   if (!model) throw new Error('Choose a Main model in Book AI settings.')
   const composition = settings.promptCompositions.story

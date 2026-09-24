@@ -47,8 +47,8 @@ export async function prepareSynonymRequest(capture: QuickToolCapture, existing:
   if (capture.document.bookId !== capture.bookId || Number(capture.document.archivedAt) > 0) throw new Error('This document is not editable in this Book.')
   const settings = await getBookAiSettings(capture.bookId, loadAiSettings().favorites)
   signal.throwIfAborted()
-  if (settings.provider !== 'fake' && settings.provider !== 'nanogpt') throw new Error('Choose a text provider in Book AI settings.')
-  if (settings.provider === 'nanogpt' && !settings.apiKey.trim()) throw new Error('Add your API key in Book AI settings.')
+  if (!['nanogpt', 'litellm', 'fake'].includes(settings.provider)) throw new Error('Choose a text provider in Book AI settings.')
+  if (settings.provider !== 'fake' && !settings.apiKey.trim()) throw new Error('Add your API key in Book AI settings.')
   const model = settings.supportModel.trim()
   if (!model) throw new Error('Choose a Support model in Book AI settings for synonyms.')
   const language = resolveSceneWriting(capture.book, capture.document.type === 'scene' ? sceneWritingValues(capture.document) : undefined).language.value

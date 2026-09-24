@@ -11,7 +11,7 @@ import { EMPTY_RESPONSE_LENGTHS, normalizeResponseLengths, type ResponseLengthSe
 export { CODEX_RESPONSE_LENGTH_PRESETS, STORY_RESPONSE_LENGTH_PRESETS, SUMMARY_RESPONSE_LENGTH_PRESETS } from './response-length'
 export type { ResponseLengthSettings } from './response-length'
 
-export type AiProvider = 'openrouter' | 'nanogpt' | 'openai' | 'compatible' | 'fake'
+export type AiProvider = 'openrouter' | 'nanogpt' | 'openai' | 'litellm' | 'compatible' | 'fake'
 export type SpeechProvider = 'nanogpt'
 export type SpeechSettings = {
   provider: SpeechProvider
@@ -345,9 +345,13 @@ export function generationWordDelayMs(settings: Pick<AiSettings, 'generationWord
   return Number(normalizeGenerationWordDelay(settings.generationWordDelayMs))
 }
 
+export function textProviderSupportsGeneration(provider: AiProvider) {
+  return provider === 'nanogpt' || provider === 'litellm' || provider === 'fake'
+}
+
 export function textAiIsConfigured(settings: Pick<AiSettings, 'provider' | 'apiKey' | 'mainModel'>) {
   if (settings.provider === 'fake') return settings.mainModel.trim() === 'fake/test'
-  return settings.provider === 'nanogpt' && Boolean(settings.apiKey.trim() && settings.mainModel.trim())
+  return textProviderSupportsGeneration(settings.provider) && Boolean(settings.apiKey.trim() && settings.mainModel.trim())
 }
 
 function normalizeSpeechSettings(value: unknown): SpeechSettings {

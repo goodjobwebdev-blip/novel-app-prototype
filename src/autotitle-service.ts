@@ -154,8 +154,8 @@ function parseSuggestion(output: string) {
 }
 
 export async function prepareAutotitleRequest(bookId: string, targetId: string, settings: AiSettings): Promise<AutotitleRequest> {
-  if (settings.provider !== 'nanogpt' && settings.provider !== 'fake') throw new Error('Dedicated autotitle supports NanoGPT or Fake (testing). Choose one in Book AI settings.')
-  if (settings.provider === 'nanogpt' && !settings.apiKey.trim()) throw new Error('Add your NanoGPT API key in Book AI settings before generating a title.')
+  if (!['nanogpt', 'litellm', 'fake'].includes(settings.provider)) throw new Error('Dedicated autotitle supports NanoGPT, LiteLLM, or Fake (testing). Choose one in Book AI settings.')
+  if (settings.provider !== 'fake' && !settings.apiKey.trim()) throw new Error(`Add your ${settings.provider === 'litellm' ? 'LiteLLM' : 'NanoGPT'} API key in Book AI settings before generating a title.`)
   const [bookEntity, targetEntity, entities] = await Promise.all([
     getEntity<ArcEntity>(bookId),
     getEntity<ArcEntity>(targetId),
