@@ -14,8 +14,8 @@ export async function prepareSummaryGeneration(book: BookEntity, summary: Summar
   const defaults = loadAiSettings()
   let settings = await getBookAiSettings(book.id, defaults.favorites)
   signal.throwIfAborted()
-  if ((settings.provider !== 'nanogpt' && settings.provider !== 'fake') || (settings.provider === 'nanogpt' && !settings.apiKey.trim()) || !settings.supportModel.trim()) {
-    throw new Error('Choose NanoGPT or Fake (testing) and a Support model in Book settings before summarizing.')
+  if (!['nanogpt', 'litellm', 'fake'].includes(settings.provider) || (settings.provider !== 'fake' && !settings.apiKey.trim()) || !settings.supportModel.trim()) {
+    throw new Error('Choose NanoGPT, LiteLLM, or Fake (testing) and a Support model in Book settings before summarizing.')
   }
   const composition = settings.promptCompositions.summarize
   assertPromptTemplateValid(composition.systemPrompt, 'summarize')

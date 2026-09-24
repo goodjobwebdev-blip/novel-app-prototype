@@ -30,8 +30,6 @@ jobs:
         run: npm install --no-package-lock
 
       - name: Build application
-        env:
-          VITE_PRUNA_GATEWAY_URL: ${{ vars.PRUNA_GATEWAY_URL }}
         run: npm run build
 
       - name: Configure GitHub Pages

@@ -59,6 +59,7 @@ async function enqueue(f, prompt = 'Mara', alias = 'portrait') {
 async function clearJobs() { const db = await p.database(); await db.table('imageJobs').clear(); await db.table('galleryImages').clear() }
 const deps = { key: async () => 'test-key', generate: async () => ({ image: png }), prepare: async () => output }
 const response = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } })
+const prunaCredentials = (key = 'key') => ({ key, gatewayUrl: 'https://gateway.invalid/pruna' })
 const job = (provider, extra = {}) => ({ ...s.resolveImageSpec('A gate', provider === 'pruna' ? 'fast' : 'portrait'), provider, id: 'adapter-test', status: 'running', createdAt: 1, ...extra })
 
 test('v5 upgrade keeps books, lore, illustrations, and undo; new books still work', async () => {
@@ -72,10 +73,11 @@ test('v5 upgrade keeps books, lore, illustrations, and undo; new books still wor
 
 test('keys fall back only to the matching AI provider; model instructions contain no credentials', () => {
   const settings = configure()
-  const ai = { ...initialAiSettings, provider: 'nanogpt', apiKey: 'nano-secret', providerProfiles: { openai: { apiKey: 'openai-secret' } } }
+  const ai = { ...initialAiSettings, provider: 'nanogpt', apiKey: 'nano-secret', providerProfiles: { openai: { apiKey: 'openai-secret' }, litellm: { apiKey: 'litellm-secret', baseUrl: 'https://gateway.example/v1' } } }
   assert.equal(s.resolveImageKey('nanogpt', settings, ai), 'nano-secret')
   assert.equal(s.resolveImageKey('openai', settings, ai), 'openai-secret')
-  assert.equal(s.resolveImageKey('pruna', settings, ai), '')
+  assert.equal(s.resolveImageKey('pruna', settings, ai), 'litellm-secret')
+  assert.equal(s.resolvePrunaGatewayUrl(ai), 'https://gateway.example/pruna')
   settings.keys.openai = 'image-secret'
   assert.equal(s.resolveImageKey('openai', settings, ai), 'image-secret')
   s.saveImageSettings(settings)
@@ -243,8 +245,10 @@ test('Pruna image editing uploads sources and uses each model-specific source fi
   const source = { id: 'source', mime: 'image/png', data: png, width: 1, height: 1 }
   for (const [model, field] of [['p-image-edit', 'images'], ['qwen-image-edit-plus', 'image']]) {
     const calls = []
-    await providers.generateProviderImage(job('pruna', { model, task: 'image-to-image', sources: [source] }), 'key', new AbortController().signal, async () => {}, async (url, init) => {
+    await providers.generateProviderImage(job('pruna', { model, task: 'image-to-image', sources: [source] }), prunaCredentials(), new AbortController().signal, async () => {}, async (url, init) => {
       calls.push({ url, init })
+      assert.match(url, /^https:\/\/gateway\.invalid\/pruna\/v1\//)
+      assert.equal(init.headers.Authorization, 'Bearer key')
       if (url.endsWith('/v1/files')) { assert.equal(init.body.getAll('content').length, 1); return response({ urls: { get: '/v1/files/uploaded' } }) }
       if (url.endsWith('/v1/predictions')) { const input = JSON.parse(init.body).input; assert.deepEqual(input[field], ['https://api.pruna.ai/v1/files/uploaded']); return response({ status: 'complete', generation_url: '/v1/predictions/delivery/edit' }) }
       return new Response(png)
@@ -271,15 +275,17 @@ test('NanoGPT video persists request IDs, polls, and downloads a validated video
 test('Pruna submits an aspect ratio, persists async predictions, and decodes output arrays', async () => {
   for (const resume of [false, true]) {
     const calls = [], submitted = []
-    const result = await providers.generateProviderImage(job('pruna', resume ? { providerJobId: 'existing-id' } : {}), 'pruna-key', new AbortController().signal, async (id) => submitted.push(id), async (url, init) => {
+    const result = await providers.generateProviderImage(job('pruna', resume ? { providerJobId: 'existing-id' } : {}), prunaCredentials('pruna-key'), new AbortController().signal, async (id) => submitted.push(id), async (url, init) => {
       calls.push({ url, init })
+      assert.match(url, /^https:\/\/gateway\.invalid\/pruna\/v1\//)
+      assert.equal(init.headers.Authorization, 'Bearer pruna-key')
       if (init.method === 'POST') {
         assert.equal(init.headers.Model, 'p-image'); assert.equal(Object.keys(init.headers).some((name) => name.toLowerCase() === 'try-sync'), false)
         assert.deepEqual(JSON.parse(init.body), { input: { prompt: 'A gate', aspect_ratio: '1:1' } })
         return response({ id: 'existing-id' })
       }
       if (url.includes('/status/')) { if (!resume) assert.deepEqual(submitted, ['existing-id']); return response({ status: 'complete', output: ['/v1/predictions/delivery/existing-id'] }) }
-      assert.equal(init.headers.apikey, 'pruna-key'); assert.equal(init.redirect, 'error')
+      assert.equal(init.headers.Authorization, 'Bearer pruna-key'); assert.equal(init.redirect, 'error')
       return new Response(png)
     })
     assert.equal(calls.filter((c) => c.init.method === 'POST').length, resume ? 0 : 1)
@@ -290,8 +296,10 @@ test('Pruna submits an aspect ratio, persists async predictions, and decodes out
 
 test('Pruna submits dimensions for Z-Image Turbo and decodes synchronous generation URL arrays', async () => {
   const calls = []
-  const result = await providers.generateProviderImage(job('pruna', { model: 'z-image-turbo', size: s.imageSize('1344x768') }), 'pruna-key', new AbortController().signal, async () => assert.fail('A synchronous result has no prediction to persist.'), async (url, init) => {
+  const result = await providers.generateProviderImage(job('pruna', { model: 'z-image-turbo', size: s.imageSize('1344x768') }), prunaCredentials('pruna-key'), new AbortController().signal, async () => assert.fail('A synchronous result has no prediction to persist.'), async (url, init) => {
     calls.push({ url, init })
+    assert.match(url, /^https:\/\/gateway\.invalid\/pruna\/v1\//)
+    assert.equal(init.headers.Authorization, 'Bearer pruna-key')
     if (init.method === 'POST') {
       assert.deepEqual(JSON.parse(init.body), { input: { prompt: 'A gate', width: 1344, height: 768 } })
       return response({ status: 'success', generation_url: ['/v1/predictions/delivery/sync-id'] })
@@ -302,16 +310,22 @@ test('Pruna submits dimensions for Z-Image Turbo and decodes synchronous generat
   assert.equal(result.cost, 0.005)
 })
 
+test('Pruna requires a configured LiteLLM gateway URL', async () => {
+  let calls = 0
+  await assert.rejects(providers.generateProviderImage(job('pruna'), { key: 'key', gatewayUrl: '' }, new AbortController().signal, async () => {}, async () => { calls++; return response({}) }), /Configure the LiteLLM base URL/)
+  assert.equal(calls, 0)
+})
+
 test('Pruna rejects unknown models and reports detail errors without leaking keys', async () => {
   let calls = 0
-  await assert.rejects(providers.generateProviderImage(job('pruna', { model: 'unknown' }), 'key', new AbortController().signal, async () => {}, async () => { calls++; return response({}) }), /Unsupported Pruna/)
+  await assert.rejects(providers.generateProviderImage(job('pruna', { model: 'unknown' }), prunaCredentials(), new AbortController().signal, async () => {}, async () => { calls++; return response({}) }), /Unsupported Pruna/)
   assert.equal(calls, 0)
-  await assert.rejects(providers.generateProviderImage(job('pruna'), 'secret', new AbortController().signal, async () => {}, async () => response({ detail: 'Bad secret' }, 400)), (error) => error.message.includes('Bad [redacted]') && !error.message.includes('secret'))
+  await assert.rejects(providers.generateProviderImage(job('pruna'), prunaCredentials('secret'), new AbortController().signal, async () => {}, async () => response({ detail: 'Bad secret' }, 400)), (error) => error.message.includes('Bad [redacted]') && !error.message.includes('secret'))
 })
 
 test('delivery rejects unsafe authenticated URLs and errors redact keys', async () => {
   let calls = 0
-  await assert.rejects(providers.generateProviderImage(job('pruna', { providerJobId: 'id' }), 'secret', new AbortController().signal, async () => {}, async () => { calls++; return response({ status: 'succeeded', generation_url: 'https://unrelated.example/steal' }) }), /unexpected delivery/)
+  await assert.rejects(providers.generateProviderImage(job('pruna', { providerJobId: 'id' }), prunaCredentials('secret'), new AbortController().signal, async () => {}, async () => { calls++; return response({ status: 'succeeded', generation_url: 'https://unrelated.example/steal' }) }), /unexpected delivery/)
   assert.equal(calls, 1)
   await assert.rejects(providers.generateProviderImage(job('openai'), 'secret', new AbortController().signal, async () => {}, async () => response({ error: { message: 'Invalid key secret' } }, 401)), (e) => !e.message.includes('secret') && e.message.includes('redacted'))
 })
@@ -625,7 +639,7 @@ test('Pruna network failures explain browser CORS without leaking keys or resubm
   for (const stage of ['submit', 'status', 'delivery']) {
     let submissions = 0
     const submitted = []
-    await assert.rejects(providers.generateProviderImage(job('pruna'), 'secret', new AbortController().signal, async (id) => submitted.push(id), async (url, init) => {
+    await assert.rejects(providers.generateProviderImage(job('pruna'), prunaCredentials('secret'), new AbortController().signal, async (id) => submitted.push(id), async (url, init) => {
       if (init.method === 'POST') {
         submissions++
         if (stage === 'submit') throw new TypeError('Failed to fetch secret')
@@ -641,7 +655,7 @@ test('Pruna network failures explain browser CORS without leaking keys or resubm
 
 test('Pruna cancellation stays an abort instead of a CORS error', async () => {
   const controller = new AbortController()
-  await assert.rejects(providers.generateProviderImage(job('pruna'), 'key', controller.signal, async () => {}, async () => {
+  await assert.rejects(providers.generateProviderImage(job('pruna'), prunaCredentials(), controller.signal, async () => {}, async () => {
     controller.abort()
     throw new TypeError('Failed to fetch')
   }), { name: 'AbortError' })

@@ -1,5 +1,6 @@
 import type { AiProvider } from './ai-settings'
 import { FAKE_PROVIDER_MODEL, streamFakeProvider, type FakeProviderMessage } from './fake-provider'
+import { streamChatCompletion, type ChatCompletionMessage } from './chat-api'
 import {
   fetchNanoGPTModelContextLength,
   nanoGPTCompletionMessages,
@@ -55,9 +56,23 @@ export async function streamTextProviderCompletion(
       onThoughts: lifecycle.onThoughts,
     }, signal)
   }
-  if (request.provider !== 'nanogpt') {
-    throw new Error('Text generation currently supports NanoGPT or Fake (testing) only.')
+  if (request.provider === 'nanogpt') {
+    await streamNanoGPTCompletion(request, onChunk, signal, lifecycle)
+    return { toolCalls: [], finishReason: 'stop' as const }
   }
-  await streamNanoGPTCompletion(request, onChunk, signal, lifecycle)
-  return { toolCalls: [], finishReason: 'stop' as const }
+  if (request.provider === 'litellm') {
+    return streamChatCompletion({
+      apiKey: request.apiKey,
+      baseUrl: request.baseUrl,
+      provider: request.provider,
+      model: request.model,
+      messages: textProviderMessages(request) as ChatCompletionMessage[],
+      thinking: request.thinking === true || (request.thinkingEffort !== undefined && request.thinkingEffort !== 'default'),
+      thinkingEffort: request.thinkingEffort,
+    }, (chunk) => {
+      if (chunk.thoughts) lifecycle.onThoughts?.(chunk.thoughts)
+      if (chunk.content) onChunk(chunk.content)
+    }, signal, lifecycle.onResponse)
+  }
+  throw new Error('Text generation currently supports NanoGPT, LiteLLM, or Fake (testing) only.')
 }

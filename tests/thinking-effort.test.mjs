@@ -88,7 +88,7 @@ test('real chat transport maps each effort to the provider API while preserving 
   let body
   globalThis.fetch = async (_url, init) => { body = JSON.parse(init.body); return streamResponse() }
   try {
-    for (const provider of ['nanogpt', 'openrouter', 'openai', 'compatible']) {
+    for (const provider of ['nanogpt', 'openrouter', 'openai', 'litellm', 'compatible']) {
       for (const thinkingEffort of ['default', 'minimal', 'low', 'medium', 'high', 'xhigh']) {
         const request = { provider, apiKey: 'test-only', baseUrl: 'https://provider.invalid/v1', model: 'reasoning-model', messages, tools, thinking: true, thinkingEffort }
         const chunks = []
@@ -116,7 +116,7 @@ test('real chat transport maps each effort to the provider API while preserving 
   } finally { globalThis.fetch = originalFetch }
 })
 
-test('NanoGPT text transport sends effort and keeps its legacy default; Fake traces it without network calls', async () => {
+test('NanoGPT and LiteLLM text transports send effort; Fake traces it without network calls', async () => {
   const originalFetch = globalThis.fetch
   let body
   globalThis.fetch = async (_url, init) => { body = JSON.parse(init.body); return streamResponse() }
@@ -126,6 +126,9 @@ test('NanoGPT text transport sends effort and keeps its legacy default; Fake tra
     assert.equal(body.reasoning.effort, 'low')
     await streamTextProviderCompletion(request, () => {}, new AbortController().signal)
     assert.deepEqual(body.reasoning, { enabled: true, delta_field: 'reasoning_content' })
+    await streamTextProviderCompletion({ ...request, provider: 'litellm', thinkingEffort: 'high' }, () => {}, new AbortController().signal)
+    assert.equal(body.reasoning_effort, 'high')
+    assert.equal(body.reasoning, undefined)
     globalThis.fetch = async () => { throw new Error('Fake must not use the network') }
     await streamTextProviderCompletion({ ...request, provider: 'fake', model: 'fake/test', thinkingEffort: 'high' }, () => {}, new AbortController().signal)
     assert.equal(getFakeProviderTrace().at(-1).thinkingEffort, 'high')

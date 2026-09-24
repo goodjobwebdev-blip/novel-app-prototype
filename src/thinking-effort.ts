@@ -20,7 +20,7 @@ export function thinkingRequestParameters(provider: AiProvider, thinking: boolea
   if (!thinking || provider === 'fake') return {}
   const effort = normalizeThinkingEffort(value)
   if (provider === 'openai') return effort === 'default' ? {} : { reasoning_effort: effort }
-  if (provider === 'compatible' && effort !== 'default') return { reasoning_effort: effort }
+  if ((provider === 'compatible' || provider === 'litellm') && effort !== 'default') return { reasoning_effort: effort }
   return {
     reasoning: {
       enabled: true,

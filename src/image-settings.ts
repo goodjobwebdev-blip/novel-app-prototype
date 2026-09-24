@@ -98,13 +98,27 @@ export function saveImageSettings(settings: ImageSettings) {
   window.dispatchEvent(new Event(IMAGE_SETTINGS_CHANGED))
   return clean
 }
+function providerProfile(ai: AiSettings, provider: AiSettings['provider']) {
+  return ai.provider === provider ? ai : ai.providerProfiles?.[provider]
+}
+
 export function resolveImageKey(provider: ImageProvider, settings = loadImageSettings(), ai: AiSettings = loadAiSettings()): string {
   if (settings.keys[provider]) return settings.keys[provider]
-  if (provider === 'pruna') return ''
-  const key = ai.provider === provider ? ai.apiKey : ai.providerProfiles?.[provider]?.apiKey
+  const profileProvider = provider === 'pruna' ? 'litellm' : provider
+  const key = providerProfile(ai, profileProvider)?.apiKey
   if (key?.trim()) return key.trim()
-  const global = loadAiSettings()
-  return (global.provider === provider ? global.apiKey : global.providerProfiles?.[provider]?.apiKey)?.trim() || ''
+  return providerProfile(loadAiSettings(), profileProvider)?.apiKey?.trim() || ''
+}
+
+export function resolvePrunaGatewayUrl(ai: AiSettings = loadAiSettings()) {
+  const local = providerProfile(ai, 'litellm')?.baseUrl?.trim()
+  const baseUrl = local || providerProfile(loadAiSettings(), 'litellm')?.baseUrl?.trim() || ''
+  if (!baseUrl) return ''
+  try {
+    const url = new URL(baseUrl)
+    if (url.protocol !== 'https:' || url.username || url.password) return ''
+    return `${url.origin}/pruna`
+  } catch { return '' }
 }
 export function resolveImageSpec(prompt: string, alias?: string, size?: string, ratio?: string, settings = loadImageSettings(), task: GenerationTask = 'text-to-image', sources: GenerationSource[] = [], video: VideoGenerationOptions = {}): ImageGenerationSpec {
   if (!prompt?.trim() || prompt.length > 32000) throw new Error('Enter a generation prompt of 1–32,000 characters.')

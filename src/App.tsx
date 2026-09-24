@@ -102,7 +102,7 @@ type RequestPreviewMessage = {
   diagnostics?: string[]
 }
 
-const providerLabels: Record<AiProvider, string> = { openrouter: 'OpenRouter', nanogpt: 'nano-gpt.com', openai: 'OpenAI', compatible: 'OpenAI-compatible', fake: 'Fake (testing)' }
+const providerLabels: Record<AiProvider, string> = { openrouter: 'OpenRouter', nanogpt: 'nano-gpt.com', openai: 'OpenAI', litellm: 'LiteLLM', compatible: 'OpenAI-compatible', fake: 'Fake (testing)' }
 const promptPresetScope: Record<keyof AiPrompts, PromptPresetScope> = { story: 'story', assistant: 'chat', lore: 'codex', summarize: 'summary' }
 function formatContext(value?: number) {
   if (!value) return 'Context unknown'
@@ -410,7 +410,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
       return
     }
     if (!requestSettings.apiKey.trim()) { setStatus('Enter an API key before loading models.'); setStatusKind('error'); return }
-    if (requestSettings.provider === 'compatible' && !requestSettings.baseUrl.trim()) { setStatus('Enter the compatible provider endpoint first.'); setStatusKind('error'); return }
+    if ((requestSettings.provider === 'compatible' || requestSettings.provider === 'litellm') && !requestSettings.baseUrl.trim()) { setStatus(`Enter the ${requestSettings.provider === 'litellm' ? 'LiteLLM base URL' : 'compatible provider endpoint'} first.`); setStatusKind('error'); return }
     modelRefreshControllerRef.current?.abort()
     const requestId = ++modelRefreshSequenceRef.current
     const connectionKey = textModelConnectionKey(requestSettings)
@@ -707,10 +707,10 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
         <SettingsSectionTabs tabs={aiSections} active={aiSection} onChange={setAiSection} idPrefix="ai" label="AI sections" />
         <section hidden={aiSection !== 'connection'} className="settings-card provider-card" role="tabpanel" id="ai-panel-connection" aria-labelledby="ai-tab-connection">
           <div className="card-heading"><div><span>01</span><h2>Provider</h2></div><p>Connection details stay in this browser.</p></div>
-          <p className="connection-summary">{providerLabels[settings.provider]} · {settings.provider === 'fake' ? 'Local testing' : settings.apiKey ? 'Key saved on this device' : 'Setup required'}</p><details open={connectionExpanded || (!settings.apiKey && settings.provider !== 'fake')} onToggle={event => setConnectionExpanded(event.currentTarget.open)}><summary>Edit connection</summary><div className="provider-grid">{(Object.keys(providerLabels) as AiProvider[]).map((provider) => <button key={provider} className={settings.provider === provider ? 'selected' : ''} type="button" aria-pressed={settings.provider === provider} onClick={() => selectProvider(provider)}><i>{provider === 'fake' ? 'T' : provider === 'nanogpt' ? 'N' : provider === 'openrouter' ? 'O' : provider === 'openai' ? 'AI' : '{ }'}</i><span><strong>{providerLabels[provider]}</strong><small>{provider === 'fake' ? 'Local · no network' : provider === 'compatible' ? 'Custom endpoint' : 'Managed endpoint'}</small></span><b>{settings.provider === provider ? '✓' : ''}</b></button>)}</div>
+          <p className="connection-summary">{providerLabels[settings.provider]} · {settings.provider === 'fake' ? 'Local testing' : settings.apiKey ? 'Key saved on this device' : 'Setup required'}</p><details open={connectionExpanded || (!settings.apiKey && settings.provider !== 'fake')} onToggle={event => setConnectionExpanded(event.currentTarget.open)}><summary>Edit connection</summary><div className="provider-grid">{(Object.keys(providerLabels) as AiProvider[]).map((provider) => <button key={provider} className={settings.provider === provider ? 'selected' : ''} type="button" aria-pressed={settings.provider === provider} onClick={() => selectProvider(provider)}><i>{provider === 'fake' ? 'T' : provider === 'nanogpt' ? 'N' : provider === 'openrouter' ? 'O' : provider === 'openai' ? 'AI' : provider === 'litellm' ? 'LLM' : '{ }'}</i><span><strong>{providerLabels[provider]}</strong><small>{provider === 'fake' ? 'Local · no network' : provider === 'compatible' ? 'Custom endpoint' : provider === 'litellm' ? 'Self-hosted gateway' : 'Managed endpoint'}</small></span><b>{settings.provider === provider ? '✓' : ''}</b></button>)}</div>
           <div className="connection-fields">
-            {settings.provider === 'compatible' && <label><span>Endpoint URL</span><input value={settings.baseUrl} onChange={(event) => updateConnection('baseUrl', event.target.value)} placeholder="https://provider.example/v1" /></label>}
-            {settings.provider !== 'fake' && <label><span>API key</span><div className="input-action"><input
+            {(settings.provider === 'compatible' || settings.provider === 'litellm') && <label><span>{settings.provider === 'litellm' ? 'LiteLLM base URL' : 'Endpoint URL'}</span><input value={settings.baseUrl} onChange={(event) => updateConnection('baseUrl', event.target.value)} placeholder={settings.provider === 'litellm' ? 'https://webdev.serveblog.net:9447/v1' : 'https://provider.example/v1'} /></label>}
+            {settings.provider !== 'fake' && <label><span>{settings.provider === 'litellm' ? 'LiteLLM API key' : 'API key'}</span><div className="input-action"><input
               type={showKey ? 'text' : 'password'}
               name="arc-provider-token"
               value={settings.apiKey}
