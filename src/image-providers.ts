@@ -4,6 +4,8 @@ import { assertImageFile, makeThumbnail } from './illustration-image'
 export type ImageOutput = { image: Blob; thumbnail: Blob; width: number; height: number; kind?: 'image' | 'video'; mediaDurationMs?: number; seed?: number; cost?: number; revisedPrompt?: string }
 export type ProviderResult = { image: Blob; kind?: 'image' | 'video'; seed?: number; cost?: number; revisedPrompt?: string }
 const PRUNA = 'https://api.pruna.ai'
+const configuredPrunaGateway = import.meta.env?.VITE_PRUNA_GATEWAY_URL?.trim().replace(/\/+$/, '') || ''
+export const prunaGatewayEnabled = Boolean(configuredPrunaGateway)
 const NANO = 'https://nano-gpt.com'
 const MB = 1024 * 1024
 export function safeImageError(error: unknown, key = '') {
@@ -69,6 +71,17 @@ export async function fetchImageModels(provider: ImageProvider, key: string, fet
   const documented = documentedImageModels.filter((model) => model.provider === 'openai')
   return (data.data ?? []).filter((model: any) => /^gpt-image-/.test(model.id)).map((model: any) => documented.find((item) => item.id === model.id) ?? ({ id: model.id, name: model.id, provider, sizes: documented[0].sizes, tasks: ['text-to-image', 'image-to-image'], maxSourceImages: 4, source: documented[0].source }))
 }
+function prunaRequestUrl(value: string) {
+  const upstream = new URL(value, PRUNA)
+  if (upstream.origin !== PRUNA) throw new Error('Pruna returned an unexpected API URL.')
+  if (!configuredPrunaGateway) return upstream.href
+  const gateway = new URL(configuredPrunaGateway)
+  if (gateway.protocol !== 'https:' || gateway.username || gateway.password) throw new Error('The configured Pruna gateway URL must use HTTPS and contain no credentials.')
+  return `${gateway.href.replace(/\/$/, '')}${upstream.pathname}${upstream.search}`
+}
+function prunaHeaders(key: string, extra: Record<string, string> = {}) {
+  return { ...(prunaGatewayEnabled ? { Authorization: `Bearer ${key}` } : { apikey: key }), ...extra }
+}
 function deliveryUrl(value: string, provider: ImageProvider) {
   const url = new URL(value, provider === 'pruna' ? PRUNA : undefined)
   if (url.protocol !== 'https:' || url.username || url.password || /^(localhost|127\.|0\.|10\.|192\.168\.|169\.254\.|\[)/i.test(url.hostname)) throw new Error('The provider returned an invalid media URL.')
@@ -123,7 +136,7 @@ async function decodeOutput(data: any, provider: ImageProvider, key: string, sig
     const rawUrl = outputUrl(data, kind, provider)
     if (typeof rawUrl !== 'string') throw new Error(`The provider returned no downloadable ${kind}.`)
     const url = deliveryUrl(rawUrl, provider)
-    media = await boundedResponse(await fetcher(url, { headers: provider === 'pruna' ? { apikey: key } : provider === 'nanogpt' && kind === 'video' ? { 'x-api-key': key } : {}, signal, credentials: 'omit', referrerPolicy: 'no-referrer', redirect: provider === 'pruna' ? 'error' : 'follow' }), kind)
+    media = await boundedResponse(await fetcher(provider === 'pruna' ? prunaRequestUrl(url) : url, { headers: provider === 'pruna' ? prunaHeaders(key) : provider === 'nanogpt' && kind === 'video' ? { 'x-api-key': key } : {}, signal, credentials: 'omit', referrerPolicy: 'no-referrer', redirect: provider === 'pruna' ? 'error' : 'follow' }), kind)
   }
   if (kind === 'image') {
     await assertImageFile(media)
@@ -144,7 +157,7 @@ function extension(mime: string) { return mime === 'image/jpeg' ? 'jpg' : mime =
 async function uploadPrunaSource(source: GenerationSource, key: string, signal: AbortSignal, fetcher: typeof fetch) {
   const form = new FormData()
   form.append('content', source.data, `${source.name || source.id}.${extension(source.mime)}`)
-  const data = await jsonResponse(await fetcher(`${PRUNA}/v1/files`, { method: 'POST', headers: { apikey: key }, body: form, credentials: 'omit', redirect: 'error', signal }), key)
+  const data = await jsonResponse(await fetcher(prunaRequestUrl('/v1/files'), { method: 'POST', headers: prunaHeaders(key), body: form, credentials: 'omit', redirect: 'error', signal }), key)
   const value = data?.urls?.get ?? data?.url ?? (data?.id ? `${PRUNA}/v1/files/${encodeURIComponent(data.id)}` : '')
   if (typeof value !== 'string' || !value) throw new Error('Pruna file upload returned no URL.')
   const url = new URL(value, PRUNA)
@@ -203,7 +216,7 @@ async function pruna(job: ImageJob, key: string, signal: AbortSignal, onSubmitte
   let id = job.providerJobId
   if (!id) {
     const uploaded = await Promise.all((job.sources ?? []).map((source) => uploadPrunaSource(source, key, signal, fetcher)))
-    const data = await jsonResponse(await fetcher(`${PRUNA}/v1/predictions`, { method: 'POST', headers: { apikey: key, Model: model.id, 'Content-Type': 'application/json' }, credentials: 'omit', redirect: 'error', signal, body: JSON.stringify({ input: prunaInput(job, uploaded) }) }), key)
+    const data = await jsonResponse(await fetcher(prunaRequestUrl('/v1/predictions'), { method: 'POST', headers: prunaHeaders(key, { Model: model.id, 'Content-Type': 'application/json' }), credentials: 'omit', redirect: 'error', signal, body: JSON.stringify({ input: prunaInput(job, uploaded) }) }), key)
     const state = status(data)
     if (SUCCESS.includes(state)) return data
     if (FAILURE.includes(state)) throw new Error(safeImageError(new Error(providerError(data, 'Pruna generation failed.')), key))
@@ -215,7 +228,7 @@ async function pruna(job: ImageJob, key: string, signal: AbortSignal, onSubmitte
   if (!id) throw new Error('Pruna returned no job ID. Check the provider before retrying.')
   while (true) {
     signal.throwIfAborted()
-    const data = await jsonResponse(await fetcher(`${PRUNA}/v1/predictions/status/${encodeURIComponent(id)}`, { headers: { apikey: key }, signal, credentials: 'omit', redirect: 'error' }), key)
+    const data = await jsonResponse(await fetcher(prunaRequestUrl(`/v1/predictions/status/${encodeURIComponent(id)}`), { headers: prunaHeaders(key), signal, credentials: 'omit', redirect: 'error' }), key)
     const state = status(data)
     if (SUCCESS.includes(state)) return data
     if (FAILURE.includes(state)) throw new Error(safeImageError(new Error(providerError(data, 'Pruna generation failed.')), key))
@@ -241,7 +254,7 @@ export async function generateProviderImage(job: ImageJob, key: string, signal: 
     catch (error) {
       signal.throwIfAborted()
       if (!(error instanceof TypeError)) throw error
-      throw new Error('Could not reach Pruna. Check your connection. If other providers work, Pruna may be blocking this site through its browser CORS policy. Ask Pruna to allow this site’s origin, or use a trusted server integration. Check your Pruna history before starting a new generation; the request may already have been accepted.')
+      throw new Error(prunaGatewayEnabled ? 'Could not reach the LiteLLM Pruna gateway. Check its HTTPS URL, CORS configuration, pass-through route, and availability. Check your Pruna history before starting a new generation; the request may already have been accepted.' : 'Could not reach Pruna. Check your connection. If other providers work, Pruna may be blocking this site through its browser CORS policy. Ask Pruna to allow this site’s origin, or use a trusted server integration. Check your Pruna history before starting a new generation; the request may already have been accepted.')
     }
   }
   return decodeOutput(await pruna(job, key, signal, onSubmitted, prunaFetch, pause), 'pruna', key, signal, prunaFetch, kind, model?.cost)
