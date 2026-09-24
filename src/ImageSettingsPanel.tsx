@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useState } from 'react'
 import type { AiSettings } from './ai-settings'
 import { modelTasks, type ImageModel, type ImageProvider, type ImageSettings, type OpenAIImageQuality, type OpenAIImageModeration } from './image-generation-types'
 import { documentedImageModels, generationTaskNames, imageSize, imageFavorite, imageProviderNames, imageRatio, IMAGE_PROVIDERS, loadImageSettings, resolveImageKey, saveImageSettings } from './image-settings'
-import { fetchImageModels } from './image-providers'
+import { fetchImageModels, prunaGatewayEnabled } from './image-providers'
 export type ImageSettingsPanelRef = { save(): boolean; discard(): void; isDirty(): boolean }
 export type ImageSettingsPanelProps = { ai: AiSettings; onDirtyChange?: (dirty: boolean) => void }
 
@@ -39,9 +39,9 @@ const ImageSettingsPanel = forwardRef<ImageSettingsPanelRef, ImageSettingsPanelP
     <details className="image-settings-section" open={!settings.favorites.length}>
       <summary>Provider API keys</summary>
       <div className="image-provider-fields">{IMAGE_PROVIDERS.map((p) => <label key={p}>
-        {imageProviderNames[p]} API key
-        <input type="password" autoComplete="off" value={settings.keys[p]} placeholder={p === 'pruna' ? 'Enter Pruna API key' : 'Use this provider’s AI-settings key'} onChange={(e) => change({ ...settings, keys: { ...settings.keys, [p]: e.target.value } })} />
-        <small>{settings.keys[p] ? 'Using the image key' : p !== 'pruna' && resolveImageKey(p, settings, ai) ? 'Using saved AI-settings key' : 'No key configured'}</small>
+        {p === 'pruna' && prunaGatewayEnabled ? 'Pruna gateway access key' : `${imageProviderNames[p]} API key`}
+        <input type="password" autoComplete="off" value={settings.keys[p]} placeholder={p === 'pruna' ? prunaGatewayEnabled ? 'Enter LiteLLM access key' : 'Enter Pruna API key' : 'Use this provider’s AI-settings key'} onChange={(e) => change({ ...settings, keys: { ...settings.keys, [p]: e.target.value } })} />
+        <small>{settings.keys[p] ? p === 'pruna' && prunaGatewayEnabled ? 'Using the LiteLLM gateway key' : 'Using the image key' : p !== 'pruna' && resolveImageKey(p, settings, ai) ? 'Using saved AI-settings key' : 'No key configured'}</small>
       </label>)}</div>
     </details>
     <h2>Favorite models</h2>

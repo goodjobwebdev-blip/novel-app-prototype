@@ -35,11 +35,34 @@ Requests go directly from the browser to the selected provider. Provider CORS po
 
 ### Pruna browser connectivity
 
-Pruna submissions use asynchronous mode (without `Try-Sync`) and save the prediction ID before polling. The `Try-Sync` header is not included in Pruna's observed CORS allowed headers, so sending it from a browser can cause `Failed to fetch` before submission.
+Pruna submissions use asynchronous mode (without `Try-Sync`) and save the prediction ID before polling. Direct browser access is retained as a development fallback, but Pruna does not return an `Access-Control-Allow-Origin` header for the deployed GitHub Pages origin.
 
-Removing that header alone does not guarantee browser access. On 2026-09-22, an OPTIONS preflight for `https://goodjobwebdev-blip.github.io` returned allowed headers `Accept,Authorization,Content-Type,apikey,Model`, but no `Access-Control-Allow-Origin`, even without `Try-Sync`. Pruna must allow the deployed site's origin for prediction, upload, status, and delivery requests, or the integration needs a trusted authenticated server. GitHub Pages cannot run that server. Do not use a public CORS proxy or `no-cors`: keys and source images must remain private, and opaque responses cannot be read by the app.
+Production therefore supports a LiteLLM pass-through gateway. Set the public build variable `VITE_PRUNA_GATEWAY_URL` to the gateway prefix, such as `https://litellm.example.com/pruna`. The app sends the key entered under **Pruna gateway access key** as a LiteLLM Bearer token; the Pruna key stays on the VPS. Upload, prediction, status, and authenticated delivery requests all use the gateway, while Pruna file URLs embedded in prediction bodies remain upstream Pruna URLs.
 
-Network errors now explain the possible CORS restriction. A browser fetch error cannot distinguish CORS from connectivity or a rejected redirect. Check Pruna's prediction history before starting a new generation to avoid duplicate charges; a recorded prediction ID can resume the existing job.
+A matching LiteLLM configuration is:
+
+```yaml
+general_settings:
+  pass_through_endpoints:
+    - path: "/pruna"
+      target: "https://api.pruna.ai"
+      include_subpath: true
+      forward_headers: true
+      auth: true
+      headers:
+        apikey: "os.environ/PRUNA_API_KEY"
+```
+
+Set these LiteLLM process environment variables without exposing them to the Vite build:
+
+```dotenv
+PRUNA_API_KEY=<provider secret>
+LITELLM_CORS_ORIGINS=https://goodjobwebdev-blip.github.io
+```
+
+The gateway must be available over HTTPS. Confirm that an unauthenticated request to the pass-through route returns `401`; custom pass-through authentication can depend on the installed LiteLLM version or edition. Never use the LiteLLM master key in the browser. Use a restricted virtual key with a small budget and rate limits. For GitHub Pages, create the repository Actions variable `PRUNA_GATEWAY_URL`; `.github/workflows/deploy.yml` passes it to Vite during the build. For local development, copy `.env.example` to `.env.local` and set the same public gateway URL.
+
+A browser network error can still represent gateway CORS, connectivity, TLS, or a rejected redirect. Check Pruna's prediction history before starting a new generation to avoid duplicate charges; a recorded prediction ID can resume the existing job. Do not use a public CORS proxy or `no-cors`: source images are private and opaque responses cannot be read by the app.
 
 ## Queue, badges, and recovery
 
