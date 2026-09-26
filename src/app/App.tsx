@@ -14,6 +14,7 @@ import {
   Bot,
   Check,
   CircleHelp,
+  Cloud,
   Home,
   Image as ImageIcon,
   MessageCircle,
@@ -79,6 +80,7 @@ import { KeyedAsyncQueue } from '../shared/utils/keyed-async-queue'
 import { saveRequiredSettingsForLeave } from '../features/settings/settings-leave-policy'
 import { fetchSpeechModels, type SpeechModel } from '../features/speech/tts-service'
 import { fetchTranscriptionModels, type SttModel } from '../features/speech/stt-service'
+import SyncSettingsPanel from '../features/sync/SyncSettingsPanel'
 import '../features/settings/response-length-settings.css'
 import '../shared/context/context-limit-settings.css'
 import '../features/codex/codex-archive.css'
@@ -87,7 +89,7 @@ import '../features/speech/tts.css'
 import '../features/codex/codex-triggers.css'
 import '../features/settings/settings-save-recovery.css'
 import type { PromptPresetScope } from '../features/settings/prompt-presets'
-type SettingsTab = 'ai' | 'context' | 'appearance' | 'speech' | 'images'
+type SettingsTab = 'ai' | 'context' | 'appearance' | 'speech' | 'images' | 'sync'
 type ContextSection = GenerationContextType | 'summary'
 type SaveState = 'loading' | 'saved' | 'saving' | 'error'
 type RequestPreviewMessage = {
@@ -684,11 +686,11 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
       <aside className="settings-rail" aria-label={`${isBookSettings ? 'Book' : 'Default'} settings navigation`}>
         <div className="rail-header"><button className="home-button" type="button" aria-label="Back to library" onClick={() => { void leaveSettings(onHome) }} disabled={leaveSaving}><Home aria-hidden="true" /><b>Home</b></button>{onBack && <button className="settings-close" type="button" onClick={() => { void leaveSettings(onBack) }} aria-label="Close settings" disabled={leaveSaving}><X aria-hidden="true" /></button>}</div>
         <nav>
-          {([['ai', Bot, 'AI'], ['context', SlidersHorizontal, 'Context'], ['appearance', Type, 'UI'], ['speech', Volume2, 'Speech'], ['images', ImageIcon, 'Images']] as const).map(([key, Icon, label]) => (
+          {(isBookSettings ? ([['ai', Bot, 'AI'], ['context', SlidersHorizontal, 'Context'], ['appearance', Type, 'UI'], ['speech', Volume2, 'Speech'], ['images', ImageIcon, 'Images']] as const) : ([['ai', Bot, 'AI'], ['context', SlidersHorizontal, 'Context'], ['appearance', Type, 'UI'], ['speech', Volume2, 'Speech'], ['images', ImageIcon, 'Images'], ['sync', Cloud, 'Sync']] as const)).map(([key, Icon, label]) => (
             <button className={settingsTab === key ? 'active' : ''} type="button" onClick={() => { void selectSettingsTab(key) }} aria-current={settingsTab === key ? 'page' : undefined} key={key}><Icon aria-hidden="true" /><span>{label}</span></button>
           ))}
         </nav>
-        <p>{settingsTab === 'images' ? 'Image providers and favorite models apply to all books on this device.' : isBookSettings ? `Changes here affect only “${book?.title}”. Favorite models are shared across books.` : 'Defaults are copied into a new book. After that, each book keeps its own settings.'}</p>
+        <p>{settingsTab === 'sync' ? 'Sync credentials and automatic-upload preference apply only to this browser.' : settingsTab === 'images' ? 'Image providers and favorite models apply to all books on this device.' : isBookSettings ? `Changes here affect only “${book?.title}”. Favorite models are shared across books.` : 'Defaults are copied into a new book. After that, each book keeps its own settings.'}</p>
       </aside>
 
       <section className="settings-page" aria-labelledby="page-title">
@@ -844,6 +846,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
         </> : <GlobalContextDefaults value={contextSettings} saved={contextSaved} saveError={contextSaveError} onRetry={() => { void saveContextDefaults() }} onChange={updateContextDefaults} />)
           : settingsTab === 'images' ? <ImageSettingsPanel ref={imageSettingsRef} ai={settings} onDirtyChange={setImageSettingsDirty} />
           : settingsTab === 'speech' ? <SpeechSettingsPanel bookId={book?.id} settings={settings} scope={isBookSettings ? 'book' : 'defaults'} onChange={(speech) => update('speech', speech)} />
+          : settingsTab === 'sync' ? <SyncSettingsPanel />
           : <SettingsPlaceholder tab={settingsTab} scope={isBookSettings ? 'book' : 'defaults'} />}
       </section>
     </main>

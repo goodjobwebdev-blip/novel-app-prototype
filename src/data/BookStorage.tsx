@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { readBookArchive, writeBookArchive } from './persistence'
-import { copyBookArchive, decodeBookArchive, encodeBookArchive } from './book-archive'
-import { checkStorageHeadroom, formatBytes, imageStorageError } from '../features/images/illustration-image'
+import { readBookArchive } from './persistence'
+import { encodeBookArchive } from './book-archive'
+import { importBookArchiveBlob } from './book-import'
+import { formatBytes, imageStorageError } from '../features/images/illustration-image'
+import BookSyncControls from '../features/sync/BookSyncControls'
 import { IMAGE_CHANGED } from '../features/codex/CodexIllustration'
 
 export function BookBackupImport({ onImported }: { onImported: (bookId: string) => Promise<void> }) {
@@ -15,18 +17,14 @@ export function BookBackupImport({ onImported }: { onImported: (bookId: string) 
     setBusy(true)
     setError('')
     try {
-      const archive = await decodeBookArchive(file)
-      await checkStorageHeadroom(file.size)
-      const copy = copyBookArchive(archive)
-      await writeBookArchive(copy.data)
-      await onImported(copy.bookId)
+      await onImported(await importBookArchiveBlob(file))
     } catch (error) { setError(imageStorageError(error)) }
     finally { working.current = false; setBusy(false) }
   }
   return <div className="book-backup-import"><input hidden ref={input} type="file" accept=".arcbook" aria-label="Import book backup file" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void restore(file) }} /><button type="button" disabled={busy} onClick={() => input.current?.click()}>{busy ? 'Importing…' : 'Import book backup'}</button>{error && <p className="illustration-error" role="alert">{error}</p>}</div>
 }
 
-export default function BookStorage({ bookId, beforeExport, onImported }: { bookId: string; beforeExport: () => Promise<void>; onImported: (bookId: string) => Promise<void> }) {
+export default function BookStorage({ bookId, title, beforeExport, onImported }: { bookId: string; title: string; beforeExport: () => Promise<void>; onImported: (bookId: string) => Promise<void> }) {
   const [estimate, setEstimate] = useState<StorageEstimate>()
   const [persistent, setPersistent] = useState<boolean>()
   const [message, setMessage] = useState('')
@@ -65,6 +63,7 @@ export default function BookStorage({ bookId, beforeExport, onImported }: { book
   const usage = estimate?.usage ?? 0
   const quota = estimate?.quota ?? 0
   return <section className="book-storage" aria-label="Storage and backups"><h3>Storage & backups</h3>
+    <BookSyncControls bookId={bookId} title={title} beforeSync={beforeExport} onImported={onImported} onRemoteApplied={() => onImported(bookId)} />
     {quota > 0 ? <><label className="storage-meter-label">{formatBytes(usage)} used · {formatBytes(quota)} browser allowance<meter min={0} max={quota} value={Math.min(usage, quota)} low={quota * .7} high={quota * .85} optimum={0} /></label><p className="illustration-help">Estimate for all books and app data on this browser. Available disk space may be lower.</p>{usage / quota > .85 && <p className="illustration-error">Storage is nearly full. Export a backup and free space before adding images.</p>}</> : <p className="illustration-help">This browser does not report its storage allowance.</p>}
     <div className="illustration-actions"><button type="button" onClick={() => { void refresh() }}>Refresh usage</button>{navigator.storage?.persist && <button type="button" disabled={persistent === true} onClick={() => { void navigator.storage.persist().then((granted) => { setPersistent(granted); setMessage(granted ? 'Persistent storage enabled. Clearing browser data can still remove your books.' : 'The browser did not grant persistent storage. Download backups regularly.') }).catch(() => setMessage('Persistent storage is unavailable. Download backups regularly.')) }}>{persistent ? 'Storage protection enabled' : 'Protect local storage'}</button>}</div>
     <p className="illustration-help">Backups include this book’s text, chats, history, settings and illustrations. API keys are excluded. Import creates a new book; add your API keys again afterward.</p>

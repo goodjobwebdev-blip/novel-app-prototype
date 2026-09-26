@@ -1,6 +1,6 @@
 # Novel sync backend
 
-The Go service under `backend/` is an optional, separately deployed backend for versioned `.arcbook` storage. The browser database remains the local source used while writing. This initial server implements the backend half of single-writer roaming; the frontend does not connect to it yet.
+The Go service under `backend/` is an optional, separately deployed backend for versioned `.arcbook` storage. The browser database remains the local source used while writing. The frontend connects to this service for opt-in, per-book, single-writer roaming between browsers or devices.
 
 ## Guarantees and boundaries
 
@@ -10,7 +10,9 @@ The Go service under `backend/` is an optional, separately deployed backend for 
 - Replacing remote state requires `If-Match`. A stale upload receives `412 Precondition Failed` instead of overwriting another device.
 - Uploads are streamed to a temporary file, size-limited, checked for the `ARCBK001` header and manifest length, hashed, and atomically renamed.
 - Deleting a book is currently a soft deletion. Objects remain available to server operators for recovery until a later retention job removes them.
-- The first release does not merge records, provide registration, process subscriptions, split media from archives, or automatically synchronize the current frontend.
+- The first release does not merge records, provide registration, process subscriptions, or split media from archives. Each sync transfers one complete `.arcbook` archive.
+- The browser checks the remote revision when a connected book opens and when the tab regains focus or connectivity. Uploads are manual by default; an optional two-minute idle upload can be enabled.
+- A conflict is never overwritten automatically. The user can import the cloud state as an unlinked recovery copy, download it, deliberately keep local and overwrite the cloud, or decide later.
 
 ## Configuration
 
@@ -81,6 +83,22 @@ curl -X PUT https://sync.example.com/api/v1/books/REMOTE_BOOK_ID/state \
 ```
 
 Each successful upload returns the next `ETag`. A `412` means another client changed the remote archive; clients must download or preserve both copies rather than retrying blindly.
+
+## Browser setup and workflow
+
+1. Open the application's global **Settings → Sync** tab.
+2. Enter the HTTPS backend URL, reverse-proxy Basic Auth username/password, and backend sync token.
+3. Use **Test connection**, then save the settings.
+4. Open a book's **Book → Storage & backups** settings and choose **Enable cloud sync**.
+5. On another browser or device, configure the same global credentials, choose **Cloud books** in the Library, and import the book.
+
+Sync credentials are device-global and stored in that browser's `localStorage`. This is convenient for a personal deployment, but anyone with access to the browser profile or page-level script execution can potentially read them. Do not use shared browser profiles, and rotate both credentials if the profile is compromised.
+
+Book connections and sync state are stored in separate IndexedDB tables and are not included in exported archives. Normal backup import remaps identities and remains unlinked; cloud import preserves identities so subsequent versions can safely replace that connected local book.
+
+Manual **Sync now** is authoritative: it flushes the current editor, creates and hashes a complete archive, and then uploads, downloads, or presents a conflict. Automatic checks only compare remote revisions. Optional automatic upload waits for two minutes of local inactivity and is off by default.
+
+The current archive encoder and SHA-256 step can require substantial memory for media-rich books, and every changed revision uploads the full archive. The browser archive format permits files up to 2 GB, while the backend and Caddy examples default to 512 MiB; raise both `MAX_ARCHIVE_BYTES` and Caddy's `request_body max_size` together if larger books must sync.
 
 ## Local development
 
@@ -156,7 +174,7 @@ sync.example.com {
 }
 ```
 
-The browser client must use `X-Sync-Token` and `credentials: "include"`. Visit the sync origin once to establish the browser's Basic Auth credentials before connecting it from the app.
+The browser client sends the reverse-proxy credentials in `Authorization`, sends the application token in `X-Sync-Token`, and uses `credentials: "include"`. CORS preflight requests do not carry either credential, which is why the `OPTIONS` handler must bypass Basic Auth.
 
 Format, validate, and reload using the method appropriate for your Caddy installation. A common systemd installation uses:
 
