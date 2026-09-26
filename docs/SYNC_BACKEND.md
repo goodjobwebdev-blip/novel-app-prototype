@@ -89,7 +89,7 @@ Each successful upload returns the next `ETag`. A `412` means another client cha
 1. Open the application's global **Settings → Sync** tab.
 2. Enter the HTTPS backend URL, reverse-proxy Basic Auth username/password, and backend sync token.
 3. Use **Test connection**, then save the settings.
-4. Open a book's **Book → Storage & backups** settings and choose **Enable cloud sync**.
+4. In the Library, choose **Send books to cloud**, then **Upload & connect** for the local book. The same connection control is also available under a book's **Book → Storage & backups** settings.
 5. On another browser or device, configure the same global credentials, choose **Cloud books** in the Library, and import the book.
 
 Sync credentials are device-global and stored in that browser's `localStorage`. This is convenient for a personal deployment, but anyone with access to the browser profile or page-level script execution can potentially read them. Do not use shared browser profiles, and rotate both credentials if the profile is compromised.
