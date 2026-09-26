@@ -42,7 +42,7 @@ export const chatOutlineTools: ChatToolDefinition[] = [
     type: 'function',
     function: {
       name: 'propose_outline_create',
-      description: 'Propose creating an Act, Chapter, or Scene. A Scene may include initial Markdown content. This does not create anything until the user approves the proposal in Chat.',
+      description: 'Propose creating an Act, Chapter, or Scene after calling read_outline. A Scene may include initial Markdown content. Never write proposed Scene/story content in chat commentary: put it exclusively in the content parameter. Call this tool before any accompanying commentary so a long response cannot prevent the tool call. This does not create anything until the user approves the proposal in Chat.',
       parameters: {
         type: 'object',
         properties: {
