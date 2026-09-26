@@ -2,3 +2,7 @@ node_modules
 dist
 *.local
 *.tsbuildinfo
+.env
+backend/data/
+backups/
+coverage.out

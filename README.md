@@ -23,7 +23,7 @@ Working behavior on `main` includes:
 - device-local typography/theme settings and custom themes;
 - an installable PWA shell and GitHub Pages deployment workflow.
 
-The prototype is still intentionally single-user and local to one browser/device. There is no cloud sync or backend. AI requests require network access and a provider API key.
+The writing client remains intentionally local-first and currently uses one independent database per browser/device. An optional Go/PostgreSQL archive-sync backend now exists under `backend/`, but the frontend is not connected to it yet, so automatic cross-device sync is not available. AI requests require network access and a provider API key. See [docs/SYNC_BACKEND.md](docs/SYNC_BACKEND.md) for the backend API, local setup, and VPS deployment.
 
 ### Known gaps
 

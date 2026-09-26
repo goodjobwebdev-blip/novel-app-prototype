@@ -1,0 +1,40 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: novel_sync
+      POSTGRES_PASSWORD: development-only
+      POSTGRES_DB: novel_sync
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5434}:5432"
+    volumes:
+      - novel-sync-postgres-dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U novel_sync -d novel_sync"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8087}:8080"
+    environment:
+      PORT: "8080"
+      DATA_DIR: /data
+      DATABASE_URL: postgres://novel_sync:development-only@postgres:5432/novel_sync?sslmode=disable
+      ALLOWED_ORIGINS: http://localhost:5173
+      BOOTSTRAP_USER_EMAIL: local@example.test
+      BOOTSTRAP_TOKEN: local-development-token-change-me-000000000000
+      MAX_ARCHIVE_BYTES: "536870912"
+    volumes:
+      - novel-sync-archives-dev:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  novel-sync-archives-dev:
+  novel-sync-postgres-dev:
