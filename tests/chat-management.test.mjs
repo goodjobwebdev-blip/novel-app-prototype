@@ -54,6 +54,19 @@ async function approve(f, proposal, signal) {
 }
 async function readProposal(message, proposal) { return (await db.getEntity(message.id)).entityActions.find((item) => item.id === proposal.id) }
 
+test('content-bearing proposal descriptions require tool-only content and tool-first ordering', () => {
+  const description = (name) => CHAT_TOOL_DEFINITIONS.find((tool) => tool.function.name === name)?.function.description ?? ''
+  for (const name of ['propose_document_edit', 'propose_document_replacement', 'propose_outline_create']) {
+    assert.match(description(name), /Never write proposed Scene\/story.*in chat commentary/)
+    assert.match(description(name), /Call this tool before any accompanying commentary/)
+  }
+  for (const name of ['propose_document_edit', 'propose_document_replacement']) {
+    assert.match(description(name), /call read_entity on the target/)
+    assert.match(description(name), /updatedAt as expected_updated_at/)
+    assert.match(description(name), /outline or search data/)
+  }
+})
+
 test('all tools have unique names; metadata reads and approved patches cover all fields', async () => {
   const names = CHAT_TOOL_DEFINITIONS.map((t) => t.function.name)
   assert.equal(new Set(names).size, names.length)

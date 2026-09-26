@@ -84,7 +84,7 @@ export const chatWorkspaceTools: ChatToolDefinition[] = [
     type: 'function',
     function: {
       name: 'propose_document_edit',
-      description: 'Propose one or more exact-text replacements in a Scene, Note, or Codex entry. This does not modify the document. old_text must be copied exactly from the current document and uniquely identify the text to replace. All replacements are validated and later applied together only after the user presses Apply.',
+      description: 'Propose one or more exact-text replacements in a Scene, Note, or Codex entry. Before every proposal, call read_entity on the target—even if outline or search data is available—and pass its latest updatedAt as expected_updated_at. old_text must be copied exactly from that read_entity result and uniquely identify the text to replace. Never write proposed Scene/story or document content in chat commentary: put it exclusively in this tool’s parameters. Call this tool before any accompanying commentary so a long response cannot prevent the tool call. This does not modify the document; all replacements are validated and applied together only after the user presses Apply.',
       parameters: {
         type: 'object',
         properties: {
@@ -115,7 +115,7 @@ export const chatWorkspaceTools: ChatToolDefinition[] = [
     type: 'function',
     function: {
       name: 'propose_document_replacement',
-      description: 'Propose replacing the complete body of a Scene, Note, or Codex entry. Use this only for whole-document rewrites; prefer propose_document_edit for localized changes. This does not modify the document until the user presses Apply.',
+      description: 'Propose replacing the complete body of a Scene, Note, or Codex entry. Before every proposal, call read_entity on the target—even if outline or search data is available—and pass its latest updatedAt as expected_updated_at. Never write proposed Scene/story or document content in chat commentary: put it exclusively in new_content. Call this tool before any accompanying commentary so a long response cannot prevent the tool call. Use this only for whole-document rewrites; prefer propose_document_edit for localized changes. This does not modify the document until the user presses Apply.',
       parameters: {
         type: 'object',
         properties: {
