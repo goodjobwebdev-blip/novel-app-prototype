@@ -34,9 +34,9 @@ registerHooks({
 const { act, createElement: h, createRef } = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { EditorView } = await import('@codemirror/view')
-const { default: MarkdownEditor } = await import('../src/MarkdownEditor.tsx')
-const { default: UiSettingsPortal } = await import('../src/UiSettingsPortal.tsx')
-const { loadUiSettings, saveUiSettings, defaultUiSettings, UI_SETTINGS_STORAGE_KEY, UI_SETTINGS_EVENT } = await import('../src/ui-settings.ts')
+const { default: MarkdownEditor } = await import('../src/features/editor/MarkdownEditor.tsx')
+const { default: UiSettingsPortal } = await import('../src/features/settings/UiSettingsPortal.tsx')
+const { loadUiSettings, saveUiSettings, defaultUiSettings, UI_SETTINGS_STORAGE_KEY, UI_SETTINGS_EVENT } = await import('../src/features/settings/ui-settings.ts')
 const created = []
 const pause = () => new Promise(resolve => setTimeout(resolve, 25))
 afterEach(async () => {

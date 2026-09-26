@@ -68,7 +68,7 @@ test('completed TTS can seek and replay without another paid request', async () 
   }
 
   try {
-    const tts = await import(`../src/tts-service.ts?playback-controls=${Date.now()}`)
+    const tts = await import(`../src/features/speech/tts-service.ts?playback-controls=${Date.now()}`)
     const settings = { provider: 'nanogpt', apiKey: 'test-key', model: 'Kokoro-82m', voice: 'af_bella', maxParallelRequests: '1' }
     const firstPlay = tts.startTtsSession(settings, 'A reusable generated passage.', 'Replay test')
     await waitFor(() => audioInstances.length === 1)

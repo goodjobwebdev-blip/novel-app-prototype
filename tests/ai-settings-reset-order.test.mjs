@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
-import { KeyedAsyncQueue } from '../src/keyed-async-queue.ts'
+import { KeyedAsyncQueue } from '../src/shared/utils/keyed-async-queue.ts'
 
-const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+const appSource = readFileSync(new URL('../src/app/App.tsx', import.meta.url), 'utf8')
 
 function block(startText, endText) {
   const start = appSource.indexOf(startText)

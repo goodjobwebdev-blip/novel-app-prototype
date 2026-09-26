@@ -19,9 +19,9 @@ import {
   referencedVariables,
   renderCompositionTemplate,
   validatePromptTemplate,
-} from '../src/prompt-composition.ts'
+} from '../src/shared/ai/prompt-composition.ts'
 
-const promptTemplateSource = readFileSync(new URL('../src/prompt-template.ts', import.meta.url), 'utf8')
+const promptTemplateSource = readFileSync(new URL('../src/shared/ai/prompt-template.ts', import.meta.url), 'utf8')
 const stabilityFor = (name) => name.startsWith('book.') ? 'book-state' : name === 'response.length' ? 'book-state' : 'turn-dynamic'
 
 test('legacy single prompts migrate losslessly into System slots without invented predefined messages', () => {

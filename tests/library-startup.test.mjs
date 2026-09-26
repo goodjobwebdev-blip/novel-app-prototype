@@ -1,4 +1,5 @@
 import test, { after } from 'node:test'
+import { transpileSourceTree } from './transpile-source-tree.mjs'
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
@@ -14,11 +15,7 @@ const React = await import('react')
 const { act } = React
 const { createRoot } = await import('react-dom/client')
 const directory = mkdtempSync(new URL('../node_modules/.arc-library-test-', import.meta.url))
-for (const filename of readdirSync(new URL('../src/', import.meta.url)).filter((name) => /\.tsx?$/.test(name))) {
-  const source = readFileSync(new URL(`../src/${filename}`, import.meta.url), 'utf8')
-  const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText.replace(/import ['"][^'"]+\.css['"];?/g, '').replace(/(['"])(\.\/[^'"]+)\1/g, (_, quote, path) => `${quote}${path.replace(/\.tsx?$/, '')}.mjs${quote}`)
-  writeFileSync(`${directory}/${filename.replace(/\.tsx?$/, '.mjs')}`, compiled)
-}
+transpileSourceTree(directory)
 after(() => { dom.window.close(); rmSync(directory, { recursive: true, force: true }) })
 
 const legacy = new Dexie('arc-novel-local-v1')
@@ -32,9 +29,9 @@ const existing = [
 await legacy.table('entities').bulkPut(existing)
 await legacy.table('snapshots').put({ id: 'old-snapshot', entityId: 'old-scene', content: 'Earlier draft', createdAt: 1 })
 legacy.close()
-const p = await import(pathToFileURL(`${directory}/persistence.mjs`))
-const { initialAiSettings } = await import(pathToFileURL(`${directory}/ai-settings.mjs`))
-const { useBookLibrary } = await import(pathToFileURL(`${directory}/useBookLibrary.mjs`))
+const p = await import(pathToFileURL(`${directory}/data/persistence.mjs`))
+const { initialAiSettings } = await import(pathToFileURL(`${directory}/shared/ai/ai-settings.mjs`))
+const { useBookLibrary } = await import(pathToFileURL(`${directory}/data/useBookLibrary.mjs`))
 let library
 function Home() {
   library = useBookLibrary('Sample story')
@@ -87,7 +84,7 @@ test('series migration failure does not hide books or disable the ready library'
 })
 
 test('the actual home screen keeps New book accessible and displays creation failures', async () => {
-  const { default: Workspace } = await import(pathToFileURL(`${directory}/Workspace.mjs`))
+  const { default: Workspace } = await import(pathToFileURL(`${directory}/app/Workspace.mjs`))
   const root = createRoot(document.getElementById('root'))
   const db = new Dexie('arc-novel-local-v1')
   await db.open()

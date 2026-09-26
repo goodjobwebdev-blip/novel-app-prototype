@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { KeyedAsyncQueue } from '../src/keyed-async-queue.ts'
+import { KeyedAsyncQueue } from '../src/shared/utils/keyed-async-queue.ts'
 
 test('per-book metadata queue preserves draft invocation order despite a slow first save', async () => {
   const queue = new KeyedAsyncQueue()
@@ -19,7 +19,7 @@ test('per-book metadata queue preserves draft invocation order despite a slow fi
 })
 
 test('Workspace serializes Book metadata saves and stale Book completion cannot reclaim currentBook', () => {
-  const source = readFileSync(new URL('../src/Workspace.tsx', import.meta.url), 'utf8')
+  const source = readFileSync(new URL('../src/app/Workspace.tsx', import.meta.url), 'utf8')
   assert.match(source, /bookMetadataSaveQueueRef = useRef\(new KeyedAsyncQueue\(\)\)/)
   const start = source.indexOf('  async function saveBookMetadata(')
   const end = source.indexOf('  async function addSeries', start)
@@ -31,7 +31,7 @@ test('Workspace serializes Book metadata saves and stale Book completion cannot 
 })
 
 test('Book Settings debounce follows draft changes only and gates saved state to the latest draft', () => {
-  const source = readFileSync(new URL('../src/Workspace.tsx', import.meta.url), 'utf8')
+  const source = readFileSync(new URL('../src/app/Workspace.tsx', import.meta.url), 'utf8')
   const start = source.indexOf('function BookSettings(')
   const end = source.indexOf('function Outline(', start)
   const block = source.slice(start, end)
@@ -42,7 +42,7 @@ test('Book Settings debounce follows draft changes only and gates saved state to
 })
 
 test('Book metadata persistence is transactional, field-level, and cannot recreate a deleted Book', () => {
-  const source = readFileSync(new URL('../src/persistence.ts', import.meta.url), 'utf8')
+  const source = readFileSync(new URL('../src/data/persistence.ts', import.meta.url), 'utf8')
   const start = source.indexOf('export async function updateBookMetadata(')
   const end = source.indexOf('export async function moveStructuralEntity', start)
   const block = source.slice(start, end)

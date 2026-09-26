@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { summaryGenerationOwnsUi } from '../src/summary-generation-owner.ts'
+import { summaryGenerationOwnsUi } from '../src/features/writing/summary-generation-owner.ts'
 
 const owner = { requestId: 7, bookId: 'book-a', summaryId: 'summary-a' }
 
@@ -14,7 +14,7 @@ test('summary completion owns UI only for the exact request, book, summary, and 
 })
 
 test('summary generation reserves navigation ownership before its first async preflight', () => {
-  const source = readFileSync(new URL('../src/Workspace.tsx', import.meta.url), 'utf8')
+  const source = readFileSync(new URL('../src/app/Workspace.tsx', import.meta.url), 'utf8')
   const start = source.indexOf('  async function runSummaryGeneration() {')
   const end = source.indexOf('\n  function generate() {', start)
   assert.ok(start >= 0 && end > start, 'runSummaryGeneration block exists')
@@ -29,7 +29,7 @@ test('summary generation reserves navigation ownership before its first async pr
 })
 
 test('book switching also honors the active generation navigation guard', () => {
-  const source = readFileSync(new URL('../src/Workspace.tsx', import.meta.url), 'utf8')
+  const source = readFileSync(new URL('../src/app/Workspace.tsx', import.meta.url), 'utf8')
   const start = source.indexOf('  async function openBook(')
   const end = source.indexOf('\n  async function deleteWithSaveBarrier', start)
   const block = source.slice(start, end)

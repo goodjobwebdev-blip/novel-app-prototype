@@ -1,4 +1,5 @@
 import test, { after } from 'node:test'
+import { transpileSourceTree } from './transpile-source-tree.mjs'
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
@@ -7,11 +8,7 @@ import 'fake-indexeddb/auto'
 
 // Run the real persistence module against IndexedDB, not a mocked save function.
 const directory = mkdtempSync(new URL('../node_modules/.arc-image-test-', import.meta.url))
-for (const filename of readdirSync(new URL('../src/', import.meta.url)).filter((name) => name.endsWith('.ts'))) {
-  const source = readFileSync(new URL(`../src/${filename}`, import.meta.url), 'utf8')
-  const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText.replace(/(['"])(\.\/[^'"]+)\1/g, (_, quote, path) => `${quote}${path.replace(/\.ts$/, '')}.mjs${quote}`)
-  writeFileSync(`${directory}/${filename.replace(/\.ts$/, '.mjs')}`, compiled)
-}
+transpileSourceTree(directory)
 const { default: Dexie } = await import('dexie')
 const legacy = new Dexie('arc-novel-local-v1')
 legacy.version(3).stores({ entities: 'id,type,bookId,parentId,[parentId+order],updatedAt', snapshots: 'id,entityId,entityType,createdAt,[entityId+createdAt],reason', codexDependencies: 'id,bookId,sourceId,targetId,[bookId+sourceId],[bookId+targetId],[sourceId+targetId],updatedAt', meta: 'key' })
@@ -19,10 +16,10 @@ await legacy.open()
 await legacy.table('entities').put({ id: 'migration-book', type: 'book', title: 'Existing book', createdAt: 1, updatedAt: 1 })
 await legacy.table('entities').put({ id: 'migration-entry', type: 'codexEntry', bookId: 'migration-book', parentId: 'migration-book', title: 'Old entry', content: 'Existing lore', category: 'Other', createdAt: 1, updatedAt: 1 })
 legacy.close()
-const p = await import(pathToFileURL(`${directory}/persistence.mjs`))
-const archive = await import(pathToFileURL(`${directory}/book-archive.mjs`))
-const images = await import(pathToFileURL(`${directory}/illustration-image.mjs`))
-const { initialAiSettings } = await import(pathToFileURL(`${directory}/ai-settings.mjs`))
+const p = await import(pathToFileURL(`${directory}/data/persistence.mjs`))
+const archive = await import(pathToFileURL(`${directory}/data/book-archive.mjs`))
+const images = await import(pathToFileURL(`${directory}/features/images/illustration-image.mjs`))
+const { initialAiSettings } = await import(pathToFileURL(`${directory}/shared/ai/ai-settings.mjs`))
 after(() => rmSync(directory, { recursive: true, force: true }))
 const png = new Blob([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6AAAAAElFTkSuQmCC', 'base64')], { type: 'image/png' })
 const pixels = { image: png, thumbnail: png, width: 1, height: 1 }

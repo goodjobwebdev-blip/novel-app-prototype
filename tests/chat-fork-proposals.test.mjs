@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { snapshotProposalForFork, snapshotProposalListForFork } from '../src/chat-fork-proposals.ts'
+import { snapshotProposalForFork, snapshotProposalListForFork } from '../src/features/chat/chat-fork-proposals.ts'
 
 test('pending and applying proposals become stale in fork history', () => {
   assert.equal(snapshotProposalForFork({ id: 'p1', status: 'proposed' }).status, 'stale')

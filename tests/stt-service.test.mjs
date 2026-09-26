@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { normalizeTranscriptForInsertion, openAiSupportsLiveTranscription, parseTranscriptionModelId, transcriptionModelUnavailable } from '../src/stt-service.ts'
+import { normalizeTranscriptForInsertion, openAiSupportsLiveTranscription, parseTranscriptionModelId, transcriptionModelUnavailable } from '../src/features/speech/stt-service.ts'
 
 test('provider-qualified transcription model IDs are collision safe', () => {
   assert.deepEqual(parseTranscriptionModelId('openai:whisper-1'), { provider: 'openai', modelId: 'whisper-1' })

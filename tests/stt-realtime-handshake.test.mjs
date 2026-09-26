@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { startSttSession, stopSttSession, cancelSttSession, dismissSttState, getSttState } from '../src/stt-service.ts'
+import { startSttSession, stopSttSession, cancelSttSession, dismissSttState, getSttState } from '../src/features/speech/stt-service.ts'
 
 const settings = { apiKey: '', openaiApiKey: 'test-user-key', transcriptionModel: 'openai:gpt-live-transcribe', transcriptionLanguage: 'en', streamTranscription: true }
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })

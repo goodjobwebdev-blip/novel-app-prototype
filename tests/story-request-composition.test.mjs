@@ -1,8 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { assembleCompositionRequest, normalizeAppManagedPart } from '../src/prompt-composition.ts'
-import { assembleStoryGenerationRequest, defaultStoryPromptComposition, upgradeDefaultStoryPromptComposition } from '../src/story-request.ts'
+import { assembleCompositionRequest, normalizeAppManagedPart } from '../src/shared/ai/prompt-composition.ts'
+import { assembleStoryGenerationRequest, defaultStoryPromptComposition, upgradeDefaultStoryPromptComposition } from '../src/features/writing/story-request.ts'
 
 const book = { title: 'Tide', series: '', seriesOrder: '', overview: 'A door under the sea.', genre: 'Fantasy', style: 'Lyrical', pov: 'Third person', tense: 'Past', language: 'English' }
 const context = {
@@ -14,10 +14,10 @@ const context = {
   additionalSources: [{ sourceId: 'codex-1', content: 'Duplicate manual lore' }, { sourceId: 'note-1', content: 'Author note' }],
 }
 
-const storyRequestSource = readFileSync(new URL('../src/story-request.ts', import.meta.url), 'utf8')
-const aiSettingsSource = readFileSync(new URL('../src/ai-settings.ts', import.meta.url), 'utf8')
-const workspaceSource = readFileSync(new URL('../src/Workspace.tsx', import.meta.url), 'utf8')
-const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+const storyRequestSource = readFileSync(new URL('../src/features/writing/story-request.ts', import.meta.url), 'utf8')
+const aiSettingsSource = readFileSync(new URL('../src/shared/ai/ai-settings.ts', import.meta.url), 'utf8')
+const workspaceSource = readFileSync(new URL('../src/app/Workspace.tsx', import.meta.url), 'utf8')
+const appSource = readFileSync(new URL('../src/app/App.tsx', import.meta.url), 'utf8')
 
 test('default Story composition and final app-owned instruction preserve authored order', () => {
   for (const fragment of ["name: 'Book'", "name: 'Story context'", "name: 'Response length'"]) assert.match(storyRequestSource, new RegExp(fragment))

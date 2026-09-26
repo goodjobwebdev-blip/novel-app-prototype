@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
-const source = await readFile(new URL('../src/keyed-async-queue.ts', import.meta.url), 'utf8')
+const source = await readFile(new URL('../src/shared/utils/keyed-async-queue.ts', import.meta.url), 'utf8')
 const js = source
   .replace('private tails = new Map<string, Promise<void>>()', 'tails = new Map()')
   .replace(/async run<T>\(key: string, task: \(\) => Promise<T>\): Promise<T>/, 'async run(key, task)')

@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
-const source = await readFile(new URL('../src/Workspace.tsx', import.meta.url), 'utf8')
+const source = await readFile(new URL('../src/app/Workspace.tsx', import.meta.url), 'utf8')
 
 function body(name, next) {
   const start = source.indexOf(`async function ${name}`)

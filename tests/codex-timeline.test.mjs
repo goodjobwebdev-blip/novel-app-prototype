@@ -7,14 +7,14 @@ import 'fake-indexeddb/auto'
 const storage = new Map()
 globalThis.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)), removeItem: key => storage.delete(key) }
 registerHooks({ resolve(specifier, context, nextResolve) { if (specifier.startsWith('.') && context.parentURL?.startsWith('file:')) { const url = new URL(specifier + '.ts', context.parentURL); if (existsSync(fileURLToPath(url))) return nextResolve(url.href, context) } return nextResolve(specifier, context) } })
-const p = await import('../src/persistence.ts'), service = await import('../src/codex-timeline-service.ts'), timeline = await import('../src/codex-timeline.ts')
-const seriesService = await import('../src/series-codex-service.ts')
-const { initialAiSettings } = await import('../src/ai-settings.ts')
-const { metadataValues } = await import('../src/chat-management-schema.ts')
-const { copyBookArchive, encodeBookArchive, decodeBookArchive } = await import('../src/book-archive.ts')
-const { buildContextValues } = await import('../src/context-service.ts')
-const { codexContextRepresentation } = await import('../src/summary-service.ts')
-const { searchBookEntities } = await import('../src/chat-search.ts')
+const p = await import('../src/data/persistence.ts'), service = await import('../src/features/codex/codex-timeline-service.ts'), timeline = await import('../src/features/codex/codex-timeline.ts')
+const seriesService = await import('../src/features/codex/series-codex-service.ts')
+const { initialAiSettings } = await import('../src/shared/ai/ai-settings.ts')
+const { metadataValues } = await import('../src/features/chat/chat-management-schema.ts')
+const { copyBookArchive, encodeBookArchive, decodeBookArchive } = await import('../src/data/book-archive.ts')
+const { buildContextValues } = await import('../src/shared/context/context-service.ts')
+const { codexContextRepresentation } = await import('../src/features/writing/summary-service.ts')
+const { searchBookEntities } = await import('../src/features/chat/chat-search.ts')
 async function fixture() {
   const { book } = await p.createBook(initialAiSettings, 'Timeline')
   const chapter = await p.createStructuralEntity('chapter', book.id, book.id, 'Chapter')
@@ -96,7 +96,7 @@ test('backup/import remaps local checkpoint anchors and preserves unresolved sna
 })
 
 test('author-chat cutoff intercepts Codex reads, searches, summaries and baseline edit attempts', async () => {
-  const { executeCodexCutoffRead } = await import('../src/chat-codex-cutoff.ts')
+  const { executeCodexCutoffRead } = await import('../src/features/chat/chat-codex-cutoff.ts')
   const f = await fixture(), world = await service.readTimelineWorld(f.book.id)
   const entries = timeline.resolveTimelineEntities(await p.listEntitiesByBook(f.book.id, 'codexEntry'), { bookId: f.book.id, sceneId: f.scenes[2].id }, world)
   const call = (name, args) => ({ id: name, type: 'function', function: { name, arguments: JSON.stringify(args) } })

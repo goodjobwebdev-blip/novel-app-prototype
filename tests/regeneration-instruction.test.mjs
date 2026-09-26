@@ -1,9 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { replaceGenerationInstruction } from '../src/regeneration-instruction.ts'
-import { assembleStoryGenerationRequest, defaultStoryPromptComposition, STORY_CONTINUE_FALLBACK } from '../src/story-request.ts'
-import { assembleCodexGenerationRequest, defaultCodexPromptComposition, CODEX_CONTINUE_FALLBACK } from '../src/codex-request.ts'
+import { replaceGenerationInstruction } from '../src/features/writing/regeneration-instruction.ts'
+import { assembleStoryGenerationRequest, defaultStoryPromptComposition, STORY_CONTINUE_FALLBACK } from '../src/features/writing/story-request.ts'
+import { assembleCodexGenerationRequest, defaultCodexPromptComposition, CODEX_CONTINUE_FALLBACK } from '../src/features/codex/codex-request.ts'
 
 const book = { title: 'Tide', series: '', seriesOrder: '', overview: 'A sunken city.', genre: '', style: '', pov: '', tense: '', language: 'English' }
 const context = {
@@ -57,7 +57,7 @@ test('invalid saved requests fail rather than replacing context or silently appe
 })
 
 test('Workspace preserves the snapshot, reads current input, and checks the revised request against saved limits', () => {
-  const source = readFileSync(new URL('../src/Workspace.tsx', import.meta.url), 'utf8')
+  const source = readFileSync(new URL('../src/app/Workspace.tsx', import.meta.url), 'utf8')
   const start = source.indexOf("if (mode === 'regenerate' && previousRequest)")
   const end = source.indexOf('\n    } else {', start)
   const regeneration = source.slice(start, end)

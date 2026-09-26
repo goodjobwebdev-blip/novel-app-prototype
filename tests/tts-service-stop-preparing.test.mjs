@@ -32,7 +32,7 @@ test('Stop during model lookup keeps TTS stopped and sends no chunk request', as
     throw new Error('TTS chunk request should not run after Stop')
   }
 
-  const tts = await import(`../src/tts-service.ts?stop-preparing=${Date.now()}`)
+  const tts = await import(`../src/features/speech/tts-service.ts?stop-preparing=${Date.now()}`)
   const settings = {
     provider: 'nanogpt',
     apiKey: 'test-key',

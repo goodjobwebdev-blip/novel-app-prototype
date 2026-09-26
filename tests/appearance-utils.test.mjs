@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { contrastRatio, contrastWarnings } from '../src/appearance-utils.ts'
-import { createCustomTheme, defaultUiSettings, saveUiSettings } from '../src/ui-settings.ts'
+import { contrastRatio, contrastWarnings } from '../src/features/settings/appearance-utils.ts'
+import { createCustomTheme, defaultUiSettings, saveUiSettings } from '../src/features/settings/ui-settings.ts'
 test('contrast calculations distinguish identical colors and black/white with symmetric ratios', () => {
   assert.equal(contrastRatio('#000000', '#ffffff'), 21)
   assert.equal(contrastRatio('#ffffff', '#000000'), 21)

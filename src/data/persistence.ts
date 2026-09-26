@@ -1,0 +1,1332 @@
+import { deleteTtsCacheOwners } from '../features/speech/tts-cache.ts'
+import { applyAuthorPlanOperation, authorPlanning } from '../features/author-planning/author-planning'
+import type { CodexCheckpoint, TimelineSummary } from '../features/codex/codex-timeline'
+import { ensureLoreTypesWithDb, resolveLoreType } from '../features/codex/lore-types.ts'
+import { installSeriesCodexHooks, synchronizeCodexEntity, synchronizeSeriesCodex, seriesTransaction, detachSeriesCodex } from '../features/codex/series-codex.ts'
+import { documentBlocks, encodeDocumentBlock } from '../features/editor/document-projection.ts'
+import { PROSE_PROJECTION_VERSION } from '../features/editor/document-projection.ts'
+import { sceneWritingValues, validateSceneWritingPatch, type SceneWritingOverrides, type SceneWritingField } from '../features/writing/scene-writing'
+import type { GalleryImage, ImageJob } from '../features/images/image-generation-types'
+import { metadataValues, validateMetadataPatch, type ChatManagementOperation } from '../features/chat/chat-management-schema'
+import {
+  copyAiSettings,
+  toBookAiSettings,
+  withGlobalFavorites,
+  type AiSettings,
+  type BookAiSettings,
+} from '../shared/ai/ai-settings'
+import { normalizeCodexTriggerList } from '../features/codex/codex-trigger-service'
+import type { ImageDetails, ImagePixels } from '../features/images/illustration-image'
+
+import Dexie from 'dexie'
+
+// Bundle the database runtime so saved illustrations can open offline.
+
+export type EntityType = 'book' | 'series' | 'act' | 'chapter' | 'scene' | 'note' | 'codexEntry' | 'summary' | 'chat' | 'chatMessage' | 'settings'
+export type SnapshotReason = 'autosave' | 'generation' | 'manual' | 'navigation' | 'lifecycle'
+
+export type ArcEntity = {
+  id: string
+  type: EntityType
+  bookId?: string
+  parentId?: string
+  order?: number
+  title?: string
+  content?: string
+  createdAt: number
+  updatedAt: number
+  [key: string]: unknown
+}
+
+export type CodexDependencyEdge = {
+  id: string
+  bookId: string
+  sourceId: string
+  targetId: string
+  relationLabel: string
+  includeWithSource: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export type DocumentSnapshot = {
+  id: string
+  entityId: string
+  entityType: EntityType
+  createdAt: number
+  content: string
+  reason: SnapshotReason
+}
+
+export type StructuralEntityType = 'act' | 'chapter' | 'scene'
+export type SummarySourceType = StructuralEntityType | 'codexEntry'
+export type StructuralEntity = ArcEntity & SceneWritingOverrides & { type: StructuralEntityType; bookId: string; parentId: string; order: number; title: string }
+export type BookMetadata = {
+  title: string
+  seriesId: string
+  seriesOrder: string
+  overview: string
+  genre: string
+  writingStyle: string
+  pointOfView: string
+  tense: string
+  language: string
+}
+export type BookEntity = ArcEntity & { type: 'book'; title: string } & Partial<Omit<BookMetadata, 'title'>>
+export type SeriesEntity = ArcEntity & { type: 'series'; title: string }
+export type NoteEntity = ArcEntity & { type: 'note'; bookId: string; parentId: string; title: string; content: string; useAsChatSkill?: boolean; useAsCodexTemplate?: boolean; compatibleLoreTypeIds?: string[] }
+export type CodexEntryEntity = ArcEntity & { type: 'codexEntry'; checkpoints?: CodexCheckpoint[]; timelineSummaries?: TimelineSummary[]; bookId: string; parentId: string; title: string; category: string; typeId?: string; content: string; primaryImageId?: string; archivedAt?: number; preferSummaryForContext?: boolean; sourceRevision?: number; autoIncludeTriggers?: string[]; codexScope?: 'series' | 'inherited' | 'override'; seriesSourceId?: string; seriesSourceSeriesId?: string; seriesSnapshotSignature?: string; hiddenInBook?: boolean }
+export type SummaryEntity = ArcEntity & {
+  type: 'summary'
+  bookId: string
+  parentId: string
+  sourceEntityId: string
+  sourceType: SummarySourceType
+  title: string
+  content: string
+  summarizedSourceRevision?: number
+}
+export type EditableEntity = StructuralEntity | NoteEntity | CodexEntryEntity | SummaryEntity
+export type GenerationContextType = 'scene' | 'codex' | 'note' | 'chat'
+export type SummaryRange = 'none' | 'all' | 'before' | 'after'
+export type GenerationContextProfile = {
+  loreAtCurrentScene?: boolean
+  includeLastScene: boolean
+  includePreviousSceneWhenEmpty: boolean
+  structuralIds: string[]
+  noteIds: string[]
+  codexEntryIds: string[]
+  summaryRange: SummaryRange
+}
+export type BookContextSettings = {
+  lastOpenedSceneId: string
+  previousScenesForCodexTriggers: number
+  profiles: Record<GenerationContextType, GenerationContextProfile>
+}
+export type BookAiSettingsEntity = ArcEntity & {
+  type: 'settings'
+  bookId: string
+  parentId: string
+  settingsType: 'ai'
+  value: BookAiSettings
+}
+export type BookContextSettingsEntity = ArcEntity & {
+  type: 'settings'
+  bookId: string
+  parentId: string
+  settingsType: 'context-book'
+  value: BookContextSettings
+}
+
+export const defaultGenerationContextProfile: GenerationContextProfile = {
+  includeLastScene: false,
+  includePreviousSceneWhenEmpty: false,
+  structuralIds: [],
+  noteIds: [],
+  codexEntryIds: [],
+  summaryRange: 'none',
+}
+
+export const defaultBookContextSettings: BookContextSettings = {
+  lastOpenedSceneId: '',
+  previousScenesForCodexTriggers: 2,
+  profiles: {
+    scene: { ...defaultGenerationContextProfile, includePreviousSceneWhenEmpty: true },
+    codex: { ...defaultGenerationContextProfile, includeLastScene: true, includePreviousSceneWhenEmpty: true },
+    note: { ...defaultGenerationContextProfile },
+    chat: { ...defaultGenerationContextProfile, includeLastScene: true, includePreviousSceneWhenEmpty: true },
+  },
+}
+
+function normalizeContextProfile(value?: Partial<GenerationContextProfile>, defaults: Partial<GenerationContextProfile> = {}): GenerationContextProfile {
+  return {
+    includeLastScene: value?.includeLastScene ?? defaults.includeLastScene ?? false,
+    includePreviousSceneWhenEmpty: value?.includePreviousSceneWhenEmpty ?? defaults.includePreviousSceneWhenEmpty ?? false,
+    structuralIds: uniqueIds(value?.structuralIds ?? []),
+    noteIds: uniqueIds(value?.noteIds ?? []),
+    codexEntryIds: uniqueIds(value?.codexEntryIds ?? []),
+    loreAtCurrentScene: value?.loreAtCurrentScene === true,
+    summaryRange: ['all', 'before', 'after'].includes(String(value?.summaryRange)) ? value!.summaryRange! : 'none',
+  }
+}
+
+function normalizeBookContextSettings(value?: Partial<BookContextSettings>): BookContextSettings {
+  const profiles = value?.profiles ?? {} as BookContextSettings['profiles']
+  const previousScenes = Number(value?.previousScenesForCodexTriggers)
+  return {
+    lastOpenedSceneId: typeof value?.lastOpenedSceneId === 'string' ? value.lastOpenedSceneId : '',
+    previousScenesForCodexTriggers: Number.isSafeInteger(previousScenes) && previousScenes >= 0 ? previousScenes : 2,
+    profiles: {
+      scene: normalizeContextProfile(profiles.scene, { includePreviousSceneWhenEmpty: true }),
+      codex: normalizeContextProfile(profiles.codex, { includeLastScene: true, includePreviousSceneWhenEmpty: true }),
+      note: normalizeContextProfile(profiles.note),
+      chat: normalizeContextProfile(profiles.chat, { includeLastScene: true, includePreviousSceneWhenEmpty: true }),
+    },
+  }
+}
+
+export const CONTEXT_DEFAULTS_STORAGE_KEY = 'arc-context-defaults-v1'
+
+export function loadDefaultBookContextSettings(): BookContextSettings {
+  if (typeof localStorage === 'undefined') return normalizeBookContextSettings(defaultBookContextSettings)
+  try {
+    const stored = localStorage.getItem(CONTEXT_DEFAULTS_STORAGE_KEY)
+    return stored ? normalizeBookContextSettings(JSON.parse(stored)) : normalizeBookContextSettings(defaultBookContextSettings)
+  } catch {
+    return normalizeBookContextSettings(defaultBookContextSettings)
+  }
+}
+
+export function saveDefaultBookContextSettings(value: BookContextSettings): BookContextSettings {
+  const normalized = normalizeBookContextSettings(value)
+  if (typeof localStorage !== 'undefined') localStorage.setItem(CONTEXT_DEFAULTS_STORAGE_KEY, JSON.stringify(normalized))
+  return normalized
+}
+
+export const PROTOTYPE_BOOK_ID = 'book-city-beneath-tide'
+export const PROTOTYPE_SCENE_ID = 'scene-ch7-2'
+
+let databasePromise: Promise<any> | null = null
+
+export async function database() {
+  if (!databasePromise) {
+    databasePromise = Promise.resolve().then(() => {
+      const db = new Dexie('arc-novel-local-v1')
+      db.version(1).stores({
+        entities: 'id,type,bookId,parentId,[parentId+order],updatedAt',
+        snapshots: 'id,entityId,entityType,createdAt,[entityId+createdAt],reason',
+        meta: 'key',
+      })
+      db.version(2).stores({
+        entities: 'id,type,bookId,parentId,[parentId+order],updatedAt',
+        snapshots: 'id,entityId,entityType,createdAt,[entityId+createdAt],reason',
+        codexDependencies: 'id,bookId,sourceId,targetId,[bookId+sourceId],[bookId+targetId],[sourceId+targetId],updatedAt',
+        meta: 'key',
+      })
+      db.version(3).stores({
+        entities: 'id,type,bookId,parentId,[parentId+order],updatedAt',
+        snapshots: 'id,entityId,entityType,createdAt,[entityId+createdAt],reason',
+        codexDependencies: 'id,bookId,sourceId,targetId,[bookId+sourceId],[bookId+targetId],[sourceId+targetId],updatedAt',
+        meta: 'key',
+      }).upgrade((transaction: any) => transaction.table('entities').filter((entity: ArcEntity) => entity.type === 'chat' || entity.type === 'chatMessage').delete())
+      db.version(4).stores({
+        illustrations: 'id,bookId,&entryId,updatedAt',
+      })
+      db.version(5).stores({ illustrationUndo: 'entryId,bookId' })
+      db.version(6).stores({ imageJobs: 'id,bookId,chatId,messageId,status,provider,createdAt', galleryImages: 'id,bookId,createdAt' })
+      installSeriesCodexHooks(db)
+      return db.open().then(() => db)
+    }).catch((error) => {
+      // A temporary open failure must not poison every later read and write.
+      databasePromise = null
+      throw error
+    })
+  }
+  return databasePromise
+}
+
+function makeId(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
+
+function aiSettingsId(bookId: string) {
+  return `settings-ai-${bookId}`
+}
+
+function summaryId(sourceEntityId: string) {
+  return `summary-${sourceEntityId}`
+}
+
+function bookContextSettingsId(bookId: string) {
+  return `settings-context-book-${bookId}`
+}
+
+function uniqueIds(ids: string[]) {
+  return [...new Set(ids.filter((id) => typeof id === 'string' && id.trim()))]
+}
+
+async function touchAncestors(db: any, parentId: string | undefined, now: number) {
+  let nextId = parentId
+  while (nextId) {
+    const parent = await db.table('entities').get(nextId) as ArcEntity | undefined
+    if (!parent) return
+    await db.table('entities').put({ ...parent, updatedAt: now })
+    nextId = parent.parentId
+  }
+}
+
+function makeBookAiSettingsEntity(bookId: string, settings: AiSettings, now = Date.now()): BookAiSettingsEntity {
+  return {
+    id: aiSettingsId(bookId),
+    type: 'settings',
+    bookId,
+    parentId: bookId,
+    settingsType: 'ai',
+    value: toBookAiSettings(settings),
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+function makeBookContextSettingsEntity(bookId: string, value: BookContextSettings = defaultBookContextSettings, now = Date.now()): BookContextSettingsEntity {
+  return {
+    id: bookContextSettingsId(bookId),
+    type: 'settings',
+    bookId,
+    parentId: bookId,
+    settingsType: 'context-book',
+    value: normalizeBookContextSettings(value),
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+export async function ensurePrototypeSeed(initialStoryMarkdown: string) {
+  const db = await database()
+  const seeded = await db.table('meta').get('prototype-seeded-v1')
+  if (!seeded) {
+    const now = Date.now()
+    const entities: ArcEntity[] = [
+      {
+        id: PROTOTYPE_BOOK_ID,
+        type: 'book',
+        title: 'The City Beneath the Tide',
+        series: 'Atlas of Lost Coasts',
+        seriesOrder: '2',
+        overview: 'A cartographer discovers that the drowned parts of her city still exist behind doors that remember them.',
+        genre: 'Fantasy',
+        writingStyle: 'Lyrical tension',
+        pointOfView: 'Third person limited',
+        tense: 'Past',
+        language: 'English',
+        createdAt: now,
+        updatedAt: now,
+      },
+      { id: 'act-1', type: 'act', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, order: 0, title: 'The doors remember', createdAt: now, updatedAt: now },
+      { id: 'chapter-7', type: 'chapter', bookId: PROTOTYPE_BOOK_ID, parentId: 'act-1', order: 0, title: 'The Cartographer’s Door', createdAt: now, updatedAt: now },
+      { id: PROTOTYPE_SCENE_ID, type: 'scene', bookId: PROTOTYPE_BOOK_ID, parentId: 'chapter-7', order: 0, title: 'The voice beyond', content: initialStoryMarkdown, createdAt: now, updatedAt: now },
+      { id: 'scene-ch7-3', type: 'scene', bookId: PROTOTYPE_BOOK_ID, parentId: 'chapter-7', order: 1, title: 'Crossing', content: '', createdAt: now, updatedAt: now },
+      { id: 'chapter-8', type: 'chapter', bookId: PROTOTYPE_BOOK_ID, parentId: 'act-1', order: 1, title: 'What the sea kept', createdAt: now, updatedAt: now },
+      { id: 'act-2', type: 'act', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, order: 1, title: 'The map without coastlines', createdAt: now, updatedAt: now },
+    ]
+
+    await db.transaction('rw', db.table('entities'), db.table('meta'), async () => {
+      await db.table('entities').bulkPut(entities)
+      await db.table('meta').put({ key: 'prototype-seeded-v1', value: true, createdAt: now })
+    })
+  }
+
+  const contentSeeded = await db.table('meta').get('prototype-content-seeded-v1')
+  const prototypeBook = await db.table('entities').get(PROTOTYPE_BOOK_ID)
+  if (!contentSeeded && prototypeBook) {
+    const now = Date.now()
+    const contentEntities: ArcEntity[] = [
+      { id: 'note-remembered-doors', type: 'note', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, title: 'Rules of the remembered doors', content: '# Rules of the remembered doors\n\nA door that remembers a name should never be answered alone.', createdAt: now, updatedAt: now },
+      { id: 'note-act-two-questions', type: 'note', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, title: 'Questions for Act II', content: '- What does crossing cost Mara?\n- Why did her father hide the map?', createdAt: now, updatedAt: now },
+      { id: 'codex-mara-vale', type: 'codexEntry', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, title: 'Mara Vale', category: 'Character', content: 'A cartographer who inherited her father’s rules and his unfinished map.', autoIncludeTriggers: ['Mara Vale'], createdAt: now, updatedAt: now },
+      { id: 'codex-drowned-quarter', type: 'codexEntry', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, title: 'The Drowned Quarter', category: 'Place', content: 'A district exposed only at low tide.', autoIncludeTriggers: ['The Drowned Quarter'], createdAt: now, updatedAt: now },
+      { id: 'codex-brass-compass', type: 'codexEntry', bookId: PROTOTYPE_BOOK_ID, parentId: PROTOTYPE_BOOK_ID, title: 'Brass Compass', category: 'Object', content: 'One of several compasses that point toward remembered doors.', autoIncludeTriggers: ['Brass Compass'], createdAt: now, updatedAt: now },
+    ]
+    await db.transaction('rw', db.table('entities'), db.table('meta'), async () => {
+      for (const entity of contentEntities) {
+        if (!await db.table('entities').get(entity.id)) await db.table('entities').put(entity)
+      }
+      await db.table('meta').put({ key: 'prototype-content-seeded-v1', value: true, createdAt: now })
+    })
+  }
+}
+
+export async function getEntity<T extends ArcEntity = ArcEntity>(id: string): Promise<T | undefined> {
+  const db = await database()
+  const entity = await db.table('entities').get(id) as T | undefined
+  if (entity?.type === 'codexEntry' && entity.bookId) { await synchronizeSeriesCodex(db, entity.bookId); return db.table('entities').get(id) }
+  return entity
+}
+
+export async function putEntity(entity: ArcEntity) {
+  const db = await database()
+  await db.table('entities').put(entity)
+  return entity
+}
+
+export async function updateEntityAtomically<T extends ArcEntity = ArcEntity>(id: string, update: (current: T) => T): Promise<T> {
+  const db = await database()
+  await synchronizeCodexEntity(db, id)
+  return db.transaction('rw', db.table('entities'), async () => {
+    const current = await db.table('entities').get(id) as T | undefined
+    if (!current) throw new Error(`Cannot update missing entity ${id}`)
+    const next = update(current)
+    await db.table('entities').put(next)
+    return next
+  })
+}
+
+export async function listCodexDependencies(bookId: string): Promise<CodexDependencyEdge[]> {
+  const db = await database()
+  await synchronizeSeriesCodex(db, bookId)
+  const edges = await db.table('codexDependencies').where('bookId').equals(bookId).toArray() as CodexDependencyEdge[]
+  return edges.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+}
+
+export async function listOutgoingCodexDependencies(bookId: string, sourceId: string): Promise<CodexDependencyEdge[]> {
+  const db = await database()
+  await synchronizeSeriesCodex(db, bookId)
+  const edges = await db.table('codexDependencies').where('[bookId+sourceId]').equals([bookId, sourceId]).toArray() as CodexDependencyEdge[]
+  return edges.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+}
+
+export async function listIncomingCodexDependencies(bookId: string, targetId: string): Promise<CodexDependencyEdge[]> {
+  const db = await database()
+  await synchronizeSeriesCodex(db, bookId)
+  const edges = await db.table('codexDependencies').where('[bookId+targetId]').equals([bookId, targetId]).toArray() as CodexDependencyEdge[]
+  return edges.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+}
+
+export async function createCodexDependency(bookId: string, sourceId: string, targetId: string, relationLabel = ''): Promise<CodexDependencyEdge> {
+  await getEntity(sourceId)
+  if (sourceId === targetId) throw new Error('A Codex entry cannot depend on itself.')
+  const db = await database()
+  return db.transaction('rw', db.table('entities'), db.table('codexDependencies'), async () => {
+    const [source, target] = await Promise.all([
+      db.table('entities').get(sourceId) as Promise<CodexEntryEntity | undefined>,
+      db.table('entities').get(targetId) as Promise<CodexEntryEntity | undefined>,
+    ])
+    if (!source || source.type !== 'codexEntry' || source.bookId !== bookId) throw new Error('The dependency source is not available in this Book.')
+    if (!target || target.type !== 'codexEntry' || target.bookId !== bookId) throw new Error('The dependency target is not available in this Book.')
+    if (isCodexEntryArchived(target)) throw new Error('Restore the target Codex entry before adding it as a dependency.')
+    const duplicate = await db.table('codexDependencies').where('[sourceId+targetId]').equals([sourceId, targetId]).first() as CodexDependencyEdge | undefined
+    if (duplicate) throw new Error('This dependency already exists.')
+    await db.table('entities').update(sourceId, { ...(source.codexScope === 'inherited' ? { codexScope: 'override' } : {}), updatedAt: Math.max(Date.now(), source.updatedAt + 1), ...(source.codexScope === 'series' ? { sourceRevision: Math.max(Date.now(), Number(source.sourceRevision ?? 0) + 1) } : {}) })
+    const now = Date.now()
+    const edge: CodexDependencyEdge = {
+      id: makeId('codex-dependency'),
+      bookId,
+      sourceId,
+      targetId,
+      relationLabel: relationLabel.trim(),
+      includeWithSource: true,
+      createdAt: now,
+      updatedAt: now,
+    }
+    await db.table('codexDependencies').put(edge)
+    return edge
+  })
+}
+
+export async function updateCodexDependency(id: string, patch: { relationLabel?: string; includeWithSource?: boolean }): Promise<CodexDependencyEdge> {
+  const db = await database()
+  return db.transaction('rw', db.table('entities'), db.table('codexDependencies'), async () => {
+    const current = await db.table('codexDependencies').get(id) as CodexDependencyEdge | undefined
+    if (!current) throw new Error('This dependency no longer exists.')
+    const source = await db.table('entities').get(current.sourceId) as CodexEntryEntity | undefined
+    if (source) await db.table('entities').update(source.id, { ...(source.codexScope === 'inherited' ? { codexScope: 'override' } : {}), updatedAt: Math.max(Date.now(), source.updatedAt + 1), ...(source.codexScope === 'series' ? { sourceRevision: Math.max(Date.now(), Number(source.sourceRevision ?? 0) + 1) } : {}) })
+    const next = {
+      ...(patch.relationLabel !== undefined ? { relationLabel: patch.relationLabel.trim() } : {}),
+      ...(patch.includeWithSource !== undefined ? { includeWithSource: patch.includeWithSource } : {}),
+      updatedAt: Date.now(),
+    }
+    await db.table('codexDependencies').update(id, next)
+    const updated = await db.table('codexDependencies').get(id) as CodexDependencyEdge | undefined
+    if (!updated) throw new Error('This dependency no longer exists.')
+    return updated
+  })
+}
+
+export async function removeCodexDependency(id: string): Promise<void> {
+  const db = await database()
+  await db.transaction('rw', db.table('entities'), db.table('codexDependencies'), async () => {
+    const edge = await db.table('codexDependencies').get(id) as CodexDependencyEdge | undefined
+    const source = edge && await db.table('entities').get(edge.sourceId) as CodexEntryEntity | undefined
+    if (source) await db.table('entities').update(source.id, { ...(source.codexScope === 'inherited' ? { codexScope: 'override' } : {}), updatedAt: Math.max(Date.now(), source.updatedAt + 1), ...(source.codexScope === 'series' ? { sourceRevision: Math.max(Date.now(), Number(source.sourceRevision ?? 0) + 1) } : {}) })
+    await db.table('codexDependencies').delete(id)
+  })
+}
+
+export async function listEntitiesByParent(parentId: string): Promise<ArcEntity[]> {
+  const db = await database()
+  const children: ArcEntity[] = await db.table('entities').where('parentId').equals(parentId).toArray()
+  return children.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+}
+
+export async function listEntitiesByBook(bookId: string, type?: EntityType): Promise<ArcEntity[]> {
+  const db = await database()
+  await synchronizeSeriesCodex(db, bookId)
+  const entities: ArcEntity[] = await db.table('entities').where('bookId').equals(bookId).toArray()
+  return entities.filter(entity => !entity.hiddenInBook && (!type || entity.type === type))
+}
+
+export async function listBooks(): Promise<BookEntity[]> {
+  const db = await database()
+  const books: BookEntity[] = await db.table('entities').where('type').equals('book').toArray()
+  return books.sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+function normalizedSeriesTitle(title: string) {
+  return title.trim().replace(/\s+/g, ' ').toLocaleLowerCase()
+}
+
+export async function ensureSeriesLibrary(): Promise<SeriesEntity[]> {
+  const db = await database()
+  const [books, storedSeries] = await Promise.all([
+    db.table('entities').where('type').equals('book').toArray() as Promise<BookEntity[]>,
+    db.table('entities').where('type').equals('series').toArray() as Promise<SeriesEntity[]>,
+  ])
+  const byTitle = new Map(storedSeries.map((series) => [normalizedSeriesTitle(series.title), series]))
+  const created: SeriesEntity[] = []
+  const migrated: BookEntity[] = []
+  const now = Date.now()
+
+  for (const book of books) {
+    if (typeof book.seriesId === 'string' && book.seriesId) continue
+    const legacyValue = typeof book.series === 'string' ? book.series.trim() : ''
+    if (!legacyValue || legacyValue.toLocaleLowerCase() === 'standalone') {
+      if (book.seriesOrder) migrated.push({ ...book, seriesId: '', seriesOrder: '' })
+      continue
+    }
+    const legacy = legacyValue.match(/^(.*?)\s*·\s*Book\s+(.+)$/i)
+    const title = legacy?.[1]?.trim() || legacyValue
+    const key = normalizedSeriesTitle(title)
+    let series = byTitle.get(key)
+    if (!series) {
+      series = { id: makeId('series'), type: 'series', title, createdAt: now, updatedAt: now }
+      byTitle.set(key, series)
+      created.push(series)
+    }
+    migrated.push({
+      ...book,
+      seriesId: series.id,
+      seriesOrder: typeof book.seriesOrder === 'string' && book.seriesOrder ? book.seriesOrder : legacy?.[2]?.trim() || '',
+    })
+  }
+
+  if (created.length || migrated.length) {
+    await db.transaction('rw', db.table('entities'), async () => {
+      if (created.length) await db.table('entities').bulkPut(created)
+      if (migrated.length) await db.table('entities').bulkPut(migrated)
+    })
+  }
+  return [...storedSeries, ...created].sort((a, b) => a.title.localeCompare(b.title))
+}
+
+export async function listSeries(): Promise<SeriesEntity[]> {
+  const db = await database()
+  const series: SeriesEntity[] = await db.table('entities').where('type').equals('series').toArray()
+  return series.sort((a, b) => a.title.localeCompare(b.title))
+}
+
+export async function createSeries(title: string): Promise<SeriesEntity> {
+  const cleanTitle = title.trim().replace(/\s+/g, ' ')
+  if (!cleanTitle) throw new Error('Enter a series name.')
+  const db = await database()
+  const series: SeriesEntity[] = await db.table('entities').where('type').equals('series').toArray()
+  const existing = series.find((candidate) => normalizedSeriesTitle(candidate.title) === normalizedSeriesTitle(cleanTitle))
+  if (existing) return existing
+  const now = Date.now()
+  const created: SeriesEntity = { id: makeId('series'), type: 'series', title: cleanTitle, createdAt: now, updatedAt: now }
+  await db.table('entities').put(created)
+  return created
+}
+
+export async function renameSeries(id: string, title: string): Promise<SeriesEntity> {
+  const cleanTitle = title.trim().replace(/\s+/g, ' ')
+  if (!cleanTitle) throw new Error('Enter a series name.')
+  const db = await database()
+  const series: SeriesEntity[] = await db.table('entities').where('type').equals('series').toArray()
+  const current = series.find((candidate) => candidate.id === id)
+  if (!current) throw new Error('That series is no longer available.')
+  const duplicate = series.find((candidate) => candidate.id !== id && normalizedSeriesTitle(candidate.title) === normalizedSeriesTitle(cleanTitle))
+  if (duplicate) throw new Error('A series with that name already exists.')
+  const updated = { ...current, title: cleanTitle, updatedAt: Date.now() }
+  await db.table('entities').put(updated)
+  return updated
+}
+
+export async function createBook(defaultAiSettings: AiSettings, title = 'Untitled Book'): Promise<{ book: BookEntity; chapter: StructuralEntity; scene: StructuralEntity }> {
+  const db = await database()
+  const now = Date.now()
+  const bookId = makeId('book')
+  const chapterId = makeId('chapter')
+  const book: BookEntity = {
+    id: bookId,
+    type: 'book',
+    title,
+    seriesId: '',
+    seriesOrder: '',
+    overview: '',
+    genre: '',
+    writingStyle: '',
+    pointOfView: '',
+    tense: 'Past',
+    language: 'English',
+    createdAt: now,
+    updatedAt: now,
+  }
+  const chapter: StructuralEntity = { id: chapterId, type: 'chapter', bookId, parentId: bookId, order: 0, title: 'Chapter 1', createdAt: now, updatedAt: now }
+  const scene: StructuralEntity = { id: makeId('scene'), type: 'scene', bookId, parentId: chapterId, order: 0, title: 'Scene 1', content: '', createdAt: now, updatedAt: now }
+  const aiSettings = makeBookAiSettingsEntity(bookId, defaultAiSettings, now)
+  const contextSettings = makeBookContextSettingsEntity(bookId, loadDefaultBookContextSettings(), now)
+  await db.table('entities').bulkPut([book, chapter, scene, aiSettings, contextSettings])
+  return { book, chapter, scene }
+}
+
+export async function ensureBookAiSettings(bookId: string, defaults: AiSettings): Promise<BookAiSettingsEntity> {
+  const db = await database()
+  const existing = await db.table('entities').get(aiSettingsId(bookId)) as BookAiSettingsEntity | undefined
+  if (existing?.type === 'settings' && existing.settingsType === 'ai') return existing
+  const created = makeBookAiSettingsEntity(bookId, defaults)
+  await db.table('entities').put(created)
+  return created
+}
+
+export async function getBookAiSettings(bookId: string, globalFavorites: string[]): Promise<AiSettings> {
+  const db = await database()
+  const entity = await db.table('entities').get(aiSettingsId(bookId)) as BookAiSettingsEntity | undefined
+  if (!entity || entity.type !== 'settings' || entity.settingsType !== 'ai') {
+    throw new Error(`AI settings for book ${bookId} were not found`)
+  }
+  return withGlobalFavorites(entity.value, globalFavorites)
+}
+
+export async function saveBookAiSettings(bookId: string, settings: AiSettings): Promise<AiSettings> {
+  const db = await database()
+  const id = aiSettingsId(bookId)
+  const existing = await db.table('entities').get(id) as BookAiSettingsEntity | undefined
+  const now = Date.now()
+  const entity: BookAiSettingsEntity = {
+    ...makeBookAiSettingsEntity(bookId, settings, existing?.createdAt ?? now),
+    updatedAt: now,
+  }
+  await db.table('entities').put(entity)
+  return withGlobalFavorites(entity.value, settings.favorites)
+}
+
+export async function copyDefaultAiSettingsToBook(bookId: string, defaults: AiSettings): Promise<AiSettings> {
+  await saveBookAiSettings(bookId, copyAiSettings(defaults))
+  return copyAiSettings(defaults)
+}
+
+export async function getBookContextSettings(bookId: string): Promise<BookContextSettings> {
+  const db = await database()
+  const id = bookContextSettingsId(bookId)
+  const existing = await db.table('entities').get(id) as BookContextSettingsEntity | undefined
+  if (existing?.type === 'settings' && existing.settingsType === 'context-book') {
+    return normalizeBookContextSettings(existing.value)
+  }
+  const created = makeBookContextSettingsEntity(bookId)
+  await db.table('entities').put(created)
+  return { ...created.value }
+}
+
+export async function saveBookContextSettings(bookId: string, value: BookContextSettings): Promise<BookContextSettings> {
+  const db = await database()
+  const id = bookContextSettingsId(bookId)
+  const existing = await db.table('entities').get(id) as BookContextSettingsEntity | undefined
+  const now = Date.now()
+  const normalized = normalizeBookContextSettings(value)
+  await db.table('entities').put({
+    ...makeBookContextSettingsEntity(bookId, normalized, existing?.createdAt ?? now),
+    updatedAt: now,
+  })
+  return normalized
+}
+
+export async function getGenerationContextProfile(bookId: string, type: GenerationContextType): Promise<GenerationContextProfile> {
+  return (await getBookContextSettings(bookId)).profiles[type]
+}
+
+export async function rememberLastOpenedScene(bookId: string, sceneId: string) {
+  const settings = await getBookContextSettings(bookId)
+  if (settings.lastOpenedSceneId === sceneId) return settings
+  return saveBookContextSettings(bookId, { ...settings, lastOpenedSceneId: sceneId })
+}
+
+export async function createStructuralEntity(
+  type: StructuralEntityType,
+  bookId: string,
+  parentId: string,
+  title = `Untitled ${type[0].toUpperCase()}${type.slice(1)}`,
+): Promise<StructuralEntity> {
+  const db = await database()
+  const parent = await db.table('entities').get(parentId) as ArcEntity | undefined
+  const validParent = type === 'act'
+    ? parent?.type === 'book'
+    : type === 'chapter'
+      ? parent?.type === 'book' || parent?.type === 'act'
+      : parent?.type === 'chapter'
+  if (!validParent) throw new Error(`Cannot create ${type} under ${parent?.type ?? 'missing parent'}`)
+  const siblings: ArcEntity[] = await db.table('entities').where('parentId').equals(parentId).toArray()
+  const order = siblings.filter((entity) => entity.type === type).reduce((maximum, entity) => Math.max(maximum, entity.order ?? -1), -1) + 1
+  const now = Date.now()
+  const entity: StructuralEntity = {
+    id: makeId(type), type, bookId, parentId, order, title,
+    ...(type === 'scene' ? { content: '' } : {}),
+    createdAt: now, updatedAt: now,
+  }
+  await db.transaction('rw', db.table('entities'), async () => {
+    await db.table('entities').put(entity)
+    await touchAncestors(db, parentId, now)
+  })
+  return entity
+}
+
+export async function createNote(bookId: string, title = 'Untitled Note'): Promise<NoteEntity> {
+  const db = await database()
+  const now = Date.now()
+  const note: NoteEntity = { id: makeId('note'), type: 'note', bookId, parentId: bookId, title, content: '', createdAt: now, updatedAt: now }
+  await db.transaction('rw', db.table('entities'), async () => {
+    await db.table('entities').put(note)
+    await touchAncestors(db, bookId, now)
+  })
+  return note
+}
+
+export async function createCodexEntry(bookId: string, title = 'Untitled Entry', category = 'Character'): Promise<CodexEntryEntity> {
+  const db = await database()
+  return seriesTransaction(db, async () => {
+    const loreType = resolveLoreType(await ensureLoreTypesWithDb(db, bookId), category)
+    if (!loreType) throw new Error('Choose a current lore type.')
+    const now = Date.now()
+    const entry: CodexEntryEntity = { id: makeId('codex'), type: 'codexEntry', bookId, parentId: bookId, title, category: loreType.name, typeId: loreType.id, content: '', autoIncludeTriggers: normalizeCodexTriggerList([title]), preferSummaryForContext: false, sourceRevision: now, createdAt: now, updatedAt: now }
+    await db.table('entities').put(entry)
+    await touchAncestors(db, bookId, now)
+    return entry
+  })
+}
+
+export async function getOrCreateSummary(source: StructuralEntity | CodexEntryEntity): Promise<SummaryEntity> {
+  const db = await database()
+  const id = summaryId(source.id)
+  const existing = await db.table('entities').get(id) as SummaryEntity | undefined
+  if (existing?.type === 'summary') return existing
+  const now = Date.now()
+  const summary: SummaryEntity = {
+    id,
+    type: 'summary',
+    bookId: source.bookId,
+    parentId: source.id,
+    sourceEntityId: source.id,
+    sourceType: source.type,
+    title: `${source.title} summary`,
+    content: '',
+    createdAt: now,
+    updatedAt: now,
+  }
+  await db.table('entities').put(summary)
+  return summary
+}
+
+export async function saveSummaryContent(summaryIdValue: string, content: string, sourceRevision: number, expected?: Pick<SummaryEntity, 'updatedAt' | 'content'>, approval?: { messageId: string; proposalId: string }): Promise<SummaryEntity> {
+  const db = await database()
+  return db.transaction('rw', db.table('entities'), async () => {
+    const current = await db.table('entities').get(summaryIdValue) as SummaryEntity | undefined
+    if (!current || current.type !== 'summary') throw new Error(`Cannot save missing summary ${summaryIdValue}`)
+    if (approval) {
+      const message = await db.table('entities').get(approval.messageId) as ArcEntity | undefined
+      const proposals = message?.entityActions as Array<{ id: string; status: string }> | undefined
+      if (message?.type !== 'chatMessage' || message.bookId !== current.bookId || !proposals?.some((item) => item.id === approval.proposalId && item.status === 'applying')) throw new Error('The summary approval is no longer active. The previous summary was kept.')
+    }
+    if (expected && (current.updatedAt !== expected.updatedAt || current.content !== expected.content)) throw new Error('The summary changed during generation. Its newer content was kept.')
+    const updated: SummaryEntity = { ...current, content, proseProjectionVersion: PROSE_PROJECTION_VERSION, summarizedSourceRevision: sourceRevision, updatedAt: Date.now() }
+    await db.table('entities').put(updated)
+    await touchAncestors(db, current.bookId, updated.updatedAt)
+    return updated
+  })
+}
+
+export function isCodexEntryArchived(entity: ArcEntity | CodexEntryEntity | undefined): boolean {
+  return entity?.type === 'codexEntry' && (entity.hiddenInBook === true || (typeof entity.archivedAt === 'number' && entity.archivedAt > 0))
+}
+
+export async function archiveCodexEntry(id: string): Promise<CodexEntryEntity> {
+  const db = await database()
+  await synchronizeCodexEntity(db, id)
+  return db.transaction('rw', db.table('entities'), async () => {
+    const current = await db.table('entities').get(id) as CodexEntryEntity | undefined
+    if (!current || current.type !== 'codexEntry') throw new Error(`Cannot archive missing Codex entry ${id}`)
+    if (isCodexEntryArchived(current)) return current
+    const now = Date.now()
+    const sourceRevision = typeof current.sourceRevision === 'number' ? current.sourceRevision : current.updatedAt
+    await db.table('entities').update(id, { sourceRevision, archivedAt: now, updatedAt: now })
+    await touchAncestors(db, current.bookId, now)
+    const updated = await db.table('entities').get(id) as CodexEntryEntity | undefined
+    if (!updated || updated.type !== 'codexEntry') throw new Error(`Cannot archive missing Codex entry ${id}`)
+    return updated
+  })
+}
+
+export async function restoreCodexEntry(id: string): Promise<CodexEntryEntity> {
+  const db = await database()
+  await synchronizeCodexEntity(db, id)
+  return db.transaction('rw', db.table('entities'), async () => {
+    const current = await db.table('entities').get(id) as CodexEntryEntity | undefined
+    if (!current || current.type !== 'codexEntry') throw new Error(`Cannot restore missing Codex entry ${id}`)
+    if (!isCodexEntryArchived(current)) return current
+    const now = Date.now()
+    const sourceRevision = typeof current.sourceRevision === 'number' ? current.sourceRevision : current.updatedAt
+    await db.table('entities').where('id').equals(id).modify((entity: CodexEntryEntity) => {
+      delete entity.archivedAt
+      entity.sourceRevision = sourceRevision
+      entity.updatedAt = now
+    })
+    await touchAncestors(db, current.bookId, now)
+    const updated = await db.table('entities').get(id) as CodexEntryEntity | undefined
+    if (!updated || updated.type !== 'codexEntry') throw new Error(`Cannot restore missing Codex entry ${id}`)
+    return updated
+  })
+}
+
+export async function updateCodexCategory(id: string, category: string): Promise<CodexEntryEntity> {
+  const db = await database()
+  await synchronizeCodexEntity(db, id)
+  return db.transaction('rw', db.table('entities'), async () => {
+    const current = await db.table('entities').get(id) as CodexEntryEntity | undefined
+    if (!current || current.type !== 'codexEntry') throw new Error(`Cannot update missing Codex entry ${id}`)
+    const loreType = resolveLoreType(await ensureLoreTypesWithDb(db, current.bookId), category)
+    if (!loreType) throw new Error('This lore type is unavailable in this scope.')
+    const now = Date.now()
+    await db.table('entities').update(id, { category: loreType.name, typeId: loreType.id, sourceRevision: now, updatedAt: now })
+    await touchAncestors(db, current.bookId, now)
+    const updated = await db.table('entities').get(id) as CodexEntryEntity | undefined
+    if (!updated || updated.type !== 'codexEntry') throw new Error(`Cannot update missing Codex entry ${id}`)
+    return updated
+  })
+}
+
+export async function updateCodexSummaryPreference(id: string, preferSummaryForContext: boolean): Promise<CodexEntryEntity> {
+  const db = await database()
+  await synchronizeCodexEntity(db, id)
+  return db.transaction('rw', db.table('entities'), async () => {
+    const current = await db.table('entities').get(id) as CodexEntryEntity | undefined
+    if (!current || current.type !== 'codexEntry') throw new Error(`Cannot update missing Codex entry ${id}`)
+    const now = Date.now()
+    const sourceRevision = typeof current.sourceRevision === 'number' ? current.sourceRevision : current.updatedAt
+    await db.table('entities').update(id, { sourceRevision, preferSummaryForContext, updatedAt: now })
+    await touchAncestors(db, current.bookId, now)
+    const updated = await db.table('entities').get(id) as CodexEntryEntity | undefined
+    if (!updated || updated.type !== 'codexEntry') throw new Error(`Cannot update missing Codex entry ${id}`)
+    return updated
+  })
+}
+
+export async function updateCodexAutoIncludeTriggers(id: string, triggers: string[]): Promise<CodexEntryEntity> {
+  const db = await database()
+  await synchronizeCodexEntity(db, id)
+  return db.transaction('rw', db.table('entities'), async () => {
+    const current = await db.table('entities').get(id) as CodexEntryEntity | undefined
+    if (!current || current.type !== 'codexEntry') throw new Error(`Cannot update missing Codex entry ${id}`)
+    if (isCodexEntryArchived(current)) throw new Error('Restore this archived Codex entry before editing automatic triggers.')
+    const now = Date.now()
+    const sourceRevision = typeof current.sourceRevision === 'number' ? current.sourceRevision : current.updatedAt
+    await db.table('entities').update(id, { sourceRevision, autoIncludeTriggers: normalizeCodexTriggerList(triggers), updatedAt: now })
+    await touchAncestors(db, current.bookId, now)
+    const updated = await db.table('entities').get(id) as CodexEntryEntity | undefined
+    if (!updated || updated.type !== 'codexEntry') throw new Error(`Cannot update missing Codex entry ${id}`)
+    return updated
+  })
+}
+
+export async function renameEntity(id: string, title: string): Promise<ArcEntity> {
+  const db = await database()
+  await synchronizeCodexEntity(db, id)
+  return db.transaction('rw', db.table('entities'), async () => {
+    const entity = await db.table('entities').get(id) as ArcEntity | undefined
+    if (!entity) throw new Error(`Cannot rename missing entity ${id}`)
+    const now = Date.now()
+    const nextTitle = title.trim() || entity.title || 'Untitled'
+    const patch: Record<string, unknown> = { title: nextTitle, updatedAt: now }
+    if (entity.type === 'codexEntry') patch.sourceRevision = now
+    await db.table('entities').update(id, patch)
+    if (['act', 'chapter', 'scene', 'codexEntry'].includes(entity.type)) {
+      const summary = await db.table('entities').get(summaryId(entity.id)) as SummaryEntity | undefined
+      if (summary?.type === 'summary') await db.table('entities').update(summary.id, { title: `${nextTitle} summary`, updatedAt: now })
+    }
+    if (['act', 'chapter', 'scene'].includes(entity.type)) await touchAncestors(db, entity.parentId, now)
+    else if (entity.bookId) await touchAncestors(db, entity.bookId, now)
+    const updated = await db.table('entities').get(id) as ArcEntity | undefined
+    if (!updated) throw new Error(`Cannot rename missing entity ${id}`)
+    return updated
+  })
+}
+
+export async function updateBookMetadata(id: string, metadata: BookMetadata, seriesLorePolicy: 'keep' | 'remove' = 'keep'): Promise<BookEntity> {
+  const db = await database()
+  await synchronizeSeriesCodex(db, id)
+  return seriesTransaction(db, async () => {
+    const entity = await db.table('entities').get(id) as BookEntity | undefined
+    if (!entity || entity.type !== 'book') throw new Error(`Cannot update missing book ${id}`)
+    if (metadata.seriesId && (await db.table('entities').get(metadata.seriesId))?.type !== 'series') throw new Error('This series no longer exists.')
+    if (entity.seriesId !== metadata.seriesId) await detachSeriesCodex(db, id, seriesLorePolicy)
+    const patch = {
+      ...metadata,
+      title: metadata.title.trim() || entity.title || 'Untitled Book',
+      seriesId: metadata.seriesId,
+      seriesOrder: metadata.seriesId ? metadata.seriesOrder.trim() : '',
+      updatedAt: Date.now(),
+    }
+    await db.table('entities').update(id, patch)
+    const updated = await db.table('entities').get(id) as BookEntity | undefined
+    if (!updated || updated.type !== 'book') throw new Error(`Cannot update missing book ${id}`)
+    return updated
+  })
+}
+
+export async function moveStructuralEntity(id: string, direction: -1 | 1): Promise<void> {
+  const db = await database()
+  await db.transaction('rw', db.table('entities'), async () => {
+    const entity = await db.table('entities').get(id) as StructuralEntity | undefined
+    if (!entity?.parentId) throw new Error(`Cannot move missing entity ${id}`)
+    const siblings: StructuralEntity[] = (await db.table('entities').where('parentId').equals(entity.parentId).toArray())
+      .filter((candidate: ArcEntity) => candidate.type === entity.type)
+      .sort((a: ArcEntity, b: ArcEntity) => (a.order ?? 0) - (b.order ?? 0))
+    const index = siblings.findIndex((candidate) => candidate.id === id)
+    const targetIndex = index + direction
+    if (index < 0 || targetIndex < 0 || targetIndex >= siblings.length) return
+    const target = siblings[targetIndex]
+    const now = Date.now()
+    await db.table('entities').update(entity.id, { order: target.order, updatedAt: now })
+    await db.table('entities').update(target.id, { order: entity.order, updatedAt: now })
+    await touchAncestors(db, entity.parentId, now)
+  })
+}
+
+export async function placeStructuralEntity(id: string, targetParentId: string, beforeId?: string): Promise<StructuralEntity> {
+  const db = await database()
+  return db.transaction('rw', db.table('entities'), async () => {
+    const entity = await db.table('entities').get(id) as StructuralEntity | undefined
+    const parent = await db.table('entities').get(targetParentId) as ArcEntity | undefined
+    if (!entity || !['act', 'chapter', 'scene'].includes(entity.type)) throw new Error(`Cannot move missing structural entity ${id}`)
+    const validParent = entity.type === 'act'
+      ? parent?.type === 'book' && parent.id === entity.bookId
+      : entity.type === 'chapter'
+        ? (parent?.type === 'book' && parent.id === entity.bookId) || (parent?.type === 'act' && parent.bookId === entity.bookId)
+        : parent?.type === 'chapter' && parent.bookId === entity.bookId
+    if (!validParent) throw new Error(`Cannot move ${entity.type} under ${parent?.type ?? 'missing parent'}`)
+
+    const sourceParentId = entity.parentId
+    const sourceSiblings = (await db.table('entities').where('parentId').equals(sourceParentId).toArray() as ArcEntity[])
+      .filter((candidate): candidate is StructuralEntity => candidate.type === entity.type && candidate.id !== entity.id)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    const targetSiblings = sourceParentId === targetParentId
+      ? sourceSiblings
+      : (await db.table('entities').where('parentId').equals(targetParentId).toArray() as ArcEntity[])
+          .filter((candidate): candidate is StructuralEntity => candidate.type === entity.type && candidate.id !== entity.id)
+          .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+
+    let targetIndex = targetSiblings.length
+    if (beforeId) {
+      targetIndex = targetSiblings.findIndex((candidate) => candidate.id === beforeId)
+      if (targetIndex < 0) throw new Error('The requested before_id is no longer a sibling in the target parent.')
+    }
+    const destination = [...targetSiblings]
+    destination.splice(targetIndex, 0, entity)
+    const now = Date.now()
+    for (const [index, candidate] of destination.entries()) {
+      await db.table('entities').update(candidate.id, { parentId: targetParentId, order: index, updatedAt: now })
+    }
+    if (sourceParentId !== targetParentId) {
+      for (const [index, candidate] of sourceSiblings.entries()) {
+        await db.table('entities').update(candidate.id, { order: index, updatedAt: now })
+      }
+    }
+    await touchAncestors(db, sourceParentId, now)
+    if (targetParentId !== sourceParentId) await touchAncestors(db, targetParentId, now)
+    const updated = await db.table('entities').get(id) as StructuralEntity | undefined
+    if (!updated || !['act', 'chapter', 'scene'].includes(updated.type)) throw new Error(`Cannot move missing structural entity ${id}`)
+    return updated
+  })
+}
+
+async function collectEntityTreeIdsWithDb(db: any, id: string): Promise<{ root?: ArcEntity; ids: string[] }> {
+  const removedIds = new Set<string>()
+  async function collect(entityId: string) {
+    if (removedIds.has(entityId)) return
+    const children: ArcEntity[] = await db.table('entities').where('parentId').equals(entityId).toArray()
+    for (const child of children) await collect(child.id)
+    removedIds.add(entityId)
+  }
+  const root = await db.table('entities').get(id) as ArcEntity | undefined
+  await collect(id)
+  if (root?.type === 'book') {
+    const bookEntities: ArcEntity[] = await db.table('entities').where('bookId').equals(id).toArray()
+    for (const entity of bookEntities) await collect(entity.id)
+  }
+  return { root, ids: [...removedIds] }
+}
+
+export async function collectEntityTreeIds(id: string): Promise<string[]> {
+  const db = await database()
+  return (await collectEntityTreeIdsWithDb(db, id)).ids
+}
+
+export async function deleteEntityTree(id: string): Promise<string[]> {
+  const db = await database()
+  const linked = await db.table('entities').get(id) as CodexEntryEntity | undefined
+  if (linked?.type === 'codexEntry' && linked.seriesSourceId) { await db.table('entities').update(id, { hiddenInBook: true }); await deleteTtsCacheOwners([id]).catch(() => undefined); return [id] }
+  let deletedIds: string[] = []
+  await db.transaction('rw', db.table('entities'), db.table('snapshots'), db.table('codexDependencies'), db.table('illustrations'), db.table('illustrationUndo'), db.table('imageJobs'), db.table('galleryImages'), async () => {
+    const { root, ids } = await collectEntityTreeIdsWithDb(db, id)
+    await db.table('illustrationUndo').bulkDelete(ids)
+    deletedIds = ids
+    await deleteImageJobsWithDb(db, ids)
+    await db.table('illustrations').where('entryId').anyOf(ids).delete()
+    const removedIds = new Set(ids)
+    await db.table('entities').bulkDelete(ids)
+    const snapshots: DocumentSnapshot[] = await db.table('snapshots').toArray()
+    const snapshotIds = snapshots.filter((snapshot) => removedIds.has(snapshot.entityId)).map((snapshot) => snapshot.id)
+    if (snapshotIds.length) await db.table('snapshots').bulkDelete(snapshotIds)
+    const dependencies = await db.table('codexDependencies').toArray() as CodexDependencyEdge[]
+    const dependencyIds = dependencies.filter((edge) => removedIds.has(edge.sourceId) || removedIds.has(edge.targetId)).map((edge) => edge.id)
+    if (dependencyIds.length) await db.table('codexDependencies').bulkDelete(dependencyIds)
+    await touchAncestors(db, root?.parentId, Date.now())
+  })
+  await deleteTtsCacheOwners(deletedIds).catch(() => undefined)
+  return deletedIds
+}
+
+export async function deleteEntity(id: string) {
+  const db = await database()
+  const linked = await db.table('entities').get(id) as CodexEntryEntity | undefined
+  if (linked?.type === 'codexEntry' && linked.seriesSourceId) { await db.table('entities').update(id, { hiddenInBook: true }); await deleteTtsCacheOwners([id]).catch(() => undefined); return }
+  await db.transaction('rw', db.table('entities'), db.table('codexDependencies'), db.table('illustrations'), db.table('illustrationUndo'), db.table('imageJobs'), db.table('galleryImages'), async () => {
+    await deleteImageJobsWithDb(db, [id])
+    await db.table('illustrations').where('entryId').equals(id).delete()
+    await db.table('illustrations').where('bookId').equals(id).delete()
+    await db.table('illustrationUndo').delete(id)
+    await db.table('illustrationUndo').where('bookId').equals(id).delete()
+    await db.table('entities').delete(id)
+    const dependencies = await db.table('codexDependencies').toArray() as CodexDependencyEdge[]
+    const dependencyIds = dependencies.filter((edge) => edge.sourceId === id || edge.targetId === id).map((edge) => edge.id)
+    if (dependencyIds.length) await db.table('codexDependencies').bulkDelete(dependencyIds)
+  })
+  await deleteTtsCacheOwners([id]).catch(() => undefined)
+}
+
+export async function saveDocumentContent(entityId: string, content: string, expected?: { bookId?: string; updatedAt: number; content: string }) {
+  const db = await database()
+  await synchronizeCodexEntity(db, entityId)
+  return db.transaction('rw', db.table('entities'), async () => {
+    const current = await db.table('entities').get(entityId) as ArcEntity | undefined
+    if (!current) throw new Error(`Cannot save missing entity ${entityId}`)
+    if (expected && (current.bookId !== expected.bookId || current.updatedAt !== expected.updatedAt || String(current.content ?? '') !== expected.content)) throw new Error('This document changed after the proposal was created. Read it again and prepare a new edit.')
+    if (expected && current.codexScope === 'inherited' && current.seriesSourceId) {
+      const source = await db.table('entities').get(String(current.seriesSourceId))
+      const captured = JSON.parse(String(current.seriesSnapshotSignature || '[]'))[0]
+      if (!source || JSON.stringify(source) !== JSON.stringify(captured)) throw new Error('The series source changed after the proposal was created. Read it again.')
+    }
+    const now = Date.now()
+    const patch: Record<string, unknown> = { content, updatedAt: now }
+    if (current.type === 'codexEntry') patch.sourceRevision = now
+    await db.table('entities').update(entityId, patch)
+    if (current.type === 'scene') await touchAncestors(db, current.parentId, now)
+    if (current.bookId) {
+      const book = await db.table('entities').get(current.bookId) as ArcEntity | undefined
+      if (book) await db.table('entities').update(book.id, { updatedAt: now })
+    }
+    const updated = await db.table('entities').get(entityId) as ArcEntity | undefined
+    if (!updated) throw new Error(`Cannot save missing entity ${entityId}`)
+    return updated
+  })
+}
+
+export async function listSnapshots(entityId: string): Promise<DocumentSnapshot[]> {
+  const db = await database()
+  const snapshots: DocumentSnapshot[] = await db.table('snapshots').where('entityId').equals(entityId).toArray()
+  return snapshots.sort((a, b) => b.createdAt - a.createdAt)
+}
+
+export async function readSnapshot(id: string): Promise<DocumentSnapshot | undefined> {
+  const db = await database()
+  return db.table('snapshots').get(id)
+}
+
+export async function createSnapshot(entityId: string, reason: SnapshotReason, contentOverride?: string) {
+  const db = await database()
+  let result: DocumentSnapshot | undefined
+  let created = false
+  await db.transaction('rw', db.table('entities'), db.table('snapshots'), async () => {
+    const entity = await db.table('entities').get(entityId) as ArcEntity | undefined
+    if (!entity) throw new Error(`Cannot snapshot missing entity ${entityId}`)
+    const content = contentOverride ?? String(entity.content ?? '')
+    const snapshots: DocumentSnapshot[] = await db.table('snapshots').where('entityId').equals(entityId).toArray()
+    snapshots.sort((a, b) => b.createdAt - a.createdAt)
+    if (snapshots[0]?.content === content) {
+      result = snapshots[0]
+      return
+    }
+    result = {
+      id: makeId('snapshot'),
+      entityId,
+      entityType: entity.type,
+      createdAt: Date.now(),
+      content,
+      reason,
+    }
+    await db.table('snapshots').put(result)
+    created = true
+  })
+  if (!result) throw new Error(`Could not create snapshot for ${entityId}`)
+  if (created) await pruneSnapshots(entityId)
+  return result
+}
+
+export async function restoreSnapshot(snapshotId: string) {
+  const db = await database()
+  const snapshot = await readSnapshot(snapshotId)
+  if (!snapshot) throw new Error(`Snapshot ${snapshotId} was not found`)
+  const entity = await db.table('entities').get(snapshot.entityId) as ArcEntity | undefined
+  if (!entity) throw new Error(`Cannot restore missing entity ${snapshot.entityId}`)
+
+  await createSnapshot(entity.id, 'manual', String(entity.content ?? ''))
+  return saveDocumentContent(entity.id, snapshot.content)
+}
+
+export async function pruneSnapshots(entityId: string, now = Date.now()) {
+  const db = await database()
+  const snapshots = await listSnapshots(entityId)
+  const keep = new Set<string>()
+  const buckets = new Set<string>()
+  const hour = 60 * 60 * 1000
+  const day = 24 * hour
+
+  for (const snapshot of snapshots) {
+    const age = now - snapshot.createdAt
+    if (snapshot.reason === 'manual') {
+      keep.add(snapshot.id)
+      continue
+    }
+    if (age <= hour) {
+      keep.add(snapshot.id)
+      continue
+    }
+    if (age <= day) {
+      const bucket = `hour:${Math.floor(snapshot.createdAt / hour)}`
+      if (!buckets.has(bucket)) { buckets.add(bucket); keep.add(snapshot.id) }
+      continue
+    }
+    if (age <= 30 * day) {
+      const bucket = `day:${Math.floor(snapshot.createdAt / day)}`
+      if (!buckets.has(bucket)) { buckets.add(bucket); keep.add(snapshot.id) }
+    }
+  }
+
+  const remove = snapshots.filter((snapshot) => !keep.has(snapshot.id)).map((snapshot) => snapshot.id)
+  if (remove.length) await db.table('snapshots').bulkDelete(remove)
+}
+
+
+// Approval-time checks and writes share a transaction so stale cards cannot
+// overwrite metadata, triggers or dependency settings changed elsewhere.
+export async function applyChatManagementChange(bookId: string, entityId: string, operation: ChatManagementOperation): Promise<void> {
+  const db = await database()
+  await synchronizeSeriesCodex(db, bookId)
+  await seriesTransaction(db, async () => {
+    const entity = await db.table('entities').get(entityId) as ArcEntity | undefined
+    if (!entity) throw new Error('The proposed item no longer exists.')
+    const now = Date.now()
+    if (operation.kind === 'author_plan') {
+      if (entity.type !== 'book' || entity.id !== bookId) throw new Error('The Book is no longer available.')
+      const entities = await db.table('entities').where('bookId').equals(bookId).toArray()
+      const planning = applyAuthorPlanOperation(authorPlanning(entity as BookEntity), operation, bookId, entities)
+      await db.table('entities').update(bookId, { authorPlanning: planning, updatedAt: now })
+      return
+    }
+    if (operation.kind === 'metadata') {
+      if (entity.type !== 'book' || entity.id !== bookId) throw new Error('The Book is no longer available.')
+      const current = metadataValues(entity as BookEntity)
+      const patch = validateMetadataPatch(operation.patch)
+      for (const key of Object.keys(patch) as Array<keyof BookMetadata>) {
+        if (current[key] !== operation.before[key]) throw new Error(`Book ${key} changed since this proposal. Read metadata again.`)
+      }
+      const seriesId = patch.seriesId ?? current.seriesId
+      if (seriesId) {
+        const series = await db.table('entities').get(seriesId) as SeriesEntity | undefined
+        if (series?.type !== 'series') throw new Error('The selected Series no longer exists.')
+      } else if (patch.seriesOrder) throw new Error('A standalone Book cannot have a Series order.')
+      if (seriesId !== current.seriesId) await detachSeriesCodex(db, bookId, 'keep')
+      await db.table('entities').update(entityId, { ...patch, ...(!seriesId ? { seriesOrder: '' } : {}), updatedAt: now })
+      return
+    }
+    if (operation.kind === 'beat') {
+      if (entity.type !== 'scene' || entity.bookId !== bookId || typeof operation.text !== 'string' || !operation.text.trim() || !['create', 'edit'].includes(operation.action)) throw new Error('Provide a nonempty beat for a Scene in this Book.')
+      const content = String(entity.content ?? '')
+      const matches = documentBlocks(content).filter((item) => item.block.id === operation.beatId)
+      if (operation.action === 'create' ? matches.length > 0 : matches.length !== 1 || matches[0].block.type !== 'beat' || matches[0].block.text !== operation.before) throw new Error('The scene beat changed. Read the Scene and propose the change again.')
+      const block = encodeDocumentBlock({ id: operation.beatId, type: 'beat', text: operation.text.trim() })
+      const next = operation.action === 'create' ? `${content}\n\n${block}\n\n` : content.slice(0, matches[0].from) + block + content.slice(matches[0].to)
+      await db.table('entities').update(entityId, { content: next, updatedAt: now })
+      await touchAncestors(db, String(entity.parentId), now)
+      return
+    }
+    if (operation.kind === 'scene_metadata') {
+      if (entity.type !== 'scene' || entity.bookId !== bookId) throw new Error('This Scene is not available in this Book.')
+      const patch = validateSceneWritingPatch(operation.patch)
+      const current = sceneWritingValues(entity)
+      for (const key of Object.keys(patch) as SceneWritingField[]) {
+        if (current[key] !== operation.before[key]) throw new Error(`Scene ${key} changed. Reopen settings and try again.`)
+      }
+      await db.table('entities').update(entityId, { ...patch, updatedAt: now })
+      await touchAncestors(db, bookId, now)
+      return
+    }
+    if (entity.type !== 'codexEntry' || entity.bookId !== bookId || isCodexEntryArchived(entity)) throw new Error('The Codex entry is unavailable or archived.')
+    await db.table('entities').update(entityId, { ...(entity.codexScope === 'inherited' ? { codexScope: 'override' } : {}), updatedAt: Math.max(Date.now(), entity.updatedAt + 1) })
+    if (operation.kind === 'triggers') {
+      if (JSON.stringify(entity.autoIncludeTriggers ?? []) !== JSON.stringify(operation.before)) throw new Error('The triggers changed since this proposal. Read settings again.')
+      await db.table('entities').update(entityId, { autoIncludeTriggers: normalizeCodexTriggerList(operation.triggers), sourceRevision: typeof entity.sourceRevision === 'number' ? entity.sourceRevision : entity.updatedAt, updatedAt: now })
+      await touchAncestors(db, bookId, now)
+      return
+    }
+    if (operation.kind !== 'dependency') throw new Error('Unsupported management operation.')
+    const target = await db.table('entities').get(operation.targetId) as CodexEntryEntity | undefined
+    if (!target || target.type !== 'codexEntry' || target.bookId !== bookId || target.id === entityId || (operation.action !== 'remove' && isCodexEntryArchived(target))) throw new Error('The dependency target is unavailable.')
+    const current = await db.table('codexDependencies').where('[sourceId+targetId]').equals([entityId, target.id]).first() as CodexDependencyEdge | undefined
+    if (operation.action === 'create') {
+      if (current) throw new Error('This dependency already exists.')
+      await db.table('codexDependencies').put({ id: makeId('codex-dependency'), bookId, sourceId: entityId, targetId: target.id, relationLabel: operation.relationLabel, includeWithSource: operation.includeWithSource, createdAt: now, updatedAt: now })
+    } else {
+      const before = operation.before
+      if (!current || current.bookId !== bookId || !before || current.id !== before.id || current.updatedAt !== before.updatedAt || current.relationLabel !== before.relationLabel || current.includeWithSource !== before.includeWithSource) throw new Error('The dependency changed since this proposal. Read settings again.')
+      if (operation.action === 'remove') await db.table('codexDependencies').delete(current.id)
+      else await db.table('codexDependencies').update(current.id, { relationLabel: operation.relationLabel, includeWithSource: operation.includeWithSource, updatedAt: now })
+    }
+  })
+}
+export type Illustration = ImageDetails & ImagePixels & {
+  id: string
+  bookId: string
+  entryId: string
+  createdAt: number
+  updatedAt: number
+}
+
+export async function getIllustration(entryId: string): Promise<Illustration | undefined> {
+  const db = await database()
+  return db.table('illustrations').where('entryId').equals(entryId).first()
+}
+
+export async function saveIllustration(entryId: string, pixels: ImagePixels, details: ImageDetails, expectedImageId?: string): Promise<Illustration> {
+  const db = await database()
+  await synchronizeCodexEntity(db, entryId)
+  return db.transaction('rw', db.table('entities'), db.table('illustrations'), db.table('illustrationUndo'), async () => {
+    const entry = await db.table('entities').get(entryId) as CodexEntryEntity | undefined
+    if (entry?.type !== 'codexEntry') throw new Error('This Codex entry no longer exists.')
+    if (isCodexEntryArchived(entry)) throw new Error('Restore this archived entry before changing its illustration.')
+    const existing = await db.table('illustrations').where('entryId').equals(entryId).first() as Illustration | undefined
+    if (expectedImageId !== existing?.id) throw new Error('The illustration changed in another window. Reopen the entry and try again.')
+    const now = Date.now()
+    const image: Illustration = { ...pixels, ...details, id: makeId('image'), entryId, bookId: entry.bookId, createdAt: existing?.createdAt ?? now, updatedAt: now }
+    await db.table('illustrationUndo').put({ id: makeId('image-undo'), entryId, bookId: entry.bookId, before: existing, expectedImageId: image.id })
+    if (existing) await db.table('illustrations').delete(existing.id)
+    await db.table('illustrations').add(image)
+    await db.table('entities').update(entryId, { primaryImageId: image.id })
+    await db.table('entities').update(entry.bookId, { updatedAt: now })
+    return image
+  })
+}
+
+export async function removeIllustration(entryId: string, expectedImageId: string): Promise<void> {
+  const db = await database()
+  await synchronizeCodexEntity(db, entryId)
+  await db.transaction('rw', db.table('entities'), db.table('illustrations'), db.table('illustrationUndo'), async () => {
+    const entry = await db.table('entities').get(entryId) as CodexEntryEntity | undefined
+    if (entry?.type !== 'codexEntry') throw new Error('This Codex entry no longer exists.')
+    if (isCodexEntryArchived(entry)) throw new Error('Restore this archived entry before changing its illustration.')
+    const existing = await db.table('illustrations').where('entryId').equals(entryId).first() as Illustration | undefined
+    if (existing?.id !== expectedImageId) throw new Error('The illustration changed. Reopen the entry and try again.')
+    await db.table('illustrationUndo').put({ id: makeId('image-undo'), entryId, bookId: entry.bookId, before: existing, expectedImageId: undefined })
+    await db.table('illustrations').delete(existing.id)
+    await db.table('entities').update(entryId, { primaryImageId: undefined })
+    await db.table('entities').update(entry.bookId, { updatedAt: Date.now() })
+  })
+}
+
+export type BookArchiveData = {
+  entities: ArcEntity[]
+  snapshots: DocumentSnapshot[]
+  dependencies: CodexDependencyEdge[]
+  illustrations: Illustration[]
+  galleryImages?: GalleryImage[]
+  imageJobs?: ImageJob[]
+}
+
+export async function readBookArchive(bookId: string): Promise<BookArchiveData> {
+  const db = await database()
+  await synchronizeSeriesCodex(db, bookId)
+  return db.transaction('r', db.table('entities'), db.table('snapshots'), db.table('codexDependencies'), db.table('illustrations'), db.table('galleryImages'), db.table('imageJobs'), async () => {
+    const book = await db.table('entities').get(bookId) as BookEntity | undefined
+    if (book?.type !== 'book') throw new Error('This book no longer exists.')
+    const entries = await db.table('entities').where('bookId').equals(bookId).toArray() as ArcEntity[]
+    const series = book.seriesId ? await db.table('entities').get(book.seriesId) : undefined
+    const ids = [bookId, ...entries.map((entry) => entry.id)]
+    const galleryImages = (await db.table('galleryImages').where('bookId').equals(bookId).toArray() as GalleryImage[]).filter((a) => a.kept)
+    const keptIds = new Set(galleryImages.map((a) => a.id))
+    const imageJobs = (await db.table('imageJobs').where('bookId').equals(bookId).toArray() as ImageJob[]).filter((j) => j.status === 'completed' && j.assetId && keptIds.has(j.assetId)).map(({ providerJobId: _p, owner: _o, heartbeat: _h, sources: _sources, ...j }) => j)
+    return {
+      galleryImages, imageJobs,
+      entities: [book, ...entries, ...(series ? [series] : [])],
+      snapshots: await db.table('snapshots').where('entityId').anyOf(ids).toArray(),
+      dependencies: await db.table('codexDependencies').where('bookId').equals(bookId).toArray(),
+      illustrations: await db.table('illustrations').where('bookId').equals(bookId).toArray(),
+    }
+  })
+}
+
+/** Import only a validated, remapped archive. All records commit together or none do. */
+export async function writeBookArchive(data: BookArchiveData): Promise<void> {
+  const db = await database()
+  await db.transaction('rw', db.table('entities'), db.table('snapshots'), db.table('codexDependencies'), db.table('illustrations'), db.table('galleryImages'), db.table('imageJobs'), async () => {
+    await db.table('galleryImages').bulkAdd(data.galleryImages ?? [])
+    await db.table('imageJobs').bulkAdd(data.imageJobs ?? [])
+    await db.table('entities').bulkAdd(data.entities)
+    await db.table('snapshots').bulkAdd(data.snapshots)
+    await db.table('codexDependencies').bulkAdd(data.dependencies)
+    await db.table('illustrations').bulkAdd(data.illustrations)
+  })
+}
+
+
+export type IllustrationUndo = { id: string; entryId: string; bookId: string; before?: Illustration; expectedImageId?: string }
+
+export async function getIllustrationUndo(entryId: string): Promise<IllustrationUndo | undefined> {
+  const db = await database()
+  return db.table('illustrationUndo').get(entryId)
+}
+
+export async function undoIllustration(entryId: string, expectedUndoId: string): Promise<void> {
+  const db = await database()
+  await synchronizeCodexEntity(db, entryId)
+  await db.transaction('rw', db.table('entities'), db.table('illustrations'), db.table('illustrationUndo'), async () => {
+    const entry = await db.table('entities').get(entryId) as CodexEntryEntity | undefined
+    if (entry?.type !== 'codexEntry') throw new Error('This Codex entry no longer exists.')
+    if (isCodexEntryArchived(entry)) throw new Error('Restore this archived entry before undoing its illustration change.')
+    const undo = await db.table('illustrationUndo').get(entryId) as IllustrationUndo | undefined
+    const current = await db.table('illustrations').where('entryId').equals(entryId).first() as Illustration | undefined
+    if (!undo || undo.expectedImageId !== current?.id || undo.id !== expectedUndoId) throw new Error('The illustration changed. Reopen the entry before undoing.')
+    if (current) await db.table('illustrations').delete(current.id)
+    const restored = undo.before ? { ...undo.before, id: makeId('image'), updatedAt: Date.now() } : undefined
+    if (restored) await db.table('illustrations').add(restored)
+    await db.table('entities').update(entryId, { primaryImageId: restored?.id })
+    await db.table('entities').update(entry.bookId, { updatedAt: Date.now() })
+    await db.table('illustrationUndo').delete(entryId)
+  })
+}
+
+export async function dismissIllustrationUndo(entryId: string, expectedUndoId: string): Promise<void> {
+  const db = await database()
+  await db.transaction('rw', db.table('illustrationUndo'), async () => {
+    const undo = await db.table('illustrationUndo').get(entryId) as IllustrationUndo | undefined
+    if (undo?.id === expectedUndoId) await db.table('illustrationUndo').delete(entryId)
+  })
+}
+
+async function deleteImageJobsWithDb(db: any, ids: string[]) {
+  const removed = new Set(ids)
+  const jobs = await db.table('imageJobs').toArray()
+  for (const job of jobs) if (removed.has(job.bookId) || removed.has(job.chatId) || removed.has(job.messageId)) {
+    if (job.assetId) {
+      const asset = await db.table('galleryImages').get(job.assetId)
+      if (asset && !asset.kept) await db.table('galleryImages').delete(asset.id)
+    }
+    await db.table('imageJobs').delete(job.id)
+  }
+}

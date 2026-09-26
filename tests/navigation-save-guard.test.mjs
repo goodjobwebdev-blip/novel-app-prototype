@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { navigateAfterRequiredSave, saveRequiredBeforeNavigation } from '../src/navigation-save-guard.ts'
-import { triggerMatchesText } from '../src/codex-trigger-service.ts'
+import { navigateAfterRequiredSave, saveRequiredBeforeNavigation } from '../src/app/navigation-save-guard.ts'
+import { triggerMatchesText } from '../src/features/codex/codex-trigger-service.ts'
 
 test('Chat navigation waits for the dirty Scene save before becoming sendable', async () => {
   let persistedScene = 'old text'

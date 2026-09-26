@@ -1,17 +1,17 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { finalizeChatProviderRequest } from '../src/chat-finalized-request.ts'
+import { finalizeChatProviderRequest } from '../src/features/chat/chat-finalized-request.ts'
 
-const request = readFileSync(new URL('../src/chat-request.ts', import.meta.url), 'utf8')
-const finalizer = readFileSync(new URL('../src/chat-finalized-request.ts', import.meta.url), 'utf8')
-const defaults = readFileSync(new URL('../src/chat-default-composition.ts', import.meta.url), 'utf8')
-const feature = readFileSync(new URL('../src/ChatFeature.tsx', import.meta.url), 'utf8')
-const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
-const api = readFileSync(new URL('../src/chat-api.ts', import.meta.url), 'utf8')
-const service = readFileSync(new URL('../src/chat-service.ts', import.meta.url), 'utf8')
-const persistence = readFileSync(new URL('../src/persistence.ts', import.meta.url), 'utf8')
-const promptTemplate = readFileSync(new URL('../src/prompt-template.ts', import.meta.url), 'utf8')
+const request = readFileSync(new URL('../src/features/chat/chat-request.ts', import.meta.url), 'utf8')
+const finalizer = readFileSync(new URL('../src/features/chat/chat-finalized-request.ts', import.meta.url), 'utf8')
+const defaults = readFileSync(new URL('../src/features/chat/chat-default-composition.ts', import.meta.url), 'utf8')
+const feature = readFileSync(new URL('../src/features/chat/ChatFeature.tsx', import.meta.url), 'utf8')
+const app = readFileSync(new URL('../src/app/App.tsx', import.meta.url), 'utf8')
+const api = readFileSync(new URL('../src/features/chat/chat-api.ts', import.meta.url), 'utf8')
+const service = readFileSync(new URL('../src/features/chat/chat-service.ts', import.meta.url), 'utf8')
+const persistence = readFileSync(new URL('../src/data/persistence.ts', import.meta.url), 'utf8')
+const promptTemplate = readFileSync(new URL('../src/shared/ai/prompt-template.ts', import.meta.url), 'utf8')
 
 test('default Chat composition is System, Workspace tools, Book, then Book context', () => {
   const workspace = defaults.indexOf("name: 'Workspace tools'")

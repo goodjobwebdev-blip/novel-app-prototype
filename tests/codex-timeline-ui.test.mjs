@@ -1,4 +1,5 @@
 import test, { after } from 'node:test'
+import { transpileSourceTree } from './transpile-source-tree.mjs'
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
@@ -24,15 +25,9 @@ const React = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { act } = React
 const directory = mkdtempSync(new URL('../node_modules/.arc-generation-ui-test-', import.meta.url))
-for (const filename of readdirSync(new URL('../src/', import.meta.url)).filter((name) => /\.tsx?$/.test(name))) {
-  const source = readFileSync(new URL(`../src/${filename}`, import.meta.url), 'utf8')
-  const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText
-    .replace(/import ['"][^'"]+\.css['"];?/g, '')
-    .replace(/(['"])(\.\/[^'"]+)\1/g, (_, quote, path) => `${quote}${path.replace(/\.tsx?$/, '')}.mjs${quote}`)
-  writeFileSync(`${directory}/${filename.replace(/\.tsx?$/, '.mjs')}`, compiled)
-}
+transpileSourceTree(directory)
 const moduleAt = (name) => import(pathToFileURL(`${directory}/${name}.mjs`))
-writeFileSync(`${directory}/chat-api.mjs`, `
+writeFileSync(`${directory}/features/chat/chat-api.mjs`, `
 export let calls = [];
 let mode = 'tools';
 let toolsPerRound = 1;
@@ -48,12 +43,12 @@ export async function streamChatCompletion(request, onChunk, signal) {
   return mode === 'complete' ? { toolCalls: [] } : { toolCalls: Array.from({ length: toolsPerRound }, (_, index) => ({ id: 'call-' + calls.length + '-' + index, type: 'function', function: { name: 'propose_note_create', arguments: JSON.stringify({ title: 'Draft ' + calls.length + '-' + index, content: 'Unapplied body' }) } })) };
 }
 `)
-const p = await moduleAt('persistence')
-const ai = await moduleAt('ai-settings')
-const chatService = await moduleAt('chat-service')
-const api = await moduleAt('chat-api')
-const { ChatView } = await moduleAt('ChatFeature')
-const { normalizeChatRoundLimit, validateChatRoundLimit } = await moduleAt('chat-round-limit')
+const p = await moduleAt('data/persistence')
+const ai = await moduleAt('shared/ai/ai-settings')
+const chatService = await moduleAt('features/chat/chat-service')
+const api = await moduleAt('features/chat/chat-api')
+const { ChatView } = await moduleAt('features/chat/ChatFeature')
+const { normalizeChatRoundLimit, validateChatRoundLimit } = await moduleAt('features/chat/chat-round-limit')
 after(async () => { (await p.database()).close(); dom.window.close(); rmSync(directory, { recursive: true, force: true }) })
 const h = React.createElement
 const button = text => [...document.querySelectorAll('button')].find(item => item.textContent.trim() === text)
@@ -83,8 +78,8 @@ globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.windo
 dom.window.Range.prototype.getClientRects = () => []
 dom.window.Range.prototype.getBoundingClientRect = () => new dom.window.DOMRect()
 
-const { default: Timeline } = await moduleAt('CodexTimeline')
-const tsService = await moduleAt('codex-timeline-service')
+const { default: Timeline } = await moduleAt('features/codex/CodexTimeline')
+const tsService = await moduleAt('features/codex/codex-timeline-service')
 test('checkpoint editor saves an independent state without changing baseline or the current scene', async () => {
   const f = await fixture(8), entry = await p.createCodexEntry(f.book.id, 'Traveler')
   await p.saveDocumentContent(entry.id, 'Baseline body')

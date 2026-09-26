@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { findDialogueRanges } from '../src/dialogue-highlighting.ts'
+import { findDialogueRanges } from '../src/features/editor/dialogue-highlighting.ts'
 
 const dialogue = (text, excluded) => findDialogueRanges(text, excluded).map(({ from, to }) => text.slice(from, to))
 

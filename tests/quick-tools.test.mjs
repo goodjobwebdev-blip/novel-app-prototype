@@ -6,11 +6,11 @@ import { fileURLToPath } from 'node:url'
 import 'fake-indexeddb/auto'
 registerHooks({ resolve(specifier, context, nextResolve) { if (specifier.startsWith('.') && context.parentURL?.startsWith('file:')) { const url = new URL(specifier + '.ts', context.parentURL); if (existsSync(fileURLToPath(url))) return nextResolve(url.href, context) } return nextResolve(specifier, context) } })
 globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} }
-const db = await import('../src/persistence.ts')
-const { initialAiSettings, copyAiSettings } = await import('../src/ai-settings.ts')
-const { encodeDocumentBlock } = await import('../src/document-projection.ts')
-const { selectionProse } = await import('../src/quick-tools.ts')
-const { prepareQuickToolRequest } = await import('../src/quick-tool-generation.ts')
+const db = await import('../src/data/persistence.ts')
+const { initialAiSettings, copyAiSettings } = await import('../src/shared/ai/ai-settings.ts')
+const { encodeDocumentBlock } = await import('../src/features/editor/document-projection.ts')
+const { selectionProse } = await import('../src/features/writing/quick-tools.ts')
+const { prepareQuickToolRequest } = await import('../src/features/writing/quick-tool-generation.ts')
 const book = { title: 'Test', series: '', seriesOrder: '', overview: '', genre: '', style: 'Spare', pov: 'Third', tense: 'Past', language: 'English' }
 
 test('selection requests use Main, projected context and effective settings while preserving exact selected Markdown', async () => {
@@ -41,7 +41,7 @@ test('selection requests use Main, projected context and effective settings whil
 })
 
 test('synonyms use only bounded word context and Support; previews preserve surrounding punctuation', async () => {
-  const { synonymContext, prepareSynonymRequest, parseSynonyms } = await import('../src/synonyms.ts')
+  const { synonymContext, prepareSynonymRequest, parseSynonyms } = await import('../src/features/writing/synonyms.ts')
   const settings = copyAiSettings(initialAiSettings); settings.provider = 'fake'; settings.mainModel = 'fake/main'; settings.supportModel = 'fake/support'; settings.supportModelContextLength = 100000
   const f = await db.createBook(settings, 'Synonyms')
   const source = 'Bright rain fell. A quiet bell rang.\n\nDISTANT_BOOK_SENTINEL ' + 'x'.repeat(2000)
@@ -67,8 +67,8 @@ test('synonyms use only bounded word context and Support; previews preserve surr
 })
 
 test('focused prose transformations preserve constraints and distinguish automatic from chosen sensory focus', async () => {
-  const { proseTransformationInstruction, sensoryPrompts } = await import('../src/prose-transformations.ts')
-  const { quickTools } = await import('../src/quick-tools.ts')
+  const { proseTransformationInstruction, sensoryPrompts } = await import('../src/features/writing/prose-transformations.ts')
+  const { quickTools } = await import('../src/features/writing/quick-tools.ts')
   assert.ok(quickTools.some((tool) => tool.id === 'show-dont-tell'))
   assert.ok(quickTools.some((tool) => tool.id === 'sensory-detail'))
   assert.equal(new Set(quickTools.map((tool) => tool.id)).size, quickTools.length)

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
-import { saveRequiredSettingsForLeave } from '../src/settings-leave-policy.ts'
+import { saveRequiredSettingsForLeave } from '../src/features/settings/settings-leave-policy.ts'
 
-const source = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+const source = readFileSync(new URL('../src/app/App.tsx', import.meta.url), 'utf8')
 
 function block(startText, endText) {
   const start = source.indexOf(startText)

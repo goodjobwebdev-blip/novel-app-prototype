@@ -13,7 +13,7 @@ import {
   renamePromptCompositionPreset,
   savePromptCompositionPreset,
   validatePromptCompositionPreset,
-} from '../src/prompt-presets.ts'
+} from '../src/features/settings/prompt-presets.ts'
 
 class MemoryStorage {
   values = new Map()
@@ -100,9 +100,9 @@ test('fatal stored template or message errors block application', () => {
 })
 
 test('preset controls are present for Book/default scopes and individual Chat without touching generation settings', () => {
-  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
-  const chat = readFileSync(new URL('../src/ChatFeature.tsx', import.meta.url), 'utf8')
-  const controls = readFileSync(new URL('../src/PromptPresetControls.tsx', import.meta.url), 'utf8')
+  const app = readFileSync(new URL('../src/app/App.tsx', import.meta.url), 'utf8')
+  const chat = readFileSync(new URL('../src/features/chat/ChatFeature.tsx', import.meta.url), 'utf8')
+  const controls = readFileSync(new URL('../src/features/settings/PromptPresetControls.tsx', import.meta.url), 'utf8')
   assert.match(app, /\[\['story', 'Story'\], \['assistant', 'Chat'\], \['lore', 'Codex'\], \['summarize', 'Summary'\]\]/)
   assert.match(app, /<PromptPresetControls[\s\S]*withPromptComposition/)
   assert.match(chat, /<PromptPresetControls scope="chat"[\s\S]*onApply=\{setCompositionDraft\}/)

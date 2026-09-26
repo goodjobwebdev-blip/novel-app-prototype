@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { queryCodexDashboard, defaultCodexDashboard, dashboardPreferences, CODEX_PAGE_SIZE } from '../src/codex-dashboard.ts'
+import { queryCodexDashboard, defaultCodexDashboard, dashboardPreferences, CODEX_PAGE_SIZE } from '../src/features/codex/codex-dashboard.ts'
 const entries = Array.from({ length: 1050 }, (_, i) => ({ id: 'entry-'+i, type: 'codexEntry', bookId: 'book', parentId: 'book', title: `Entry ${String(i).padStart(4, '0')}`, category: i % 2 ? 'Character' : 'Place', typeId: i % 2 ? 'character' : 'place', content: `Body ${i}. <!-- PRIVATE_ONLY --> ![SECRET_ALT](image.png)`, createdAt: i, updatedAt: i, autoIncludeTriggers: i % 3 ? ['name'] : [], ...(i % 5 === 0 ? { codexScope: 'inherited' } : {}), ...(i > 1000 ? { archivedAt: 1 } : {}) }))
 test('list and cards share projected search, filters, stable sorts and bounded pages for 1000+ entries', () => {
   const prefs = { ...defaultCodexDashboard, typeId: 'character', scope: 'book', triggers: 'yes', summary: 'current' }

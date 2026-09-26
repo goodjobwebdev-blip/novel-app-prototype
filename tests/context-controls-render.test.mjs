@@ -6,7 +6,7 @@ import { build } from 'esbuild'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
-const compiled = await build({ entryPoints: [fileURLToPath(new URL('../src/ContextControls.tsx', import.meta.url))], bundle: true, platform: 'node', format: 'cjs', write: false, external: ['react'], jsx: 'automatic' })
+const compiled = await build({ entryPoints: [fileURLToPath(new URL('../src/shared/context/ContextControls.tsx', import.meta.url))], bundle: true, platform: 'node', format: 'cjs', write: false, external: ['react'], jsx: 'automatic' })
 const compiledModule = { exports: {} }
 new Function('require', 'module', 'exports', compiled.outputFiles[0].text)(createRequire(import.meta.url), compiledModule, compiledModule.exports)
 const { ContextSourcePicker, ContextSourceInventory, ContextBudget } = compiledModule.exports

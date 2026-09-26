@@ -2,11 +2,11 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
-const editor = readFileSync(new URL('../src/PromptTemplateEditor.tsx', import.meta.url), 'utf8')
-const workspace = readFileSync(new URL('../src/Workspace.tsx', import.meta.url), 'utf8')
-const summaryGeneration = readFileSync(new URL('../src/summary-generation.ts', import.meta.url), 'utf8')
-const chat = readFileSync(new URL('../src/ChatFeature.tsx', import.meta.url), 'utf8')
+const app = readFileSync(new URL('../src/app/App.tsx', import.meta.url), 'utf8')
+const editor = readFileSync(new URL('../src/features/settings/PromptTemplateEditor.tsx', import.meta.url), 'utf8')
+const workspace = readFileSync(new URL('../src/app/Workspace.tsx', import.meta.url), 'utf8')
+const summaryGeneration = readFileSync(new URL('../src/features/writing/summary-generation.ts', import.meta.url), 'utf8')
+const chat = readFileSync(new URL('../src/features/chat/ChatFeature.tsx', import.meta.url), 'utf8')
 
 test('prompt settings use the CodeMirror editor with live diagnostics and caret insertion', () => {
   assert.match(app, /<PromptTemplateEditor/)

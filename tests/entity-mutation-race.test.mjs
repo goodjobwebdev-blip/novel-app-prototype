@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const source = readFileSync(new URL('../src/persistence.ts', import.meta.url), 'utf8')
+const source = readFileSync(new URL('../src/data/persistence.ts', import.meta.url), 'utf8')
 
 function block(name, next) {
   const start = source.indexOf(`export async function ${name}`)

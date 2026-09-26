@@ -6,7 +6,7 @@ import {
   CODEX_CONTINUE_FALLBACK,
   codexRequestValues,
   defaultCodexPromptComposition,
-} from '../src/codex-request.ts'
+} from '../src/features/codex/codex-request.ts'
 
 const book = { title: 'Tide', series: 'Lost Coasts', seriesOrder: '2', overview: 'A drowned city.', genre: 'Fantasy', style: 'Lyrical', pov: 'Third person', tense: 'Past', language: 'English' }
 const baseContext = {
@@ -93,8 +93,8 @@ test('response guidance is template-owned and Assistant roles are never rewritte
 })
 
 test('legacy shared response length migrates to Story only and Codex defaults empty', () => {
-  const settings = readFileSync(new URL('../src/ai-settings.ts', import.meta.url), 'utf8')
-  const responseLength = readFileSync(new URL('../src/response-length.ts', import.meta.url), 'utf8')
+  const settings = readFileSync(new URL('../src/shared/ai/ai-settings.ts', import.meta.url), 'utf8')
+  const responseLength = readFileSync(new URL('../src/features/settings/response-length.ts', import.meta.url), 'utf8')
   assert.match(settings, /normalizeResponseLengths\(value\?\.responseLengths, value\?\.responseLength\)/)
   assert.match(responseLength, /story: typeof input\?\.story === 'string' \? input\.story : typeof legacySharedValue === 'string' \? legacySharedValue : ''/)
   assert.match(responseLength, /codex: typeof input\?\.codex === 'string' \? input\.codex : ''/)
@@ -103,8 +103,8 @@ test('legacy shared response length migrates to Story only and Codex defaults em
 })
 
 test('Workspace and Request Preview consume the same normalized Codex assembly', () => {
-  const workspace = readFileSync(new URL('../src/Workspace.tsx', import.meta.url), 'utf8')
-  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  const workspace = readFileSync(new URL('../src/app/Workspace.tsx', import.meta.url), 'utf8')
+  const app = readFileSync(new URL('../src/app/App.tsx', import.meta.url), 'utf8')
   assert.match(workspace, /assembleCodexGenerationRequest\(\{[\s\S]*insertionPosition: context\.insertionPosition/)
   assert.match(workspace, /const messages = normalizedRequest\.providerMessages/)
   assert.match(workspace, /editor\?\.beginGeneration\(mode, 'append'\)/)

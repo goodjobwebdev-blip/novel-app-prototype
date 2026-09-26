@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
-const source = await readFile(new URL('../src/persistence.ts', import.meta.url), 'utf8')
+const source = await readFile(new URL('../src/data/persistence.ts', import.meta.url), 'utf8')
 
 function functionBody(name, nextName) {
   const start = source.indexOf(`export async function ${name}`)

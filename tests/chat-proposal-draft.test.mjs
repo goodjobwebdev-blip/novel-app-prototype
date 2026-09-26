@@ -13,12 +13,12 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   }
   return nextResolve(specifier, context)
 } })
-const db = await import('../src/persistence.ts')
-const { initialAiSettings } = await import('../src/ai-settings.ts')
-const { createChat, createChatMessage, saveChatProposalDraft } = await import('../src/chat-service.ts')
-const { applyChatDocumentEdit } = await import('../src/chat-tools.ts')
-const { editProposalDraft, proposalDraftValues } = await import('../src/chat-proposal-draft.ts')
-const { chatHistoryContent } = await import('../src/chat-request.ts')
+const db = await import('../src/data/persistence.ts')
+const { initialAiSettings } = await import('../src/shared/ai/ai-settings.ts')
+const { createChat, createChatMessage, saveChatProposalDraft } = await import('../src/features/chat/chat-service.ts')
+const { applyChatDocumentEdit } = await import('../src/features/chat/chat-tools.ts')
+const { editProposalDraft, proposalDraftValues } = await import('../src/features/chat/chat-proposal-draft.ts')
+const { chatHistoryContent } = await import('../src/features/chat/chat-request.ts')
 const proposal = { id: 'p', entityId: 'scene', entityTitle: 'Opening', entityType: 'scene', expectedUpdatedAt: 123, mode: 'text_replacements', edits: [{ oldText: 'first', newText: 'one' }, { oldText: 'second', newText: 'two' }], status: 'proposed', createdAt: 1 }
 
 test('draft editing preserves immutable anchors, original suggestion and revision guards', () => {

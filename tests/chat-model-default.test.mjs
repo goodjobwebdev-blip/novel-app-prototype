@@ -14,9 +14,9 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   }
   return nextResolve(specifier, context)
 } })
-const settings = await import('../src/ai-settings.ts')
-const db = await import('../src/persistence.ts')
-const { createChat, getChat, updateChat } = await import('../src/chat-service.ts')
+const settings = await import('../src/shared/ai/ai-settings.ts')
+const db = await import('../src/data/persistence.ts')
+const { createChat, getChat, updateChat } = await import('../src/features/chat/chat-service.ts')
 after(async () => (await db.database()).close())
 
 test('saved global Chat default seeds books and new chats without changing the writing model', async () => {
