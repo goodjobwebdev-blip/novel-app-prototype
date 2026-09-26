@@ -79,6 +79,10 @@ import {
 import AiSettingsScreen from './App'
 import CodexIllustration, { CodexThumbnail } from '../features/codex/CodexIllustration'
 import BookStorage, { BookBackupImport } from '../data/BookStorage'
+import CloudBookImport from '../features/sync/CloudBookImport'
+import { useWorkspaceSyncStatus } from '../features/sync/WorkspaceSyncStatus'
+import { checkRemoteBook, syncBookNow } from '../features/sync/sync-service'
+import { loadSyncSettings } from '../features/sync/sync-settings'
 import { useBookLibrary } from '../data/useBookLibrary'
 import { generationWordDelayMs, loadAiSettings, textAiIsConfigured, type AiSettings } from '../shared/ai/ai-settings'
 import { createBufferedWordRenderer } from '../features/writing/buffered-word-renderer'
@@ -233,7 +237,7 @@ Then the voice on the other side whispered, _Mara Vale_, and every compass in he
 
 export default function Workspace() {
   const [screen, setScreen] = useState<Screen>('home')
-  const [settingsInitialTab, setSettingsInitialTab] = useState<'ai' | 'images'>('ai')
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'ai' | 'images' | 'sync'>('ai')
   useEffect(() => startImageQueue(), [])
   const [returnScreen, setReturnScreen] = useState<Screen>('home')
   const [imageReturnScreen, setImageReturnScreen] = useState<ContentScreen>('home')
@@ -280,6 +284,7 @@ export default function Workspace() {
   const attentionImageJobs = visibleImageJobs.filter((job) => ['failed', 'interrupted'].includes(job.status)).length
   const [creatingBook, setCreatingBook] = useState(false)
   const [currentBook, setCurrentBook] = useState<BookEntity | null>(null)
+  const syncStatus = useWorkspaceSyncStatus(currentBook?.id)
   const [outlineEntities, setOutlineEntities] = useState<StructuralEntity[]>([])
   const [notes, setNotes] = useState<NoteEntity[]>([])
   const [codexEntries, setCodexEntries] = useState<CodexEntryEntity[]>([])
@@ -299,6 +304,7 @@ export default function Workspace() {
   const storageReadyRef = useRef(false)
   const changedSinceSnapshotRef = useRef(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const autoSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const documentSaveQueueRef = useRef(new KeyedAsyncQueue())
   const bookMetadataSaveQueueRef = useRef(new KeyedAsyncQueue())
   const deletingEntityIdsRef = useRef(new Set<string>())
@@ -318,6 +324,26 @@ export default function Workspace() {
   currentBookIdRef.current = currentBook?.id ?? null
   screenRef.current = screen
   const codexMentionIndex = useMemo(() => buildCodexMentionIndex(codexEntries), [codexEntries])
+
+  useEffect(() => {
+    const bookId = currentBook?.id
+    if (!bookId) return
+    const check = () => { if (navigator.onLine && currentBookIdRef.current === bookId) void checkRemoteBook(bookId) }
+    check()
+    window.addEventListener('focus', check)
+    window.addEventListener('online', check)
+    return () => { window.removeEventListener('focus', check); window.removeEventListener('online', check) }
+  }, [currentBook?.id])
+
+  useEffect(() => {
+    if (!currentBook?.id) return
+    const changed = () => scheduleAutomaticSync()
+    for (const event of ['arc-entity-changed', 'arc-chat-changed', 'arc-series-codex-changed', 'arc-lore-types-changed', 'arc-illustrations-changed', 'arc-image-store-changed']) window.addEventListener(event, changed)
+    return () => {
+      for (const event of ['arc-entity-changed', 'arc-chat-changed', 'arc-series-codex-changed', 'arc-lore-types-changed', 'arc-illustrations-changed', 'arc-image-store-changed']) window.removeEventListener(event, changed)
+      if (autoSyncTimerRef.current) { window.clearTimeout(autoSyncTimerRef.current); autoSyncTimerRef.current = null }
+    }
+  }, [currentBook?.id])
 
   useEffect(() => {
     setArcPrompt('')
@@ -514,6 +540,17 @@ export default function Workspace() {
     }
   }, [])
 
+  function scheduleAutomaticSync() {
+    const bookId = currentBookIdRef.current
+    if (!bookId || !loadSyncSettings().automaticUpload) return
+    if (autoSyncTimerRef.current) window.clearTimeout(autoSyncTimerRef.current)
+    autoSyncTimerRef.current = window.setTimeout(() => {
+      autoSyncTimerRef.current = null
+      if (currentBookIdRef.current !== bookId) return
+      void syncBookNow(bookId, prepareBookExport).then((result) => { if (result.kind === 'pulled') return importedBook(bookId) }).catch(() => undefined)
+    }, 2 * 60 * 1000)
+  }
+
   function handleStoryChange(value: string) {
     storyRef.current = value
     if (activeDocument?.type === 'scene') {
@@ -526,6 +563,7 @@ export default function Workspace() {
     changedSinceSnapshotRef.current = true
     setStoryMarkdown(value)
     if (storageReadyRef.current) setSaveState('saving')
+    scheduleAutomaticSync()
   }
 
   type LoadedBookContent = {
@@ -1076,7 +1114,7 @@ export default function Workspace() {
     if (!opened) showToast('Could not save the current document. Images was not opened because its book context could be stale.')
   }
 
-  function openSettings(from: Screen, tab: 'ai' | 'images' = 'ai') {
+  function openSettings(from: Screen, tab: 'ai' | 'images' | 'sync' = 'ai') {
     if (from === 'editor' && !canUnmountEditor(Boolean(generationAbortRef.current))) {
       showToast('Stop generation before opening Settings.')
       return
@@ -1906,7 +1944,7 @@ export default function Workspace() {
         {libraryState === 'loading' && <div className="library-storage-status" role="status"><p>Loading your books…</p>{librarySlow && <><p>Storage is taking longer to open. Close other tabs or windows of this app so a pending update can finish. Keep this tab open and do not clear browser data.</p><button type="button" onClick={() => window.location.reload()}>Reload app</button></>}</div>}
         {libraryError && <div className="library-storage-status" role="alert"><strong>{libraryState === 'error' ? 'Your library could not be loaded' : 'Your books loaded, but series information could not be updated'}</strong><p>{libraryError}</p><p>Keep your browser data. This error does not mean your books were deleted.</p><button type="button" onClick={retryLibrary}>Retry loading books</button><button type="button" onClick={() => window.location.reload()}>Reload app</button></div>}
         {libraryState === 'ready' && !bookList.length && <p>Your library is empty. Create a new book or import a backup.</p>}
-        <BookBackupImport onImported={importedBook} />
+        <div className="library-import-actions"><BookBackupImport onImported={importedBook} /><CloudBookImport onImported={importedBook} /></div>
         <div className="library-grid">{bookList.map((book, index) => <article className="library-book-card" key={book.id}>
           <button type="button" className="library-book" onClick={() => { void openBook(book.id).catch((error) => showToast(error instanceof Error ? error.message : 'Could not open the book.')) }}><i className={`mock-cover ${['tide', 'orchard', 'fires'][index % 3]}`}>{book.title.slice(0,1)}</i><span><small>{formatSeries(book, seriesList)}</small><strong>{book.title}</strong><em>{formatEdited(book.updatedAt)}</em></span></button>
           <div className="library-book-actions"><button className="autotitle-trigger" type="button" onClick={() => { void startAutotitle(book) }} aria-label={`Autotitle ${book.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></button><button type="button" onClick={() => { void editBookTitle(book) }} aria-label={`Rename ${book.title}`}><Pencil aria-hidden="true" /></button><button type="button" onClick={() => { void removeBook(book) }} aria-label={`Delete ${book.title}`}><Trash2 aria-hidden="true" /></button></div>
@@ -1919,7 +1957,7 @@ export default function Workspace() {
     <main className={`workspace-screen ${screen === 'chat' ? 'chat-active' : ''}`}>
       <header className="floating-controls">
         <div className="floating-control-group"><button type="button" onClick={() => openSettings(screen)} aria-label="Open current book settings"><ChevronsRight aria-hidden="true" /></button><button className="image-destination-button" type="button" onClick={() => { void openImages(screen) }} aria-label="Open images and gallery"><ImageIcon aria-hidden="true" /><ImageActivityBadge active={activeImageJobs} review={reviewImageJobs} attention={attentionImageJobs} /></button></div>
-        <span className={`save-state ${saveState}`} title={saveState === 'error' ? 'Local save failed; your current editor text remains in memory.' : undefined}><i /> {saveState === 'loading' ? 'Loading' : saveState === 'saving' ? 'Saving' : saveState === 'error' ? 'Save failed' : 'Saved'}</span>
+        <span className={`save-state ${saveState} ${syncStatus.state === 'conflict' ? 'sync-conflict-state' : ''}`} title={syncStatus.message || (saveState === 'error' ? 'Local save failed; your current editor text remains in memory.' : undefined)}><i /> {saveState === 'loading' ? 'Loading' : saveState === 'saving' ? 'Saving' : saveState === 'error' ? 'Save failed' : 'Saved'}{syncStatus.label ? ` · ${syncStatus.label}` : ''}</span>
         <button type="button" onClick={() => setRightOpen(true)} aria-label="Open book workspace"><ChevronsLeft aria-hidden="true" /></button>
       </header>
 
@@ -2538,7 +2576,7 @@ function BookSettings({ book, books, series, onSave, onCreateSeries, onRenameSer
       <div><span>Danger zone</span><h3 id="book-danger-title">Delete this book</h3><p>Removes the manuscript and all local book data from this device.</p></div>
       <div className="book-danger-actions"><button className={deleteConfirm ? 'confirming' : ''} type="button" onClick={() => { if (!deleteConfirm) setDeleteConfirm(true); else { savedRef.current = JSON.stringify(draft); void onDelete() } }}><Trash2 aria-hidden="true" />{deleteConfirm ? 'Confirm delete' : 'Delete book'}</button>{deleteConfirm && <button className="cancel" type="button" onClick={() => setDeleteConfirm(false)}>Cancel</button>}</div>
     </section>
-    <BookStorage key={book.id} bookId={book.id} onImported={onImported} beforeExport={async () => {
+    <BookStorage key={book.id} bookId={book.id} title={book.title} onImported={onImported} beforeExport={async () => {
       if (latestDraftRef.current) await onSave(latestDraftRef.current)
       await onBeforeExport()
     }} />

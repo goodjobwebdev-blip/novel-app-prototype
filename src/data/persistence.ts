@@ -214,6 +214,7 @@ export async function database() {
       })
       db.version(5).stores({ illustrationUndo: 'entryId,bookId' })
       db.version(6).stores({ imageJobs: 'id,bookId,chatId,messageId,status,provider,createdAt', galleryImages: 'id,bookId,createdAt' })
+      db.version(7).stores({ syncLinks: '&bookId,&[endpoint+remoteBookId],endpoint,remoteBookId,updatedAt', syncState: '&bookId,status,updatedAt' })
       installSeriesCodexHooks(db)
       return db.open().then(() => db)
     }).catch((error) => {
@@ -960,10 +961,10 @@ export async function collectEntityTreeIds(id: string): Promise<string[]> {
 
 export async function deleteEntityTree(id: string): Promise<string[]> {
   const db = await database()
-  const linked = await db.table('entities').get(id) as CodexEntryEntity | undefined
+  const linked = await db.table('entities').get(id) as ArcEntity | undefined
   if (linked?.type === 'codexEntry' && linked.seriesSourceId) { await db.table('entities').update(id, { hiddenInBook: true }); await deleteTtsCacheOwners([id]).catch(() => undefined); return [id] }
   let deletedIds: string[] = []
-  await db.transaction('rw', db.table('entities'), db.table('snapshots'), db.table('codexDependencies'), db.table('illustrations'), db.table('illustrationUndo'), db.table('imageJobs'), db.table('galleryImages'), async () => {
+  await db.transaction('rw', db.table('entities'), db.table('snapshots'), db.table('codexDependencies'), db.table('illustrations'), db.table('illustrationUndo'), db.table('imageJobs'), db.table('galleryImages'), db.table('syncLinks'), db.table('syncState'), async () => {
     const { root, ids } = await collectEntityTreeIdsWithDb(db, id)
     await db.table('illustrationUndo').bulkDelete(ids)
     deletedIds = ids
@@ -977,6 +978,10 @@ export async function deleteEntityTree(id: string): Promise<string[]> {
     const dependencies = await db.table('codexDependencies').toArray() as CodexDependencyEdge[]
     const dependencyIds = dependencies.filter((edge) => removedIds.has(edge.sourceId) || removedIds.has(edge.targetId)).map((edge) => edge.id)
     if (dependencyIds.length) await db.table('codexDependencies').bulkDelete(dependencyIds)
+    if (root?.type === 'book') {
+      await db.table('syncLinks').delete(root.id)
+      await db.table('syncState').delete(root.id)
+    }
     await touchAncestors(db, root?.parentId, Date.now())
   })
   await deleteTtsCacheOwners(deletedIds).catch(() => undefined)
@@ -985,15 +990,19 @@ export async function deleteEntityTree(id: string): Promise<string[]> {
 
 export async function deleteEntity(id: string) {
   const db = await database()
-  const linked = await db.table('entities').get(id) as CodexEntryEntity | undefined
+  const linked = await db.table('entities').get(id) as ArcEntity | undefined
   if (linked?.type === 'codexEntry' && linked.seriesSourceId) { await db.table('entities').update(id, { hiddenInBook: true }); await deleteTtsCacheOwners([id]).catch(() => undefined); return }
-  await db.transaction('rw', db.table('entities'), db.table('codexDependencies'), db.table('illustrations'), db.table('illustrationUndo'), db.table('imageJobs'), db.table('galleryImages'), async () => {
+  await db.transaction('rw', db.table('entities'), db.table('codexDependencies'), db.table('illustrations'), db.table('illustrationUndo'), db.table('imageJobs'), db.table('galleryImages'), db.table('syncLinks'), db.table('syncState'), async () => {
     await deleteImageJobsWithDb(db, [id])
     await db.table('illustrations').where('entryId').equals(id).delete()
     await db.table('illustrations').where('bookId').equals(id).delete()
     await db.table('illustrationUndo').delete(id)
     await db.table('illustrationUndo').where('bookId').equals(id).delete()
     await db.table('entities').delete(id)
+    if (linked?.type === 'book') {
+      await db.table('syncLinks').delete(id)
+      await db.table('syncState').delete(id)
+    }
     const dependencies = await db.table('codexDependencies').toArray() as CodexDependencyEdge[]
     const dependencyIds = dependencies.filter((edge) => edge.sourceId === id || edge.targetId === id).map((edge) => edge.id)
     if (dependencyIds.length) await db.table('codexDependencies').bulkDelete(dependencyIds)
