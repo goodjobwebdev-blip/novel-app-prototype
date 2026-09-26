@@ -80,6 +80,7 @@ import AiSettingsScreen from './App'
 import CodexIllustration, { CodexThumbnail } from '../features/codex/CodexIllustration'
 import BookStorage, { BookBackupImport } from '../data/BookStorage'
 import CloudBookImport from '../features/sync/CloudBookImport'
+import LocalBookSync from '../features/sync/LocalBookSync'
 import { useWorkspaceSyncStatus } from '../features/sync/WorkspaceSyncStatus'
 import { checkRemoteBook, syncBookNow } from '../features/sync/sync-service'
 import { loadSyncSettings } from '../features/sync/sync-settings'
@@ -1944,7 +1945,7 @@ export default function Workspace() {
         {libraryState === 'loading' && <div className="library-storage-status" role="status"><p>Loading your books…</p>{librarySlow && <><p>Storage is taking longer to open. Close other tabs or windows of this app so a pending update can finish. Keep this tab open and do not clear browser data.</p><button type="button" onClick={() => window.location.reload()}>Reload app</button></>}</div>}
         {libraryError && <div className="library-storage-status" role="alert"><strong>{libraryState === 'error' ? 'Your library could not be loaded' : 'Your books loaded, but series information could not be updated'}</strong><p>{libraryError}</p><p>Keep your browser data. This error does not mean your books were deleted.</p><button type="button" onClick={retryLibrary}>Retry loading books</button><button type="button" onClick={() => window.location.reload()}>Reload app</button></div>}
         {libraryState === 'ready' && !bookList.length && <p>Your library is empty. Create a new book or import a backup.</p>}
-        <div className="library-import-actions"><BookBackupImport onImported={importedBook} /><CloudBookImport onImported={importedBook} /></div>
+        <div className="library-import-actions"><BookBackupImport onImported={importedBook} /><LocalBookSync books={bookList} beforeSync={prepareBookExport} onConfigure={() => openSettings('home', 'sync')} onRemoteApplied={importedBook} /><CloudBookImport onImported={importedBook} /></div>
         <div className="library-grid">{bookList.map((book, index) => <article className="library-book-card" key={book.id}>
           <button type="button" className="library-book" onClick={() => { void openBook(book.id).catch((error) => showToast(error instanceof Error ? error.message : 'Could not open the book.')) }}><i className={`mock-cover ${['tide', 'orchard', 'fires'][index % 3]}`}>{book.title.slice(0,1)}</i><span><small>{formatSeries(book, seriesList)}</small><strong>{book.title}</strong><em>{formatEdited(book.updatedAt)}</em></span></button>
           <div className="library-book-actions"><button className="autotitle-trigger" type="button" onClick={() => { void startAutotitle(book) }} aria-label={`Autotitle ${book.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></button><button type="button" onClick={() => { void editBookTitle(book) }} aria-label={`Rename ${book.title}`}><Pencil aria-hidden="true" /></button><button type="button" onClick={() => { void removeBook(book) }} aria-label={`Delete ${book.title}`}><Trash2 aria-hidden="true" /></button></div>
