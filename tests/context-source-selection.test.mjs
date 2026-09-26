@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { structuralSelectionIds, orderedContextScenes } from '../src/context-source-selection.ts'
+import { structuralSelectionIds, orderedContextScenes } from '../src/shared/context/context-source-selection.ts'
 const items = [
   { id: 'act', parentId: 'book', type: 'act', order: 0 },
   { id: 'second', parentId: 'act', type: 'chapter', order: 2 },

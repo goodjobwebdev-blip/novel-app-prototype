@@ -7,8 +7,8 @@ import {
   SUMMARY_CREATE_ACTION,
   SUMMARY_REPLACE_ACTION,
   summaryRequestValues,
-} from '../src/summary-request.ts'
-import { promptVariables } from '../src/prompt-template.ts'
+} from '../src/features/writing/summary-request.ts'
+import { promptVariables } from '../src/shared/ai/prompt-template.ts'
 
 const book = { title: 'Tide', series: 'Lost Coasts', seriesOrder: '2', overview: 'A drowned city.', genre: 'Fantasy', style: 'Lyrical', pov: 'Third person', tense: 'Past', language: 'English' }
 const baseInput = {
@@ -73,11 +73,11 @@ test('Summary variable catalog excludes cursor and context namespaces', () => {
 })
 
 test('Summary source hierarchy, settings migration, preview, and provider dispatch use the shared normalized request', () => {
-  const generation = readFileSync(new URL('../src/summary-generation.ts', import.meta.url), 'utf8')
-  const service = readFileSync(new URL('../src/summary-service.ts', import.meta.url), 'utf8')
-  const settings = readFileSync(new URL('../src/ai-settings.ts', import.meta.url), 'utf8')
-  const workspace = readFileSync(new URL('../src/Workspace.tsx', import.meta.url), 'utf8')
-  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  const generation = readFileSync(new URL('../src/features/writing/summary-generation.ts', import.meta.url), 'utf8')
+  const service = readFileSync(new URL('../src/features/writing/summary-service.ts', import.meta.url), 'utf8')
+  const settings = readFileSync(new URL('../src/shared/ai/ai-settings.ts', import.meta.url), 'utf8')
+  const workspace = readFileSync(new URL('../src/app/Workspace.tsx', import.meta.url), 'utf8')
+  const app = readFileSync(new URL('../src/app/App.tsx', import.meta.url), 'utf8')
   assert.match(service, /Outdated Scene summary rejected; authoritative full Scene body used/)
   assert.match(service, /Current Chapter summary/)
   assert.match(service, /Full Codex body \+ metadata/)

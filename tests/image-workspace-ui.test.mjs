@@ -1,4 +1,5 @@
 import test, { after } from 'node:test'
+import { transpileSourceTree } from './transpile-source-tree.mjs'
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
@@ -24,19 +25,13 @@ const React = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { act } = React
 const directory = mkdtempSync(new URL('../node_modules/.arc-image-workspace-ui-test-', import.meta.url))
-for (const filename of readdirSync(new URL('../src/', import.meta.url)).filter((name) => /\.tsx?$/.test(name))) {
-  const source = readFileSync(new URL(`../src/${filename}`, import.meta.url), 'utf8')
-  const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText
-    .replace(/import ['"][^'"]+\.css['"];?/g, '')
-    .replace(/(['"])(\.\/[^'"]+)\1/g, (_, quote, path) => `${quote}${path.replace(/\.tsx?$/, '')}.mjs${quote}`)
-  writeFileSync(`${directory}/${filename.replace(/\.tsx?$/, '.mjs')}`, compiled)
-}
+transpileSourceTree(directory)
 const moduleAt = (name) => import(pathToFileURL(`${directory}/${name}.mjs`))
-const p = await moduleAt('persistence')
-const settings = await moduleAt('image-settings')
-const store = await moduleAt('image-store')
-const { initialAiSettings } = await moduleAt('ai-settings')
-const { default: ImageWorkspace, createImageWorkspaceState } = await moduleAt('ImageWorkspace')
+const p = await moduleAt('data/persistence')
+const settings = await moduleAt('features/images/image-settings')
+const store = await moduleAt('features/images/image-store')
+const { initialAiSettings } = await moduleAt('shared/ai/ai-settings')
+const { default: ImageWorkspace, createImageWorkspaceState } = await moduleAt('features/images/ImageWorkspace')
 after(async () => { (await p.database()).close(); dom.window.close(); rmSync(directory, { recursive: true, force: true }) })
 
 const h = React.createElement
@@ -193,7 +188,7 @@ test('gallery card actions appear only after opening the image viewer', async ()
 })
 
 test('Workspace routes Images as a top-level screen and the Library image control does not open Settings', () => {
-  const source = readFileSync(new URL('../src/Workspace.tsx', import.meta.url), 'utf8')
+  const source = readFileSync(new URL('../src/app/Workspace.tsx', import.meta.url), 'utf8')
   assert.match(source, /type Screen = [^\n]*'images'/)
 
   const imagesStart = source.indexOf("if (screen === 'images')")

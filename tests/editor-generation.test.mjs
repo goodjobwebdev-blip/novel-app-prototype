@@ -15,7 +15,7 @@ globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.windo
 dom.window.Range.prototype.getClientRects = () => []
 dom.window.Range.prototype.getBoundingClientRect = () => new dom.window.DOMRect()
 const directory = mkdtempSync(new URL('../node_modules/.editor-generation-test-', import.meta.url))
-buildSync({ entryPoints: [new URL('../src/MarkdownEditor.tsx', import.meta.url).pathname], jsx: 'automatic', bundle: true, packages: 'external', format: 'esm', outfile: `${directory}/editor.mjs`, loader: { '.css': 'empty' }, logLevel: 'silent' })
+buildSync({ entryPoints: [new URL('../src/features/editor/MarkdownEditor.tsx', import.meta.url).pathname], jsx: 'automatic', bundle: true, packages: 'external', format: 'esm', outfile: `${directory}/editor.mjs`, loader: { '.css': 'empty' }, logLevel: 'silent' })
 const React = await import('react')
 const { act } = React
 const { createRoot } = await import('react-dom/client')

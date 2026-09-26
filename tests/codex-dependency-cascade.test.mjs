@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { cascadeAutomaticCodexDependencies } from '../src/codex-dependency-cascade.ts'
+import { cascadeAutomaticCodexDependencies } from '../src/features/codex/codex-dependency-cascade.ts'
 
 const entry = (id, archived = false) => ({ id, type: 'codexEntry', bookId: 'book', parentId: 'book', title: id.toUpperCase(), category: 'Other', content: id, createdAt: 1, updatedAt: 1, ...(archived ? { archivedAt: 10 } : {}) })
 const edge = (id, sourceId, targetId, includeWithSource = true, createdAt = 1) => ({ id, bookId: 'book', sourceId, targetId, relationLabel: '', includeWithSource, createdAt, updatedAt: createdAt })

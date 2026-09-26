@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { isActiveCodexTitleDuplicate } from '../src/chat-codex-duplicate.ts'
+import { isActiveCodexTitleDuplicate } from '../src/features/chat/chat-codex-duplicate.ts'
 
 test('archived same-title Codex entries do not block ordinary Chat creation', () => {
   assert.equal(isActiveCodexTitleDuplicate({ title: 'Mara Vale', archivedAt: Date.now() }, 'Mara Vale'), false)

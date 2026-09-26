@@ -1,4 +1,5 @@
 import test, { after } from 'node:test'
+import { transpileSourceTree } from './transpile-source-tree.mjs'
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, readdirSync, writeFileSync, rmSync, renameSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
@@ -18,16 +19,10 @@ const React = await import('react')
 const { act } = React
 const { createRoot } = await import('react-dom/client')
 const directory = mkdtempSync(new URL('../node_modules/.media-dictation-test-', import.meta.url))
-for (const filename of readdirSync(new URL('../src/', import.meta.url)).filter(name => /\.tsx?$/.test(name))) {
-  const compiled = ts.transpileModule(readFileSync(new URL(`../src/${filename}`, import.meta.url), 'utf8'), {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022, jsx: ts.JsxEmit.ReactJSX },
-  }).outputText.replace(/import ['"][^'"]+\.css['"];?/g, '')
-    .replace(/(['"])(\.\/[^'"]+)\1/g, (_, quote, path) => `${quote}${path.replace(/\.tsx?$/, '')}.mjs${quote}`)
-  writeFileSync(`${directory}/${filename.replace(/\.tsx?$/, '.mjs')}`, compiled)
-}
+transpileSourceTree(directory)
 // Exercise the real media editor and popup with deterministic speech events.
-renameSync(`${directory}/stt-service.mjs`, `${directory}/stt-original.mjs`)
-writeFileSync(`${directory}/stt-service.mjs`, `
+renameSync(`${directory}/features/speech/stt-service.mjs`, `${directory}/features/speech/stt-original.mjs`)
+writeFileSync(`${directory}/features/speech/stt-service.mjs`, `
 export { normalizeTranscriptForInsertion } from './stt-original.mjs';
 import { parseTranscriptionModelId } from './stt-original.mjs';
 let state = { status: 'idle', target: null }, target;
@@ -45,10 +40,10 @@ export function stopSttSession() { stops++; target.onFinal('moonlit'); emit('com
 export function cancelSttSession() { cancels++; target.onCancel(); emit('cancelled'); }
 `)
 const moduleAt = name => import(pathToFileURL(`${directory}/${name}.mjs`))
-const p = await moduleAt('persistence')
-const ai = await moduleAt('ai-settings')
-const stt = await moduleAt('stt-service')
-const { default: MediaPromptEditor } = await moduleAt('MediaPromptEditor')
+const p = await moduleAt('data/persistence')
+const ai = await moduleAt('shared/ai/ai-settings')
+const stt = await moduleAt('features/speech/stt-service')
+const { default: MediaPromptEditor } = await moduleAt('features/images/MediaPromptEditor')
 after(async () => { (await p.database()).close(); dom.window.close(); rmSync(directory, { recursive: true, force: true }) })
 const h = React.createElement
 const findButton = label => [...document.querySelectorAll('button')].find(item => item.textContent.trim() === label || item.getAttribute('aria-label') === label)

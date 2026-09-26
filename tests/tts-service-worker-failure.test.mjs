@@ -55,7 +55,7 @@ test('fatal parallel TTS chunk failure aborts siblings and starts no later chunk
     throw new Error(`Unexpected request: ${url}`)
   }
 
-  const tts = await import(`../src/tts-service.ts?worker-failure=${Date.now()}`)
+  const tts = await import(`../src/features/speech/tts-service.ts?worker-failure=${Date.now()}`)
   const settings = {
     provider: 'nanogpt',
     apiKey: 'test-key',

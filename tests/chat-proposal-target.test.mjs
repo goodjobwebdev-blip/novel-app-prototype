@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { loadProposalTargetOrMarkStale } from '../src/chat-proposal-target.ts'
+import { loadProposalTargetOrMarkStale } from '../src/features/chat/chat-proposal-target.ts'
 
 test('missing proposal target is marked stale before the lookup error is rethrown', async () => {
   const events = []

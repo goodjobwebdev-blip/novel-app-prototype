@@ -17,15 +17,15 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   }
   return nextResolve(specifier, context)
 } })
-const db = await import('../src/persistence.ts')
-const { initialAiSettings, copyAiSettings } = await import('../src/ai-settings.ts')
-const { executeChatManagementTool } = await import('../src/chat-management-tools.ts')
-const { executeChatWorkspaceTool } = await import('../src/chat-tools.ts')
-const { applyChatEntityAction, rejectChatEntityAction } = await import('../src/chat-entity-tools.ts')
-const { createChat, createChatMessage } = await import('../src/chat-service.ts')
-const { getFakeProviderTrace, clearFakeProviderTrace } = await import('../src/fake-provider.ts')
-const { prepareSummaryGeneration, regenerateEntitySummary } = await import('../src/summary-generation.ts')
-const { CHAT_TOOL_DEFINITIONS } = await import('../src/chat-request.ts')
+const db = await import('../src/data/persistence.ts')
+const { initialAiSettings, copyAiSettings } = await import('../src/shared/ai/ai-settings.ts')
+const { executeChatManagementTool } = await import('../src/features/chat/chat-management-tools.ts')
+const { executeChatWorkspaceTool } = await import('../src/features/chat/chat-tools.ts')
+const { applyChatEntityAction, rejectChatEntityAction } = await import('../src/features/chat/chat-entity-tools.ts')
+const { createChat, createChatMessage } = await import('../src/features/chat/chat-service.ts')
+const { getFakeProviderTrace, clearFakeProviderTrace } = await import('../src/shared/ai/fake-provider.ts')
+const { prepareSummaryGeneration, regenerateEntitySummary } = await import('../src/features/writing/summary-generation.ts')
+const { CHAT_TOOL_DEFINITIONS } = await import('../src/features/chat/chat-request.ts')
 
 function call(name, args = {}) { return { id: crypto.randomUUID(), type: 'function', function: { name, arguments: JSON.stringify(args) } } }
 async function execute(bookId, name, args = {}) {
@@ -284,7 +284,7 @@ test('scene settings inherit live defaults, isolate fields and reject stale or c
   await db.updateEntityAtomically(f.scene.id, (scene) => ({ ...scene, language: 'Spanish' }))
   await assert.rejects(() => approve(f, stale.proposal), /changed/)
   assert.equal((await execute(f.book.id, 'propose_scene_settings_update', { entity_id: f.scene.id, changes: { title: 'No' } })).ok, false)
-  const { encodeBookArchive, decodeBookArchive, copyBookArchive } = await import('../src/book-archive.ts')
+  const { encodeBookArchive, decodeBookArchive, copyBookArchive } = await import('../src/data/book-archive.ts')
   const archived = await decodeBookArchive(encodeBookArchive(await db.readBookArchive(f.book.id)))
   const copied = copyBookArchive(archived)
   const sceneCopy = copied.data.entities.find((entity) => entity.type === 'scene')

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { transitionProposalList } from '../src/chat-proposal-transition.ts'
+import { transitionProposalList } from '../src/features/chat/chat-proposal-transition.ts'
 
 test('sibling proposal transitions merge against the latest proposal array', () => {
   const initial = [

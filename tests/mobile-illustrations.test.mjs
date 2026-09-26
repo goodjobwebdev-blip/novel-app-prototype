@@ -1,4 +1,5 @@
 import test, { after } from 'node:test'
+import { transpileSourceTree } from './transpile-source-tree.mjs'
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
@@ -23,20 +24,14 @@ const React = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { act } = React
 const directory = mkdtempSync(new URL('../node_modules/.arc-mobile-test-', import.meta.url))
-for (const filename of readdirSync(new URL('../src/', import.meta.url)).filter((name) => /\.tsx?$/.test(name))) {
-  const source = readFileSync(new URL(`../src/${filename}`, import.meta.url), 'utf8')
-  const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText
-    .replace(/import ['"][^'"]+\.css['"];?/g, '')
-    .replace(/(['"])(\.\/[^'"]+)\1/g, (_, quote, path) => `${quote}${path.replace(/\.tsx?$/, '')}.mjs${quote}`)
-  writeFileSync(`${directory}/${filename.replace(/\.tsx?$/, '.mjs')}`, compiled)
-}
+transpileSourceTree(directory)
 const moduleAt = (name) => import(pathToFileURL(`${directory}/${name}.mjs`))
-const geometry = await moduleAt('image-gestures')
-const { default: Gestures } = await moduleAt('IllustrationGestures')
-const { default: Modal } = await moduleAt('IllustrationModal')
-const { default: Illustration } = await moduleAt('CodexIllustration')
-const p = await moduleAt('persistence')
-const { initialAiSettings } = await moduleAt('ai-settings')
+const geometry = await moduleAt('features/images/image-gestures')
+const { default: Gestures } = await moduleAt('features/images/IllustrationGestures')
+const { default: Modal } = await moduleAt('features/images/IllustrationModal')
+const { default: Illustration } = await moduleAt('features/codex/CodexIllustration')
+const p = await moduleAt('data/persistence')
+const { initialAiSettings } = await moduleAt('shared/ai/ai-settings')
 after(() => { dom.window.close(); rmSync(directory, { recursive: true, force: true }) })
 const h = React.createElement
 async function mount(element) { const root = createRoot(document.getElementById('root')); await act(async () => root.render(element)); return root }

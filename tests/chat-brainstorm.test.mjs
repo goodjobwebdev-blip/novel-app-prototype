@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { executeBrainstormTool, brainstormSelectionText, updateBrainstormDraft } from '../src/chat-brainstorm.ts'
+import { executeBrainstormTool, brainstormSelectionText, updateBrainstormDraft } from '../src/features/chat/chat-brainstorm.ts'
 const call = args => ({ function: { name: 'present_brainstorm', arguments: typeof args === 'string' ? args : JSON.stringify(args) } })
 const options = [{ title: 'Explore', description: 'Follow the river' }, { title: 'Wait', description: 'Watch the gate', trade_off: 'Lose daylight' }]
 test('brainstorm payload validation rejects malformed and out-of-range options safely', () => {

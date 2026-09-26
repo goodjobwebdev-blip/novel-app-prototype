@@ -6,11 +6,11 @@ import { fileURLToPath } from 'node:url'
 import 'fake-indexeddb/auto'
 registerHooks({ resolve(specifier, context, nextResolve) { if (specifier.startsWith('.') && context.parentURL?.startsWith('file:')) { const url = new URL(specifier + '.ts', context.parentURL); if (existsSync(fileURLToPath(url))) return nextResolve(url.href, context) } return nextResolve(specifier, context) } })
 globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} }
-const p = await import('../src/persistence.ts')
-const { initialAiSettings, copyAiSettings } = await import('../src/ai-settings.ts')
-const { encodeDocumentBlock } = await import('../src/document-projection.ts')
-const { sensoryPrompts } = await import('../src/prose-transformations.ts')
-const { createSensoryVariantParser, prepareSensoryDetailRequest, validSensoryReplacement } = await import('../src/sensory-details.ts')
+const p = await import('../src/data/persistence.ts')
+const { initialAiSettings, copyAiSettings } = await import('../src/shared/ai/ai-settings.ts')
+const { encodeDocumentBlock } = await import('../src/features/editor/document-projection.ts')
+const { sensoryPrompts } = await import('../src/features/writing/prose-transformations.ts')
+const { createSensoryVariantParser, prepareSensoryDetailRequest, validSensoryReplacement } = await import('../src/features/writing/sensory-details.ts')
 after(async () => (await p.database()).close())
 const idea = (sense, index = 1) => ({ sense, label: `${sense} idea ${index}`, text: `She paused, noticing ${sense} detail ${index}.` })
 

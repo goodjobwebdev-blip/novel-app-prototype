@@ -14,14 +14,14 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   }
   return nextResolve(specifier, context)
 } })
-const ai = await import('../src/ai-settings.ts')
-const p = await import('../src/persistence.ts')
-const chats = await import('../src/chat-service.ts')
-const { streamChatCompletion } = await import('../src/chat-api.ts')
-const { streamTextProviderCompletion } = await import('../src/text-provider.ts')
-const { getFakeProviderTrace } = await import('../src/fake-provider.ts')
-const { normalizeThinkingEffort } = await import('../src/thinking-effort.ts')
-const { switchProviderProfile } = await import('../src/provider-profiles.ts')
+const ai = await import('../src/shared/ai/ai-settings.ts')
+const p = await import('../src/data/persistence.ts')
+const chats = await import('../src/features/chat/chat-service.ts')
+const { streamChatCompletion } = await import('../src/features/chat/chat-api.ts')
+const { streamTextProviderCompletion } = await import('../src/shared/ai/text-provider.ts')
+const { getFakeProviderTrace } = await import('../src/shared/ai/fake-provider.ts')
+const { normalizeThinkingEffort } = await import('../src/shared/ai/thinking-effort.ts')
+const { switchProviderProfile } = await import('../src/features/settings/provider-profiles.ts')
 after(async () => (await p.database()).close())
 
 test('effort defaults normalize, survive persistence and remain isolated across books and chats', async () => {

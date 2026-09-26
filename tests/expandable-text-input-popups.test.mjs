@@ -16,11 +16,15 @@ const modalEntries = []
 dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true; modalEntries.push(this) }
 dom.window.HTMLDialogElement.prototype.close = function () { this.open = false }
 const style = document.createElement('style')
-style.textContent = ['generation-controls.css', 'composer.css'].map(name => readFileSync(new URL(`../src/${name}`, import.meta.url), 'utf8')).join('\n')
+style.textContent = ['shared/ui/generation-controls.css', 'features/chat/composer.css'].map(path => readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8')).join('\n')
 document.head.append(style)
 const directory = mkdtempSync(new URL('../node_modules/.expanded-popup-test-', import.meta.url))
-for (const name of ['ProseRewriteDialog', 'ExpandableTextInput', 'IllustrationModal']) buildSync({
-  entryPoints: [new URL(`../src/${name}.tsx`, import.meta.url).pathname], jsx: 'automatic', bundle: true, packages: 'external', format: 'esm', outfile: `${directory}/${name}.mjs`, loader: { '.css': 'empty' }, logLevel: 'silent',
+for (const [name, path] of [
+  ['ProseRewriteDialog', 'features/writing/ProseRewriteDialog'],
+  ['ExpandableTextInput', 'shared/ui/ExpandableTextInput'],
+  ['IllustrationModal', 'features/images/IllustrationModal'],
+]) buildSync({
+  entryPoints: [new URL(`../src/${path}.tsx`, import.meta.url).pathname], jsx: 'automatic', bundle: true, packages: 'external', format: 'esm', outfile: `${directory}/${name}.mjs`, loader: { '.css': 'empty' }, logLevel: 'silent',
 })
 const React = await import('react')
 const { act } = React

@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { LatestAsyncIntent, bookScopeMatches, documentBelongsToBook } from '../src/book-scope-guard.ts'
+import { LatestAsyncIntent, bookScopeMatches, documentBelongsToBook } from '../src/app/book-scope-guard.ts'
 
 test('latest async intent invalidates earlier book navigation work', () => {
   const intent = new LatestAsyncIntent()
@@ -22,7 +22,7 @@ test('book/document scope guards reject cross-book identity', () => {
 })
 
 test('Workspace enforces stale refresh, load ownership, and latest openBook intent', () => {
-  const source = readFileSync(new URL('../src/Workspace.tsx', import.meta.url), 'utf8')
+  const source = readFileSync(new URL('../src/app/Workspace.tsx', import.meta.url), 'utf8')
 
   const reloadStart = source.indexOf('  async function reloadBookContent(')
   const reloadEnd = source.indexOf('\n  async function loadDocument(', reloadStart)

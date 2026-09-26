@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
 
-const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
-const tabs = readFileSync(new URL('../src/SettingsSectionTabs.tsx', import.meta.url), 'utf8')
-const styles = readFileSync(new URL('../src/settings-section-tabs.css', import.meta.url), 'utf8')
+const app = readFileSync(new URL('../src/app/App.tsx', import.meta.url), 'utf8')
+const tabs = readFileSync(new URL('../src/features/settings/SettingsSectionTabs.tsx', import.meta.url), 'utf8')
+const styles = readFileSync(new URL('../src/features/settings/settings-section-tabs.css', import.meta.url), 'utf8')
 
 test('Context Management exposes explicit accessible tabs for every existing context mode', () => {
   assert.match(app, /const contextSections:[\s\S]*\['scene', 'Story'\][\s\S]*\['codex', 'Codex'\][\s\S]*\['chat', 'Chat'\][\s\S]*\['summary', 'Summary'\][\s\S]*\['note', 'Note'\]/)

@@ -9,9 +9,9 @@ const storage = new Map()
 globalThis.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key,value) => storage.set(key,String(value)), removeItem: key => storage.delete(key) }
 registerHooks({ resolve(s,c,n) { if (s.startsWith('.') && c.parentURL?.startsWith('file:')) { const u = new URL(s+'.ts',c.parentURL); if (existsSync(fileURLToPath(u))) return n(u.href,c) } return n(s,c) } })
 
-const cache=await import('../src/tts-cache.ts'), p=await import('../src/persistence.ts')
-const {initialAiSettings}=await import('../src/ai-settings.ts'), {encodeDocumentBlock}=await import('../src/document-projection.ts')
-let tts=await import('../src/tts-service.ts'), autoPlay=true, paid=0, catalog=0, inputs=[]
+const cache=await import('../src/features/speech/tts-cache.ts'), p=await import('../src/data/persistence.ts')
+const {initialAiSettings}=await import('../src/shared/ai/ai-settings.ts'), {encodeDocumentBlock}=await import('../src/features/editor/document-projection.ts')
+let tts=await import('../src/features/speech/tts-service.ts'), autoPlay=true, paid=0, catalog=0, inputs=[]
 globalThis.Audio=class { constructor(url){this.src=url;this.currentTime=0;this.duration=1} pause(){} play(){if(autoPlay)setTimeout(()=>this.onended?.(),1);return Promise.resolve()} }
 const settings={provider:'nanogpt',apiKey:'SECRET_TTS_KEY',model:'Kokoro-82m',voice:'af_bella',maxParallelRequests:'2'}
 function provider(custom){paid=0;catalog=0;inputs=[];globalThis.fetch=async(url,init={})=>{if(String(url).includes('/audio-models')){catalog++;return Response.json({data:[{id:settings.model,voices:['af_bella','af_sarah'],max_chars:500,pricing:{per_thousand_chars:0.02}}]})} if(String(url).endsWith('/api/tts')){paid++;inputs.push(JSON.parse(init.body).text);return custom?custom(paid,init):new Response(new Blob(['complete audio '+paid]),{headers:{'content-type':'audio/mpeg'}})}throw new Error('Unexpected network '+url)} }
@@ -21,7 +21,7 @@ after(async()=>{tts.stopTtsSession();tts.dismissTtsState();(await p.database()).
 test('durable cached replay survives a fresh service instance, rename, missing credentials and complete network loss',async()=>{
  const f=await fixture();provider();await tts.startTtsSession(settings,'Known words.', 'Original title',f.owner);assert.equal(paid,1)
  const db=await cache.ttsCacheDatabase();assert.equal(await db.table('chunks').count(),1);assert.ok((await db.table('chunks').toArray())[0].blob.size)
- tts.dismissTtsState();tts=await import('../src/tts-service.ts?fresh='+Date.now());globalThis.fetch=async()=>{throw new Error('Offline replay must make zero network calls')}
+ tts.dismissTtsState();tts=await import('../src/features/speech/tts-service.ts?fresh='+Date.now());globalThis.fetch=async()=>{throw new Error('Offline replay must make zero network calls')}
  const offline={...settings,apiKey:''};const plan=await tts.prepareSpeechPlayback(offline,'Known words.',f.owner);assert.equal(plan.cachedChunks,1);assert.equal(plan.missingChunks,0)
  await tts.startTtsSession(offline,'Known words.','Renamed scene',f.owner);assert.equal(tts.getTtsState().status,'complete');assert.equal(tts.getTtsState().missingChunks,0)
  assert.doesNotMatch(JSON.stringify([await db.table('meta').toArray(),await db.table('manifests').toArray(),await db.table('chunks').toArray()]),/SECRET_TTS_KEY/)

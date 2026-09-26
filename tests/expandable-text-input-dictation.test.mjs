@@ -18,7 +18,7 @@ const React = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { act } = React
 const directory = mkdtempSync(new URL('../node_modules/.expandable-input-test-', import.meta.url))
-const source = readFileSync(new URL('../src/ExpandableTextInput.tsx', import.meta.url), 'utf8')
+const source = readFileSync(new URL('../src/shared/ui/ExpandableTextInput.tsx', import.meta.url), 'utf8')
 const compiled = ts.transpileModule(source, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022, jsx: ts.JsxEmit.ReactJSX },
 }).outputText

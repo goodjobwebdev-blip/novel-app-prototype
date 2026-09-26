@@ -4,7 +4,7 @@ import {
   chatMatchesBookSelection,
   onlyChatsForBook,
   reloadMatchesBookSelection,
-} from '../src/chat-book-guard.ts'
+} from '../src/features/chat/chat-book-guard.ts'
 
 test('late Book A sidebar reload cannot replace Book B state', async () => {
   let currentBookId = 'book-a'

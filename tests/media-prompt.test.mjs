@@ -13,10 +13,10 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   }
   return nextResolve(specifier, context)
 } })
-const { assembleMediaEnhancementRequest, enhanceMediaPrompt, mediaEnhancementFingerprint, mediaEnhancementIsStale, selectedMediaPrompt } = await import('../src/media-prompt.ts')
-const { saveMediaWorkspaceDraft, loadMediaWorkspaceDraft } = await import('../src/media-draft-storage.ts')
-const { initialAiSettings, copyAiSettings } = await import('../src/ai-settings.ts')
-const { clearFakeProviderTrace, getFakeProviderTrace } = await import('../src/fake-provider.ts')
+const { assembleMediaEnhancementRequest, enhanceMediaPrompt, mediaEnhancementFingerprint, mediaEnhancementIsStale, selectedMediaPrompt } = await import('../src/features/images/media-prompt.ts')
+const { saveMediaWorkspaceDraft, loadMediaWorkspaceDraft } = await import('../src/features/images/media-draft-storage.ts')
+const { initialAiSettings, copyAiSettings } = await import('../src/shared/ai/ai-settings.ts')
+const { clearFakeProviderTrace, getFakeProviderTrace } = await import('../src/shared/ai/fake-provider.ts')
 const draft = { prompt: 'Moonlit gate', alias: 'Visual', size: '1024x1024', task: 'text-to-image', sources: [{ data: new Blob(['SOURCE-SECRET']), id: 'source' }], enhancementGuidance: 'Vintage illustration', enhancementMode: 'guided' }
 
 test('enhancement context includes only prompt, guidance and media capabilities', () => {

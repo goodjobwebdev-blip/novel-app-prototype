@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { DEFAULT_LITELLM_BASE_URL, switchProviderProfile } from '../src/provider-profiles.ts'
+import { DEFAULT_LITELLM_BASE_URL, switchProviderProfile } from '../src/features/settings/provider-profiles.ts'
 const initialAiSettings = { provider: 'nanogpt', baseUrl: 'https://nano-gpt.com/api/v1', codexModel: '', codexEffectiveContextLimit: '' }
 test('provider profiles isolate credentials and restore model choices after a persistence round trip', () => {
   const original = { ...initialAiSettings, apiKey: 'nano-test-key', mainModel: 'writer', supportModel: 'helper', chatModel: 'assistant', chatModelContextLength: 64000, mainModelContextLength: 32000, mainEffectiveContextLimit: '16k' }

@@ -2,10 +2,10 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const persistence = readFileSync(new URL('../src/persistence.ts', import.meta.url), 'utf8')
-const workspace = readFileSync(new URL('../src/Workspace.tsx', import.meta.url), 'utf8')
-const chatTools = readFileSync(new URL('../src/chat-tools.ts', import.meta.url), 'utf8')
-const contextService = readFileSync(new URL('../src/context-service.ts', import.meta.url), 'utf8')
+const persistence = readFileSync(new URL('../src/data/persistence.ts', import.meta.url), 'utf8')
+const workspace = readFileSync(new URL('../src/app/Workspace.tsx', import.meta.url), 'utf8')
+const chatTools = readFileSync(new URL('../src/features/chat/chat-tools.ts', import.meta.url), 'utf8')
+const contextService = readFileSync(new URL('../src/shared/context/context-service.ts', import.meta.url), 'utf8')
 
 test('Codex dependency edges are normalized, directional and indexed for outgoing/incoming queries', () => {
   assert.match(persistence, /export type CodexDependencyEdge = \{[\s\S]*sourceId: string[\s\S]*targetId: string[\s\S]*includeWithSource: boolean/)

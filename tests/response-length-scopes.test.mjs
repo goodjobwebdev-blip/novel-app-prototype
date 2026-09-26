@@ -7,10 +7,10 @@ import {
   STORY_RESPONSE_LENGTH_PRESETS,
   SUMMARY_RESPONSE_LENGTH_PRESETS,
   normalizeResponseLengths,
-} from '../src/response-length.ts'
-import { assembleCodexGenerationRequest, defaultCodexPromptComposition } from '../src/codex-request.ts'
-import { assembleSummaryGenerationRequest, defaultSummaryPromptComposition } from '../src/summary-request.ts'
-import { promptVariables } from '../src/prompt-template.ts'
+} from '../src/features/settings/response-length.ts'
+import { assembleCodexGenerationRequest, defaultCodexPromptComposition } from '../src/features/codex/codex-request.ts'
+import { assembleSummaryGenerationRequest, defaultSummaryPromptComposition } from '../src/features/writing/summary-request.ts'
+import { promptVariables } from '../src/shared/ai/prompt-template.ts'
 
 const book = { title: 'Tide', series: '', seriesOrder: '', overview: '', genre: '', style: '', pov: '', tense: '', language: 'English' }
 const context = {
@@ -22,7 +22,7 @@ const context = {
 test('legacy shared response length migrates to Story only and is removed from normalized state', () => {
   const migrated = normalizeResponseLengths(undefined, 'Finish this scene.')
   assert.deepEqual(migrated, { story: 'Finish this scene.', codex: '', summary: '' })
-  const settings = readFileSync(new URL('../src/ai-settings.ts', import.meta.url), 'utf8')
+  const settings = readFileSync(new URL('../src/shared/ai/ai-settings.ts', import.meta.url), 'utf8')
   assert.match(settings, /normalizeResponseLengths\(value\?\.responseLengths, value\?\.responseLength\)/)
   assert.match(settings, /const \{ responseLength: _legacyResponseLength, \.\.\.storedValue \}/)
 })
@@ -53,7 +53,7 @@ test('response.length is one scope-local variable for Story, Codex, and Summary 
 })
 
 test('built-in compositions place one ordinary Response length message before the final action', () => {
-  const storySource = readFileSync(new URL('../src/story-request.ts', import.meta.url), 'utf8')
+  const storySource = readFileSync(new URL('../src/features/writing/story-request.ts', import.meta.url), 'utf8')
   assert.match(storySource, /export const defaultStoryPromptComposition[\s\S]*name: 'Response length'[\s\S]*export type StoryRequestInput/)
   assert.equal(defaultCodexPromptComposition.predefinedMessages.at(-1).name, 'Response length')
   assert.equal(defaultSummaryPromptComposition.predefinedMessages.at(-1).name, 'Response length')
@@ -75,20 +75,20 @@ test('empty or unreferenced guidance is never secretly injected in any generatio
     assembleSummaryGenerationRequest({ composition: bareComposition, book, responseLength: 'SUMMARY SECRET', summary: { id: 'summary-1', content: '' }, target: { id: 'scene-1', type: 'scene', title: 'Scene', source: 'Scene body' } }),
   ]
   requests.forEach((request) => assert.doesNotMatch(request.providerMessages.map((message) => message.content).join('\n'), /(?:STORY|CODEX|SUMMARY) SECRET/))
-  const storySource = readFileSync(new URL('../src/story-request.ts', import.meta.url), 'utf8')
+  const storySource = readFileSync(new URL('../src/features/writing/story-request.ts', import.meta.url), 'utf8')
   assert.match(storySource, /values: storyRequestValues\(input\)/)
   assert.doesNotMatch(storySource, /responseLengthMessage|hiddenResponseLength/)
 })
 
 test('settings UI edits exactly the active scope and previews the same rendered provider messages', () => {
-  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
-  const workspace = readFileSync(new URL('../src/Workspace.tsx', import.meta.url), 'utf8')
+  const app = readFileSync(new URL('../src/app/App.tsx', import.meta.url), 'utf8')
+  const workspace = readFileSync(new URL('../src/app/Workspace.tsx', import.meta.url), 'utf8')
   assert.match(app, /promptTab === 'lore' \? 'codex' : promptTab === 'summarize' \? 'summary' : promptTab === 'story' \? 'story' : null/)
   assert.match(app, /responseLengths: \{ \.\.\.current\.responseLengths, \[responseLengthScope\]: event\.target\.value \}/)
   assert.match(app, /Available as <code>\{'\{\{response\.length\}\}'\}<\/code> only in this generation scope/)
   assert.match(app, /normalizedRequestDiagnosticText\(request\)/)
   assert.match(workspace, /settings\.responseLengths\.story/)
   assert.match(workspace, /settings\.responseLengths\.codex/)
-  assert.match(readFileSync(new URL('../src/summary-generation.ts', import.meta.url), 'utf8'), /settings\.responseLengths\.summary/)
+  assert.match(readFileSync(new URL('../src/features/writing/summary-generation.ts', import.meta.url), 'utf8'), /settings\.responseLengths\.summary/)
 })
 

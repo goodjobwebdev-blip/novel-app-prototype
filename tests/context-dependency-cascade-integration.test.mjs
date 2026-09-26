@@ -2,8 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const context = readFileSync(new URL('../src/context-service.ts', import.meta.url), 'utf8')
-const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+const context = readFileSync(new URL('../src/shared/context/context-service.ts', import.meta.url), 'utf8')
+const app = readFileSync(new URL('../src/app/App.tsx', import.meta.url), 'utf8')
 
 test('only direct trigger matches seed dependency cascade and cascaded ids dedupe manual Codex', () => {
   assert.match(context, /cascadeAutomaticCodexDependencies\(\s*automaticMatches\.map\(\(match\) => match\.entry\)/s)

@@ -14,14 +14,14 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   return nextResolve(specifier, context)
 } })
 
-const p = await import('../src/persistence.ts')
-const s = await import('../src/series-codex-service.ts')
-const { initialAiSettings } = await import('../src/ai-settings.ts')
-const { metadataValues } = await import('../src/chat-management-schema.ts')
-const { copyBookArchive } = await import('../src/book-archive.ts')
-const { encodeDocumentBlock, documentBlocks } = await import('../src/document-projection.ts')
-const { prepareChatSkillContext } = await import('../src/chat-skills.ts')
-const { createChat, updateChat } = await import('../src/chat-service.ts')
+const p = await import('../src/data/persistence.ts')
+const s = await import('../src/features/codex/series-codex-service.ts')
+const { initialAiSettings } = await import('../src/shared/ai/ai-settings.ts')
+const { metadataValues } = await import('../src/features/chat/chat-management-schema.ts')
+const { copyBookArchive } = await import('../src/data/book-archive.ts')
+const { encodeDocumentBlock, documentBlocks } = await import('../src/features/editor/document-projection.ts')
+const { prepareChatSkillContext } = await import('../src/features/chat/chat-skills.ts')
+const { createChat, updateChat } = await import('../src/features/chat/chat-service.ts')
 async function fixture() {
   const series = await p.createSeries('Shared world '+crypto.randomUUID())
   const books = []

@@ -1,4 +1,5 @@
 import test, { after } from 'node:test'
+import { transpileSourceTree } from './transpile-source-tree.mjs'
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
@@ -24,17 +25,11 @@ const React = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { act } = React
 const directory = mkdtempSync(new URL('../node_modules/.arc-generation-ui-test-', import.meta.url))
-for (const filename of readdirSync(new URL('../src/', import.meta.url)).filter((name) => /\.tsx?$/.test(name))) {
-  const source = readFileSync(new URL(`../src/${filename}`, import.meta.url), 'utf8')
-  const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText
-    .replace(/import ['"][^'"]+\.css['"];?/g, '')
-    .replace(/(['"])(\.\/[^'"]+)\1/g, (_, quote, path) => `${quote}${path.replace(/\.tsx?$/, '')}.mjs${quote}`)
-  writeFileSync(`${directory}/${filename.replace(/\.tsx?$/, '.mjs')}`, compiled)
-}
+transpileSourceTree(directory)
 const moduleAt = (name) => import(pathToFileURL(`${directory}/${name}.mjs`))
 
 
-const cache=await moduleAt('tts-cache'), {default:CacheSettings}=await moduleAt('TtsCacheSettings')
+const cache=await moduleAt('features/speech/tts-cache'), {default:CacheSettings}=await moduleAt('features/speech/TtsCacheSettings')
 const h=React.createElement
 const button=text=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text)
 async function waitFor(predicate){for(let i=0;i<100&&!await predicate();i++)await act(async()=>new Promise(r=>setTimeout(r,10)));assert.ok(await predicate(),document.body.textContent)}

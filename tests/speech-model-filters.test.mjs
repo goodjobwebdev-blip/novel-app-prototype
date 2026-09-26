@@ -27,8 +27,8 @@ test('NanoGPT audio model requests use supported type filters', async () => {
   }
 
   const cacheBust = Date.now()
-  const { fetchSpeechModels } = await import(`../src/tts-service.ts?audio-model-filter=${cacheBust}`)
-  const { fetchTranscriptionModels } = await import(`../src/stt-service.ts?audio-model-filter=${cacheBust}`)
+  const { fetchSpeechModels } = await import(`../src/features/speech/tts-service.ts?audio-model-filter=${cacheBust}`)
+  const { fetchTranscriptionModels } = await import(`../src/features/speech/stt-service.ts?audio-model-filter=${cacheBust}`)
 
   const speechModels = await fetchSpeechModels('test-key')
   await fetchTranscriptionModels({

@@ -1,4 +1,5 @@
 import test, { after } from 'node:test'
+import { transpileSourceTree } from './transpile-source-tree.mjs'
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
@@ -23,23 +24,17 @@ const React = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { act } = React
 const directory = mkdtempSync(new URL('../node_modules/.arc-generation-ui-test-', import.meta.url))
-for (const filename of readdirSync(new URL('../src/', import.meta.url)).filter((name) => /\.tsx?$/.test(name))) {
-  const source = readFileSync(new URL(`../src/${filename}`, import.meta.url), 'utf8')
-  const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText
-    .replace(/import ['"][^'"]+\.css['"];?/g, '')
-    .replace(/(['"])(\.\/[^'"]+)\1/g, (_, quote, path) => `${quote}${path.replace(/\.tsx?$/, '')}.mjs${quote}`)
-  writeFileSync(`${directory}/${filename.replace(/\.tsx?$/, '.mjs')}`, compiled)
-}
+transpileSourceTree(directory)
 const moduleAt = (name) => import(pathToFileURL(`${directory}/${name}.mjs`))
-const p = await moduleAt('persistence')
-const settings = await moduleAt('image-settings')
-const store = await moduleAt('image-store')
-const { executeImageProposal } = await moduleAt('image-tools')
-const { runImageQueue } = await moduleAt('image-queue')
-const { initialAiSettings } = await moduleAt('ai-settings')
-const { createChat, createChatMessage } = await moduleAt('chat-service')
-const { default: Card } = await moduleAt('ImageProposalCard')
-const { default: Panel } = await moduleAt('ImagePanel')
+const p = await moduleAt('data/persistence')
+const settings = await moduleAt('features/images/image-settings')
+const store = await moduleAt('features/images/image-store')
+const { executeImageProposal } = await moduleAt('features/images/image-tools')
+const { runImageQueue } = await moduleAt('features/images/image-queue')
+const { initialAiSettings } = await moduleAt('shared/ai/ai-settings')
+const { createChat, createChatMessage } = await moduleAt('features/chat/chat-service')
+const { default: Card } = await moduleAt('features/images/ImageProposalCard')
+const { default: Panel } = await moduleAt('features/images/ImagePanel')
 after(async () => { (await p.database()).close(); dom.window.close(); rmSync(directory, { recursive: true, force: true }) })
 const h = React.createElement
 const button = (text) => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === text || b.getAttribute('aria-label') === text)
@@ -191,8 +186,13 @@ test('image choices keep compact checkbox geometry under shared settings styles'
   configure()
   const style = document.createElement('style')
   // Match the app's cascade: component styles load before global form rules.
-  style.textContent = ['image-generation.css', 'styles.css', 'ui-settings.css', 'mobile-control-hardening.css', 'ai-settings-ux.css']
-    .map((file) => readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8')).join('\n')
+  style.textContent = [
+    'features/images/image-generation.css',
+    'app/styles.css',
+    'features/settings/ui-settings.css',
+    'shared/ui/mobile-control-hardening.css',
+    'features/settings/ai-settings-ux.css',
+  ].map((path) => readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8')).join('\n')
   document.head.append(style)
   const root = createRoot(document.getElementById('root'))
   try {
@@ -294,9 +294,9 @@ test('discard removes an unwanted result from the generation queue immediately',
 })
 
 test('media enhancement preserves original text, chips do not send, and late results keep newer edits', async () => {
-  const ai = await moduleAt('ai-settings')
-  const fake = await moduleAt('fake-provider')
-  const { default: Prompt } = await moduleAt('MediaPromptEditor')
+  const ai = await moduleAt('shared/ai/ai-settings')
+  const fake = await moduleAt('shared/ai/fake-provider')
+  const { default: Prompt } = await moduleAt('features/images/MediaPromptEditor')
   const config = ai.copyAiSettings(ai.initialAiSettings)
   config.provider = 'fake'; config.supportModel = 'fake/test'; config.supportModelContextLength = 33000
   ai.saveAiSettings(config)

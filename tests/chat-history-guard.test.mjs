@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { chatHistoryPrefixMatches } from '../src/chat-history-guard.ts'
+import { chatHistoryPrefixMatches } from '../src/features/chat/chat-history-guard.ts'
 
 const base = [
   { id: 'u1', order: 0, role: 'user', content: 'Go left' },

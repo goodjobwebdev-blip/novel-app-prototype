@@ -2,14 +2,14 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const aiSettings = readFileSync(new URL('../src/ai-settings.ts', import.meta.url), 'utf8')
-const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
-const workspace = readFileSync(new URL('../src/Workspace.tsx', import.meta.url), 'utf8')
-const chatApi = readFileSync(new URL('../src/chat-api.ts', import.meta.url), 'utf8')
-const chatService = readFileSync(new URL('../src/chat-service.ts', import.meta.url), 'utf8')
-const chatFeature = readFileSync(new URL('../src/ChatFeature.tsx', import.meta.url), 'utf8')
-const autotitle = readFileSync(new URL('../src/autotitle-service.ts', import.meta.url), 'utf8')
-const textProvider = readFileSync(new URL('../src/text-provider.ts', import.meta.url), 'utf8')
+const aiSettings = readFileSync(new URL('../src/shared/ai/ai-settings.ts', import.meta.url), 'utf8')
+const app = readFileSync(new URL('../src/app/App.tsx', import.meta.url), 'utf8')
+const workspace = readFileSync(new URL('../src/app/Workspace.tsx', import.meta.url), 'utf8')
+const chatApi = readFileSync(new URL('../src/features/chat/chat-api.ts', import.meta.url), 'utf8')
+const chatService = readFileSync(new URL('../src/features/chat/chat-service.ts', import.meta.url), 'utf8')
+const chatFeature = readFileSync(new URL('../src/features/chat/ChatFeature.tsx', import.meta.url), 'utf8')
+const autotitle = readFileSync(new URL('../src/features/writing/autotitle-service.ts', import.meta.url), 'utf8')
+const textProvider = readFileSync(new URL('../src/shared/ai/text-provider.ts', import.meta.url), 'utf8')
 
 test('Fake is a text-only provider and clears text connection credentials in normalized settings', () => {
   assert.match(aiSettings, /export type AiProvider = [^\n]*'fake'/)

@@ -15,12 +15,12 @@ globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.windo
 dom.window.Range.prototype.getClientRects = () => []
 dom.window.Range.prototype.getBoundingClientRect = () => new dom.window.DOMRect()
 const directory = mkdtempSync(new URL('../node_modules/.editor-block-test-', import.meta.url))
-buildSync({ entryPoints: [new URL('../src/MarkdownEditor.tsx', import.meta.url).pathname], jsx: 'automatic', bundle: true, packages: 'external', format: 'esm', outfile: `${directory}/editor.mjs`, loader: { '.css': 'empty' }, logLevel: 'silent' })
+buildSync({ entryPoints: [new URL('../src/features/editor/MarkdownEditor.tsx', import.meta.url).pathname], jsx: 'automatic', bundle: true, packages: 'external', format: 'esm', outfile: `${directory}/editor.mjs`, loader: { '.css': 'empty' }, logLevel: 'silent' })
 const React = await import('react')
 const { act } = React
 const { createRoot } = await import('react-dom/client')
 const { default: MarkdownEditor } = await import(pathToFileURL(`${directory}/editor.mjs`))
-const { encodeDocumentBlock, proseText } = await import('../src/document-projection.ts')
+const { encodeDocumentBlock, proseText } = await import('../src/features/editor/document-projection.ts')
 after(() => { dom.window.close(); rmSync(directory, { recursive: true, force: true }) })
 
 test('private block widgets preserve source, apply edits atomically, undo and reject stale snapshots', async () => {
@@ -48,7 +48,7 @@ test('private block widgets preserve source, apply edits atomically, undo and re
 })
 
 test('beat visibility preserves source and history; replacement affects only bound prose and is undoable', async () => {
-  const { prepareAutomaticBeat, beatPassage } = await import('../src/scene-beats.ts')
+  const { prepareAutomaticBeat, beatPassage } = await import('../src/features/writing/scene-beats.ts')
   const prepared = prepareAutomaticBeat('Before.\n\nAfter.', 9, 'Open the door.', 'beat-one')
   const source = prepared.source.slice(0, prepared.position) + 'Old passage.' + prepared.source.slice(prepared.position)
   const root = createRoot(document.getElementById('root')), ref = React.createRef()
@@ -82,7 +82,7 @@ test('an identical document mounted in a new editor cannot accept an old selecti
 })
 
 test('rewrite examples edit the instruction; Go previews without applying and result remains editable', async () => {
-  buildSync({ entryPoints: [new URL('../src/ProseRewriteDialog.tsx', import.meta.url).pathname], jsx: 'automatic', bundle: true, packages: 'external', format: 'esm', outfile: `${directory}/dialog.mjs`, loader: { '.css': 'empty' }, logLevel: 'silent' })
+  buildSync({ entryPoints: [new URL('../src/features/writing/ProseRewriteDialog.tsx', import.meta.url).pathname], jsx: 'automatic', bundle: true, packages: 'external', format: 'esm', outfile: `${directory}/dialog.mjs`, loader: { '.css': 'empty' }, logLevel: 'silent' })
   const { default: Dialog } = await import(pathToFileURL(`${directory}/dialog.mjs`))
   const root = createRoot(document.getElementById('root')), calls = [], applied = [], closed = []
   const click = async (label) => { const button = [...document.querySelectorAll('button')].find((item) => item.textContent === label); assert.ok(button, label); await act(async () => button.click()) }
@@ -103,7 +103,7 @@ test('rewrite examples edit the instruction; Go previews without applying and re
 })
 
 test('selection actions stay compact and open above a selection near the viewport bottom', async () => {
-  buildSync({ entryPoints: [new URL('../src/SelectionTools.tsx', import.meta.url).pathname], jsx: 'automatic', bundle: true, packages: 'external', format: 'esm', outfile: `${directory}/selection-tools.mjs`, loader: { '.css': 'empty' }, logLevel: 'silent' })
+  buildSync({ entryPoints: [new URL('../src/features/editor/SelectionTools.tsx', import.meta.url).pathname], jsx: 'automatic', bundle: true, packages: 'external', format: 'esm', outfile: `${directory}/selection-tools.mjs`, loader: { '.css': 'empty' }, logLevel: 'silent' })
   const { default: Tools } = await import(pathToFileURL(`${directory}/selection-tools.mjs`))
   const root = createRoot(document.getElementById('root')), calls = []
   const selection = { snapshot: { editorId: 'editor', revision: 1, document: 'The blue door', from: 4, to: 8, text: 'blue' }, rect: { left: 20, top: 620, bottom: 710 }, protected: false }

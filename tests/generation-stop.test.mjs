@@ -11,8 +11,8 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   }
   return nextResolve(specifier, context)
 } })
-const { streamChatCompletion } = await import('../src/chat-api.ts')
-const { streamTextProviderCompletion } = await import('../src/text-provider.ts')
+const { streamChatCompletion } = await import('../src/features/chat/chat-api.ts')
+const { streamTextProviderCompletion } = await import('../src/shared/ai/text-provider.ts')
 const request = { provider: 'nanogpt', task: 'story', apiKey: 'test-only', baseUrl: 'https://provider.invalid/v1', model: 'test', messages: [{ role: 'user', content: 'Continue' }], thinking: true, systemPrompt: '', userMessage: '' }
 const encoder = new TextEncoder()
 const event = delta => `data: ${JSON.stringify({ choices: [{ delta }] })}\n\n`

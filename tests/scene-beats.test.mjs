@@ -9,16 +9,16 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   return nextResolve(specifier, context)
 } })
 globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} }
-const { prepareAutomaticBeat, beatPassage, bindBeatPassage, passageMarkers, sceneBeats } = await import('../src/scene-beats.ts')
-const { proseText, encodeDocumentBlock } = await import('../src/document-projection.ts')
-const { prepareSceneBeatRequest } = await import('../src/scene-beat-generation.ts')
-const db = await import('../src/persistence.ts')
-const { initialAiSettings, copyAiSettings } = await import('../src/ai-settings.ts')
-const { executeChatManagementTool } = await import('../src/chat-management-tools.ts')
-const { executeChatWorkspaceTool } = await import('../src/chat-tools.ts')
-const { buildContextValues } = await import('../src/context-service.ts')
-const { assembleChatGenerationRequest, defaultChatPromptComposition } = await import('../src/chat-request.ts')
-const { copyBookArchive } = await import('../src/book-archive.ts')
+const { prepareAutomaticBeat, beatPassage, bindBeatPassage, passageMarkers, sceneBeats } = await import('../src/features/writing/scene-beats.ts')
+const { proseText, encodeDocumentBlock } = await import('../src/features/editor/document-projection.ts')
+const { prepareSceneBeatRequest } = await import('../src/features/writing/scene-beat-generation.ts')
+const db = await import('../src/data/persistence.ts')
+const { initialAiSettings, copyAiSettings } = await import('../src/shared/ai/ai-settings.ts')
+const { executeChatManagementTool } = await import('../src/features/chat/chat-management-tools.ts')
+const { executeChatWorkspaceTool } = await import('../src/features/chat/chat-tools.ts')
+const { buildContextValues } = await import('../src/shared/context/context-service.ts')
+const { assembleChatGenerationRequest, defaultChatPromptComposition } = await import('../src/features/chat/chat-request.ts')
+const { copyBookArchive } = await import('../src/data/book-archive.ts')
 const bookValues = { title: 'Test', series: '', seriesOrder: '', overview: '', genre: '', style: '', pov: '', tense: '', language: '' }
 function call(name, args) { return { id: crypto.randomUUID(), type: 'function', function: { name, arguments: JSON.stringify(args) } } }
 

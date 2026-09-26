@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { applyIfStillCurrent } from '../src/async-state-guard.ts'
+import { applyIfStillCurrent } from '../src/shared/utils/async-state-guard.ts'
 
 test('late Chat A settings completion cannot replace selected Chat B state', async () => {
   let selectedChatId = 'chat-a'

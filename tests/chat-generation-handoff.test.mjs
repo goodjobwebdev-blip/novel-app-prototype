@@ -11,8 +11,8 @@ import {
   registerChatGeneration,
   releaseChatGeneration,
   setChatGenerationPhase,
-} from '../src/chat-generation-owner.ts'
-import { runChatSendPipeline } from '../src/chat-send-pipeline.ts'
+} from '../src/features/chat/chat-generation-owner.ts'
+import { runChatSendPipeline } from '../src/features/chat/chat-send-pipeline.ts'
 
 test('Chat B can own generation while aborted Chat A is still tearing down', () => {
   const owners = new Map()
@@ -86,7 +86,7 @@ test('post-persistence generation failure keeps the accepted turn and reports th
 })
 
 test('ChatFeature reserves per-Chat generation ownership before accepted Send persistence', () => {
-  const source = readFileSync(new URL('../src/ChatFeature.tsx', import.meta.url), 'utf8')
+  const source = readFileSync(new URL('../src/features/chat/ChatFeature.tsx', import.meta.url), 'utf8')
   assert.match(source, /createChatGenerationOwner\(sourceChat\.bookId, sourceChat\.id\)/)
   assert.match(source, /registerChatGeneration\(generationOwnersRef\.current, owner\)/)
   assert.match(source, /runChatSendPipeline\(/)
@@ -98,7 +98,7 @@ test('ChatFeature reserves per-Chat generation ownership before accepted Send pe
 })
 
 test('ChatFeature selection and teardown use exact generation ownership', () => {
-  const source = readFileSync(new URL('../src/ChatFeature.tsx', import.meta.url), 'utf8')
+  const source = readFileSync(new URL('../src/features/chat/ChatFeature.tsx', import.meta.url), 'utf8')
   assert.match(source, /abortChatGenerationsOutsideSelection\(generationOwnersRef\.current, bookId, chatId\)/)
   assert.match(source, /ownsChatGeneration\(generationOwnersRef\.current, owner\)/)
   assert.match(source, /releaseChatGeneration\(generationOwnersRef\.current, owner\)/)

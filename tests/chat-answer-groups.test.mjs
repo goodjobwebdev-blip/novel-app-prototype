@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { groupChatAnswers, answerProse } from '../src/chat-answer-groups.ts'
+import { groupChatAnswers, answerProse } from '../src/features/chat/chat-answer-groups.ts'
 
 test('assistant rounds group by response without mutating history or proposal ownership', () => {
   const messages = [

@@ -2,11 +2,11 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const workspace = readFileSync(new URL('../src/Workspace.tsx', import.meta.url), 'utf8')
-const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
-const ttsStyles = readFileSync(new URL('../src/tts.css', import.meta.url), 'utf8')
-const autotitleStyles = readFileSync(new URL('../src/autotitle.css', import.meta.url), 'utf8')
-const codexMentionStyles = readFileSync(new URL('../src/codex-mentions.css', import.meta.url), 'utf8')
+const workspace = readFileSync(new URL('../src/app/Workspace.tsx', import.meta.url), 'utf8')
+const styles = readFileSync(new URL('../src/app/styles.css', import.meta.url), 'utf8')
+const ttsStyles = readFileSync(new URL('../src/features/speech/tts.css', import.meta.url), 'utf8')
+const autotitleStyles = readFileSync(new URL('../src/features/writing/autotitle.css', import.meta.url), 'utf8')
+const codexMentionStyles = readFileSync(new URL('../src/features/codex/codex-mentions.css', import.meta.url), 'utf8')
 
 function zIndex(source, selector) {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createBufferedWordRenderer } from '../src/buffered-word-renderer.ts'
+import { createBufferedWordRenderer } from '../src/features/writing/buffered-word-renderer.ts'
 
 const turn = () => new Promise(resolve => setTimeout(resolve, 10))
 

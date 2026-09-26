@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
-const source = await readFile(new URL('../src/deletion-save-barrier.ts', import.meta.url), 'utf8')
+const source = await readFile(new URL('../src/app/deletion-save-barrier.ts', import.meta.url), 'utf8')
 const js = source
   .replace(/export async function runDeletionSaveBarrier<T>\(/, 'export async function runDeletionSaveBarrier(')
   .replace(/\n  ids: string\[],\n  deletingIds: Set<string>,\n  waitForIdle: \(id: string\) => Promise<void>,\n  action: \(\) => Promise<T>,\n\): Promise<T> \{/, '\n  ids,\n  deletingIds,\n  waitForIdle,\n  action,\n) {')
