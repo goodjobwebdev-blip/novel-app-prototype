@@ -21,9 +21,9 @@ func NewRouter(cfg config.Config, store *storage.Store) http.Handler {
 	router.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   cfg.AllowedOrigins,
 		AllowedMethods:   []string{http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "If-Match", "X-Device-ID"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "If-Match", "X-Device-ID", "X-Sync-Token"},
 		ExposedHeaders:   []string{"ETag", "Location"},
-		AllowCredentials: false,
+		AllowCredentials: true,
 		MaxAge:           300,
 	}))
 
