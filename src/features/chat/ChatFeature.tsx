@@ -173,6 +173,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const followOutputRef = useRef(true)
+  const lastScrollYRef = useRef(0)
   const selectedBookIdRef = useRef(bookId)
   const selectedChatIdRef = useRef(chatId)
   selectedBookIdRef.current = bookId
@@ -260,13 +261,17 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   }, [generating])
 
   useEffect(() => {
+    lastScrollYRef.current = window.scrollY
     const updateFollowState = () => {
       const root = document.documentElement
-      const distanceFromBottom = root.scrollHeight - (window.scrollY + window.innerHeight)
-      const nearBottom = distanceFromBottom <= 120
-      if (nearBottom === followOutputRef.current) return
-      followOutputRef.current = nearBottom
-      setFollowOutput(nearBottom)
+      const scrollY = window.scrollY
+      const scrolledUp = scrollY < lastScrollYRef.current - 1
+      const distanceFromBottom = root.scrollHeight - (scrollY + window.innerHeight)
+      const shouldFollow = !scrolledUp && distanceFromBottom <= 120
+      lastScrollYRef.current = scrollY
+      if (shouldFollow === followOutputRef.current) return
+      followOutputRef.current = shouldFollow
+      setFollowOutput(shouldFollow)
     }
     window.addEventListener('scroll', updateFollowState, { passive: true })
     updateFollowState()
@@ -1217,7 +1222,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           {streamedThoughts && <details className="chat-thoughts" open={liveThoughtsOpen} onToggle={(event) => setLiveThoughtsOpen(event.currentTarget.open)}><summary>Thoughts</summary><div>{streamedThoughts}</div></details>}
           {streamedContent && <div className="chat-assistant-body">{chat.character ? <CharacterMessage content={streamedContent} participants={chat.character.participants} render={text => <MarkdownMessage content={text} />} /> : <MarkdownMessage content={streamedContent} />}</div>}
         </div></article>}
-        <div ref={bottomRef} />
+        <div ref={bottomRef} className="chat-scroll-anchor" />
       </div>
     </section>
 
