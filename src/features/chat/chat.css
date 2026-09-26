@@ -146,6 +146,7 @@
 
 
 /* Stable agent generation: preserve every visible round and only follow output near the bottom. */
+.chat-scroll-anchor { scroll-margin-bottom: calc(var(--composer-height, 160px) + 48px); }
 .chat-live-generation { min-height: 2.75rem; }
 .chat-live-status { min-height: 2rem; margin-bottom: .45rem; display: flex; align-items: center; gap: .45rem; color: var(--muted); font-size: .72rem; font-variant-numeric: tabular-nums; }
 .chat-live-status i { width: .45rem; height: .45rem; flex: none; border-radius: 999px; background: currentColor; animation: chatPulse 1s ease-in-out infinite alternate; }
