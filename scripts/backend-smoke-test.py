@@ -17,7 +17,8 @@ if basic_user and basic_password:
 else:
     auth = {"Authorization": f"Bearer {token}"}
 
-health = json.load(urllib.request.urlopen(f"{base}/health"))
+health_request = urllib.request.Request(f"{base}/health", headers=auth)
+health = json.load(urllib.request.urlopen(health_request))
 create = urllib.request.Request(
     f"{base}/books",
     data=json.dumps({"clientBookId": f"smoke-{uuid.uuid4()}", "title": "Smoke Test"}).encode(),
