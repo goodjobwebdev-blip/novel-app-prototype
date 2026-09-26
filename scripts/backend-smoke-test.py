@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import base64
 import json
 import os
 import struct
@@ -8,7 +9,13 @@ import uuid
 
 base = os.environ.get("SYNC_API_URL", "http://127.0.0.1:8087/api/v1")
 token = os.environ.get("SYNC_API_TOKEN", "local-development-token-change-me-000000000000")
-auth = {"Authorization": f"Bearer {token}"}
+basic_user = os.environ.get("SYNC_BASIC_USER")
+basic_password = os.environ.get("SYNC_BASIC_PASSWORD")
+if basic_user and basic_password:
+    encoded = base64.b64encode(f"{basic_user}:{basic_password}".encode()).decode()
+    auth = {"Authorization": f"Basic {encoded}", "X-Sync-Token": token}
+else:
+    auth = {"Authorization": f"Bearer {token}"}
 
 health = json.load(urllib.request.urlopen(f"{base}/health"))
 create = urllib.request.Request(

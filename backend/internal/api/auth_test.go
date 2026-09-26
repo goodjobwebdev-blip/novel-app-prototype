@@ -1,6 +1,9 @@
 package api
 
-import "testing"
+import (
+	"net/http/httptest"
+	"testing"
+)
 
 func TestBearerToken(t *testing.T) {
 	valid := "01234567890123456789012345678901"
@@ -22,5 +25,23 @@ func TestBearerToken(t *testing.T) {
 				t.Fatalf("bearerToken() valid = %v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+func TestRequestTokenSupportsBasicAuthProxy(t *testing.T) {
+	token := "01234567890123456789012345678901"
+	request := httptest.NewRequest("GET", "/", nil)
+	request.Header.Set("Authorization", "Basic ignored-by-sync-backend")
+	request.Header.Set("X-Sync-Token", token)
+
+	got, ok := requestToken(request)
+	if !ok || got != token {
+		t.Fatalf("requestToken() = %q, %v", got, ok)
+	}
+}
+
+func TestSyncTokenRejectsWhitespace(t *testing.T) {
+	if _, ok := syncToken(" 01234567890123456789012345678901"); ok {
+		t.Fatal("syncToken accepted leading whitespace")
 	}
 }

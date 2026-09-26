@@ -32,10 +32,17 @@ openssl rand -hex 32
 
 ## API
 
-All routes except health require:
+All routes except health require the sync token. Direct deployments can use bearer authentication:
 
 ```http
 Authorization: Bearer YOUR_BOOTSTRAP_TOKEN
+```
+
+When a reverse proxy uses HTTP Basic Auth, send the application token separately so both authentication layers can coexist:
+
+```http
+Authorization: Basic BASE64_PROXY_CREDENTIALS
+X-Sync-Token: YOUR_BOOTSTRAP_TOKEN
 ```
 
 | Method | Route | Purpose |
@@ -55,7 +62,8 @@ Create a remote book:
 
 ```sh
 curl https://sync.example.com/api/v1/books \
-  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -u 'BASIC_USER:BASIC_PASSWORD' \
+  -H 'X-Sync-Token: YOUR_TOKEN' \
   -H 'Content-Type: application/json' \
   --data '{"clientBookId":"LOCAL_DEXIE_BOOK_ID","title":"My Novel"}'
 ```
@@ -64,7 +72,8 @@ The response starts with `currentEtag: "rev-0-empty"`. Preserve the quoted HTTP 
 
 ```sh
 curl -X PUT https://sync.example.com/api/v1/books/REMOTE_BOOK_ID/state \
-  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -u 'BASIC_USER:BASIC_PASSWORD' \
+  -H 'X-Sync-Token: YOUR_TOKEN' \
   -H 'Content-Type: application/vnd.arc-book' \
   -H 'If-Match: "rev-0-empty"' \
   -H 'X-Device-ID: desktop' \
@@ -123,15 +132,31 @@ PostgreSQL is not published to the host. The API listens only on `127.0.0.1`, wh
 
 Add a site block, replacing the hostname and port if necessary:
 
+If Caddy Basic Auth is required, let unauthenticated CORS preflight requests reach the backend, then protect all real requests. Generate the password hash with `caddy hash-password`.
+
 ```caddyfile
 sync.example.com {
-    request_body {
-        max_size 512MB
+    @preflight method OPTIONS
+
+    handle @preflight {
+        reverse_proxy 127.0.0.1:8087
     }
 
-    reverse_proxy 127.0.0.1:8087
+    handle {
+        basic_auth {
+            sync-user PASSWORD_HASH
+        }
+
+        request_body {
+            max_size 512MB
+        }
+
+        reverse_proxy 127.0.0.1:8087
+    }
 }
 ```
+
+The browser client must use `X-Sync-Token` and `credentials: "include"`. Visit the sync origin once to establish the browser's Basic Auth credentials before connecting it from the app.
 
 Format, validate, and reload using the method appropriate for your Caddy installation. A common systemd installation uses:
 
