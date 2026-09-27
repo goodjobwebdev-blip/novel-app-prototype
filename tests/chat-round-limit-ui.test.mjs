@@ -40,6 +40,7 @@ export async function streamChatCompletion(request, onChunk, signal) {
   signal.throwIfAborted();
   onChunk({ content: 'Round ' + calls.length });
   if (mode === 'brainstorm') { mode = 'complete'; return { toolCalls: [{ id: 'brainstorm-call', type: 'function', function: { name: 'present_brainstorm', arguments: JSON.stringify({ topic: 'The next scene', options: [{ title: 'Explore', description: 'Follow the river' }, { title: 'Wait', description: 'Watch the gate' }] }) } }] }; }
+  if (mode === 'reads') return { toolCalls: [{ id: 'read-' + calls.length, type: 'function', function: { name: 'read_outline', arguments: '{}' } }] };
   return mode === 'complete' ? { toolCalls: [] } : { toolCalls: Array.from({ length: toolsPerRound }, (_, index) => ({ id: 'call-' + calls.length + '-' + index, type: 'function', function: { name: 'propose_note_create', arguments: JSON.stringify({ title: 'Draft ' + calls.length + '-' + index, content: 'Unapplied body' }) } })) };
 }
 `)
@@ -68,7 +69,7 @@ async function fixture(limit) {
   chat = await chatService.updateChat(chat.id, { maxModelRounds: limit, modelContextLength: 100000 })
   return { book, chat }
 }
-function view(f) { return h(ChatView, { bookId: f.book.id, chatId: f.chat.id, bookPromptValues: { title: f.book.title }, onChatChange() {}, onToast(message) { throw new Error(message) } }) }
+function view(f) { return h(ChatView, { bookId: f.book.id, chatId: f.chat.id, bookPromptValues: { title: f.book.title }, onChatChange() {}, onToast(message) { if (!/^(Created|Applied|Approved|Regenerated|Renamed|Deleted|Updated)/.test(message)) throw new Error(message) } }) }
 
 test('malformed stored limits resolve to eight; explicit invalid saves are rejected', () => {
   for (const value of [0, -1, 1.5, NaN, Infinity, '8', undefined, 33]) {
@@ -80,7 +81,7 @@ test('malformed stored limits resolve to eight; explicit invalid saves are rejec
 test('limits 1, 8 and 32 stop actual ChatView sends exactly at the configured model count', async () => {
   for (const limit of [1, 8, 32]) {
     const f = await fixture(limit)
-    api.configure('tools', limit === 1 ? async () => { await chatService.updateChat(f.chat.id, { maxModelRounds: 32 }) } : undefined)
+    api.configure('reads', limit === 1 ? async () => { await chatService.updateChat(f.chat.id, { maxModelRounds: 32 }) } : undefined)
     const root = createRoot(document.getElementById('root'))
     try {
       await act(async () => root.render(view(f)))
@@ -91,19 +92,19 @@ test('limits 1, 8 and 32 stop actual ChatView sends exactly at the configured mo
       assert.equal(saved.at(-1).status, 'limited')
       assert.equal(saved.at(-1).continuation.maxRounds, limit)
       assert.equal(saved.at(-1).continuation.runtimeParts.filter(part => part.role === 'tool').length, limit)
-      assert.equal(saved.filter(message => message.entityActions?.length).length, limit)
+      assert.equal(saved.filter(message => message.toolActivity?.length).length, limit)
     } finally { await act(async () => root.unmount()) }
   }
 })
 
-test('reload then Continue sends saved results without recreating proposals and reflects edited values', async () => {
+test('reload then approval auto-continues with saved results without recreating proposals', async () => {
   const f = await fixture(1)
   api.configure('tools')
   let root = createRoot(document.getElementById('root'))
   try {
     await act(async () => root.render(view(f)))
     await send()
-    await settle(() => Boolean(button('Continue')) && !button('Continue').disabled)
+    await settle(() => Boolean(button('Create')) && document.body.textContent.includes('Waiting for your approval'))
     const saved = await chatService.listChatMessages(f.book.id, f.chat.id)
     const last = saved.at(-1), proposal = last.entityActions[0]
     await chatService.saveChatProposalDraft(f.book.id, f.chat.id, last.id, 'entityActions', proposal.id, { newTitle: 'Writer edited title', content: 'Writer edited body' }, 0)
@@ -111,9 +112,9 @@ test('reload then Continue sends saved results without recreating proposals and 
     root = createRoot(document.getElementById('root'))
     api.setMode('complete')
     await act(async () => root.render(view(f)))
-    await settle(() => Boolean(button('Continue')))
-    await click('Continue')
-    await settle(() => api.calls.length === 2 && Boolean(button('Send')))
+    await settle(() => Boolean(button('Create')))
+    await click('Create')
+    await settle(() => api.calls.length === 2 && Boolean(button('Send')) && !document.body.textContent.includes('Waiting for your approval'))
     const after = await chatService.listChatMessages(f.book.id, f.chat.id)
     assert.equal(after.filter(message => message.entityActions?.length).length, 1)
     assert.equal(after.at(-1).status, 'complete')
@@ -125,6 +126,29 @@ test('reload then Continue sends saved results without recreating proposals and 
 })
 
 
+test('approval continuations preserve every earlier provider prefix byte-for-byte', async () => {
+  const f = await fixture(8)
+  api.configure('tools')
+  const root = createRoot(document.getElementById('root'))
+  try {
+    await act(async () => root.render(view(f)))
+    await send()
+    await settle(() => api.calls.length === 1 && Boolean(button('Create')))
+
+    await click('Create')
+    await settle(() => api.calls.length === 2 && Boolean(button('Create')) && document.body.textContent.includes('Draft 2-0'))
+    assert.deepEqual(api.calls[1].messages.slice(0, api.calls[0].messages.length), api.calls[0].messages)
+    assert.deepEqual(api.calls[1].tools, api.calls[0].tools)
+
+    api.setMode('complete')
+    await click('Create')
+    await settle(() => api.calls.length === 3 && Boolean(button('Send')) && !document.body.textContent.includes('Waiting for your approval'))
+    assert.deepEqual(api.calls[2].messages.slice(0, api.calls[1].messages.length), api.calls[1].messages)
+    assert.deepEqual(api.calls[2].tools, api.calls[1].tools)
+    await act(async () => new Promise(resolve => setTimeout(resolve, 50)))
+  } finally { await act(async () => root.unmount()) }
+})
+
 test('several tools in one completion consume one round and all proposals survive', async () => {
   const f = await fixture(1)
   api.configure('tools', undefined, 2)
@@ -132,53 +156,45 @@ test('several tools in one completion consume one round and all proposals surviv
   try {
     await act(async () => root.render(view(f)))
     await send()
-    await settle(() => Boolean(button('Continue')) && !button('Continue').disabled)
+    await settle(() => document.querySelectorAll('.chat-entity-action').length === 2 && document.body.textContent.includes('Waiting for your approval'))
     const saved = (await chatService.listChatMessages(f.book.id, f.chat.id)).at(-1)
     assert.equal(api.calls.length, 1)
     assert.equal(saved.entityActions.length, 2)
     assert.equal(saved.continuation.runtimeParts.filter(part => part.role === 'tool').length, 2)
+    assert.equal(saved.status, 'waiting')
+    assert.equal(api.calls.length, 1)
   } finally { await act(async () => root.unmount()) }
 })
 
-test('earlier chat prose and its proposal remain visible in order when the next round arrives and after reload', async t => {
+test('tool rounds remain one stable answer with one toolbar during generation and after reload', async t => {
   const errors = [], originalError = console.error
   t.mock.method(console, 'error', (...args) => { errors.push(args.join(' ')); originalError(...args) })
   const f = await fixture(8)
-  let releaseNextRound
-  const nextRound = new Promise(resolve => { releaseNextRound = resolve })
-  api.configure('brainstorm', count => count === 2 ? nextRound : undefined)
+  api.configure('reads', count => { if (count === 2) api.setMode('complete') })
   let root = createRoot(document.getElementById('root'))
   const body = text => [...document.querySelectorAll('.chat-assistant-body')].find(element => element.textContent === text)
   const assertFullAnswer = () => {
-    const first = body('Round 1'), second = body('Round 2'), proposal = document.querySelector('.chat-brainstorm')
-    assert.ok(first && second && proposal, 'Both rounds and the proposal are rendered')
-    assert.ok(!first.closest('details:not([open])'), 'The earlier prose stays visible without opening Activity')
-    assert.ok(!second.closest('details:not([open])'))
-    assert.ok(first.compareDocumentPosition(proposal) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING, 'The proposal follows its original prose')
-    assert.ok(proposal.compareDocumentPosition(second) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING, 'Later prose follows the proposal')
-    assert.equal(document.querySelectorAll('.chat-brainstorm').length, 1)
+    const first = body('Round 1'), second = body('Round 2')
+    assert.ok(first && second, 'Both rounds are rendered as answer prose')
+    assert.equal(document.querySelectorAll('.chat-answer-group').length, 1)
+    assert.equal(document.querySelectorAll('.chat-answer-group .chat-answer-tools').length, 1)
     assert.equal(document.querySelectorAll('.chat-answer-activity .chat-assistant-body').length, 0, 'Activity does not duplicate answer prose')
+    assert.match(document.querySelector('.chat-answer-activity').textContent, /read_outline · succeeded/)
   }
   try {
     await act(async () => root.render(view(f)))
     await send()
-    await settle(() => api.calls.length === 2 && Boolean(document.querySelector('.chat-brainstorm')))
+    await settle(() => api.calls.length === 2 && Boolean(button('Send')) && !button('Send').disabled && Boolean(body('Round 2')))
     const first = body('Round 1')
-    assert.ok(first)
-    await act(async () => releaseNextRound())
-    await settle(() => Boolean(button('Send')) && !button('Send').disabled && Boolean(body('Round 2')))
     assertFullAnswer()
     assert.equal(first.isConnected, true, 'New rounds do not replace or move earlier rendered prose')
-    const saved = await chatService.listChatMessages(f.book.id, f.chat.id)
-    assert.deepEqual(saved.filter(message => message.role === 'assistant').map(message => message.content), ['Round 1', 'Round 2'])
     await act(async () => root.unmount())
     root = createRoot(document.getElementById('root'))
     await act(async () => root.render(view(f)))
     await settle(() => Boolean(body('Round 2')))
     assertFullAnswer()
-    assert.ok(!errors.some(message => /same key/.test(message)), 'Round prose and proposal containers have separate identities')
+    assert.ok(!errors.some(message => /same key/.test(message)))
   } finally {
-    releaseNextRound()
     await act(async () => root.unmount())
   }
 })
@@ -208,20 +224,20 @@ test('brainstorm selection and saved edits cause no request; explicit submission
     await act(async () => root.render(view(f)))
     await send()
     await settle(() => Boolean(button('Send selection')) && Boolean(button('Send')))
-    assert.equal(api.calls.length, 2)
+    assert.equal(api.calls.length, 1)
     await act(async () => document.querySelector('.chat-brainstorm input[type=checkbox]').click())
     await settle(() => !button('Generate more').disabled)
     const input = document.querySelector('textarea[aria-label="Your own brainstorm option"]')
     await act(async () => { Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set.call(input, 'Also look for footprints'); input.dispatchEvent(new dom.window.Event('input', { bubbles: true })) })
     await click('Save option edits')
     await settle(() => !button('Generate more').disabled)
-    assert.equal(api.calls.length, 2)
+    assert.equal(api.calls.length, 1)
     let history = await chatService.listChatMessages(f.book.id, f.chat.id)
     const card = history.find(message => message.brainstorms?.length).brainstorms[0]
     assert.equal(card.selectedIds.length, 1)
     assert.equal(card.customOption, 'Also look for footprints')
     await click('Send selection')
-    await settle(() => api.calls.length === 3 && Boolean(button('Send')))
+    await settle(() => api.calls.length === 2 && Boolean(button('Send')))
     history = await chatService.listChatMessages(f.book.id, f.chat.id)
     assert.equal(history.filter(message => message.role === 'user').length, 2)
     assert.match(history.filter(message => message.role === 'user').at(-1).content, /Explore\nFollow the river/)
@@ -229,7 +245,7 @@ test('brainstorm selection and saved edits cause no request; explicit submission
     assert.doesNotMatch(history.filter(message => message.role === 'user').at(-1).content, /Watch the gate/)
     await settle(() => !button('Generate more').disabled)
     await click('Generate more')
-    await settle(() => api.calls.length === 4 && Boolean(button('Send')))
+    await settle(() => api.calls.length === 3 && Boolean(button('Send')))
     assert.equal(document.querySelectorAll('.chat-brainstorm-options article').length, 2)
   } finally { await act(async () => root.unmount()) }
 })
@@ -240,7 +256,7 @@ test('actual chat sends capture ordered skill content once across rounds and ref
   const note = await skills.copyStarterChatSkill(f.book.id, 'copy')
   await p.saveDocumentContent(note.id, 'Captured skill sentinel')
   f.chat = await chatService.updateChat(f.chat.id, { skillNoteIds: [note.id], contextProfile: { ...f.chat.contextProfile, noteIds: [note.id] } })
-  api.configure('tools', async count => { if (count === 1) await p.saveDocumentContent(note.id, 'Next request sentinel'); if (count === 2) api.setMode('complete') })
+  api.configure('reads', async count => { if (count === 1) await p.saveDocumentContent(note.id, 'Next request sentinel'); if (count === 2) api.setMode('complete') })
   const root = createRoot(document.getElementById('root'))
   try {
     await act(async () => root.render(view(f)))
@@ -302,7 +318,7 @@ test('chat effort controls persist across reloads, retain the choice when disabl
 test('a response snapshots effort across tool rounds; Continue uses the updated chat setting', async () => {
   const f = await fixture(2)
   f.chat = await chatService.updateChat(f.chat.id, { thinking: true, thinkingEffort: 'high' })
-  api.configure('tools', async count => {
+  api.configure('reads', async count => {
     if (count !== 1) return
     const select = document.querySelector('select[aria-label="Chat thinking effort"]')
     assert.ok(select)
@@ -323,5 +339,6 @@ test('a response snapshots effort across tool rounds; Continue uses the updated 
     await click('Continue')
     await settle(() => api.calls.length === 3 && Boolean(button('Send')))
     assert.equal(api.calls[2].thinkingEffort, 'low')
+    await act(async () => new Promise(resolve => setTimeout(resolve, 50)))
   } finally { await act(async () => root.unmount()) }
 })

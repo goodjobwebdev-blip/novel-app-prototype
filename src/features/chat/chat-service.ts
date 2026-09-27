@@ -5,7 +5,7 @@ import { resolveLoreType } from '../codex/lore-types'
 import { updateBrainstormDraft, type ChatBrainstorm } from './chat-brainstorm'
 import { normalizeChatRoundLimit, validateChatRoundLimit } from './chat-round-limit'
 import { chatHistorySignature } from './chat-history-guard'
-import type { NormalizedRequestPart } from '../../shared/ai/prompt-composition'
+import type { NormalizedAssembledRequest, NormalizedRequestPart } from '../../shared/ai/prompt-composition'
 import { editProposalDraft, type EditableProposal, type EditableProposalField, type ProposalDraft } from './chat-proposal-draft'
 import type { ChatImageProposal, ImageJob } from '../images/image-generation-types'
 import { loadAiSettings, type AiSettings } from '../../shared/ai/ai-settings'
@@ -47,8 +47,8 @@ export type ChatEntity = ArcEntity & {
   maxModelRounds?: number
 }
 
-export type ChatMessageStatus = 'complete' | 'stopped' | 'failed' | 'limited'
-export type ChatContinuation = { baseHistoryIds: string[]; historySignature: string; runtimeParts: NormalizedRequestPart[]; maxRounds: number }
+export type ChatMessageStatus = 'complete' | 'stopped' | 'failed' | 'limited' | 'waiting'
+export type ChatContinuation = { baseHistoryIds: string[]; historySignature: string; baseRequest?: NormalizedAssembledRequest; runtimeParts: NormalizedRequestPart[]; maxRounds: number; reason?: 'round-limit' | 'approval'; responseId?: string }
 export type ChatCodexCreationStatus = 'proposed' | 'applying' | 'created' | 'rejected' | 'duplicate' | 'stale'
 export type ChatCodexCreationProposal = ProposalDraft & {
   id: string
@@ -388,7 +388,7 @@ export async function claimChatContinuation(bookId: string, chatId: string, mess
     if (!message || message.type !== 'chatMessage' || message.bookId !== bookId || message.parentId !== chatId || !message.continuation || message.continuedAt) throw new Error('This continuation is no longer available.')
     const history = (await listChatMessages(bookId, chatId))
     if (history.at(-1)?.id !== messageId || chatHistorySignature(history) !== message.continuation.historySignature) throw new Error('Chat history changed. Continue is available only from the unchanged latest response.')
-    await db.table('entities').update(messageId, { continuedAt: Date.now() })
+    await db.table('entities').update(messageId, { continuedAt: Date.now(), ...(message.status === 'waiting' ? { status: 'complete' } : {}) })
     return { history, continuation: structuredClone(message.continuation) }
   })
 }

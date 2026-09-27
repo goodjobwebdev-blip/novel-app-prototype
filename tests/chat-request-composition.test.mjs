@@ -52,7 +52,8 @@ test('automatic Chat context order and stable identity deduplication are explici
 
 test('tool rounds keep the finalized prefix and append normalized app-managed chronology', () => {
   assert.match(request, /assembleNormalizedRequest\(\[\.\.\.base\.parts, \.\.\.runtimeParts\]/)
-  assert.match(feature, /const baseRequest = buildNormalizedRequest/)
+  assert.match(feature, /const baseRequest = continuation\?\.baseRequest[\s\S]*structuredClone\(continuation\.baseRequest\)[\s\S]*buildNormalizedRequest/)
+  assert.match(feature, /baseRequest: structuredClone\(baseRequest\)/)
   assert.match(feature, /runtimeParts\.push\(normalizeRuntimeMessagePart/)
   assert.match(feature, /role: 'tool', tool_call_id: call\.id/)
   assert.match(feature, /roundDiagnostics[\s\S]*finalizedRequest\.diagnosticText/)
