@@ -58,6 +58,7 @@ import {
   Mic,
   NotebookPen,
   PanelBottomOpen,
+  Palette,
   Pause,
   Pencil,
   Play,
@@ -96,6 +97,7 @@ import { canUnmountEditor } from '../features/editor/editor-unmount-guard'
 import { summaryGenerationOwnsUi, type SummaryGenerationOwner } from '../features/writing/summary-generation-owner'
 import ExpandableTextInput, { type ExpandableTextInputDictationTarget } from '../shared/ui/ExpandableTextInput'
 import GenerationActions from '../shared/ui/GenerationActions'
+import UiKitScreen from '../shared/ui/UiKitScreen'
 import MarkdownEditor, { type CodexMentionClick, type GenerationContext, type GenerationResult, type MarkdownEditorHandle } from '../features/editor/MarkdownEditor'
 import type { NanoGPTStreamMetadata } from '../shared/ai/nanogpt'
 import { fetchTextProviderModelContextLength, streamTextProviderCompletion, textProviderRequestText } from '../shared/ai/text-provider'
@@ -238,6 +240,7 @@ Then the voice on the other side whispered, _Mara Vale_, and every compass in he
 
 export default function Workspace() {
   const [screen, setScreen] = useState<Screen>('home')
+  const [uiKitOpen, setUiKitOpen] = useState(false)
   const [settingsInitialTab, setSettingsInitialTab] = useState<'ai' | 'images' | 'sync'>('ai')
   useEffect(() => startImageQueue(), [])
   const [returnScreen, setReturnScreen] = useState<Screen>('home')
@@ -1921,6 +1924,8 @@ export default function Workspace() {
     }}
   />
 
+  if (uiKitOpen) return <UiKitScreen onBack={() => setUiKitOpen(false)} />
+
   if (screen === 'images') {
     const imageBook = imageReturnScreen === 'home' ? undefined : currentBook ?? undefined
     return <ImageWorkspace
@@ -1938,7 +1943,7 @@ export default function Workspace() {
     <main className="library-screen">
       {autotitleOverlay}
       {toast && <div className="app-toast" role="alert" key={toast.id}><span>{toast.message}</span><button type="button" onClick={() => setToast(null)} aria-label="Dismiss notification"><X aria-hidden="true" /></button></div>}
-      <header className="library-top"><div className="arc-brand"><Feather aria-hidden="true" /> ARC</div><button className="image-destination-button" type="button" onClick={() => { void openImages('home') }} aria-label="Open images and gallery"><ImageIcon aria-hidden="true" /><ImageActivityBadge active={activeImageJobs} review={reviewImageJobs} attention={attentionImageJobs} /></button><button type="button" onClick={() => openSettings('home')} aria-label="Open default settings"><Settings2 aria-hidden="true" /></button></header>
+      <header className="library-top"><div className="arc-brand"><Feather aria-hidden="true" /> ARC</div><button className="ui-kit-entry" type="button" onClick={() => setUiKitOpen(true)} aria-label="Open UI Kit" title="UI Kit"><Palette aria-hidden="true" /></button><button className="image-destination-button" type="button" onClick={() => { void openImages('home') }} aria-label="Open images and gallery"><ImageIcon aria-hidden="true" /><ImageActivityBadge active={activeImageJobs} review={reviewImageJobs} attention={attentionImageJobs} /></button><button type="button" onClick={() => openSettings('home')} aria-label="Open default settings"><Settings2 aria-hidden="true" /></button></header>
       <section className="library-content">
         <div className="library-title"><div><small>Your library</small><h1>Books</h1></div><button type="button" aria-label="New book" disabled={libraryState !== 'ready' || creatingBook} onClick={() => { void makeBook() }}><Plus aria-hidden="true" /><span>{creatingBook ? 'Creating…' : 'New book'}</span></button></div>
         {!aiReady && <div className="setup-warning"><Bot aria-hidden="true" /><div><strong>Text AI is not set up</strong><p>Choose a provider and models before using generation or chat.</p></div><button type="button" onClick={() => openSettings('home')}>Set up AI <ChevronRight aria-hidden="true" /></button></div>}
