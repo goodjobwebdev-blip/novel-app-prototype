@@ -16,6 +16,7 @@ import { projectProse } from '../editor/document-projection'
 import ProposalDraftEditor from './ProposalDraftEditor'
 import type { ReactNode } from 'react'
 import { groupChatAnswers, answerProse } from './chat-answer-groups'
+import { chatListPageForIndex, paginateChatList } from './chat-list-pagination'
 import Composer from './Composer'
 import { executeImageProposal } from '../images/image-tools'
 import ImageProposalCard from '../images/ImageProposalCard'
@@ -1578,6 +1579,7 @@ export function ChatSidebar({ bookId, activeChatId, onOpen, currentSceneId, care
   const [characterSetup, setCharacterSetup] = useState(false)
   const [items, setItems] = useState<ChatEntity[]>([])
   const [query, setQuery] = useState('')
+  const [page, setPage] = useState(1)
   const bookIdRef = useRef(bookId)
   const activeChatIdRef = useRef(activeChatId)
   const reloadVersionRef = useRef(0)
@@ -1599,6 +1601,7 @@ export function ChatSidebar({ bookId, activeChatId, onOpen, currentSceneId, care
 
   useEffect(() => {
     setItems([])
+    setPage(1)
     void reload(bookId)
     const handle = (event: Event) => {
       const detail = (event as CustomEvent<{ bookId?: string }>).detail
@@ -1609,12 +1612,25 @@ export function ChatSidebar({ bookId, activeChatId, onOpen, currentSceneId, care
   }, [bookId])
 
   const normalized = query.trim().toLowerCase()
-  const visible = items.filter((chat) => chat.bookId === bookId && (!normalized || `${chat.title} ${chat.lastMessagePreview ?? ''}`.toLowerCase().includes(normalized)))
+  const matching = items.filter((chat) => chat.bookId === bookId && (!normalized || `${chat.title} ${chat.lastMessagePreview ?? ''}`.toLowerCase().includes(normalized)))
+  const pagination = paginateChatList(matching, page)
+  const visible = pagination.items
+
+  useEffect(() => {
+    setPage(current => paginateChatList(matching, current).page)
+  }, [matching.length])
+
+  useEffect(() => {
+    if (!activeChatId || normalized) return
+    const index = matching.findIndex(chat => chat.id === activeChatId)
+    if (index >= 0) setPage(chatListPageForIndex(index))
+  }, [activeChatId, items, normalized])
 
   async function add() {
     const sourceBookId = bookId
     if (!sourceBookId) return
     const chat = await createChat(sourceBookId)
+    setPage(1)
     await reload(sourceBookId)
     if (bookIdRef.current === sourceBookId && chat.bookId === sourceBookId) onOpen(chat.id)
   }
@@ -1639,11 +1655,12 @@ export function ChatSidebar({ bookId, activeChatId, onOpen, currentSceneId, care
   return <section className="chat-sidebar"><div className="panel-title"><div><small>Conversations</small><h2>Chats</h2></div><button type="button" onClick={() => { void add() }} aria-label="Start new chat"><Plus aria-hidden="true" /></button></div>
     <button className="new-character-chat" type="button" onClick={() => setCharacterSetup(true)}><MessageCircle aria-hidden="true" />New character chat</button>
     {characterSetup && <CharacterChatSetup bookId={bookId} currentSceneId={currentSceneId} caret={caret} onClose={() => setCharacterSetup(false)} onOpen={onOpen} />}
-    <label className="chat-sidebar-search"><Search aria-hidden="true" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search chats" /></label>
+    <label className="chat-sidebar-search"><Search aria-hidden="true" /><input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1) }} placeholder="Search chats" /></label>
     <div className="chat-sidebar-list">{visible.map((chat) => <article className={`chat-row-wrap ${activeChatId === chat.id ? 'selected' : ''}`} key={chat.id}>
       <button className="chat-row" type="button" onClick={() => { if (chat.bookId === bookIdRef.current) onOpen(chat.id) }}><i><MessageCircle aria-hidden="true" /></i><span><strong>{chat.title}</strong><small>{chat.lastMessagePreview || 'No messages yet'}</small></span><em>{formatChatEdited(chat.updatedAt)}</em></button>
       <div className="chat-row-actions"><button type="button" onClick={() => { void rename(chat) }} aria-label={`Rename ${chat.title}`}><Pencil aria-hidden="true" /></button><button type="button" onClick={() => { void remove(chat) }} aria-label={`Delete ${chat.title}`}><Trash2 aria-hidden="true" /></button></div>
     </article>)}{!visible.length && <p className="content-empty">{query ? 'No matching chats.' : 'No chats yet.'}</p>}</div>
+    {pagination.totalPages > 1 && <nav className="chat-sidebar-pagination" aria-label="Chat list pages"><button type="button" disabled={pagination.page === 1} onClick={() => setPage(current => Math.max(1, current - 1))}>Previous</button><span>Page {pagination.page} of {pagination.totalPages}<small>{pagination.from}–{pagination.to} of {pagination.totalItems} chats</small></span><button type="button" disabled={pagination.page === pagination.totalPages} onClick={() => setPage(current => Math.min(pagination.totalPages, current + 1))}>Next</button></nav>}
   </section>
 }
 

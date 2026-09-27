@@ -70,6 +70,11 @@
 .chat-sidebar-search svg { width: .9rem; color: var(--muted); }
 .chat-sidebar-search input { width: 100%; border: 0; outline: 0; background: transparent; color: inherit; }
 .chat-sidebar-list { display: grid; gap: .4rem; }
+.chat-sidebar-pagination { margin-top: .75rem; padding-top: .75rem; border-top: 1px solid var(--border); display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: .5rem; }
+.chat-sidebar-pagination button { min-height: 36px; padding: 0 .65rem; border: 1px solid var(--border); border-radius: .6rem; background: var(--glass); color: var(--soft); font-size: .72rem; cursor: pointer; }
+.chat-sidebar-pagination button:disabled { opacity: .4; cursor: default; }
+.chat-sidebar-pagination > span { min-width: 0; display: grid; justify-items: center; gap: .15rem; color: var(--soft); font-size: .72rem; text-align: center; }
+.chat-sidebar-pagination small { color: var(--muted); font-size: .65rem; white-space: nowrap; }
 .chat-row-wrap { position: relative; border-radius: .9rem; }
 .chat-row-wrap.selected { background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .chat-row-wrap .chat-row { width: 100%; padding-right: 4.4rem; }
