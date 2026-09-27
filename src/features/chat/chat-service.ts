@@ -48,6 +48,13 @@ export type ChatEntity = ArcEntity & {
 }
 
 export type ChatMessageStatus = 'complete' | 'stopped' | 'failed' | 'limited' | 'waiting'
+export type ChatToolExecution = {
+  callId: string
+  name: string
+  arguments: string
+  result: string
+  ok?: boolean
+}
 export type ChatContinuation = { baseHistoryIds: string[]; historySignature: string; baseRequest?: NormalizedAssembledRequest; runtimeParts: NormalizedRequestPart[]; maxRounds: number; reason?: 'round-limit' | 'approval'; responseId?: string }
 export type ChatCodexCreationStatus = 'proposed' | 'applying' | 'created' | 'rejected' | 'duplicate' | 'stale'
 export type ChatCodexCreationProposal = ProposalDraft & {
@@ -129,6 +136,7 @@ export type ChatMessageEntity = ArcEntity & {
   status?: ChatMessageStatus
   responseId?: string
   toolActivity?: string[]
+  toolExecutions?: ChatToolExecution[]
   roundNumber?: number
   continuation?: ChatContinuation
   continuedAt?: number
@@ -312,7 +320,7 @@ async function touchFromMessages(bookId: string, chatId: string, autoTitle?: str
   })
 }
 
-export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntity['role'], content: string, extra: Pick<ChatMessageEntity, 'thoughts' | 'status' | 'responseId' | 'toolActivity' | 'roundNumber' | 'continuation' | 'continuedAt' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations' | 'brainstorms' | 'characterBoundary'> = {}): Promise<ChatMessageEntity> {
+export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntity['role'], content: string, extra: Pick<ChatMessageEntity, 'thoughts' | 'status' | 'responseId' | 'toolActivity' | 'toolExecutions' | 'roundNumber' | 'continuation' | 'continuedAt' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations' | 'brainstorms' | 'characterBoundary'> = {}): Promise<ChatMessageEntity> {
   const messages = await listChatMessages(chat.bookId, chat.id)
   const now = Date.now()
   const message: ChatMessageEntity = {
@@ -327,6 +335,7 @@ export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntit
     status: extra.status ?? 'complete',
     responseId: extra.responseId,
     toolActivity: extra.toolActivity ? [...extra.toolActivity] : undefined,
+    toolExecutions: extra.toolExecutions ? structuredClone(extra.toolExecutions) : undefined,
     roundNumber: extra.roundNumber,
     characterBoundary: extra.characterBoundary ? structuredClone(extra.characterBoundary) : undefined,
     continuation: extra.continuation ? structuredClone(extra.continuation) : undefined,
@@ -350,7 +359,7 @@ export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntit
   return message
 }
 
-export async function updateChatMessage(messageId: string, patch: Partial<Pick<ChatMessageEntity, 'content' | 'thoughts' | 'status' | 'responseId' | 'toolActivity' | 'roundNumber' | 'continuation' | 'continuedAt' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations' | 'brainstorms' | 'characterBoundary'>>): Promise<ChatMessageEntity> {
+export async function updateChatMessage(messageId: string, patch: Partial<Pick<ChatMessageEntity, 'content' | 'thoughts' | 'status' | 'responseId' | 'toolActivity' | 'toolExecutions' | 'roundNumber' | 'continuation' | 'continuedAt' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations' | 'brainstorms' | 'characterBoundary'>>): Promise<ChatMessageEntity> {
   const snapshot = structuredClone(patch)
   const next = await updateEntityAtomically<ChatMessageEntity>(messageId, current => {
     if (current.type !== 'chatMessage') throw new Error('Message is no longer available.')

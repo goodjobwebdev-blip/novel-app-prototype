@@ -172,18 +172,26 @@
 .chat-management-change > div > span { font-size: 12px; opacity: .7; }
 .chat-management-change pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; margin: 4px 0; }
 
-/* One response, with its original model rounds available in ordered activity. */
+/* One response with each model round and its tools kept together. */
 .chat-answer-group { min-width: 0; width: 100%; max-width: 100%; }
-.chat-answer-activity { margin: .6rem 0; color: var(--soft); }
-.chat-answer-activity > summary { cursor: pointer; padding: .5rem 0; font-size: .78rem; }
-.chat-activity-round { min-width: 0; display: grid; gap: .3rem; border-left: 2px solid var(--line); padding: .6rem 0 .6rem .8rem; }
-.chat-activity-round > small { display: block; overflow-wrap: anywhere; }
-.chat-activity-round > span { display: block; overflow-wrap: anywhere; font-size: .76rem; }
-.chat-activity-round > span::before { content: '✓'; margin-right: .4rem; color: var(--accent); }
-.chat-activity-round > span.failed { color: var(--danger); }
-.chat-activity-round > span.failed::before { content: '×'; color: currentColor; }
-.chat-answer-round + .chat-answer-round { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+.chat-answer-round + .chat-answer-round { margin-top: 1.4rem; }
+.chat-round-heading { min-height: 1.6rem; margin-bottom: .45rem; display: flex; align-items: center; gap: .55rem; color: var(--muted); font-size: .72rem; }
+.chat-round-heading strong { color: var(--soft); font-size: .72rem; font-weight: 650; }
+.chat-round-heading span { padding-left: .55rem; border-left: 1px solid var(--line); }
 .chat-answer-group .message-tools { display: flex; flex-wrap: wrap; }
+.message.assistant.continuing-answer { margin-top: -1rem; }
+.chat-round-tools { display: grid; gap: .45rem; margin-top: .75rem; }
+.chat-tool-execution { min-width: 0; border: 1px solid var(--line); border-radius: .7rem; background: color-mix(in srgb, var(--glass) 70%, transparent); overflow: hidden; }
+.chat-tool-execution > summary { min-height: 2.55rem; padding: .45rem .65rem; display: flex; align-items: center; gap: .55rem; cursor: pointer; color: var(--soft); font-size: .76rem; }
+.chat-tool-execution > summary::marker { color: var(--muted); }
+.chat-tool-execution > summary code { min-width: 0; overflow-wrap: anywhere; color: var(--ink); background: transparent; font-size: .74rem; }
+.chat-tool-execution > summary span { margin-left: auto; color: var(--muted); font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; }
+.chat-tool-execution.succeeded > summary span { color: var(--accent); }
+.chat-tool-execution.failed > summary span { color: var(--danger); }
+.chat-tool-execution > div { display: grid; gap: .7rem; padding: .7rem; border-top: 1px solid var(--line); }
+.chat-tool-execution section { min-width: 0; }
+.chat-tool-execution section > strong { display: block; margin-bottom: .35rem; color: var(--muted); font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; }
+.chat-tool-execution pre { box-sizing: border-box; max-width: 100%; max-height: 22rem; margin: 0; padding: .65rem; overflow: auto; border-radius: .5rem; background: color-mix(in srgb, var(--canvas) 84%, transparent); color: var(--soft); white-space: pre-wrap; overflow-wrap: anywhere; font: .72rem/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
 .chat-approval-wait { margin: .7rem 0 0; padding: .65rem .75rem; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: .65rem; background: color-mix(in srgb, var(--accent) 7%, transparent); color: var(--soft); font-size: .82rem; }
 .chat-continue { margin-top: .7rem; min-height: 38px; padding: .45rem .7rem; border: 1px solid var(--border); border-radius: .65rem; background: var(--glass); color: var(--ink); }
 .functional-chat .messages, .functional-chat .message, .chat-markdown { max-width: 100%; min-width: 0; }
