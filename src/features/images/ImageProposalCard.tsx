@@ -11,7 +11,7 @@ import { generationTaskNames } from './image-settings'
 import './image-generation.css'
 
 const proposalDraft = (value: ChatImageProposal): ImageDraft => structuredClone(value.draft ?? { prompt: value.prompt, alias: value.modelAlias, size: value.size, task: value.task ?? 'text-to-image', sources: [] })
-export default function ImageProposalCard({ message, proposal }: { message: ChatMessageEntity; proposal: ChatImageProposal }) {
+export default function ImageProposalCard({ message, proposal, onResolved }: { message: ChatMessageEntity; proposal: ChatImageProposal; onResolved?: () => void }) {
   const { data: current, error: readError } = useImageQuery(() => getEntity<ChatMessageEntity>(message.id), [message.id], message as ChatMessageEntity | undefined)
   const value = current?.imageGenerations?.find(p => p.id === proposal.id) ?? proposal
   const { data: sourceAssets } = useImageQuery(() => listGalleryImages(message.bookId), [message.bookId], [])
@@ -45,6 +45,7 @@ export default function ImageProposalCard({ message, proposal }: { message: Chat
   const generate = async () => {
     await pendingSave.current
     await enqueueImageProposal(draft, { ...origin, submissionId: crypto.randomUUID() })
+    onResolved?.()
   }
   const latestJob = ownedJobs.at(-1)
   const active = ownedJobs.filter(job => ['queued', 'running'].includes(job.status))
@@ -57,7 +58,7 @@ export default function ImageProposalCard({ message, proposal }: { message: Chat
     {!expanded && <ImageJobs proposalId={proposal.id} messageId={message.id} />}
     {expanded && <IllustrationModal title="Generation tool" onClose={close} footer={<div className="image-actions">
       <button type="button" disabled={busy} onClick={close}>Close tool</button>
-      {value.status === 'proposed' && <button type="button" disabled={busy} onClick={() => { void action(async () => { await pendingSave.current; await setImageProposal(message.id, value.id, 'rejected'); setExpanded(false) }) }}>Reject</button>}
+      {value.status === 'proposed' && <button type="button" disabled={busy} onClick={() => { void action(async () => { await pendingSave.current; await setImageProposal(message.id, value.id, 'rejected'); setExpanded(false); onResolved?.() }) }}>Reject</button>}
       <button type="button" className="image-primary" disabled={busy || !['proposed', 'accepted'].includes(value.status) || !selectedMediaPrompt(draft).trim()} onClick={() => { void action(generate) }}>{busy ? 'Saving…' : 'Generate'}</button>
     </div>}>
       <div className="image-ui"><ImageGenerationControls bookId={message.bookId} value={draft} onChange={changeDraft} disabled={busy} sourceAssets={sourceAssets} />

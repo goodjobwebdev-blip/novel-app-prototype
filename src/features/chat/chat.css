@@ -176,9 +176,16 @@
 .chat-answer-group { min-width: 0; width: 100%; max-width: 100%; }
 .chat-answer-activity { margin: .6rem 0; color: var(--soft); }
 .chat-answer-activity > summary { cursor: pointer; padding: .5rem 0; font-size: .78rem; }
-.chat-activity-round { min-width: 0; border-left: 2px solid var(--line); padding: .6rem 0 .6rem .8rem; }
-.chat-activity-round > small { display: block; margin-bottom: .5rem; overflow-wrap: anywhere; }
+.chat-activity-round { min-width: 0; display: grid; gap: .3rem; border-left: 2px solid var(--line); padding: .6rem 0 .6rem .8rem; }
+.chat-activity-round > small { display: block; overflow-wrap: anywhere; }
+.chat-activity-round > span { display: block; overflow-wrap: anywhere; font-size: .76rem; }
+.chat-activity-round > span::before { content: '✓'; margin-right: .4rem; color: var(--accent); }
+.chat-activity-round > span.failed { color: var(--danger); }
+.chat-activity-round > span.failed::before { content: '×'; color: currentColor; }
+.chat-answer-round + .chat-answer-round { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
 .chat-answer-group .message-tools { display: flex; flex-wrap: wrap; }
+.chat-approval-wait { margin: .7rem 0 0; padding: .65rem .75rem; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: .65rem; background: color-mix(in srgb, var(--accent) 7%, transparent); color: var(--soft); font-size: .82rem; }
+.chat-continue { margin-top: .7rem; min-height: 38px; padding: .45rem .7rem; border: 1px solid var(--border); border-radius: .65rem; background: var(--glass); color: var(--ink); }
 .functional-chat .messages, .functional-chat .message, .chat-markdown { max-width: 100%; min-width: 0; }
 .chat-markdown pre, .chat-markdown .markdown-table-scroll { box-sizing: border-box; width: 100%; }
 .chat-answer-tools button { min-height: 40px; background: transparent; border: 0; color: var(--soft); }
