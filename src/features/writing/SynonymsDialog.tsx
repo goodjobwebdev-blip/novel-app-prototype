@@ -4,6 +4,8 @@ import { generateSynonyms, synonymContext, type SynonymCandidate } from './synon
 import type { QuickToolCapture } from './quick-tools'
 import { protectedRanges } from '../editor/document-projection.ts'
 import type { RewriteRequestPreview } from './ProseRewriteDialog'
+import Button from '../../shared/ui/Button'
+import Input from '../../shared/ui/Input'
 
 export default function SynonymsDialog({ capture, apply, close }: { capture: QuickToolCapture; apply: (text: string) => boolean; close: () => void }) {
   const context = synonymContext(capture)
@@ -35,13 +37,13 @@ export default function SynonymsDialog({ capture, apply, close }: { capture: Qui
     if (event.key === 'Escape') { controller.current?.abort(); close() }
     if (event.key === 'Tab') { const items = Array.from(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)') ?? []); const first = items[0], last = items.at(-1); if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() } }
   }}>
-    <header><h2 id="synonyms-title">Synonyms for “{context.selected}”</h2><button type="button" aria-label="Close synonyms" onClick={() => { controller.current?.abort(); close() }}>×</button></header>
+    <header><h2 id="synonyms-title">Synonyms for “{context.selected}”</h2><Button variant="ghost" style={{ width: 44, height: 44, padding: 0, borderRadius: 'var(--radius)' }} aria-label="Close synonyms" onClick={() => { controller.current?.abort(); close() }}>×</Button></header>
     <p>Each generation sends a new request to your Support model.</p>
     <div className="synonym-candidates" role="group" aria-label="Synonym candidates">{candidates.map((candidate) => <button key={candidate.text} type="button" disabled={running} aria-pressed={replacement === candidate.text} onClick={() => setReplacement(candidate.text)}><strong>{candidate.text}</strong>{candidate.note && <small>{candidate.note}</small>}</button>)}</div>
-    <label>Replacement<input value={replacement} onChange={(event) => setReplacement(event.target.value)} placeholder="Choose a candidate or adjust it here" /></label>
+    <Input label="Replacement" value={replacement} onChange={(event) => setReplacement(event.target.value)} placeholder="Choose a candidate or adjust it here" />
     <p className="synonym-sentence">{context.before}<mark>{replacement || context.selected}</mark>{context.after}</p>
     <p role="status">{status}</p>{error && <p role="alert">{error}</p>}
     {request && <details><summary>Request preview · {request.model}</summary><pre className="rewrite-original">{JSON.stringify({ model: request.model, messages: request.request.providerMessages }, null, 2)}</pre></details>}
-    <footer><button type="button" onClick={() => { controller.current?.abort(); close() }}>Discard</button>{running ? <button type="button" onClick={() => { controller.current?.abort(); setStatus('Stopping…') }}>Stop</button> : <button type="button" onClick={() => { void run() }}>{candidates.length ? 'Generate more' : 'Retry'}</button>}<button type="button" disabled={running || !replacement.trim() || Boolean(protectedRanges(replacement).length)} onClick={() => { if (apply(replacement)) close(); else setError('The source changed. Close this dialog and select the word again.') }}>Apply replacement</button></footer>
+    <footer><Button variant="ghost" onClick={() => { controller.current?.abort(); close() }}>Discard</Button>{running ? <Button variant="danger" onClick={() => { controller.current?.abort(); setStatus('Stopping…') }}>Stop</Button> : <Button onClick={() => { void run() }}>{candidates.length ? 'Generate more' : 'Retry'}</Button>}<Button variant="primary" disabled={running || !replacement.trim() || Boolean(protectedRanges(replacement).length)} onClick={() => { if (apply(replacement)) close(); else setError('The source changed. Close this dialog and select the word again.') }}>Apply replacement</Button></footer>
   </section></div>, document.body)
 }

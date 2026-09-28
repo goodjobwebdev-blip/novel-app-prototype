@@ -6,7 +6,7 @@
 .context-trigger-window small { opacity: .68; }
 .automatic-codex-preview { display: grid; gap: 8px; }
 .automatic-codex-preview > strong { font-size: .82rem; }
-.automatic-codex-preview article { padding: 9px 10px; border: 1px solid rgba(255,255,255,.08); border-radius: 9px; display: grid; gap: 4px; }
+.automatic-codex-preview article { padding: 9px 10px; border: 1px solid rgba(255,255,255,.08); border-radius: var(--radius); display: grid; gap: 4px; }
 .automatic-codex-preview article header { display: flex; justify-content: space-between; gap: 10px; }
 .automatic-codex-preview article small { opacity: .7; }
 .automatic-codex-preview ul { margin: 2px 0 0; padding-left: 18px; }

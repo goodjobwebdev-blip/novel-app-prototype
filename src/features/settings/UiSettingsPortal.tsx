@@ -18,6 +18,10 @@ import {
   type UiTypography,
 } from './ui-settings'
 
+import Button from '../../shared/ui/Button'
+import Checkbox from '../../shared/ui/Checkbox'
+import Input from '../../shared/ui/Input'
+import Toast from '../../shared/ui/Toast'
 import { contrastWarnings } from './appearance-utils'
 import SettingsSectionTabs from './SettingsSectionTabs'
 
@@ -93,7 +97,7 @@ function TypographySection({ number, title, description, value, onChange, onRese
     </div>
     <div className="ui-type-preview" style={{ fontFamily: fontStack(value.fontFamily), fontSize: value.fontSize, lineHeight: value.lineHeight, fontWeight: value.fontWeight }}>
       {number === '01' ? <><p>The quiet room held its breath while the next sentence arrived. Outside, the rain traced silver lines down the window.</p><p>“Tell me what happened,” she said.</p></> : <><small>Writing instruction</small><p>Continue the scene from Mara’s point of view. Keep the dialogue restrained and leave the letter unopened.</p></>}
-    </div><button className="ui-secondary-action" type="button" onClick={onReset}>Reset {number === '01' ? 'editor' : 'input'} typography</button>
+    </div><Button className="ui-secondary-action" onClick={onReset}>Reset {number === '01' ? 'editor' : 'input'} typography</Button>
   </section>
 }
 
@@ -124,8 +128,8 @@ function ThemeOption({ id, name, palette, active, custom, onSelect, onDuplicate,
       {active && <Check aria-hidden="true" />}
     </button>
     <div className="ui-theme-actions">
-      <button type="button" onClick={onDuplicate} aria-label={`Duplicate ${name}`} title="Duplicate to customize"><Copy aria-hidden="true" /></button>
-      {custom && onDelete && <button className="danger" type="button" onClick={onDelete} aria-label={`Delete ${name}`} title="Delete theme"><Trash2 aria-hidden="true" /></button>}
+      <Button className="ui-icon-action" size="small" variant="ghost" leadingIcon={<Copy />} onClick={onDuplicate} aria-label={`Duplicate ${name}`} title="Duplicate to customize" />
+      {custom && onDelete && <Button className="ui-icon-action" size="small" variant="danger" leadingIcon={<Trash2 />} onClick={onDelete} aria-label={`Delete ${name}`} title="Delete theme" />}
     </div>
   </div>
 }
@@ -140,11 +144,11 @@ function ColorField({ label, value, onChange }: { label: string; value: string; 
 function ThemeEditor({ theme, onChange, onApply, onCancel }: { theme: CustomUiTheme; onChange: (theme: CustomUiTheme) => void; onApply: () => void; onCancel: () => void }) {
   const warnings = contrastWarnings(theme.palette)
   return <section className="ui-theme-editor"><header><div><Palette aria-hidden="true" /><span><strong>Customize theme</strong><small>Draft changes affect only the preview until you apply them.</small></span></div></header>
-    <label className="ui-theme-name"><span>Theme name</span><input value={theme.name} maxLength={80} onChange={event => onChange({ ...theme, name: event.target.value })} /></label>
+    <Input className="ui-theme-name" label="Theme name" value={theme.name} maxLength={80} onChange={event => onChange({ ...theme, name: event.target.value })} />
     {([['Surfaces', ['background', 'elevated', 'editor', 'border']], ['Text', ['text', 'muted']], ['Accents', ['accent', 'accentActive', 'selection', 'error']]] as const).map(([group, keys]) => <fieldset className="ui-color-group" key={group}><legend>{group}</legend><div className="ui-color-grid">{keys.map(key => <ColorField key={key} label={colorLabels.find(item => item[0] === key)![1]} value={theme.palette[key]} onChange={value => onChange({ ...theme, palette: { ...theme.palette, [key]: value } })} />)}</div></fieldset>)}
     {warnings.length > 0 && <div className="ui-contrast-warning" role="status"><strong>Some colors may be difficult to read</strong><ul>{warnings.map(item => <li key={item.label}>{item.label}: {item.ratio.toFixed(2)}:1 contrast. Try a lighter or darker color.</li>)}</ul></div>}
     <div className="ui-theme-preview" style={{ background: theme.palette.background, borderColor: theme.palette.border, color: theme.palette.text }}><aside style={{ background: theme.palette.elevated, borderColor: theme.palette.border }}><i style={{ background: theme.palette.accent }} /><span style={{ color: theme.palette.muted }}>Outline</span></aside><article style={{ background: theme.palette.editor }}><small style={{ color: theme.palette.accent }}>SCENE 07</small><p>Theme preview for the writing surface.</p><mark style={{ background: theme.palette.selection, color: theme.palette.text }}>Selected text</mark></article></div>
-    <div className="ui-draft-actions"><button type="button" onClick={onApply} disabled={!theme.name.trim()}>Apply theme</button><button type="button" onClick={onCancel}>Cancel changes</button></div>
+    <div className="ui-draft-actions"><Button variant="primary" onClick={onApply} disabled={!theme.name.trim()}>Apply theme</Button><Button variant="ghost" onClick={onCancel}>Cancel changes</Button></div>
   </section>
 }
 
@@ -207,16 +211,15 @@ function UiSettingsPanel() {
   }
 
   return <section className="ui-settings-panel" aria-labelledby="page-title">
-    <header className="page-heading"><div><p>Global UI</p><h1 id="page-title">Appearance</h1><span>Applies to every book on this device. UI settings are global and cannot be overridden by a book.</span></div><div className={`save-state ${saveError ? 'error' : 'saved'}`} role="status" aria-live="polite"><i />{saveError ? 'Not saved' : 'Saved'}{saveError && <button type="button" onClick={() => persist(pendingSettings ?? settings)}>Retry</button>}</div></header>
+    <header className="page-heading"><div><p>Global UI</p><h1 id="page-title">Appearance</h1><span>Applies to every book on this device. UI settings are global and cannot be overridden by a book.</span></div><div className={`save-state ${saveError ? 'error' : 'saved'}`} role="status" aria-live="polite"><i />{saveError ? 'Not saved' : 'Saved'}{saveError && <Button size="small" onClick={() => persist(pendingSettings ?? settings)}>Retry</Button>}</div></header>
 
     {saveError && <p className="ui-save-error" role="alert">Changes could not be saved on this device. They are kept here for retry; a reload will use the last saved appearance.</p>}
-    <div className="ui-appearance-tools"><span className="ui-scope-summary">All books on this device · {saveError ? 'Not saved' : 'Saved automatically'}</span><button type="button" className="ui-safe-reset" onClick={resetTheme}>Reset to readable theme</button></div>
+    <div className="ui-appearance-tools"><span className="ui-scope-summary">All books on this device · {saveError ? 'Not saved' : 'Saved automatically'}</span><Button className="ui-safe-reset" onClick={resetTheme}>Reset to readable theme</Button></div>
     <SettingsSectionTabs tabs={appearanceSections.map(([tab, label]) => [tab, tab === 'customization' && draft ? `${label} · Draft` : label] as const)} active={section} onChange={setSection} idPrefix="appearance" label="Appearance sections" />
     <section hidden={section !== 'editor'} role="tabpanel" id="appearance-panel-editor" aria-labelledby="appearance-tab-editor" className="settings-card ui-editor-settings"><h2>Editor</h2>
-      <label><input type="checkbox" checked={settings.highlightDialogue === true} aria-describedby="dialogue-style-description" onChange={event => commit(current => ({ ...current, highlightDialogue: event.target.checked }))} /> Highlight dialogue</label>
-      <p id="dialogue-style-description">Use the theme’s accent color for text inside quotation marks in story scenes.</p>
+      <Checkbox label="Highlight dialogue" description="Use the theme’s accent color for text inside quotation marks in story scenes." checked={settings.highlightDialogue === true} onChange={event => commit(current => ({ ...current, highlightDialogue: event.target.checked }))} />
       <div className="ui-dialogue-preview" aria-label="Dialogue styling preview">She paused. “<span className={settings.highlightDialogue ? 'cm-dialogue' : undefined}>Tell me what happened.</span>” The room fell silent.</div>
-      <label><input type="checkbox" checked={settings.sceneBeats !== false} onChange={(event) => commit((current) => ({ ...current, sceneBeats: event.target.checked }))} /> Show scene beats</label><label><input type="checkbox" checked={settings.saveArcAsBeat !== false} onChange={(event) => commit((current) => ({ ...current, saveArcAsBeat: event.target.checked }))} /> Save ARC as a beat</label><p>Save nonempty drawer instructions above their generated prose. Visibility is independent; hiding beats keeps them in the book. Write private comments directly as <code>{'<!-- Your comment -->'}</code>; comments stay out of AI context and read aloud.</p></section>
+      <Checkbox label="Show scene beats" checked={settings.sceneBeats !== false} onChange={(event) => commit((current) => ({ ...current, sceneBeats: event.target.checked }))} /><Checkbox label="Save ARC as a beat" checked={settings.saveArcAsBeat !== false} onChange={(event) => commit((current) => ({ ...current, saveArcAsBeat: event.target.checked }))} /><p>Save nonempty drawer instructions above their generated prose. Visibility is independent; hiding beats keeps them in the book. Write private comments directly as <code>{'<!-- Your comment -->'}</code>; comments stay out of AI context and read aloud.</p></section>
     <div hidden={section !== 'typography'} role="tabpanel" id="appearance-panel-typography" aria-labelledby="appearance-tab-typography">
     <TypographySection onReset={() => commit(current => ({ ...current, editor: { ...defaultUiSettings.editor } }))} number="01" title="Main editor" description="Typography for Scenes, Notes, Codex entries, and summaries." value={settings.editor} onChange={(editor) => commit((current) => ({ ...current, editor }))} />
     <TypographySection onReset={() => commit(current => ({ ...current, inputs: { ...defaultUiSettings.inputs } }))} number="02" title="Expandable inputs" description="Typography for scalable drawer and chat/context text inputs." value={settings.inputs} onChange={(inputs) => commit((current) => ({ ...current, inputs }))} />
@@ -227,13 +230,13 @@ function UiSettingsPanel() {
         {builtInThemes.map((theme) => <ThemeOption key={theme.id} id={theme.id} name={theme.name} palette={theme.palette} active={settings.activeThemeId === theme.id} onSelect={() => selectTheme(theme.id)} onDuplicate={() => duplicate(theme.id)} />)}
       </div></div>
 
-      <div className="ui-theme-group ui-custom-themes"><header><h3>Custom</h3><button className="create-theme" type="button" onClick={() => duplicate(activeTheme.id)}><Plus aria-hidden="true" /> Create theme</button></header>
+      <div className="ui-theme-group ui-custom-themes"><header><h3>Custom</h3><Button className="ui-create-theme" leadingIcon={<Plus />} onClick={() => duplicate(activeTheme.id)}>Create theme</Button></header>
         {settings.customThemes.length ? <div className="ui-theme-grid">{settings.customThemes.map((theme) => <ThemeOption key={theme.id} id={theme.id} name={theme.name} palette={theme.palette} active={settings.activeThemeId === theme.id} custom onSelect={() => selectTheme(theme.id)} onDuplicate={() => duplicate(theme.id)} onDelete={() => removeCustomTheme(theme)} />)}</div> : <p className="ui-custom-empty">Create a theme from the active palette, or duplicate any built-in theme to customize it.</p>}
       </div>
 
     </section>
-    {deleted && <div className="ui-delete-notice" role="status">Deleted “{deleted.theme.name}”<button type="button" onClick={() => { commit(current => ({ ...current, customThemes: [...current.customThemes.filter(theme => theme.id !== deleted.theme.id), deleted.theme], activeThemeId: deleted.wasActive ? deleted.theme.id : current.activeThemeId })); setDeleted(null) }}>Undo</button></div>}
-    <section hidden={section !== 'customization'} className="settings-card ui-customization-card" role="tabpanel" id="appearance-panel-customization" aria-labelledby="appearance-tab-customization"><h2>Customization</h2>{draft ? <ThemeEditor key={draft.id} theme={draft} onChange={editDraft} onApply={applyDraft} onCancel={() => editDraft(null)} /> : <><p>Edit a copy of a built-in palette, or customize the active custom theme.</p>{activeCustom && <button type="button" onClick={() => beginEdit(activeCustom)}>Edit {activeCustom.name}</button>}<button type="button" onClick={() => duplicate(activeTheme.id)}>Create from {activeTheme.name}</button></>}</section>
+    {deleted && <Toast fixed variant="success" title={`Deleted “${deleted.theme.name}”`} onDismiss={() => setDeleted(null)} action={{ label: 'Undo', onClick: () => { commit(current => ({ ...current, customThemes: [...current.customThemes.filter(theme => theme.id !== deleted.theme.id), deleted.theme], activeThemeId: deleted.wasActive ? deleted.theme.id : current.activeThemeId })); setDeleted(null) } }}>The custom theme was removed from this device.</Toast>}
+    <section hidden={section !== 'customization'} className="settings-card ui-customization-card" role="tabpanel" id="appearance-panel-customization" aria-labelledby="appearance-tab-customization"><h2>Customization</h2>{draft ? <ThemeEditor key={draft.id} theme={draft} onChange={editDraft} onApply={applyDraft} onCancel={() => editDraft(null)} /> : <><p>Edit a copy of a built-in palette, or customize the active custom theme.</p>{activeCustom && <Button onClick={() => beginEdit(activeCustom)}>Edit {activeCustom.name}</Button>}<Button onClick={() => duplicate(activeTheme.id)}>Create from {activeTheme.name}</Button></>}</section>
   </section>
 }
 

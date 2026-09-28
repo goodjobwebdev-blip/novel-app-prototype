@@ -121,7 +121,7 @@
   padding: 16px;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: var(--overlay-radius);
   background: var(--deep);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
   display: grid;
@@ -354,48 +354,6 @@
 .context-source-list h3 { margin: 10px 0 2px; color: var(--accent); font-size: 8px; letter-spacing: .12em; text-transform: uppercase; }
 .context-source-list > p { color: var(--faint); font-size: 10px; text-align: center; }
 
-.app-toast {
-  position: fixed;
-  z-index: 160;
-  top: max(16px, env(safe-area-inset-top));
-  left: 50%;
-  width: min(calc(100% - 28px), 560px);
-  min-height: 48px;
-  padding: 10px 10px 10px 14px;
-  border: 1px solid rgba(216, 122, 110, 0.38);
-  border-radius: 14px;
-  background: rgba(38, 23, 21, 0.95);
-  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.46);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  color: #f2ded9;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  transform: translateX(-50%);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.app-toast button {
-  flex: none;
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.06);
-  color: inherit;
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-}
-
-.app-toast button svg {
-  width: 15px;
-  height: 15px;
-}
 
 .expandable-text-input textarea {
   width: 100%;
@@ -465,7 +423,7 @@
   min-height: 0;
   padding: 16px;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--overlay-radius);
   background: var(--deep);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
   display: flex;

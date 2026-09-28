@@ -31,7 +31,7 @@
 .arc-searchable-select__empty { margin: 0; padding: 30px 14px; color: var(--faint); font-size: 11px; text-align: center; }
 .arc-searchable-select__modal { width: 100%; max-width: none; height: 100%; max-height: none; margin: 0; padding: max(14px,env(safe-area-inset-top)) 12px max(14px,env(safe-area-inset-bottom)); border: 0; background: rgba(8,9,8,.74); color: var(--ink); }
 .arc-searchable-select__modal::backdrop { background: rgba(8,9,8,.74); backdrop-filter: blur(8px); }
-.arc-searchable-select__modal > section { width: min(100%,560px); max-height: 100%; margin: 0 auto; padding: 12px; border: 1px solid color-mix(in srgb, var(--ink) 24%, var(--line)); border-radius: var(--radius); background: var(--deep); box-shadow: 0 24px 80px rgba(0,0,0,.55); display: grid; grid-template-rows: auto auto minmax(0,1fr); }
+.arc-searchable-select__modal > section { width: min(100%,560px); max-height: 100%; margin: 0 auto; padding: 12px; border: 1px solid color-mix(in srgb, var(--ink) 24%, var(--line)); border-radius: var(--overlay-radius); background: var(--deep); box-shadow: 0 24px 80px rgba(0,0,0,.55); display: grid; grid-template-rows: auto auto minmax(0,1fr); }
 .arc-searchable-select__modal header { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .arc-searchable-select__modal header > strong { font: 500 21px var(--serif); }
 .arc-searchable-select__modal header button { width: 40px; height: 40px; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb, var(--surface-2) 82%, transparent); display: grid; place-items: center; cursor: pointer; }

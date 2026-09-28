@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { CloudUpload, X } from 'lucide-react'
+import Button from '../../shared/ui/Button'
 import type { BookEntity } from '../../data/persistence'
 import { enableBookSync, syncBookNow } from './sync-service'
 import { listSyncLinks } from './sync-persistence'
@@ -60,13 +61,13 @@ export default function LocalBookSync({ books, beforeSync, onConfigure, onRemote
   }
 
   return <div className="local-book-sync">
-    <button type="button" onClick={() => { void show() }}><CloudUpload size={17} />Send books to cloud</button>
+    <Button leadingIcon={<CloudUpload />} onClick={() => { void show() }}>Send books to cloud</Button>
     {open && <div className="sync-dialog-backdrop" role="presentation"><section className="sync-dialog" role="dialog" aria-modal="true" aria-labelledby="local-cloud-books-title">
-      <header><div><small>Self-hosted sync</small><h2 id="local-cloud-books-title">Send books to cloud</h2></div><button type="button" onClick={() => setOpen(false)} aria-label="Close local books"><X /></button></header>
+      <header><div><small>Self-hosted sync</small><h2 id="local-cloud-books-title">Send books to cloud</h2></div><Button className="sync-icon-button" variant="ghost" onClick={() => setOpen(false)} aria-label="Close local books" leadingIcon={<X />} /></header>
       <p className="sync-dialog-help">Choose a local book for its first upload, or manually sync one that is already connected.</p>
       {busy === 'list' ? <p role="status">Loading local books…</p> : !books.length ? <p>No local books are available.</p> : <ul>{books.map(book => {
         const isConnected = connected.has(book.id)
-        return <li key={book.id}><div><strong>{book.title}</strong><small>{isConnected ? 'Connected to cloud sync' : 'Stored only on this device'}</small></div><button type="button" disabled={Boolean(busy)} onClick={() => { void sync(book) }}>{busy === book.id ? 'Syncing…' : isConnected ? 'Sync now' : 'Upload & connect'}</button></li>
+        return <li key={book.id}><div><strong>{book.title}</strong><small>{isConnected ? 'Connected to cloud sync' : 'Stored only on this device'}</small></div><Button disabled={Boolean(busy)} onClick={() => { void sync(book) }}>{busy === book.id ? 'Syncing…' : isConnected ? 'Sync now' : 'Upload & connect'}</Button></li>
       })}</ul>}
       {message && <p role="status" className="sync-success">{message}</p>}
       {error && <p role="alert" className="illustration-error">{error}</p>}

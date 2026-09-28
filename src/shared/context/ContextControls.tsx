@@ -3,6 +3,10 @@ import { isCodexEntryArchived, type ArcEntity, type GenerationContextProfile } f
 import type { ContextDiagnostics, PreparedContextValues } from './context-service'
 import type { DynamicContextSource, NormalizedAssembledRequest } from '../ai/prompt-composition'
 import { orderedContextScenes, structuralSelectionIds } from './context-source-selection'
+import Button from '../ui/Button'
+import Checkbox from '../ui/Checkbox'
+import Choice from '../ui/Choice'
+import Input from '../ui/Input'
 
 type SelectionKey = 'structuralIds' | 'noteIds' | 'codexEntryIds'
 export function ContextSourcePicker({ sources, currentDocumentId, anchorId, profile, onToggle, onClear, fullCodex = false }: {
@@ -30,7 +34,8 @@ export function ContextSourcePicker({ sources, currentDocumentId, anchorId, prof
     const key: SelectionKey = item.type === 'note' ? 'noteIds' : item.type === 'codexEntry' ? 'codexEntryIds' : 'structuralIds'
     const inherited = effective.has(item.id) && !profile.structuralIds.includes(item.id)
     const later = anchorIndex >= 0 && sceneOrder.indexOf(item.id) > anchorIndex
-    return <label className="context-selection-row"><input type="checkbox" checked={profile[key].includes(item.id) || inherited} disabled={inherited} onChange={() => onToggle(key, item.id)} /><span><strong>{item.title || 'Untitled'}</strong><small>{item.type === 'act' || item.type === 'chapter' ? 'Includes descendant scenes in full; automatic sources are deduplicated' : item.type === 'codexEntry' ? fullCodex ? 'Full entry body' : 'Uses this entry’s full-text / summary preference' : 'Full text'}{inherited ? ' · Selected through a parent; deselect the parent to change' : ''}{later ? ' · Later than reference scene' : ''}</small></span></label>
+    const description = `${item.type === 'act' || item.type === 'chapter' ? 'Includes descendant scenes in full; automatic sources are deduplicated' : item.type === 'codexEntry' ? fullCodex ? 'Full entry body' : 'Uses this entry’s full-text / summary preference' : 'Full text'}${inherited ? ' · Selected through a parent; deselect the parent to change' : ''}${later ? ' · Later than reference scene' : ''}`
+    return <Choice className="context-selection-row" title={item.title || 'Untitled'} description={description} meta={item.category ? `${item.type} · ${item.category}` : item.type} badges={[inherited && 'Inherited', later && 'Later than reference']} checked={profile[key].includes(item.id) || inherited} disabled={inherited} onChange={() => onToggle(key, item.id)} />
   }
   const branch = (item: ArcEntity, ancestors: string[] = []): React.ReactNode => {
     if (ancestors.includes(item.id) || !hasMatch(item)) return null
@@ -41,7 +46,7 @@ export function ContextSourcePicker({ sources, currentDocumentId, anchorId, prof
   const structuralIds = new Set(available.filter(item => ['act', 'chapter', 'scene'].includes(item.type)).map(item => item.id))
   const roots = available.filter(item => structuralIds.has(item.id) && !structuralIds.has(item.parentId ?? '')).sort((a, b) => Number(a.order ?? 0) - Number(b.order ?? 0))
   return <div className="context-picker">
-    <div className="context-picker-toolbar"><label className="context-search-label"><span>Find sources</span><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search titles, types, or categories" /></label><label className="context-selected-filter"><input type="checkbox" checked={selectedOnly} onChange={event => setSelectedOnly(event.target.checked)} /><span>Selected only</span></label><button type="button" disabled={!selected.length} onClick={onClear}>Clear source selections</button></div>
+    <div className="context-picker-toolbar"><Input className="context-search-label" label="Find sources" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search titles, types, or categories" /><Checkbox className="context-selected-filter" label="Selected only" checked={selectedOnly} onChange={event => setSelectedOnly(event.target.checked)} /><Button disabled={!selected.length} onClick={onClear}>Clear source selections</Button></div>
     <p className="context-help">{selected.length} explicit selections · {sceneOrder.filter(id => effective.has(id) && id !== currentDocumentId).length} scenes selected directly or through a parent. Clearing selections keeps automatic context and the summary range.</p>
     {laterSelected && <p className="context-caution" role="status">Selected sources include scenes later than “{sources.find(item => item.id === anchorId)?.title}”. These may reveal later story events.</p>}
     <div className="context-source-tree"><h3>Manuscript</h3>{roots.map(item => branch(item))}{(['note', 'codexEntry'] as const).map(type => <section key={type}><h3>{type === 'note' ? 'Notes' : 'Codex'}</h3>{available.filter(item => item.type === type && matches(item)).map(item => <div key={item.id}>{row(item)}</div>)}</section>)}{!available.some(matches) && <p>No matching sources.</p>}</div>

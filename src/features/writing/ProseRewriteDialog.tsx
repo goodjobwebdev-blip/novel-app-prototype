@@ -1,6 +1,7 @@
 import type { NormalizedAssembledRequest } from '../../shared/ai/prompt-composition'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import Button from '../../shared/ui/Button'
 import ExpandableTextInput from '../../shared/ui/ExpandableTextInput'
 import { protectedRanges } from '../editor/document-projection.ts'
 
@@ -45,7 +46,7 @@ export default function ProseRewriteDialog({ title, original, instruction: initi
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
     }
   }}>
-    <header><h2 id="prose-rewrite-title">{title}</h2><button type="button" onClick={() => { controller.current?.abort(); close() }} aria-label="Close rewrite preview">×</button></header>
+    <header><h2 id="prose-rewrite-title">{title}</h2><Button variant="ghost" style={{ width: 44, height: 44, padding: 0, borderRadius: 'var(--radius)' }} onClick={() => { controller.current?.abort(); close() }} aria-label="Close rewrite preview">×</Button></header>
     <p>Review the replacement before applying it to this passage.</p>
     <label>{instructionLabel}<ExpandableTextInput value={instruction} onChange={setInstruction} readOnly={instructionReadOnly || running} aria-label="Rewrite instruction" dialogTitle="Rewrite instruction" /></label>
     {examples.length > 0 && <div className="quick-tool-examples" aria-label="Instruction examples">{examples.map((example) => <button key={example} type="button" disabled={running} onClick={() => setInstruction(example)}>{example}</button>)}</div>}
@@ -54,6 +55,6 @@ export default function ProseRewriteDialog({ title, original, instruction: initi
     <label>Replacement<ExpandableTextInput value={result} onChange={setResult} readOnly={running} aria-label="Replacement preview" dialogTitle="Edit replacement preview" /></label>
     {request && <details><summary>Request preview · {request.model}</summary><pre className="rewrite-original">{JSON.stringify({ model: request.model, messages: request.request.providerMessages }, null, 2)}</pre></details>}
     <p role="status">{status}</p>{error && <p role="alert">{error}</p>}
-    <footer><button type="button" onClick={() => { controller.current?.abort(); close() }}>Discard</button>{running ? <button type="button" onClick={stop}>Stop</button> : <button type="button" disabled={!allowEmptyInstruction && !instruction.trim()} onClick={() => { void run() }}>{result ? 'Regenerate preview' : generateLabel}</button>}<button type="button" disabled={running || !result.trim() || Boolean(protectedRanges(result).length)} onClick={() => { if (apply(result)) close(); else setError('The document or passage changed. Close this preview and select it again.') }}>Apply replacement</button></footer>
+    <footer><Button variant="ghost" onClick={() => { controller.current?.abort(); close() }}>Discard</Button>{running ? <Button variant="danger" onClick={stop}>Stop</Button> : <Button disabled={!allowEmptyInstruction && !instruction.trim()} onClick={() => { void run() }}>{result ? 'Regenerate preview' : generateLabel}</Button>}<Button variant="primary" disabled={running || !result.trim() || Boolean(protectedRanges(result).length)} onClick={() => { if (apply(result)) close(); else setError('The document or passage changed. Close this preview and select it again.') }}>Apply replacement</Button></footer>
   </section></div>, document.body)
 }
