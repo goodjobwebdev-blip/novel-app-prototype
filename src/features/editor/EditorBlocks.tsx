@@ -1,7 +1,10 @@
 import { passageMarkers } from '../writing/scene-beats'
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
+import Button from '../../shared/ui/Button'
 import ExpandableTextInput from '../../shared/ui/ExpandableTextInput'
+import Input from '../../shared/ui/Input'
+import Select from '../../shared/ui/Select'
 import type { MarkdownEditorHandle, EditorSelectionSnapshot } from './MarkdownEditor'
 import { encodeDocumentBlock, rangeTouchesProtected, type DocumentBlock, type LocatedBlock } from './document-projection.ts'
 import { listGalleryImages, imageId, notifyImageStore } from '../images/image-store'
@@ -57,10 +60,10 @@ export default function EditorBlocks({ bookId, editor, disabled, editRequest, in
   return <>
     {error && !draft && <p role="alert">{error}</p>}
     {draft && createPortal(<div className="editor-block-backdrop"><section ref={dialog} role="dialog" aria-modal="true" aria-labelledby="editor-block-title" className="editor-block-dialog" onKeyDown={(event) => { if (event.key === 'Escape' && !busy) setDraft(null); if (event.key === 'Tab') { const controls = Array.from(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)') ?? []); const first = controls[0], last = controls.at(-1); if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() } } }}>
-      <header><h2 id="editor-block-title">{draft.existing ? 'Edit' : 'Insert'} {draft.block.type === 'image' ? 'image' : draft.block.type === 'beat' ? 'scene beat' : 'private comment'}</h2><button type="button" disabled={busy} onClick={() => setDraft(null)} aria-label="Close block editor">×</button></header>
+      <header><h2 id="editor-block-title">{draft.existing ? 'Edit' : 'Insert'} {draft.block.type === 'image' ? 'image' : draft.block.type === 'beat' ? 'scene beat' : 'private comment'}</h2><Button className="editor-block-close" size="small" variant="ghost" disabled={busy} onClick={() => setDraft(null)} aria-label="Close block editor">×</Button></header>
       <p>{draft.block.type === 'beat' ? 'Planning visible to Chat. Used as the instruction when generating this beat, and excluded from manuscript context and read aloud.' : 'This block stays in your book and backups. It is excluded from AI requests and read aloud.'}</p>
       {draft.block.type !== 'image' ? <ExpandableTextInput autoFocus value={draft.block.text || ''} onChange={(text) => patch({ text })} aria-label={draft.block.type === 'beat' ? 'Scene beat' : 'Private comment'} dialogTitle={draft.block.type === 'beat' ? 'Edit scene beat' : 'Edit private comment'} /> : <>
-        <label>Saved image<select value={draft.block.assetId || ''} disabled={busy} onChange={async (event) => {
+        <Select label="Saved image" value={draft.block.assetId || ''} disabled={busy} onChange={async (event) => {
           const asset = images.find((image) => image.id === event.target.value)
           if (!asset) { patch({ assetId: '' }); return }
           if (!asset.id.startsWith('codex:')) { patch({ assetId: asset.id }); return }
@@ -70,7 +73,7 @@ export default function EditorBlocks({ bookId, editor, disabled, editRequest, in
             await (await database()).table('galleryImages').add(copy)
             setImages((items) => [copy, ...items]); patch({ assetId: copy.id }); notifyImageStore()
           } catch (e) { setError(e instanceof Error ? e.message : 'Could not save image.') } finally { setBusy(false) }
-        }}><option value="">Choose an image</option>{images.map((image) => <option key={image.id} value={image.id}>{image.prompt || 'Saved image'} · {image.width} × {image.height}</option>)}</select></label>
+        }}><option value="">Choose an image</option>{images.map((image) => <option key={image.id} value={image.id}>{image.prompt || 'Saved image'} · {image.width} × {image.height}</option>)}</Select>
         <label>Upload image<input type="file" accept="image/png,image/jpeg,image/webp" disabled={busy} onChange={async (event) => {
           const file = event.target.files?.[0]; event.target.value = ''; if (!file) return
           setBusy(true); setError('')
@@ -81,11 +84,11 @@ export default function EditorBlocks({ bookId, editor, disabled, editRequest, in
             setImages((items) => [asset, ...items]); patch({ assetId: asset.id }); notifyImageStore()
           } catch (e) { setError(e instanceof Error ? e.message : 'Could not save image.') } finally { setBusy(false) }
         }} /></label>
-        <label>Alternative text<input value={draft.block.alt || ''} onChange={(event) => patch({ alt: event.target.value })} /></label>
-        <label>Caption<input value={draft.block.caption || ''} onChange={(event) => patch({ caption: event.target.value })} /></label>
+        <Input label="Alternative text" value={draft.block.alt || ''} onChange={(event) => patch({ alt: event.target.value })} />
+        <Input label="Caption" value={draft.block.caption || ''} onChange={(event) => patch({ caption: event.target.value })} />
       </>}
       {error && <p role="alert">{error}</p>}
-      <footer>{draft.existing && <button type="button" disabled={busy || disabled} onClick={() => apply(true)}>Remove block</button>}<button type="button" disabled={busy} onClick={() => setDraft(null)}>Cancel</button><button type="button" disabled={busy || disabled || (draft.block.type === 'image' && !draft.block.assetId) || (draft.block.type === 'beat' && !draft.block.text?.trim())} onClick={() => apply()}>{busy ? 'Saving image…' : 'Apply'}</button></footer>
+      <footer>{draft.existing && <Button variant="danger" disabled={busy || disabled} onClick={() => apply(true)}>Remove block</Button>}<Button variant="ghost" disabled={busy} onClick={() => setDraft(null)}>Cancel</Button><Button variant="primary" loading={busy} disabled={disabled || (draft.block.type === 'image' && !draft.block.assetId) || (draft.block.type === 'beat' && !draft.block.text?.trim())} onClick={() => apply()}>{busy ? 'Saving image…' : 'Apply'}</Button></footer>
     </section></div>, document.body)}
   </>
 }

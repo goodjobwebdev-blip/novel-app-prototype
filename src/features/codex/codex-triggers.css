@@ -1,6 +1,6 @@
-.codex-trigger-editor { display: grid; gap: 7px; min-width: 0; }
-.codex-trigger-editor textarea { min-height: 86px; resize: vertical; }
-.codex-trigger-editor small { opacity: .68; line-height: 1.4; }
+.codex-trigger-editor { display: grid; gap: 7px; min-width: 0; color: var(--soft); }
+.codex-trigger-editor > span { font-size: 12px; font-weight: 600; }
+.codex-trigger-editor small { color: var(--faint); opacity: .8; line-height: 1.4; }
 .context-trigger-window { display: grid; grid-template-columns: minmax(0, 1fr) minmax(86px, 120px); gap: 12px; align-items: center; }
 .context-trigger-window span { display: grid; gap: 3px; }
 .context-trigger-window small { opacity: .68; }

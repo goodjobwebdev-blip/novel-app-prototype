@@ -317,12 +317,18 @@ button:focus-visible { outline:3px solid rgba(198,168,107,.3); outline-offset:2p
 .summary-status.current { color:#9db38d; }
 .document-metadata { margin:-18px 0 24px; padding:12px; border:1px solid var(--line); border-radius:12px; background:rgba(255,255,255,.025); }
 .document-titlebar { margin:-17px 0 30px; padding-bottom:18px; border-bottom:1px solid var(--line); display:flex; align-items:end; justify-content:space-between; gap:14px; }
+.document-titlebar > div:first-child { min-width:0; }
+.document-titlebar h1 { overflow-wrap:anywhere; }
+.document-title-actions { flex-wrap:wrap; justify-content:flex-end; }
+.document-title-actions .arc-button { min-height:44px; }
+.document-icon-action.arc-button { width:44px; min-width:44px; padding:0; }
 .document-titlebar small { color:var(--accent); font:9px ui-sans-serif,system-ui; letter-spacing:.12em; text-transform:uppercase; }
 .document-titlebar h1 { margin:4px 0 0; font:500 clamp(28px,7vw,42px)/1.08 var(--serif); }
-.document-titlebar button { min-height:36px; padding:0 11px; border:1px solid var(--line); border-radius:18px; background:rgba(255,255,255,.035); color:var(--soft); display:flex; align-items:center; gap:6px; font:11px ui-sans-serif,system-ui; cursor:pointer; }
+.document-titlebar button:not(.arc-button) { min-height:44px; padding:0 11px; border:1px solid var(--line); border-radius:var(--radius); background:rgba(255,255,255,.035); color:var(--soft); display:flex; align-items:center; gap:6px; font:11px ui-sans-serif,system-ui; cursor:pointer; }
 .document-titlebar button svg { width:14px; height:14px; }
-.document-metadata label { max-width:260px; display:block; }
-.document-metadata select { width:100%; min-height:42px; padding:0 10px; border:1px solid var(--line); border-radius:10px; background:var(--surface); color:var(--ink); }
+.document-metadata label { max-width:none; }
+.codex-document-metadata { display:grid; gap:14px; }
+.codex-document-metadata .arc-field { width:min(100%,320px); }
 .summary-generate-wrap { position:fixed; z-index:35; inset:auto clamp(14px,4vw,32px) 18px auto; }
 .summary-generate { min-height:52px; padding:0 19px; border:1px solid rgba(245,226,185,.35); border-radius:26px; background:rgba(211,184,127,.94); color:#1a1813; box-shadow:0 10px 32px rgba(0,0,0,.38); display:flex; align-items:center; gap:8px; font-weight:700; cursor:pointer; }
 .summary-generate svg { width:18px; height:18px; }
@@ -411,6 +417,8 @@ input,.reload-button,.use-model,.create-theme,.panel-field textarea,.panel-field
   .model-list article { grid-template-columns:44px minmax(0,1fr) auto; }
   .tree p,.outline-row { grid-template-columns:18px minmax(0,1fr) 44px; }
   .content-open { padding-right:196px; }
+  .document-titlebar:not(:has(.codex-image-identity)) { align-items:start; flex-direction:column; }
+  .document-titlebar:not(:has(.codex-image-identity)) .document-title-actions { width:100%; }
 }
 
 /* Compact provider diagnostics use the shared disclosure geometry. */

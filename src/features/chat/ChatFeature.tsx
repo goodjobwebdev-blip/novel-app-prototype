@@ -50,9 +50,11 @@ import {
 import { streamChatCompletion, type ChatCompletionUsage } from './chat-api'
 import Button from '../../shared/ui/Button'
 import Checkbox from '../../shared/ui/Checkbox'
+import Disclosure from '../../shared/ui/Disclosure'
 import ExpandableTextInput, { type ExpandableTextInputDictationTarget } from '../../shared/ui/ExpandableTextInput'
 import GenerationActions from '../../shared/ui/GenerationActions'
 import Input from '../../shared/ui/Input'
+import SearchField from '../../shared/ui/SearchField'
 import Select from '../../shared/ui/Select'
 import PromptTemplateEditor from '../settings/PromptTemplateEditor'
 import PromptPresetControls from '../settings/PromptPresetControls'
@@ -1280,13 +1282,12 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           return <section className="chat-answer-round" key={message.id}>
             <header className="chat-round-heading"><strong>Round {message.roundNumber ?? index + 1}</strong><span>{executions.length ? `${executions.length} tool ${executions.length === 1 ? 'call' : 'calls'}` : message.content ? 'Response' : 'Reasoning'}</span></header>
             {editingId === message.id ? <InlineMessageEdit value={editingValue} onChange={setEditingValue} onCancel={() => setEditingId('')} onSave={() => { void saveEdit(message, false) }} /> : <>
-              {message.thoughts && <details className="chat-thoughts" open={openThoughtMessageIds.has(message.id)} onToggle={(event) => setPersistedThoughtsOpen(message.id, event.currentTarget.open)}><summary>Thoughts</summary><div>{message.thoughts}</div></details>}
+              {message.thoughts && <Disclosure className="chat-thoughts" title="Thoughts" open={openThoughtMessageIds.has(message.id)} onToggle={(event) => setPersistedThoughtsOpen(message.id, event.currentTarget.open)}>{message.thoughts}</Disclosure>}
               {message.content && <div className="chat-assistant-body">{chat?.character ? <CharacterMessage content={message.content} participants={chat.character.participants} render={text => <MarkdownMessage content={text} />} /> : <MarkdownMessage content={message.content} />}</div>}
             </>}
-            {executions.length ? <div className="chat-round-tools" aria-label={`Round ${message.roundNumber ?? index + 1} tool calls`}>{executions.map(execution => <details className={`chat-tool-execution ${execution.ok === false ? 'failed' : execution.ok === true ? 'succeeded' : ''}`} key={execution.callId}>
-              <summary><code>{execution.name}</code><span>{execution.ok === false ? 'Failed' : execution.ok === true ? 'Succeeded' : 'Result'}</span></summary>
+            {executions.length ? <div className="chat-round-tools" aria-label={`Round ${message.roundNumber ?? index + 1} tool calls`}>{executions.map(execution => <Disclosure className={`chat-tool-execution ${execution.ok === false ? 'failed' : execution.ok === true ? 'succeeded' : ''}`} title={<><code>{execution.name}</code><span>{execution.ok === false ? 'Failed' : execution.ok === true ? 'Succeeded' : 'Result'}</span></>} key={execution.callId}>
               <div>{execution.arguments ? <section><strong>Arguments</strong><pre>{formatToolPayload(execution.arguments)}</pre></section> : null}<section><strong>Result</strong><pre>{formatToolPayload(execution.result)}</pre></section></div>
-            </details>)}</div> : null}
+            </Disclosure>)}</div> : null}
             {(message.brainstorms ?? []).map(brainstorm => <BrainstormCard key={brainstorm.id} message={message} brainstorm={brainstorm} disabled={generating} onSaved={reloadMessages} onSend={text => isCurrentChat({ id: message.parentId, bookId: message.bookId }) ? send(text) : Promise.resolve(false)} />)}
             {renderWorkspaceCards(message)}
             {message.directImageRequest && <section className="chat-media-card image-ui"><strong>Requested image</strong><ImageJobs messageId={message.id} direct /></section>}
@@ -1296,7 +1297,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
         {!responseStillGenerating && <>
           {last.status && last.status !== 'complete' && <small className="chat-message-status">{last.status === 'waiting' ? 'Waiting for your approval' : last.status === 'limited' ? `Limit reached · ${last.continuation?.maxRounds ?? last.roundNumber ?? 8} model rounds` : last.status === 'failed' ? 'Interrupted' : 'Stopped'}</small>}
           {waitingForApproval && <p className="chat-approval-wait">The agent is paused. Approve or reject the action above; it will continue with the actual result.</p>}
-          {last.continuation && !last.continuedAt && messages.at(-1)?.id === last.id && !waitingForApproval && <button className="chat-continue" type="button" disabled={generating} onClick={() => { void continueResponse(last) }}>Continue</button>}
+          {last.continuation && !last.continuedAt && messages.at(-1)?.id === last.id && !waitingForApproval && <Button className="chat-continue" disabled={generating} onClick={() => { void continueResponse(last) }}>Continue</Button>}
           <div className="message-tools chat-answer-tools">
             <Button className="chat-icon-action" size="small" variant="ghost" aria-label={copiedMessageId === last.id ? 'Copied answer' : 'Copy answer'} title={copiedMessageId === last.id ? 'Copied' : 'Copy'} leadingIcon={copiedMessageId === last.id ? <Check /> : <Copy />} disabled={!prose} onClick={() => { void copyMessage({ ...last, content: prose }) }} />
             {answerMessages.length === 1 && <Button className="chat-icon-action" size="small" variant="ghost" aria-label="Edit answer" title="Edit" leadingIcon={<Pencil />} disabled={generating || Boolean(summaryProposalId)} onClick={() => beginEdit(last)} />}
@@ -1335,14 +1336,14 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
         {groupChatAnswers(messages).map(group => group.role === 'user' ? renderUserMessage(group.messages[0]) : renderAssistantAnswer(group.messages))}
         {generating && <article className={`message assistant streaming ${generationContinuesAnswer ? 'continuing-answer' : ''}`}><div className="chat-message-stack chat-live-generation">
           <header className="chat-round-heading"><strong>Round {roundProgress.round || 1}</strong><span>{generationPhaseLabel(phase)} · {formatElapsed(elapsed)}</span></header>
-          {streamedThoughts && <details className="chat-thoughts" open={liveThoughtsOpen} onToggle={(event) => setLiveThoughtsOpen(event.currentTarget.open)}><summary>Thoughts</summary><div>{streamedThoughts}</div></details>}
+          {streamedThoughts && <Disclosure className="chat-thoughts" title="Thoughts" open={liveThoughtsOpen} onToggle={(event) => setLiveThoughtsOpen(event.currentTarget.open)}>{streamedThoughts}</Disclosure>}
           {streamedContent && <div className="chat-assistant-body">{chat.character ? <CharacterMessage content={streamedContent} participants={chat.character.participants} render={text => <MarkdownMessage content={text} />} /> : <MarkdownMessage content={streamedContent} />}</div>}
         </div></article>}
         <div ref={bottomRef} className="chat-scroll-anchor" />
       </div>
     </section>
 
-    {!followOutput && <button className="chat-follow-output" type="button" onClick={jumpToLatest}>↓ New content</button>}
+    {!followOutput && <Button className="chat-follow-output" variant="secondary" onClick={jumpToLatest}>↓ New content</Button>}
 
     <Composer className="chat-message-composer" strip={<details className="chat-config-strip">
         <summary><span>Generation settings</span><small>Thinking: {chat.thinking ? THINKING_EFFORT_OPTIONS.find(option => option.value === normalizeThinkingEffort(chat.thinkingEffort))?.label : 'Provider default'} · model · context</small><ChevronDown aria-hidden="true" /></summary>
@@ -1378,8 +1379,8 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           <PromptTemplateEditor value={compositionDraft.systemPrompt} diagnostics={promptTemplateDiagnostics(compositionDraft.systemPrompt, 'assistant')} ariaLabel="Chat system prompt template" onChange={(systemPrompt) => setCompositionDraft((current) => ({ ...current, systemPrompt }))} />
           <ChatPredefinedMessages messages={compositionDraft.predefinedMessages} previewValues={promptPreviewContext ? chatRequestValues(chat?.character ? emptyCharacterBook : bookPromptValues, promptPreviewContext, previewCharacter?.instructions) : undefined} onChange={(predefinedMessages) => setCompositionDraft((current) => ({ ...current, predefinedMessages }))} />
           {workspaceWarning && <p className="chat-composition-warning" role="status">{workspaceWarning}</p>}
-          <details className="prompt-reference"><summary>Variables & syntax</summary><div className="chat-composition-variables">{promptVariables.filter((variable) => variable.scopes.includes('assistant')).map((variable) => <code key={variable.name}>{`{{${variable.name}}}`}</code>)}</div></details>
-          <details className="chat-request-preview" open><summary>Request Preview</summary>
+          <Disclosure className="chat-composition-reference" title="Variables & syntax"><div className="chat-composition-variables">{promptVariables.filter((variable) => variable.scopes.includes('assistant')).map((variable) => <code key={variable.name}>{`{{${variable.name}}}`}</code>)}</div></Disclosure>
+          <Disclosure className="chat-request-preview" title="Request preview" open>
             {previewRequest ? <>
               <p>Likely reusable prefix: {likelyReusablePrefix(previewRequest.parts, (name) => promptVariables.find((variable) => variable.name === name)?.stability).partCount} message(s)</p>
               {previewDiagnostics && <p>{previewDiagnostics.requestTokens.toLocaleString()} estimated input tokens · {Math.round(previewDiagnostics.usageRatio * 100)}% of the usable {previewDiagnostics.usableInputTokens.toLocaleString()}-token budget.</p>}
@@ -1387,9 +1388,9 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
               {previewRequest.parts.map((part) => <section key={part.id} className={part.omitted ? 'omitted' : ''}><strong>{part.name || part.id}</strong><small>{part.role?.toUpperCase() || 'STRUCTURED'} · {part.ownership} · {part.sourceKind}{part.omitted ? ' · omitted' : ''}</small><pre>{part.content || '[empty]'}</pre></section>)}
               {previewRequest.structuredParts.map((part) => <section key={part.id}><strong>{part.name || part.id}</strong><small>APP MANAGED · structured tools</small><pre>{JSON.stringify(part.value, null, 2)}</pre></section>)}
               {previewRequest.dynamicSourceDedupe.map((decision) => <p key={decision.sourceId}>Omitted Additional source “{decision.omittedAdditional.title || decision.sourceId}” because it is already represented automatically.</p>)}
-              {lastFinalizedRequest && <details><summary>Last sent provider payload</summary><pre>{JSON.stringify({ messages: lastFinalizedRequest.messages, tools: lastFinalizedRequest.tools }, null, 2)}</pre></details>}
+              {lastFinalizedRequest && <Disclosure title="Last sent provider payload"><pre>{JSON.stringify({ messages: lastFinalizedRequest.messages, tools: lastFinalizedRequest.tools }, null, 2)}</pre></Disclosure>}
             </> : <p>{promptPreviewError || 'Preparing the current Chat context…'}</p>}
-          </details>
+          </Disclosure>
           {compositionDiagnostics.some((diagnostic) => diagnostic.severity === 'error') && <div className="chat-composition-warning" role="alert">Fix template errors before saving.<ul>{compositionDiagnostics.map((diagnostic, index) => <li key={`${diagnostic.code}-${index}`}>{diagnostic.message}</li>)}</ul></div>}
         </div>
         <footer><span>Saved only for this chat. Reset copies the current Book Chat defaults.</span><div><Button variant="ghost" onClick={() => { void resetPrompt() }}>Reset</Button><Button variant="ghost" onClick={() => { setCompositionDraft(clonePromptComposition(chat.promptComposition)); setPromptOpen(false) }}>Cancel</Button><Button variant="primary" onClick={() => { void savePrompt() }}>Save</Button></div></footer>
@@ -1662,7 +1663,7 @@ export function ChatSidebar({ bookId, activeChatId, onOpen, currentSceneId, care
   return <section className="chat-sidebar"><div className="panel-title"><div><small>Conversations</small><h2>Chats</h2></div><Button className="chat-icon-action" size="small" variant="ghost" onClick={() => { void add() }} aria-label="Start new chat" leadingIcon={<Plus />} /></div>
     <Button className="new-character-chat" leadingIcon={<MessageCircle />} onClick={() => setCharacterSetup(true)}>New character chat</Button>
     {characterSetup && <CharacterChatSetup bookId={bookId} currentSceneId={currentSceneId} caret={caret} onClose={() => setCharacterSetup(false)} onOpen={onOpen} />}
-    <label className="chat-sidebar-search"><Search aria-hidden="true" /><input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1) }} placeholder="Search chats" /></label>
+    <SearchField className="chat-sidebar-search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1) }} placeholder="Search chats" aria-label="Search chats" />
     <div className="chat-sidebar-list">{visible.map((chat) => <article className={`chat-row-wrap ${activeChatId === chat.id ? 'selected' : ''}`} key={chat.id}>
       <button className="chat-row" type="button" onClick={() => { if (chat.bookId === bookIdRef.current) onOpen(chat.id) }}><i><MessageCircle aria-hidden="true" /></i><span><strong>{chat.title}</strong><small>{chat.lastMessagePreview || 'No messages yet'}</small></span><em>{formatChatEdited(chat.updatedAt)}</em></button>
       <div className="chat-row-actions"><Button className="chat-icon-action" size="small" variant="ghost" onClick={() => { void rename(chat) }} aria-label={`Rename ${chat.title}`} leadingIcon={<Pencil />} /><Button className="chat-icon-action" size="small" variant="ghost" onClick={() => { void remove(chat) }} aria-label={`Delete ${chat.title}`} leadingIcon={<Trash2 />} /></div>

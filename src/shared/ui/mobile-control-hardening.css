@@ -225,28 +225,11 @@ input[type="range"] {
   }
 }
 
-/* Metadata must use UI typography and keep checkbox labels on the same row. */
+/* Note metadata uses the shared choices and disclosures at their native target sizes. */
 .document-metadata.note-roles {
   margin: 0 0 24px;
   font: 14px/1.5 var(--input-font-family, sans-serif);
 }
-
-.document-metadata.note-roles label {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  max-width: none;
-  min-height: 36px;
-}
-
-.document-metadata.note-roles input[type="checkbox"] {
-  width: 18px;
-  height: 18px;
-  margin: 0;
-  flex: none;
-}
-
-.note-roles > small { padding-left: 28px; }
 
 .lore-types-manager > article {
   display: grid;
