@@ -2576,15 +2576,15 @@ function BookSettings({ book, books, series, onSave, onCreateSeries, onRenameSer
     </section>
     <section className="book-settings-group" aria-labelledby="story-profile-title">
       <div className="book-settings-group-title"><span>02</span><h3 id="story-profile-title">Story profile</h3></div>
-      <label className="book-field"><span>Book overview</span><textarea rows={5} value={draft.overview} onChange={(event) => update('overview', event.target.value)} placeholder="What is this book about?" /></label>
-      <Input className="book-field" label="Genre" value={draft.genre} onChange={(event) => update('genre', event.target.value)} placeholder="Fantasy, mystery, romance…" />
-      <Input className="book-field" label="Writing style" value={draft.writingStyle} onChange={(event) => update('writingStyle', event.target.value)} placeholder="Lyrical tension, clean and cinematic…" />
+      <label className="book-field"><span>Book overview</span><ExpandableTextInput rows={5} value={draft.overview} onChange={(value) => update('overview', value)} aria-label="Book overview" dialogTitle="Edit book overview" placeholder="What is this book about?" /></label>
+      <label className="book-field"><span>Genre</span><ExpandableTextInput value={draft.genre} onChange={(value) => update('genre', value)} aria-label="Genre" dialogTitle="Edit genre" placeholder="Fantasy, mystery, romance…" /></label>
+      <label className="book-field"><span>Writing style</span><ExpandableTextInput value={draft.writingStyle} onChange={(value) => update('writingStyle', value)} aria-label="Writing style" dialogTitle="Edit writing style" placeholder="Lyrical tension, clean and cinematic…" /></label>
       <Input className="book-field" label="Point of view" value={draft.pointOfView} onChange={(event) => update('pointOfView', event.target.value)} placeholder="Third person limited" />
       <div className="book-field-pair"><Input className="book-field" label="Tense" value={draft.tense} onChange={(event) => update('tense', event.target.value)} placeholder="Past" /><Input className="book-field" label="Primary language" value={draft.language} onChange={(event) => update('language', event.target.value)} placeholder="English" /></div>
     </section>
     <section className="book-danger" aria-labelledby="book-danger-title">
       <div><span>Danger zone</span><h3 id="book-danger-title">Delete this book</h3><p>Removes the manuscript and all local book data from this device.</p></div>
-      <div className="book-danger-actions"><button className={deleteConfirm ? 'confirming' : ''} type="button" onClick={() => { if (!deleteConfirm) setDeleteConfirm(true); else { savedRef.current = JSON.stringify(draft); void onDelete() } }}><Trash2 aria-hidden="true" />{deleteConfirm ? 'Confirm delete' : 'Delete book'}</button>{deleteConfirm && <button className="cancel" type="button" onClick={() => setDeleteConfirm(false)}>Cancel</button>}</div>
+      <div className="book-danger-actions"><Button variant="danger" leadingIcon={<Trash2 />} onClick={() => { if (!deleteConfirm) setDeleteConfirm(true); else { savedRef.current = JSON.stringify(draft); void onDelete() } }}>{deleteConfirm ? 'Confirm delete' : 'Delete book'}</Button>{deleteConfirm && <Button variant="ghost" onClick={() => setDeleteConfirm(false)}>Cancel</Button>}</div>
     </section>
     <BookStorage key={book.id} bookId={book.id} title={book.title} onImported={onImported} beforeExport={async () => {
       if (latestDraftRef.current) await onSave(latestDraftRef.current)
