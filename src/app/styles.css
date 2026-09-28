@@ -320,7 +320,8 @@ button:focus-visible { outline:3px solid rgba(198,168,107,.3); outline-offset:2p
 .document-titlebar button svg { width:14px; height:14px; }
 .document-metadata label { max-width:none; }
 .codex-document-metadata { display:grid; gap:14px; }
-.codex-document-metadata .arc-field { width:min(100%,320px); }
+.codex-document-metadata .arc-field { width:100%; }
+.story-editor > :is(.roleplay-participant,.codex-timeline,.codex-scope-controls,.codex-document-metadata,.codex-templates,.codex-dependencies-metadata) { width:100%; margin:0 0 14px; }
 .summary-generate-wrap { position:fixed; z-index:35; inset:auto clamp(14px,4vw,32px) 18px auto; }
 .summary-generate { min-height:52px; padding:0 19px; border:1px solid rgba(245,226,185,.35); border-radius:26px; background:rgba(211,184,127,.94); color:#1a1813; box-shadow:0 10px 32px rgba(0,0,0,.38); display:flex; align-items:center; gap:8px; font-weight:700; cursor:pointer; }
 .summary-generate svg { width:18px; height:18px; }
@@ -413,7 +414,7 @@ input,.reload-button,.use-model,.create-theme,.panel-field textarea,.panel-field
   .tree p { grid-template-columns:18px minmax(0,1fr) 44px; }
   .outline-row { grid-template-columns:18px minmax(0,1fr) 44px 44px; }
   .content-open { padding-right:196px; }
-  .document-titlebar:not(:has(.codex-image-identity)) .document-title-actions { width:100%; }
+  .document-title-actions,.document-titlebar .codex-identity-actions { width:100%; justify-content:flex-start; }
 }
 
 /* Compact provider diagnostics use the shared disclosure geometry. */
