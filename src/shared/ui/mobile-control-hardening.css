@@ -77,8 +77,8 @@ input[type="range"] {
 }
 
 /* Arc-themed action surfaces where the component CSS previously only set layout. */
-.speech-settings .card-heading > button,
-.stt-settings-card .card-heading > button,
+.speech-settings .card-heading > button:not(.arc-button),
+.stt-settings-card .card-heading > button:not(.arc-button),
 .codex-panel-actions > button {
   appearance: none;
   min-height: 36px;
@@ -94,15 +94,15 @@ input[type="range"] {
   cursor: pointer;
 }
 
-.speech-settings .card-heading > button svg,
-.stt-settings-card .card-heading > button svg,
+.speech-settings .card-heading > button:not(.arc-button) svg,
+.stt-settings-card .card-heading > button:not(.arc-button) svg,
 .codex-panel-actions > button svg {
   width: 16px;
   height: 16px;
 }
 
-.speech-settings .card-heading > button:hover:not(:disabled),
-.stt-settings-card .card-heading > button:hover:not(:disabled),
+.speech-settings .card-heading > button:not(.arc-button):hover:not(:disabled),
+.stt-settings-card .card-heading > button:not(.arc-button):hover:not(:disabled),
 .codex-panel-actions > button:hover:not(:disabled),
 .codex-panel-actions > button.active {
   border-color: rgba(198, 168, 107, .38);
@@ -110,22 +110,22 @@ input[type="range"] {
   color: var(--accent-bright, var(--ink));
 }
 
-.speech-settings .card-heading > button:active:not(:disabled),
-.stt-settings-card .card-heading > button:active:not(:disabled),
+.speech-settings .card-heading > button:not(.arc-button):active:not(:disabled),
+.stt-settings-card .card-heading > button:not(.arc-button):active:not(:disabled),
 .codex-panel-actions > button:active:not(:disabled) {
   transform: translateY(1px);
   background: rgba(198, 168, 107, .13);
 }
 
-.speech-settings .card-heading > button:focus-visible,
-.stt-settings-card .card-heading > button:focus-visible,
+.speech-settings .card-heading > button:not(.arc-button):focus-visible,
+.stt-settings-card .card-heading > button:not(.arc-button):focus-visible,
 .codex-panel-actions > button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
-.speech-settings .card-heading > button:disabled,
-.stt-settings-card .card-heading > button:disabled,
+.speech-settings .card-heading > button:not(.arc-button):disabled,
+.stt-settings-card .card-heading > button:not(.arc-button):disabled,
 .codex-panel-actions > button:disabled {
   opacity: .5;
   cursor: not-allowed;

@@ -1314,7 +1314,7 @@ function SpeechSettingsPanel({ bookId, settings, scope, onChange }: { bookId?: s
   const liveSupported = selectedStt?.supportsLive === true
 
   return <section className="speech-settings">
-    <header className="page-heading"><div><p>{scope === 'book' ? 'Book Speech' : 'Default Speech'}</p><h1 id="page-title">Speech</h1><span>{scope === 'book' ? 'Independent TTS and dictation settings for this book.' : 'Copied into each new book, then edited independently.'}</span></div><Volume2 aria-hidden="true" /></header>
+    <header className="page-heading"><div><p>{scope === 'book' ? 'Book Speech' : 'Default Speech'}</p><h1 id="page-title">Speech</h1><span>{scope === 'book' ? 'Independent TTS and dictation settings for this book.' : 'Copied into each new book, then edited independently.'}</span></div></header>
     <TtsCacheSettings bookId={bookId} />
     <section className="settings-card">
       <div className="card-heading"><div><span>01</span><h2>Speech credentials</h2></div><p>Speech credentials are separate from text AI.</p></div>
