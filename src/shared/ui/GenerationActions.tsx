@@ -11,7 +11,7 @@ type Action = {
 }
 
 /** Shared by Chat, the floating editor control, and the instruction drawer. */
-export default function GenerationActions({ label, onGenerate, actions, menuOnly = false, menuAlign = 'end', shape = 'circle' }: {
+export default function GenerationActions({ label, onGenerate, actions, menuOnly = false, menuAlign = 'end', shape = 'square' }: {
   label: string
   menuOnly?: boolean
   menuAlign?: 'start' | 'end'

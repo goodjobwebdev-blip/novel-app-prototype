@@ -892,7 +892,7 @@
 .generation-running > .generation-activity-strip { flex: none; min-height: 44px; }
 .generate-control-shell .generation-stop-circle {
   width: 56px; height: 56px; min-width: 56px; padding: 0; flex: none;
-  display: grid; place-items: center; border-radius: 50%;
+  display: grid; place-items: center; border-radius: var(--radius);
   border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--line));
   background: var(--accent); color: var(--deep); cursor: pointer;
   box-shadow: 0 8px 28px rgba(0, 0, 0, .24); touch-action: manipulation;
