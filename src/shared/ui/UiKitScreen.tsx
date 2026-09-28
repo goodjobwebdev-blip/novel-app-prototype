@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, BookOpen, Bot, BrainCircuit, ChevronDown, FileQuestion, ImagePlus, LayoutGrid, List, MessageCircle, Mic, Palette, Plus, Redo2, RefreshCw, Search, SlidersHorizontal, Sparkles, Trash2, Undo2, Volume2, Zap } from 'lucide-react'
+import { ArrowLeft, BookOpen, Bot, BrainCircuit, ChevronDown, FileQuestion, ImagePlus, LayoutGrid, List, MessageCircle, Mic, Minus, Palette, Plus, Redo2, RefreshCw, Search, SlidersHorizontal, Sparkles, Trash2, Undo2, Volume2, Zap } from 'lucide-react'
 import { builtInThemes, defaultUiSettings, loadUiSettings, saveUiSettings, UI_SETTINGS_EVENT, type UiSettings, type UiTypography } from '../../features/settings/ui-settings'
 import ActionMenu, { type ActionMenuItem } from './ActionMenu'
 import Button from './Button'
@@ -37,7 +37,7 @@ function PatternActions({ title }: { title: string }) {
 
 function OutlinePatternRow({ eyebrow, title, expanded, selected = false }: { eyebrow: string; title: string; expanded?: boolean; selected?: boolean }) {
   return <div className={`ui-kit-outline-row ${selected ? 'selected' : ''}`}>
-    {expanded === undefined ? <span className="ui-kit-outline-leaf-node" aria-hidden="true" /> : <button className="ui-kit-outline-toggle" type="button" aria-label={`${expanded ? 'Collapse' : 'Expand'} ${title}`}><span aria-hidden="true">{expanded ? '−' : '+'}</span></button>}
+    {expanded === undefined ? <span className="ui-kit-outline-leaf-node" aria-hidden="true" /> : <button className="ui-kit-outline-toggle" type="button" aria-label={`${expanded ? 'Collapse' : 'Expand'} ${title}`}><span aria-hidden="true">{expanded ? <Minus /> : <Plus />}</span></button>}
     <button className="ui-kit-outline-open" type="button"><small>{eyebrow}</small><strong>{title}</strong></button>
     <Button className="ui-kit-pattern-icon-action" size="small" variant="secondary" aria-label={`Open summary for ${title}`} leadingIcon={<FileQuestion />} />
     <PatternActions title={title} />

@@ -93,7 +93,8 @@
 .ui-kit-outline-row.selected::after { content: ''; position: absolute; left: 28px; top: 5px; bottom: 5px; width: 3px; background: var(--accent); }
 .ui-kit-outline-toggle,.ui-kit-outline-leaf-node { width: 28px; height: 44px; padding: 0; border: 0; background: transparent; display: grid; place-items: center; }
 .ui-kit-outline-toggle { color: var(--soft); cursor: pointer; }
-.ui-kit-outline-toggle > span { width: 22px; height: 22px; border: 1px solid color-mix(in srgb,var(--ink) 28%,var(--line)); border-radius: var(--radius); background: color-mix(in srgb,var(--surface-2) 82%,transparent); display: grid; place-items: center; font: 600 14px/1 ui-sans-serif,system-ui,sans-serif; }
+.ui-kit-outline-toggle > span { width: 22px; height: 22px; border: 1px solid color-mix(in srgb,var(--ink) 28%,var(--line)); border-radius: var(--radius); background: color-mix(in srgb,var(--surface-2) 82%,transparent); display: grid; place-items: center; }
+.ui-kit-outline-toggle > span > svg { width: 13px; height: 13px; stroke-width: 2; }
 .ui-kit-outline-leaf-node::before { content: ''; width: 6px; height: 6px; border: 1px solid color-mix(in srgb,var(--ink) 34%,var(--line)); border-radius: 1px; background: var(--canvas); }
 .ui-kit-outline-open { min-width: 0; min-height: 52px; padding: 6px 4px; border: 0; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
 .ui-kit-outline-open small,.ui-kit-outline-open strong { min-width: 0; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
