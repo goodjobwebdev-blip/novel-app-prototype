@@ -54,7 +54,7 @@
 .image-gesture-view .image-gesture-surface { flex: 1; min-height: 80px; }
 .image-view-caption { flex: none; max-height: 20%; overflow: auto; margin: 12px 0 0; font-size: 14px; text-align: center; color: var(--soft); overflow-wrap: anywhere; }
 
-.content-open .codex-thumbnail, .codex-thumbnail { display: inline-grid; place-items: center; width: 44px; height: 44px; flex: none; overflow: hidden; border-radius: 9px; }
+.codex-thumbnail { display: inline-grid; place-items: center; width: 44px; height: 44px; flex: none; overflow: hidden; border-radius: 9px; }
 .codex-thumbnail img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .codex-mention-preview-heading { display: flex; gap: 10px; align-items: center; }
 .book-storage { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }

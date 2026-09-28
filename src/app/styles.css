@@ -325,23 +325,7 @@ button:focus-visible { outline:3px solid rgba(198,168,107,.3); outline-offset:2p
 .summary-generate-wrap { position:fixed; z-index:35; inset:auto clamp(14px,4vw,32px) 18px auto; }
 .summary-generate { min-height:52px; padding:0 19px; border:1px solid rgba(245,226,185,.35); border-radius:26px; background:rgba(211,184,127,.94); color:#1a1813; box-shadow:0 10px 32px rgba(0,0,0,.38); display:flex; align-items:center; gap:8px; font-weight:700; cursor:pointer; }
 .summary-generate svg { width:18px; height:18px; }
-.content-row { position:relative; min-height:68px; border-bottom:1px solid var(--line); }
-.content-row.selected { border-radius:var(--radius); border:1px solid rgba(198,168,107,.24); background:rgba(198,168,107,.055); }
-.content-open { width:100%; min-height:68px; padding:8px 72px 8px 5px; border:0; background:transparent; display:grid; grid-template-columns:30px minmax(0,1fr) 18px; align-items:center; gap:8px; text-align:left; cursor:pointer; }
 .notes-search { margin-bottom:13px; }
-.notes-panel .content-row { border-radius:var(--radius); }
-.notes-panel .content-open { grid-template-columns:20px minmax(0,1fr) 18px; }
-.notes-panel .content-open > svg:first-child { justify-self:center; }
-.content-open > svg { width:16px; height:16px; color:var(--faint); }
-.content-open span,.content-open strong,.content-open small { min-width:0; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.content-open strong { font:500 15px var(--serif); }
-.content-open small { margin-top:3px; color:var(--faint); font-size:9px; }
-.codex-content-row .content-open > i { width:32px; height:32px; border-radius:9px; background:#33444a; display:grid; place-items:center; font:18px var(--serif); }
-.codex-content-row .content-open small { margin:0 0 2px; color:var(--accent); text-transform:uppercase; }
-.content-actions { position:absolute; inset:50% 5px auto auto; transform:translateY(-50%); display:flex; gap:2px; }
-.content-actions button { width:30px; height:30px; padding:0; border:0; border-radius:8px; background:rgba(9,10,9,.86); color:var(--faint); display:grid; place-items:center; cursor:pointer; }
-.content-actions button:last-child { color:var(--danger); }
-.content-actions svg { width:13px; height:13px; }
 .content-empty { margin:20px 0; color:var(--faint); font-size:11px; text-align:center; }
 .category-filter button.active { border-color:rgba(198,168,107,.36); background:rgba(198,168,107,.09); color:var(--accent-bright); }
 
@@ -399,21 +383,20 @@ input,.reload-button,.use-model,.create-theme,.panel-field textarea,.panel-field
 .panel-search .arc-input { background:rgba(255,255,255,.035); }
 
 /* Icon-only actions stay square and reach a 44px mobile touch target. */
-.favorite,.summary-status,.content-actions button,.document-titlebar .summary-status { border-radius:var(--radius); }
+.favorite,.summary-status,.document-titlebar .summary-status { border-radius:var(--radius); }
 .favorite { width:36px; height:36px; display:grid; place-items:center; }
 .model-list article { grid-template-columns:36px minmax(0,1fr) auto; }
 .summary-status { width:36px; height:36px; }
 .tree p { grid-template-columns:18px minmax(0,1fr) 36px; }
 .outline-row { grid-template-columns:18px minmax(0,1fr) 36px 44px; }
-.content-actions button { width:34px; height:34px; }
-.content-open { padding-right:156px; }
+
 .document-titlebar .summary-status { width:40px; height:40px; min-height:40px; padding:0; display:grid; place-items:center; }
 @media (max-width:720px) {
-  .favorite,.summary-status,.content-actions button,.document-titlebar .summary-status { width:44px; height:44px; min-width:44px; min-height:44px; padding:0; }
+  .favorite,.summary-status,.document-titlebar .summary-status { width:44px; height:44px; min-width:44px; min-height:44px; padding:0; }
   .model-list article { grid-template-columns:44px minmax(0,1fr) auto; }
   .tree p { grid-template-columns:18px minmax(0,1fr) 44px; }
   .outline-row { grid-template-columns:18px minmax(0,1fr) 44px 44px; }
-  .content-open { padding-right:196px; }
+
   .document-title-actions,.document-titlebar .codex-identity-actions { width:100%; justify-content:flex-start; }
 }
 

@@ -13,6 +13,7 @@ import Input from './Input'
 import PanelHeader from './PanelHeader'
 import ProgressBar from './ProgressBar'
 import RadioGroup from './RadioGroup'
+import ResourceListRow from './ResourceListRow'
 import SearchableSelect from './SearchableSelect'
 import SegmentedControl from './SegmentedControl'
 import Select from './Select'
@@ -70,11 +71,12 @@ const codexPatternEntries = [
 ]
 
 function CodexPattern({ layout }: { layout: string }) {
-  return <div className={`ui-kit-codex-pattern ${layout}`}>
+  if (layout === 'list') return <div className="ui-kit-codex-pattern list">{codexPatternEntries.map((entry, index) => <ResourceListRow key={entry.title} selected={index === 0} icon={<BookOpen />} title={entry.title} meta={entry.category} onOpen={() => {}} actions={<PatternActions title={entry.title} />} />)}</div>
+  return <div className="ui-kit-codex-pattern cards">
     {codexPatternEntries.map((entry, index) => <article className={`ui-kit-codex-entry ${index === 0 ? 'selected' : ''}`} key={entry.title}>
-      <button className="ui-kit-codex-open" type="button">{layout === 'list' && <BookOpen aria-hidden="true" />}<span><small>{entry.category}</small><strong>{entry.title}</strong>{layout === 'cards' && <span>{entry.preview}</span>}</span></button>
+      <button className="ui-kit-codex-open" type="button"><span><small>{entry.category}</small><strong>{entry.title}</strong><span>{entry.preview}</span></span></button>
       <div className="ui-kit-codex-entry-actions"><PatternActions title={entry.title} /></div>
-      {layout === 'cards' && <footer>{entry.meta}</footer>}
+      <footer>{entry.meta}</footer>
     </article>)}
   </div>
 }

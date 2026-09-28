@@ -101,7 +101,6 @@ select {
   background: color-mix(in srgb, var(--surface) 76%, transparent);
 }
 
-.content-actions button,
 .library-book-actions button {
   background: color-mix(in srgb, var(--surface) 92%, transparent);
 }
