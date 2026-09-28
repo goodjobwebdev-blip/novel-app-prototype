@@ -5,9 +5,10 @@ import { documentedImageModels, generationTaskNames, imageSize, imageFavorite, i
 import { fetchImageModels } from './image-providers'
 import Button from '../../shared/ui/Button'
 import Checkbox from '../../shared/ui/Checkbox'
+import Choice from '../../shared/ui/Choice'
 import Disclosure from '../../shared/ui/Disclosure'
 import Input from '../../shared/ui/Input'
-
+import SearchField from '../../shared/ui/SearchField'
 import Select from '../../shared/ui/Select'
 export type ImageSettingsPanelRef = { save(): boolean; discard(): void; isDirty(): boolean }
 export type ImageSettingsPanelProps = { ai: AiSettings; onDirtyChange?: (dirty: boolean) => void }
@@ -21,6 +22,7 @@ const ImageSettingsPanel = forwardRef<ImageSettingsPanelRef, ImageSettingsPanelP
   const change = (value: ImageSettings) => { setSettings(value); setDirty(true); setMessage('') }
   useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
   const models = provider === 'pruna' ? documentedImageModels.filter((m) => m.provider === provider) : catalogs[provider] ?? documentedImageModels.filter((m) => m.provider === provider)
+  const visibleModels = models.filter((model) => `${model.id} ${model.name}`.toLowerCase().includes(query.toLowerCase())).slice(0, 100)
   const refresh = async () => {
     setBusy(true); setError('')
     const selectedProvider = provider
@@ -60,18 +62,18 @@ const ImageSettingsPanel = forwardRef<ImageSettingsPanelRef, ImageSettingsPanelP
         <Select label="Provider" value={provider} onChange={(e) => { setProvider(e.target.value as ImageProvider); setQuery('') }}>{IMAGE_PROVIDERS.map((p) => <option key={p} value={p}>{imageProviderNames[p]}</option>)}</Select>
         <Button disabled={busy} loading={busy} onClick={() => { void refresh() }}>{provider === 'pruna' ? 'Load documented models' : 'Refresh models'}</Button>
       </div>
-      <Input label="Find a model" type="search" placeholder="Search models" value={query} onChange={(e) => setQuery(e.target.value)} />
-      <div className="image-catalog">{models.filter((m) => `${m.id} ${m.name}`.toLowerCase().includes(query.toLowerCase())).slice(0, 100).map((m) => <div key={m.id}>
-        <span>{m.name}<small>{m.id}{m.cost != null ? ` · estimated $${m.cost.toFixed(4)} per output` : ''}</small><small>{modelTasks(m).map((task) => generationTaskNames[task]).join(' · ')}</small>{m.description && <small>{m.description}</small>}</span>
+      <span className="image-catalog-label">Find a model</span>
+      <div className="image-catalog-browser"><SearchField placeholder="Search models" aria-label="Search image and video models" value={query} onChange={(e) => setQuery(e.target.value)} /><div className="image-catalog">{visibleModels.map((m) => <div key={m.id}>
+        <span><strong>{m.name}</strong><small>{m.id}{m.cost != null ? ` · estimated $${m.cost.toFixed(4)} per output` : ''}</small><small>{modelTasks(m).map((task) => generationTaskNames[task]).join(' · ')}</small>{m.description && <small>{m.description}</small>}</span>
         <Button size="small" disabled={settings.favorites.some((f) => f.provider === m.provider && f.id === m.id)} onClick={() => change({ ...settings, favorites: [...settings.favorites, imageFavorite(m, settings.favorites)] })}>Favorite</Button>
-      </div>)}{!models.length && <p>Refresh models to discover supported generation capabilities.</p>}</div>
+      </div>)}{!visibleModels.length && <p>{models.length ? 'No models match that search.' : 'Refresh models to discover supported generation capabilities.'}</p>}</div></div>
     </Disclosure>
     {settings.favorites.map((f, index) => {
       const update = (patch: Partial<typeof f>) => change({ ...settings, favorites: settings.favorites.map((m, i) => i === index ? { ...m, ...patch } : m) })
       const discovered = (f.provider === 'pruna' ? documentedImageModels : catalogs[f.provider])?.find((m) => m.id === f.id)
       return <Disclosure className="image-favorite" title={f.name} eyebrow={`${imageProviderNames[f.provider]}${(discovered?.cost ?? f.cost) != null ? ` · estimated $${(discovered?.cost ?? f.cost)!.toFixed(4)} per output` : ''}`} description={`${modelTasks(f).map((task) => generationTaskNames[task]).join(' · ')}${(discovered?.description ?? f.description) ? ` · ${discovered?.description ?? f.description}` : ''}`} open={editingFavorite === index} onToggle={(event) => { if (event.currentTarget.open && editingFavorite !== index) setEditingFavorite(index); else if (!event.currentTarget.open && editingFavorite === index) setEditingFavorite(null) }} key={`${f.provider}/${f.id}`}>
-        <Input label="Chat model alias" maxLength={64} value={f.alias} onChange={(e) => { const alias = e.target.value; change({ ...settings, defaultAlias: settings.defaultAlias === f.alias ? alias : settings.defaultAlias, favorites: settings.favorites.map((m, i) => i === index ? { ...m, alias } : m) }) }} />
-        <label className="arc-choice image-default-choice"><input type="radio" name="default-image-model" checked={settings.defaultAlias === f.alias || (!settings.defaultAlias && index === 0)} onChange={() => change({ ...settings, defaultAlias: f.alias })} /><span><strong>Use as default image model</strong></span></label>
+        <div className="image-favorite-identity"><Input label="Chat model alias" maxLength={64} value={f.alias} onChange={(e) => { const alias = e.target.value; change({ ...settings, defaultAlias: settings.defaultAlias === f.alias ? alias : settings.defaultAlias, favorites: settings.favorites.map((m, i) => i === index ? { ...m, alias } : m) }) }} />
+        <Choice className="image-default-choice" type="radio" name="default-image-model" title="Use as default image model" checked={settings.defaultAlias === f.alias || (!settings.defaultAlias && index === 0)} onChange={() => change({ ...settings, defaultAlias: f.alias })} /></div>
         <fieldset className="image-size-options">
           <legend>Enabled ratios and sizes <small>{f.enabledSizes.length} selected</small></legend>
           <div className="image-size-grid">{f.sizes.map((s) => <Checkbox className="image-size-option" key={s.value} label={imageRatio(s)} description={`${s.width} × ${s.height}`} checked={f.enabledSizes.includes(s.value)} onChange={(e) => { const enabledSizes = e.target.checked ? [...f.enabledSizes, s.value] : f.enabledSizes.filter((v) => v !== s.value); update({ enabledSizes, defaultSize: enabledSizes.includes(f.defaultSize) ? f.defaultSize : enabledSizes[0] || '' }) }} />)}</div>

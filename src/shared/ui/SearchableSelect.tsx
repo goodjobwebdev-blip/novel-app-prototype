@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { Check, ChevronDown, Search, X } from 'lucide-react'
+import { Check, ChevronDown, X } from 'lucide-react'
 import { createPortal } from 'react-dom'
+import SearchField from './SearchField'
 import './searchable-select.css'
 
 export type SearchableSelectOption = {
@@ -112,10 +113,7 @@ export default function SearchableSelect({
   }
 
   const optionList = <>
-    <label className="arc-searchable-select__search">
-      <Search aria-hidden="true" />
-      <input ref={searchRef} type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder={searchPlaceholder} aria-label={searchPlaceholder} />
-    </label>
+    <SearchField ref={searchRef} value={query} onChange={event => setQuery(event.target.value)} placeholder={searchPlaceholder} aria-label={searchPlaceholder} />
     <div className="arc-searchable-select__options" id={listId} role="listbox" aria-labelledby={labelId}>
       {filtered.map(option => <button
         key={option.value}
