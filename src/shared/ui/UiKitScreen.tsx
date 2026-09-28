@@ -147,7 +147,7 @@ export default function UiKitScreen({ onBack }: { onBack: () => void }) {
             <p className="ui-kit-example-copy">Open the menu to inspect the existing compact action pattern.</p>
             <div className="ui-kit-popover-demo">
               <span aria-live="polite">{lastAction}</span>
-              <GenerationActions label="Run" menuAlign="end" onGenerate={() => setLastAction('Run main action')} actions={[
+              <GenerationActions label="Run" menuAlign="end" shape="square" onGenerate={() => setLastAction('Run main action')} actions={[
                 { id: 'image', label: 'Insert image', icon: <ImagePlus aria-hidden="true" />, onSelect: () => setLastAction('Insert image') },
                 { id: 'instruction', label: 'Dictate instruction', icon: <Mic aria-hidden="true" />, onSelect: () => setLastAction('Dictate instruction') },
                 { id: 'regenerate', label: 'Regenerate', icon: <RefreshCw aria-hidden="true" />, onSelect: () => setLastAction('Regenerate') },
