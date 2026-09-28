@@ -327,8 +327,12 @@ button:focus-visible { outline:3px solid rgba(198,168,107,.3); outline-offset:2p
 .summary-generate { min-height:52px; padding:0 19px; border:1px solid rgba(245,226,185,.35); border-radius:26px; background:rgba(211,184,127,.94); color:#1a1813; box-shadow:0 10px 32px rgba(0,0,0,.38); display:flex; align-items:center; gap:8px; font-weight:700; cursor:pointer; }
 .summary-generate svg { width:18px; height:18px; }
 .content-row { position:relative; min-height:68px; border-bottom:1px solid var(--line); }
-.content-row.selected { border-radius:12px; border:1px solid rgba(198,168,107,.24); background:rgba(198,168,107,.055); }
+.content-row.selected { border-radius:var(--radius); border:1px solid rgba(198,168,107,.24); background:rgba(198,168,107,.055); }
 .content-open { width:100%; min-height:68px; padding:8px 72px 8px 5px; border:0; background:transparent; display:grid; grid-template-columns:30px minmax(0,1fr) 18px; align-items:center; gap:8px; text-align:left; cursor:pointer; }
+.notes-search { margin-bottom:13px; }
+.notes-panel .content-row { border-radius:var(--radius); }
+.notes-panel .content-open { grid-template-columns:20px minmax(0,1fr) 18px; }
+.notes-panel .content-open > svg:first-child { justify-self:center; }
 .content-open > svg { width:16px; height:16px; color:var(--faint); }
 .content-open span,.content-open strong,.content-open small { min-width:0; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .content-open strong { font:500 15px var(--serif); }
