@@ -1,15 +1,15 @@
 /* Compact entry identity; illustration tools live in modal sheets. */
-.document-titlebar:has(.codex-image-identity) { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin-bottom: 18px; }
-.document-titlebar:has(.codex-image-identity) .document-title-actions { justify-content: flex-end; flex-wrap: wrap; }
-.codex-image-identity { min-width: 0; }
+.document-titlebar:has(.codex-image-identity) { display: block; margin-bottom: 18px; }
+.codex-image-identity { min-width: 0; display: grid; gap: 12px; }
+.codex-identity-actions { width: 100%; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
 .codex-title-main { display: flex; gap: 12px; align-items: center; min-width: 0; }
 .codex-title-text { flex: 1; min-width: 0; }
 .codex-title-text h1 { overflow-wrap: anywhere; }
 .document-titlebar .codex-title-image { flex: none; padding: 0; width: 64px; height: 64px; min-height: 64px; border-radius: 12px; overflow: hidden; }
 .codex-title-image img { width: 100%; height: 100%; object-fit: cover; }
-.document-titlebar .codex-image-menu { flex: none; width: 48px; height: 48px; min-height: 48px; padding: 0; border-radius: var(--radius); justify-content: center; }
-.document-titlebar .codex-image-menu svg { width: 24px; height: 24px; }
-.document-titlebar .image-add { margin-top: 8px; min-height: 48px; font-size: 16px; border-radius: var(--radius); }
+.document-titlebar .codex-image-menu { flex: none; width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 0; justify-content: center; }
+.document-titlebar .codex-image-menu svg { width: 17px; height: 17px; }
+.document-titlebar .image-add { min-height: 44px; }
 .image-inline-feedback:empty { display: none; }
 .image-change-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 8px; font: 14px/1.4 Inter, sans-serif; color: var(--soft); }
 .document-titlebar .image-change-status button, .document-titlebar .illustration-error button { min-height: 48px; font-size: 16px; }

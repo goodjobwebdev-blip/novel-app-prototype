@@ -24,27 +24,6 @@ input[type="range"] {
 }
 
 
-/* The trigger window is a number-field row, not a generic checkbox row. */
-.context-defaults-card > label.context-trigger-window {
-  grid-template-columns: minmax(0, 1fr) minmax(86px, 120px);
-  align-items: center;
-  gap: 12px;
-}
-
-.context-defaults-card > label.context-trigger-window > span {
-  min-width: 0;
-  margin: 0;
-}
-
-.context-defaults-card > label.context-trigger-window > input[type="number"] {
-  width: 100%;
-  min-width: 0;
-  min-height: 42px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
 
 /* Ensure the searchable Chat model trigger can actually shrink inside the row. */
 .functional-chat-composer .chat-config-row,
@@ -77,8 +56,8 @@ input[type="range"] {
 }
 
 /* Arc-themed action surfaces where the component CSS previously only set layout. */
-.speech-settings .card-heading > button,
-.stt-settings-card .card-heading > button,
+.speech-settings .card-heading > button:not(.arc-button),
+.stt-settings-card .card-heading > button:not(.arc-button),
 .codex-panel-actions > button {
   appearance: none;
   min-height: 36px;
@@ -94,15 +73,15 @@ input[type="range"] {
   cursor: pointer;
 }
 
-.speech-settings .card-heading > button svg,
-.stt-settings-card .card-heading > button svg,
+.speech-settings .card-heading > button:not(.arc-button) svg,
+.stt-settings-card .card-heading > button:not(.arc-button) svg,
 .codex-panel-actions > button svg {
   width: 16px;
   height: 16px;
 }
 
-.speech-settings .card-heading > button:hover:not(:disabled),
-.stt-settings-card .card-heading > button:hover:not(:disabled),
+.speech-settings .card-heading > button:not(.arc-button):hover:not(:disabled),
+.stt-settings-card .card-heading > button:not(.arc-button):hover:not(:disabled),
 .codex-panel-actions > button:hover:not(:disabled),
 .codex-panel-actions > button.active {
   border-color: rgba(198, 168, 107, .38);
@@ -110,39 +89,28 @@ input[type="range"] {
   color: var(--accent-bright, var(--ink));
 }
 
-.speech-settings .card-heading > button:active:not(:disabled),
-.stt-settings-card .card-heading > button:active:not(:disabled),
+.speech-settings .card-heading > button:not(.arc-button):active:not(:disabled),
+.stt-settings-card .card-heading > button:not(.arc-button):active:not(:disabled),
 .codex-panel-actions > button:active:not(:disabled) {
   transform: translateY(1px);
   background: rgba(198, 168, 107, .13);
 }
 
-.speech-settings .card-heading > button:focus-visible,
-.stt-settings-card .card-heading > button:focus-visible,
+.speech-settings .card-heading > button:not(.arc-button):focus-visible,
+.stt-settings-card .card-heading > button:not(.arc-button):focus-visible,
 .codex-panel-actions > button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
-.speech-settings .card-heading > button:disabled,
-.stt-settings-card .card-heading > button:disabled,
+.speech-settings .card-heading > button:not(.arc-button):disabled,
+.stt-settings-card .card-heading > button:not(.arc-button):disabled,
 .codex-panel-actions > button:disabled {
   opacity: .5;
   cursor: not-allowed;
 }
 
 @media (max-width: 640px) {
-  .context-defaults-card > label.context-trigger-window {
-    grid-template-columns: minmax(0, 1fr);
-    align-items: stretch;
-  }
-
-  .context-defaults-card > label.context-trigger-window > input[type="number"] {
-    width: min(100%, 160px);
-    justify-self: start;
-    text-align: left;
-  }
-
   .codex-panel-actions {
     min-width: 0;
     flex-wrap: wrap;
@@ -213,19 +181,19 @@ input[type="range"] {
   font-size: .82rem;
 }
 
-.functional-chat-composer .chat-config-row summary {
+.functional-chat-composer .chat-config-row details:not(.arc-disclosure) > summary {
   min-height: 44px;
   padding: .5rem 0;
   cursor: pointer;
 }
 
-.functional-chat-composer .chat-config-row :is(.chat-skills, .chat-image-references) button {
+.functional-chat-composer .chat-config-row :is(.chat-skills, .chat-image-references) button:not(.arc-button) {
   width: auto;
   height: auto;
   min-height: 40px;
   margin: 0;
   padding: .4rem .6rem;
-  border-radius: .5rem;
+  border-radius: var(--radius);
 }
 
 .functional-chat-composer .chat-system-prompt-button {
@@ -257,28 +225,11 @@ input[type="range"] {
   }
 }
 
-/* Metadata must use UI typography and keep checkbox labels on the same row. */
+/* Note metadata uses the shared choices and disclosures at their native target sizes. */
 .document-metadata.note-roles {
   margin: 0 0 24px;
   font: 14px/1.5 var(--input-font-family, sans-serif);
 }
-
-.document-metadata.note-roles label {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  max-width: none;
-  min-height: 36px;
-}
-
-.document-metadata.note-roles input[type="checkbox"] {
-  width: 18px;
-  height: 18px;
-  margin: 0;
-  flex: none;
-}
-
-.note-roles > small { padding-left: 28px; }
 
 .lore-types-manager > article {
   display: grid;

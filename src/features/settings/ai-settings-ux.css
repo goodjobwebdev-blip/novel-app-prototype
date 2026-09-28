@@ -15,9 +15,9 @@
 .ai-scope-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; color: var(--soft); font-size: 13px; }
 .ai-settings-menu summary { cursor: pointer; }
 .ai-settings-shell button[aria-pressed="true"] { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--ink); border-color: var(--accent); }
-.ai-settings-shell .model-pickers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.ai-settings-shell .model-role-card { padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-2); text-align: left; display: grid; gap: 8px; min-width: 0; }
-.model-role-card strong { font-size: 13px; }.model-role-card span { overflow-wrap: anywhere; font-size: 14px; }.model-role-card small { color: var(--soft); }
+.model-role-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.model-role-setting { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); display: grid; align-content: start; gap: 16px; }
+.model-role-setting > header { display: grid; gap: 4px; }.model-role-setting > header h3,.model-role-setting > header p,.effective-model-note { margin: 0; }.model-role-setting > header p,.effective-model-note { color: var(--soft); font-size: 12px; line-height: 1.5; }.effective-model-note { padding-top: 12px; border-top: 1px solid var(--line); }
 .ai-settings-shell h3 { font-size: 15px; font-weight: 600; }
 .ai-settings-shell :is(.speed-presets, .model-results, .message-undo) { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .ai-settings-shell :is(.speed-presets, .reveal-preview, .model-results, .message-undo, .response-length-warning, .ai-settings-menu, .model-empty, .status) button { min-height: 44px; padding: 9px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); color: var(--ink); font-size: 13px; }
@@ -29,6 +29,7 @@
 .ai-settings-shell .provider-grid { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
 .ai-settings-shell .favorite { width: 44px; height: 44px; }.ai-settings-shell .model-list article { grid-template-columns: 44px minmax(0,1fr) auto; }.ai-settings-shell .use-model { min-height: 44px; font-size: 12px; }
 .model-results { padding: 14px; color: var(--soft); font-size: 13px; }.model-results button { margin-left: auto; }
-.response-length-warning { padding: 14px; border: 1px solid var(--accent); border-radius: 12px; font-size: 13px; color: var(--soft); }.response-length-warning p { margin: 8px 0; }
-.ai-settings-shell .prompt-tabs button { min-height: 44px; font-size: 13px; }.ai-settings-shell .story-message-actions button { min-width: 44px; min-height: 44px; }.message-undo { color: var(--soft); font-size: 13px; }
-@media(max-width: 560px) { .ai-settings-shell .model-list article { grid-template-columns: 44px minmax(0,1fr); }.ai-settings-shell .use-model { grid-column: 2; justify-self: start; }.ai-settings-shell .card-heading { align-items: start; }.ai-settings-shell .model-pickers { grid-template-columns: 1fr; } }
+.response-length-warning { padding: 14px; border: 1px solid var(--accent); border-radius: var(--radius); font-size: 13px; color: var(--soft); }.response-length-warning p { margin: 8px 0; }
+.ai-settings-shell .story-message-actions button { min-width: 44px; min-height: 44px; }.message-undo { color: var(--soft); font-size: 13px; }
+@media(max-width: 720px) { .model-role-settings { grid-template-columns: 1fr; } }
+@media(max-width: 560px) { .ai-settings-shell .model-list article { grid-template-columns: 44px minmax(0,1fr); }.ai-settings-shell .use-model { grid-column: 2; justify-self: start; }.ai-settings-shell .card-heading { align-items: start; } }

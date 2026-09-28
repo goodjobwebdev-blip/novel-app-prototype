@@ -88,6 +88,9 @@
 .sync-success {
   color: var(--accent);
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: .82rem;
 }
 
@@ -169,7 +172,7 @@
   flex-wrap: wrap;
   align-items: flex-start;
   gap: 10px;
-  margin: -5px 0 30px;
+  margin: 0 0 30px;
 }
 
 .library-import-actions > div {

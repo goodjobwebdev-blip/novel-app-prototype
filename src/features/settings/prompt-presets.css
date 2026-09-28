@@ -1,6 +1,7 @@
 .prompt-preset-controls { display: grid; gap: 10px; margin: 14px 0 20px; padding: 16px; border: 1px solid var(--line, var(--border)); border-radius: var(--radius); background: var(--surface-2); }
 .prompt-preset-picker { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
 .prompt-preset-picker > .arc-field { min-width: min(220px, 100%); flex: 1; }
+.prompt-preset-picker > .arc-button { flex: none; width: auto; white-space: nowrap; }
 .prompt-preset-controls > small { color: var(--soft); font-size: 12px; line-height: 1.45; }
 .prompt-preset-notice { margin: 0; color: var(--accent); font-size: .84rem; }
 .prompt-preset-library { margin-top: 6px; }
@@ -11,4 +12,4 @@
 .prompt-preset-library article span,
 .prompt-preset-library article small { color: var(--soft); font-size: .76rem; }
 .prompt-preset-library article > div:last-child { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-@media (max-width: 640px) { .prompt-preset-picker > .arc-button { min-height: 44px; flex: 1; } .prompt-preset-library article { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 640px) { .prompt-preset-picker > .arc-field { flex-basis: 100%; }.prompt-preset-picker > .arc-button { min-height: 44px; flex: 1 0 max-content; } .prompt-preset-library article { align-items: flex-start; flex-direction: column; } }

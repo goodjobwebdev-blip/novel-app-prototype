@@ -16,6 +16,8 @@ import Button from '../shared/ui/Button'
 import Disclosure from '../shared/ui/Disclosure'
 import SearchableSelect from '../shared/ui/SearchableSelect'
 import SegmentedControl from '../shared/ui/SegmentedControl'
+import RadioGroup from '../shared/ui/RadioGroup'
+import Tabs from '../shared/ui/Tabs'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bot,
@@ -98,6 +100,7 @@ import type { PromptPresetScope } from '../features/settings/prompt-presets'
 type SettingsTab = 'ai' | 'context' | 'appearance' | 'speech' | 'images' | 'sync'
 type ContextSection = GenerationContextType | 'summary'
 type SaveState = 'loading' | 'saved' | 'saving' | 'error'
+type ModelRole = 'main' | 'support' | 'codex' | 'chat'
 type RequestPreviewMessage = {
   key: string
   role: 'system' | 'user' | 'assistant' | 'tool'
@@ -111,6 +114,12 @@ type RequestPreviewMessage = {
 }
 
 const providerLabels: Record<AiProvider, string> = { openrouter: 'OpenRouter', nanogpt: 'nano-gpt.com', openai: 'OpenAI', litellm: 'LiteLLM', compatible: 'OpenAI-compatible', fake: 'Fake (testing)' }
+const modelRoles: ReadonlyArray<{ key: ModelRole; label: string; description: string }> = [
+  { key: 'main', label: 'Main · Story writing', description: 'Writes story prose.' },
+  { key: 'support', label: 'Support · Summaries & titles', description: 'Creates summaries and titles.' },
+  { key: 'codex', label: 'Codex · Worldbuilding', description: 'Builds world and lore entries.' },
+  { key: 'chat', label: 'Chat · Assistant', description: 'Sets the default for new chats.' },
+]
 const promptPresetScope: Record<keyof AiPrompts, PromptPresetScope> = { story: 'story', assistant: 'chat', lore: 'codex', summarize: 'summary' }
 function formatContext(value?: number) {
   if (!value) return 'Context unknown'
@@ -153,7 +162,6 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
   const [promptTab, setPromptTab] = useState<keyof AiPrompts>('story')
   const [promptVariableQuery, setPromptVariableQuery] = useState('')
   const [aiSection, setAiSection] = useState<'connection' | 'models' | 'prompts'>('models')
-  const [modelRole, setModelRole] = useState<'main' | 'support' | 'codex' | 'chat'>('main')
   const [connectionExpanded, setConnectionExpanded] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [showKey, setShowKey] = useState(false)
@@ -389,7 +397,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
     changeAiSettings(() => next)
     setModels(provider === 'fake' ? [FAKE_PROVIDER_MODEL] : []); setStatus(provider === 'fake' ? 'Fake Test Model is available locally. Reload never contacts a network.' : 'Provider changed. Reload its model list when ready.'); setStatusKind(provider === 'fake' ? 'success' : 'quiet')
   }
-  function selectModel(kind: 'main' | 'support' | 'codex' | 'chat', id: string) {
+  function selectModel(kind: ModelRole, id: string) {
     const contextLength = models.find((model) => model.id === id)?.context_length
     changeAiSettings((current) => kind === 'main'
       ? { ...current, mainModel: id, mainModelContextLength: contextLength }
@@ -737,29 +745,44 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
 
         <section hidden={aiSection !== 'models'} className="settings-card models-card" role="tabpanel" id="ai-panel-models" aria-labelledby="ai-tab-models">
           <div className="card-heading"><div><span>02</span><h2>Models</h2></div><p>{isBookSettings ? 'Favorites are shared; model choices belong to this book.' : 'Main writes; Support summarizes; Codex builds your world; Chat assists.'}</p></div>
-          <div className="model-pickers">{(['main', 'support', 'codex', 'chat'] as const).map(role => {
-            const id = settings[`${role}Model`]
-            const model = models.find(item => item.id === id)
-            return <button className="model-role-card" type="button" key={role} aria-pressed={modelRole === role} onClick={() => setModelRole(role)}><strong>{role === 'main' ? 'Main · Story writing' : role === 'support' ? 'Support · Summaries & titles' : role === 'chat' ? 'Chat · Assistant' : 'Codex · Worldbuilding'}</strong><span>{model?.name || id || ((role === 'codex' || role === 'chat') ? `Use Main · ${settings.mainModel || 'not selected'}` : 'Choose a model')}</span><small>{formatContext(model?.context_length ?? settings[`${role}ModelContextLength`])}</small></button>
+          <div className="model-role-settings">{modelRoles.map(({ key: role, label, description }) => {
+            const configuredModel = settings[`${role}Model`].trim()
+            const mainModel = settings.mainModel.trim()
+            const emptyTitle = role === 'codex' || role === 'chat' ? `Use Main · ${mainModel || 'not selected'}` : `No ${label.split(' · ')[0]} model`
+            const emptySubtitle = role === 'main'
+              ? 'Story generation will be unavailable'
+              : role === 'support'
+                ? 'Summaries and prompt enhancement will be unavailable'
+                : 'No separate model for this role'
+            const effectiveModel = role === 'codex' || role === 'chat' ? configuredModel || mainModel : configuredModel
+            const priority = role === 'main'
+              ? effectiveModel ? `Effective model: ${effectiveModel}. Main has no fallback.` : 'Effective model: none. Main has no fallback, so story generation is unavailable.'
+              : role === 'support'
+                ? effectiveModel ? `Effective model: ${effectiveModel}. Support has priority for summaries, prompt enhancement, and automatic titles.` : mainModel ? `Effective model: none for summaries or prompt enhancement. Automatic titles alone fall back to Main: ${mainModel}.` : 'Effective model: none. Summaries, prompt enhancement, and automatic titles are unavailable.'
+                : role === 'codex'
+                  ? effectiveModel ? `Effective model: ${effectiveModel}. Priority: Codex, then Main.` : 'Effective model: none. Priority: Codex, then Main; Codex generation is unavailable when both are empty.'
+                  : effectiveModel ? `Effective model for new chats: ${effectiveModel}. Priority: Chat, then Main. Existing chats keep their own model.` : 'Effective model for new chats: none. Priority: Chat, then Main. Existing chats keep their own model.'
+            return <section className="model-role-setting" key={role} aria-labelledby={`${role}-model-heading`}>
+              <header><h3 id={`${role}-model-heading`}>{label}</h3><p>{description}</p></header>
+              <SearchableSelect
+                label="Catalog model"
+                value={settings[`${role}Model`]}
+                searchPlaceholder={`Search ${label.split(' · ')[0]} models`}
+                emptyText={models.length ? 'No models match that search.' : 'Reload the provider model list first.'}
+                description="Choose a model returned by the provider. Favorites are listed first."
+                options={[
+                  { value: '', title: emptyTitle, subtitle: emptySubtitle },
+                  ...(!models.some(model => model.id === settings[`${role}Model`]) && settings[`${role}Model`] ? [{ value: settings[`${role}Model`], title: settings[`${role}Model`], subtitle: 'Unlisted provider model', badges: ['Custom ID'] }] : []),
+                  ...[...models].sort((a, b) => Number(settings.favorites.includes(b.id)) - Number(settings.favorites.includes(a.id))).map(model => ({ value: model.id, title: model.name || model.id, subtitle: model.name && model.name !== model.id ? model.id : undefined, meta: formatContext(model.context_length), badges: [settings.favorites.includes(model.id) ? 'Favorite' : '', model.architecture?.modality || 'Text'].filter(Boolean) })),
+                ]}
+                onChange={modelId => selectModel(role, modelId)}
+              />
+              <Input label="Exact model ID" description="This edits the same model selection as the catalog picker. Use it only when the provider supports a model that is missing from the loaded catalog." value={settings[`${role}Model`]} onChange={event => selectModel(role, event.target.value)} placeholder={(role === 'codex' || role === 'chat') ? 'Leave empty to use Main' : 'Enter an unlisted model ID'} />
+              <Select label="Thinking effort" description={role === 'chat' ? 'Copied to new chats; each chat can change it.' : 'Used whenever this role runs, including when its model falls back to Main.'} value={settings[`${role}ThinkingEffort`]} onChange={event => update(`${role}ThinkingEffort`, normalizeThinkingEffort(event.target.value))}>{THINKING_EFFORT_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</Select>
+              <p className="effective-model-note">{priority}</p>
+              {role === 'chat' && !isBookSettings && <Select label="Max model rounds per response" description="Default for new chats. One assistant model request is one round; several tools in that request still count as one. Existing chats keep their own limit." value={settings.chatMaxModelRounds} onChange={event => update('chatMaxModelRounds', Number(event.target.value))}>{Array.from({ length: 32 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</Select>}
+            </section>
           })}</div>
-          <SearchableSelect
-            label={`${modelRole === 'main' ? 'Main · Story writing' : modelRole === 'support' ? 'Support · Summaries & titles' : modelRole === 'chat' ? 'Chat · Assistant' : 'Codex · Worldbuilding'} model`}
-            value={settings[`${modelRole}Model`]}
-            placeholder={modelRole === 'codex' || modelRole === 'chat' ? `Use Main · ${settings.mainModel || 'not selected'}` : 'Choose a model'}
-            searchPlaceholder="Search loaded models"
-            emptyText={models.length ? 'No models match that search.' : 'Reload the provider model list first.'}
-            description={`${models.length} loaded model${models.length === 1 ? '' : 's'}. Favorites are shown first.`}
-            options={[
-              ...((modelRole === 'codex' || modelRole === 'chat') ? [{ value: '', title: `Use Main · ${settings.mainModel || 'not selected'}`, subtitle: 'No separate model for this role' }] : []),
-              ...(!models.some(model => model.id === settings[`${modelRole}Model`]) && settings[`${modelRole}Model`] ? [{ value: settings[`${modelRole}Model`], title: settings[`${modelRole}Model`], subtitle: 'Saved custom or unavailable model', badges: ['Custom'] }] : []),
-              ...[...models].sort((a, b) => Number(settings.favorites.includes(b.id)) - Number(settings.favorites.includes(a.id))).map(model => ({ value: model.id, title: model.name || model.id, subtitle: model.name && model.name !== model.id ? model.id : undefined, meta: formatContext(model.context_length), badges: [settings.favorites.includes(model.id) ? 'Favorite' : '', model.architecture?.modality || 'Text'].filter(Boolean) })),
-            ]}
-            onChange={modelId => selectModel(modelRole, modelId)}
-          />
-          <Input label="Custom model ID" description="Optional fallback for compatible endpoints or models not present in the loaded catalog." value={settings[`${modelRole}Model`]} onChange={event => selectModel(modelRole, event.target.value)} placeholder={(modelRole === 'codex' || modelRole === 'chat') ? 'Leave empty to use Main' : 'Enter model ID'} />
-          <Select label="Thinking effort" aria-label="Default thinking effort" description={`${modelRole === 'chat' ? 'Copied to new chats; each chat can change its own effort.' : 'Used for this role, including when its model falls back to Main.'} Higher effort may take longer and use more tokens. Available effort levels depend on the model; use Provider default if unsupported.`} value={settings[`${modelRole}ThinkingEffort`]} onChange={event => update(`${modelRole}ThinkingEffort`, normalizeThinkingEffort(event.target.value))}>{THINKING_EFFORT_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</Select>
-          {modelRole === 'chat' && <p>Used for new chats. Leave empty to use Main. You can change the model inside each chat.</p>}
-          {modelRole === 'chat' && !isBookSettings && <Select label="Max model rounds per response" aria-label="Default max model rounds per response" description="Default for new chats. One assistant model request is one round; several tools in that request still count as one. Existing chats keep their own limit." value={settings.chatMaxModelRounds} onChange={event => update('chatMaxModelRounds', Number(event.target.value))}>{Array.from({ length: 32 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</Select>}
           <div className="reveal-setting"><h3>Text reveal speed</h3><p>Controls how quickly generated words appear.</p><SegmentedControl className="reveal-speed-control" label="Text reveal speed" value={settings.generationWordDelayMs} onChange={delay => update('generationWordDelayMs', delay)} fullWidth options={[{ value: '120', label: 'Slow' }, { value: '40', label: 'Normal' }, { value: '10', label: 'Fast' }]} /><TextRevealPreview delay={Number(settings.generationWordDelayMs)} /></div>
           <Disclosure className="ai-advanced" title="Advanced" description="Speed and context limits">
           <label className="generation-speed-setting">
@@ -776,7 +799,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
 
         <section hidden={aiSection !== 'prompts'} className="settings-card prompts-card" role="tabpanel" id="ai-panel-prompts" aria-labelledby="ai-tab-prompts">
           <div className="card-heading"><div><span>03</span><h2>Prompts</h2></div><p>System prompt, ordered predefined messages, then Arc’s current instruction.</p></div>
-          <div className="prompt-tabs" role="tablist" aria-label="Prompt purpose">{([['story', 'Story'], ['assistant', 'Chat'], ['lore', 'Codex'], ['summarize', 'Summary']] as const).map(([key, label]) => <button key={key} className={promptTab === key ? 'active' : ''} role="tab" id={`prompt-tab-${key}`} aria-selected={promptTab === key} aria-controls="prompt-panel" tabIndex={promptTab === key ? 0 : -1} onKeyDown={event => { const keys = ['story', 'assistant', 'lore', 'summarize'] as const; const index = keys.indexOf(key); const next = event.key === 'ArrowRight' ? (index + 1) % 4 : event.key === 'ArrowLeft' ? (index + 3) % 4 : event.key === 'Home' ? 0 : event.key === 'End' ? 3 : -1; if (next >= 0) { event.preventDefault(); setPromptTab(keys[next]); document.getElementById(`prompt-tab-${keys[next]}`)?.focus() } }} type="button" onClick={() => setPromptTab(key)}>{label}</button>)}</div>
+          <Tabs className="prompt-tabs" label="Prompt purpose" value={promptTab} onChange={setPromptTab} items={([['story', 'Story'], ['assistant', 'Chat'], ['lore', 'Codex'], ['summarize', 'Summary']] as const).map(([value, label]) => ({ value, label, id: `prompt-tab-${value}`, panelId: 'prompt-panel' }))} />
           <div role="tabpanel" id="prompt-panel" aria-labelledby={`prompt-tab-${promptTab}`} key={promptTab}>
           <PromptPresetControls
             scope={promptPresetScope[promptTab]}
@@ -893,7 +916,7 @@ function SummaryRequestPreview({ request, source, error, hasCurrentSummary, mode
       <div className="codex-context-representations"><strong>Authoritative source construction</strong>{source.diagnostics.map((item, index) => <span key={`${item.sourceId}-${index}`}><b>{item.title || item.sourceId}</b><em>{item.representation || item.type || 'Source'}{item.reason ? ` · ${item.reason}` : ''}</em></span>)}</div>
       <div className="context-budget"><strong>Likely reusable prefix: {likelyReusablePrefix(request.parts, (name) => promptVariables.find((variable) => variable.name === name)?.stability).partCount} message(s)</strong><span>Reuse stops before the first message that references turn-dynamic target data.</span></div>
       <div className="context-preview-rendered">{request.parts.map((part) => <section key={part.id} className={part.omitted ? 'omitted' : ''}><header><h3>{part.name || part.sourceId || part.id}</h3><span>{part.role?.toUpperCase() ?? 'NO ROLE'} · {part.ownership} · {part.sourceKind}{part.omitted ? ' · omitted' : ''}</span></header>{part.content ? <div className="context-preview-copy">{part.content}</div> : <p className="context-preview-empty">This message is empty.</p>}{part.referencedVariables.length ? <p className="context-preview-empty">References: {part.referencedVariables.map((reference) => `{{${reference}}}`).join(', ')}</p> : null}{part.dynamicVariables?.length ? <ul>{part.dynamicVariables.flatMap((item) => item.sources.map((value) => <li key={`${part.id}-${item.variable}-${value.sourceId}`}>{item.variable}: {value.title || value.sourceId} · {value.representation || value.type}</li>))}</ul> : null}</section>)}</div>
-      <details className="context-preview-raw"><summary>View message stack</summary><pre>{exactPreview}</pre></details>
+      <Disclosure className="context-preview-raw" title="View message stack"><pre>{exactPreview}</pre></Disclosure>
     </>}
   </section>
 }
@@ -944,7 +967,7 @@ function SummaryContextSettings({ book, source, error, settings }: { book: NonNu
     <p className="context-scope-banner">Summary generation builds its source from the entity being summarized. Story, Codex, and Chat selections do not change this source.</p>
     <ContextBudget diagnostics={diagnostics} model={settings.supportModel} pending={!source && !error} error={error || promptErrors.map(item => item.message).join(' ')} />
     <section className="settings-card"><h2>Source material</h2><p className="context-help">Scenes and Codex entries use their full body. Chapters and Acts use current child summaries where available, with full-source fallbacks for missing or outdated summaries.</p>{source?.diagnostics.map((item, index) => <article className="context-source-row" key={`${item.sourceId}-${index}`}><strong>{item.title || 'Untitled'}</strong><span>{item.representation}</span><small>{item.reason?.replace(/#77 hierarchy/g, 'summary hierarchy')}</small></article>)}{source && !source.diagnostics.length && <p>No child source material is available.</p>}</section>
-    <details className="settings-card context-inspector"><summary>Inspect summary request</summary><SummaryRequestPreview request={request} source={source} error={error} hasCurrentSummary model={settings.supportModel} modelContextLength={settings.supportModelContextLength} /></details>
+    <Disclosure className="settings-card context-inspector" title="Inspect summary request"><SummaryRequestPreview request={request} source={source} error={error} hasCurrentSummary model={settings.supportModel} modelContextLength={settings.supportModelContextLength} /></Disclosure>
   </section>
 }
 
@@ -952,7 +975,7 @@ function GlobalContextDefaults({ value, saved, saveError, onRetry, onChange }: {
   return <section className="context-defaults-settings">
     <header className="page-heading"><div><p>Default Context</p><h1 id="page-title">Context defaults</h1><span>Copied into new books. Existing books keep their own Context settings.</span></div><ContextSaveStatus saved={saved} error={saveError} onRetry={onRetry} /></header>
     <section className="settings-card context-defaults-card"><div className="card-heading"><div><span>01</span><h2>Automatic Codex</h2></div></div>
-      <label className="context-trigger-window"><span><strong>Previous Scenes to scan for Codex triggers</strong><small>The current Scene is included in addition to this many immediately previous Scenes. 0 means current Scene only.</small></span><input type="number" min="0" step="1" value={value.previousScenesForCodexTriggers} onChange={(event) => onChange({ ...value, previousScenesForCodexTriggers: Math.max(0, Math.floor(Number(event.target.value) || 0)) })} /></label>
+      <Input className="context-trigger-window" label="Previous Scenes to scan for Codex triggers" description="The current Scene is included in addition to this many immediately previous Scenes. 0 means current Scene only." type="number" min="0" step="1" value={value.previousScenesForCodexTriggers} onChange={(event) => onChange({ ...value, previousScenesForCodexTriggers: Math.max(0, Math.floor(Number(event.target.value) || 0)) })} />
     </section>
   </section>
 }
@@ -1131,21 +1154,21 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
     <ContextBudget diagnostics={diagnostics} model={selectedModel} pending={previewPending} error={previewError || (previewPromptErrors.length ? 'Fix the prompt errors before generating.' : '')} />
     {previewChat?.character && <p className="context-help">Each participant’s full Codex profile is always included. Automatic manuscript context follows the chat’s story position. Add Codex entries, notes, manuscript sections or summaries below; selected references are sent with every reply, including in existing chats.</p>}
     {!previewChat?.character && <section className="settings-card context-defaults-card"><div className="card-heading"><div><span>01</span><h2>Automatic context</h2></div></div>
-      <label className="context-trigger-window"><span><strong>Previous Scenes to scan for Codex triggers</strong><small>Book-wide setting. Scan “{anchorLabel}” plus this many preceding scenes. {type === 'chat' ? 'Change this from a Scene or Codex Context tab; it is read-only in Chat.' : 'Changes affect Story, Codex, and Chat in this book.'}</small></span><input type="number" min="0" step="1" disabled={type === 'chat'} value={value.previousScenesForCodexTriggers} onChange={(event) => onChange({ ...value, previousScenesForCodexTriggers: Math.max(0, Math.floor(Number(event.target.value) || 0)) })} /></label>
-      {archivedSelectedCodex.length > 0 && <div className="context-inactive-source"><div><strong>{archivedSelectedCodex.length} archived Codex {archivedSelectedCodex.length === 1 ? 'selection is' : 'selections are'} inactive</strong><small>{archivedSelectedCodex.map((item) => item.title ?? 'Untitled').join(', ')}. Archived lore is skipped from requests.</small></div><button type="button" onClick={() => updateProfile({ ...profile, codexEntryIds: profile.codexEntryIds.filter((id) => !archivedSelectedIds.has(id)) })}>Remove inactive</button></div>}
+      <Input className="context-trigger-window" label="Previous Scenes to scan for Codex triggers" description={`Book-wide setting. Scan “${anchorLabel}” plus this many preceding scenes. ${type === 'chat' ? 'Change this from a Scene or Codex Context tab; it is read-only in Chat.' : 'Changes affect Story, Codex, and Chat in this book.'}`} type="number" min="0" step="1" disabled={type === 'chat'} value={value.previousScenesForCodexTriggers} onChange={(event) => onChange({ ...value, previousScenesForCodexTriggers: Math.max(0, Math.floor(Number(event.target.value) || 0)) })} />
+      {archivedSelectedCodex.length > 0 && <div className="context-inactive-source"><div><strong>{archivedSelectedCodex.length} archived Codex {archivedSelectedCodex.length === 1 ? 'selection is' : 'selections are'} inactive</strong><small>{archivedSelectedCodex.map((item) => item.title ?? 'Untitled').join(', ')}. Archived lore is skipped from requests.</small></div><Button size="small" variant="danger" onClick={() => updateProfile({ ...profile, codexEntryIds: profile.codexEntryIds.filter((id) => !archivedSelectedIds.has(id)) })}>Remove inactive</Button></div>}
       <div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Book metadata</strong><small>Provided through the book prompt variables.</small></span><b>Available</b></div>
-      {type === 'scene' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current Scene</strong><small>The active editor content is available to the Story prompt. See Included sources below for what this template sends.</small></span><b>Available</b></div><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} /><span><strong>Previous Scene when empty</strong><small>Use the immediately previous Scene only when the current Scene has no text.</small></span></label><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Earlier summaries</strong><small>Uses the highest completed Act or Chapter summary without exposing later material.</small></span><b>Automatic</b></div></> : type === 'codex' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current entry</strong><small>Title, category, full body, and the captured insertion point are available through <code>entry.*</code> variables.</small></span><b>Available</b></div><label><input type="checkbox" checked={profile.includeLastScene} onChange={(event) => updateProfile({ ...profile, includeLastScene: event.target.checked })} /><span><strong>Story context from {anchorLabel}</strong><small>Use the Book’s last-opened Scene and earlier story summaries as the Codex story anchor.</small></span></label><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} disabled={!profile.includeLastScene} /><span><strong>Previous Scene when anchor is empty</strong><small>Use the immediately previous Scene as the full anchor without duplicating its summary.</small></span></label></> : <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>{anchorLabel} and earlier summaries</strong><small>Available through Chat composition variables from the book's last-opened Scene anchor.</small></span><b>Automatic</b></div><label><input type="checkbox" checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} /><span><strong>Previous Scene when empty</strong><small>Expose the immediately previous Scene only when the anchor Scene has no text.</small></span></label></>}
+      {type === 'scene' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current Scene</strong><small>The active editor content is available to the Story prompt. See Included sources below for what this template sends.</small></span><b>Available</b></div><Checkbox label="Previous Scene when empty" description="Use the immediately previous Scene only when the current Scene has no text." checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} /><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Earlier summaries</strong><small>Uses the highest completed Act or Chapter summary without exposing later material.</small></span><b>Automatic</b></div></> : type === 'codex' ? <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>Current entry</strong><small>Title, category, full body, and the captured insertion point are available through <code>entry.*</code> variables.</small></span><b>Available</b></div><Checkbox label={`Story context from ${anchorLabel}`} description="Use the Book’s last-opened Scene and earlier story summaries as the Codex story anchor." checked={profile.includeLastScene} onChange={(event) => updateProfile({ ...profile, includeLastScene: event.target.checked })} /><Checkbox label="Previous Scene when anchor is empty" description="Use the immediately previous Scene as the full anchor without duplicating its summary." checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} disabled={!profile.includeLastScene} /></> : <><div className="context-default-locked"><Check aria-hidden="true" /><span><strong>{anchorLabel} and earlier summaries</strong><small>Available through Chat composition variables from the book's last-opened Scene anchor.</small></span><b>Automatic</b></div><Checkbox label="Previous Scene when empty" description="Expose the immediately previous Scene only when the anchor Scene has no text." checked={profile.includePreviousSceneWhenEmpty} onChange={(event) => updateProfile({ ...profile, includePreviousSceneWhenEmpty: event.target.checked })} /></>}
     </section>}
     <ContextSourceInventory preview={preview} request={normalizedRequest} sources={sources} pending={previewPending} />
     <section className="settings-card context-sources-card"><div className="card-heading"><div><span>02</span><h2>Additional context</h2></div><p>{previewChat?.character ? 'Selected references are included automatically.' : <>Available as <code>{'{{context.additional}}'}</code>.</>}</p></div>
       {previewChat?.character && <p className="context-help">Your selections can include material outside the story position. Removing a selection affects future requests; it does not erase earlier conversation messages.</p>}
-      {type !== 'scene' && <label><input type="checkbox" checked={profile.loreAtCurrentScene === true} onChange={event => updateProfile({ ...profile, loreAtCurrentScene: event.target.checked })} /><span><strong>Resolve Codex at the reference scene</strong><small>{previewChat?.character ? 'Selected Codex entries use their full body at the story position. Off uses their full baseline body. Automatic character profiles continue to follow the story position.' : 'Uses eligible checkpoint bodies and their matching summaries. Off uses baseline lore for unrestricted author planning.'}</small></span></label>}
-      <fieldset className="summary-range"><legend>Additional summaries</legend>{([['none','None'],['all','All summaries'],['before',`Before ${anchorLabel}`],['after',`After ${anchorLabel}`]] as const).map(([range,label]) => <label key={range}><input type="radio" name="summary-range" disabled={!anchor && (range === 'before' || range === 'after')} checked={profile.summaryRange === range} onChange={() => updateProfile({ ...profile, summaryRange: range })}/><span>{label}</span></label>)}</fieldset>
+      {type !== 'scene' && <Checkbox label="Resolve Codex at the reference scene" description={previewChat?.character ? 'Selected Codex entries use their full body at the story position. Off uses their full baseline body. Automatic character profiles continue to follow the story position.' : 'Uses eligible checkpoint bodies and their matching summaries. Off uses baseline lore for unrestricted author planning.'} checked={profile.loreAtCurrentScene === true} onChange={event => updateProfile({ ...profile, loreAtCurrentScene: event.target.checked })} />}
+      <RadioGroup label="Additional summaries" name={`summary-range-${type}`} value={profile.summaryRange} onChange={range => updateProfile({ ...profile, summaryRange: range as typeof profile.summaryRange })} options={[{ value: 'none', label: 'None' }, { value: 'all', label: 'All summaries' }, { value: 'before', label: `Before ${anchorLabel}`, disabled: !anchor }, { value: 'after', label: `After ${anchorLabel}`, disabled: !anchor }]} />
       <p className="context-help">None turns off additional summaries only. Automatic earlier-story summaries stay available. {(!anchor && (profile.summaryRange === 'before' || profile.summaryRange === 'after')) && 'Open a scene to resolve this range.'}</p>
       {(profile.summaryRange === 'all' || profile.summaryRange === 'after') && <p className="context-caution" role="status">This range can include material later than the reference scene.</p>}
       <ContextSourcePicker sources={sources} currentDocumentId={type === 'chat' ? undefined : currentDocumentId} anchorId={anchor?.id} profile={profile} fullCodex={Boolean(previewChat?.character)} onToggle={toggle} onClear={() => updateProfile({ ...profile, structuralIds: [], noteIds: [], codexEntryIds: [] })} />
     </section>
-    <details className="settings-card context-preview-card context-inspector"><summary>Inspect request</summary><div className="card-heading"><div><span>04</span><h2>Request details</h2></div><p>{selectedModel ? `Model: ${selectedModel}. ` : ''}Rendered message stack for the current {typeLabel.toLowerCase()} request.</p></div>
+    <Disclosure className="settings-card context-inspector" eyebrow="04" title="Inspect request" description={`${selectedModel ? `Model: ${selectedModel}. ` : ''}Rendered message stack for the current ${typeLabel.toLowerCase()} request.`}>
       {type !== 'chat' && <p className="context-preview-empty">The generation instruction below shows the fallback used when the generation drawer is empty. Custom drawer text replaces it when you generate.</p>}
       {type === 'scene' && <p className="context-preview-empty">Captured generation point: {(insertionPosition ?? currentDocumentText?.length ?? 0).toLocaleString()} of {(currentDocumentText?.length ?? 0).toLocaleString()} characters. Empty instruction fallback: “{STORY_CONTINUE_FALLBACK}”</p>}
       {type === 'codex' && <p className="context-preview-empty">Captured generation point: {(insertionPosition ?? currentDocumentText?.length ?? 0).toLocaleString()} of {(currentDocumentText?.length ?? 0).toLocaleString()} characters. Empty instruction fallback: “{CODEX_CONTINUE_FALLBACK}”</p>}
@@ -1158,12 +1181,12 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
         {normalizedRequest?.dynamicSourceDedupe.length ? <div className="codex-context-representations"><strong>Deduplicated Additional sources</strong>{normalizedRequest.dynamicSourceDedupe.map((decision) => <span key={decision.sourceId}><b>{decision.omittedAdditional.title || decision.sourceId}</b><em>Omitted because this source is already represented automatically{decision.automatic.representation ? ` as ${decision.automatic.representation}` : ''}.</em></span>)}</div> : null}
         {normalizedRequest?.dynamicSourceExclusions.length ? <div className="codex-context-representations"><strong>Excluded current target</strong>{normalizedRequest.dynamicSourceExclusions.map((decision, index) => <span key={`${decision.sourceId}-${index}`}><b>{decision.omitted.title || decision.sourceId}</b><em>Omitted because the current Codex target is represented through entry variables.</em></span>)}</div> : null}
         {normalizedRequest && <div className="context-budget"><strong>Likely reusable prefix: {likelyReusablePrefix(normalizedRequest.parts, (name) => promptVariables.find((variable) => variable.name === name)?.stability).partCount} message(s)</strong><span>Reuse stops before the first message that references turn-dynamic data.</span></div>}
-        {chatNormalizedRequest?.structuredParts.map((part) => <details className="context-preview-raw" key={part.id}><summary>{part.name || 'Structured request data'} · App managed</summary><pre>{JSON.stringify(part.value, null, 2)}</pre></details>)}
+        {chatNormalizedRequest?.structuredParts.map((part) => <Disclosure className="context-preview-raw" key={part.id} title={part.name || 'Structured request data'} description="App managed"><pre>{JSON.stringify(part.value, null, 2)}</pre></Disclosure>)}
         {type === 'scene' && <section className="context-preview-rendered"><h3>Effective scene writing settings</h3>{Object.entries(resolveSceneWriting(metadata, sceneWritingValues(currentDocument))).map(([key, item]) => <p key={key}>{key}: {item.value || 'Not set'} · {item.origin}</p>)}</section>}
         <div className="context-preview-rendered">{requestMessages.map((message) => <section key={message.key} className={message.omitted ? 'omitted' : ''}><header><h3>{message.title}</h3><span>{message.detail}</span></header>{message.content ? <div className="context-preview-copy">{message.content}</div> : <p className="context-preview-empty">This message is empty.</p>}{message.references?.length ? <p className="context-preview-empty">References: {message.references.map((reference) => `{{${reference}}}`).join(', ')}</p> : null}{message.diagnostics?.length ? <ul>{message.diagnostics.map((diagnostic) => <li key={diagnostic}>{diagnostic}</li>)}</ul> : null}{message.reasoning && <div className="context-preview-copy"><strong>Reasoning</strong>\n\n{message.reasoning}</div>}</section>)}</div>
-        <details className="context-preview-raw"><summary>View message stack</summary><pre>{exactPreview || '[No messages would be sent yet.]'}</pre></details>
+        <Disclosure className="context-preview-raw" title="View message stack"><pre>{exactPreview || '[No messages would be sent yet.]'}</pre></Disclosure>
       </> : <p className="context-preview-empty">Preparing preview…</p>}
-    </details>
+    </Disclosure>
   </section>
 }
 
@@ -1292,7 +1315,7 @@ function SpeechSettingsPanel({ bookId, settings, scope, onChange }: { bookId?: s
   const liveSupported = selectedStt?.supportsLive === true
 
   return <section className="speech-settings">
-    <header className="page-heading"><div><p>{scope === 'book' ? 'Book Speech' : 'Default Speech'}</p><h1 id="page-title">Speech</h1><span>{scope === 'book' ? 'Independent TTS and dictation settings for this book.' : 'Copied into each new book, then edited independently.'}</span></div><Volume2 aria-hidden="true" /></header>
+    <header className="page-heading"><div><p>{scope === 'book' ? 'Book Speech' : 'Default Speech'}</p><h1 id="page-title">Speech</h1><span>{scope === 'book' ? 'Independent TTS and dictation settings for this book.' : 'Copied into each new book, then edited independently.'}</span></div></header>
     <TtsCacheSettings bookId={bookId} />
     <section className="settings-card">
       <div className="card-heading"><div><span>01</span><h2>Speech credentials</h2></div><p>Speech credentials are separate from text AI.</p></div>

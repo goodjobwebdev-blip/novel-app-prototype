@@ -29,6 +29,7 @@ import { applyChatManagementChange } from '../data/persistence'
 import Composer from '../features/chat/Composer'
 import { startImageQueue } from '../features/images/image-queue'
 import ImageWorkspace from '../features/images/ImageWorkspace'
+import ActionMenu, { type ActionMenuItem } from '../shared/ui/ActionMenu'
 import Button from '../shared/ui/Button'
 import Toast, { type ToastVariant } from '../shared/ui/Toast'
 import { useImageQuery } from '../features/images/image-hooks'
@@ -38,9 +39,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { createPortal } from 'react-dom'
 import {
-  ArrowDown,
   ArrowLeft,
-  ArrowUp,
   Archive,
   ArchiveRestore,
   Bot,
@@ -97,10 +96,14 @@ import { runDeletionSaveBarrier } from './deletion-save-barrier'
 import { navigateAfterRequiredSave, saveRequiredBeforeNavigation } from './navigation-save-guard'
 import { canUnmountEditor } from '../features/editor/editor-unmount-guard'
 import { summaryGenerationOwnsUi, type SummaryGenerationOwner } from '../features/writing/summary-generation-owner'
+import Checkbox from '../shared/ui/Checkbox'
+import Disclosure from '../shared/ui/Disclosure'
 import ExpandableTextInput, { type ExpandableTextInputDictationTarget } from '../shared/ui/ExpandableTextInput'
 import GenerationActions from '../shared/ui/GenerationActions'
 import UiKitScreen from '../shared/ui/UiKitScreen'
 import Input from '../shared/ui/Input'
+import PanelHeader from '../shared/ui/PanelHeader'
+import SearchField from '../shared/ui/SearchField'
 import MarkdownEditor, { type CodexMentionClick, type GenerationContext, type GenerationResult, type MarkdownEditorHandle } from '../features/editor/MarkdownEditor'
 import type { NanoGPTStreamMetadata } from '../shared/ai/nanogpt'
 import { fetchTextProviderModelContextLength, streamTextProviderCompletion, textProviderRequestText } from '../shared/ai/text-provider'
@@ -1948,7 +1951,8 @@ export default function Workspace() {
       {toast && <Toast fixed key={toast.id} variant={toast.variant} title={toast.title} onDismiss={() => setToast(null)}>{toast.message}</Toast>}
       <header className="library-top"><div className="arc-brand"><Feather aria-hidden="true" /> ARC</div><button className="ui-kit-entry" type="button" onClick={() => setUiKitOpen(true)} aria-label="Open UI Kit" title="UI Kit"><Palette aria-hidden="true" /></button><button className="image-destination-button" type="button" onClick={() => { void openImages('home') }} aria-label="Open images and gallery"><ImageIcon aria-hidden="true" /><ImageActivityBadge active={activeImageJobs} review={reviewImageJobs} attention={attentionImageJobs} /></button><button type="button" onClick={() => openSettings('home')} aria-label="Open default settings"><Settings2 aria-hidden="true" /></button></header>
       <section className="library-content">
-        <div className="library-title"><div><small>Your library</small><h1>Books</h1></div><Button variant="primary" size="large" aria-label="New book" disabled={libraryState !== 'ready' || creatingBook} onClick={() => { void makeBook() }} leadingIcon={<Plus aria-hidden="true" />}>{creatingBook ? 'Creating…' : 'New book'}</Button></div>
+        <div className="library-title"><div><small>Your library</small><h1>Books</h1></div></div>
+        <div className="library-primary-action"><Button variant="primary" size="large" aria-label="New book" disabled={libraryState !== 'ready' || creatingBook} onClick={() => { void makeBook() }} leadingIcon={<Plus aria-hidden="true" />}>{creatingBook ? 'Creating…' : 'New book'}</Button></div>
         {!aiReady && <div className="setup-warning"><Bot aria-hidden="true" /><div><strong>Text AI is not set up</strong><p>Choose a provider and models before using generation or chat.</p></div><button type="button" onClick={() => openSettings('home')}>Set up AI <ChevronRight aria-hidden="true" /></button></div>}
         {libraryState === 'loading' && <div className="library-storage-status" role="status"><p>Loading your books…</p>{librarySlow && <><p>Storage is taking longer to open. Close other tabs or windows of this app so a pending update can finish. Keep this tab open and do not clear browser data.</p><button type="button" onClick={() => window.location.reload()}>Reload app</button></>}</div>}
         {libraryError && <div className="library-storage-status" role="alert"><strong>{libraryState === 'error' ? 'Your library could not be loaded' : 'Your books loaded, but series information could not be updated'}</strong><p>{libraryError}</p><p>Keep your browser data. This error does not mean your books were deleted.</p><button type="button" onClick={retryLibrary}>Retry loading books</button><button type="button" onClick={() => window.location.reload()}>Reload app</button></div>}
@@ -1989,12 +1993,18 @@ export default function Workspace() {
           await applyChatManagementChange(currentBook.id, id, { kind: 'scene_metadata', patch, before })
           if (activeDocumentIdRef.current === id) setActiveDocument((current) => current?.id === id ? { ...current, ...patch } : current)
         }} /></>}
-        {(activeDocument?.type === 'note' || activeDocument?.type === 'codexEntry') && <div className={`document-titlebar ${activeCodexArchived ? 'archived' : ''}`}>{activeDocument.type === 'codexEntry' ? <CodexIllustration key={activeDocument.id} entry={activeDocument} readOnly={activeCodexArchived || activeDocument.codexScope === 'inherited'}><small>{activeCodexArchived ? `Archived · ${activeDocument.category}` : activeDocument.category}</small><h1>{activeDocument.title}</h1></CodexIllustration> : <div><small>Note</small><h1>{activeDocument.title}</h1></div>}<div className="document-title-actions">{(activeDocument.type === 'note' || !activeCodexArchived) && <button className="autotitle-trigger" type="button" onClick={() => { void startAutotitle(activeDocument) }} aria-label={`Autotitle ${activeDocument.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></button>}{activeDocument.type === 'codexEntry' && <SummaryIcon state={summaryStates[activeDocument.id] ?? 'missing'} kind="codex" onOpen={() => { void openSummary(activeDocument) }} />}{activeDocument.type === 'codexEntry' && activeCodexArchived ? <button type="button" onClick={() => { void restoreCodex(activeDocument) }}><ArchiveRestore aria-hidden="true" /> Restore</button> : <button type="button" onClick={() => { void renameContentEntity(activeDocument) }}><Pencil aria-hidden="true" /> Rename</button>}</div></div>}
+        {(activeDocument?.type === 'note' || activeDocument?.type === 'codexEntry') && <div className={`document-titlebar ${activeCodexArchived ? 'archived' : ''}`}>
+          {activeDocument.type === 'codexEntry' ? <CodexIllustration key={activeDocument.id} entry={activeDocument} readOnly={activeCodexArchived || activeDocument.codexScope === 'inherited'} actions={<>
+            {!activeCodexArchived && <Button className="document-icon-action autotitle-trigger" size="small" variant="secondary" onClick={() => { void startAutotitle(activeDocument) }} aria-label={`Autotitle ${activeDocument.title}`} title="Autotitle" leadingIcon={<WandSparkles />} />}
+            <SummaryIcon state={summaryStates[activeDocument.id] ?? 'missing'} kind="codex" onOpen={() => { void openSummary(activeDocument) }} />
+            {activeCodexArchived ? <Button size="small" variant="secondary" leadingIcon={<ArchiveRestore />} onClick={() => { void restoreCodex(activeDocument) }}>Restore</Button> : <Button size="small" variant="secondary" leadingIcon={<Pencil />} onClick={() => { void renameContentEntity(activeDocument) }}>Rename</Button>}
+          </>}><small>{activeCodexArchived ? `Archived · ${activeDocument.category}` : activeDocument.category}</small><h1>{activeDocument.title}</h1></CodexIllustration> : <><div><small>Note</small><h1>{activeDocument.title}</h1></div><div className="document-title-actions"><Button className="document-icon-action autotitle-trigger" size="small" variant="secondary" onClick={() => { void startAutotitle(activeDocument) }} aria-label={`Autotitle ${activeDocument.title}`} title="Autotitle" leadingIcon={<WandSparkles />} /><Button size="small" variant="secondary" leadingIcon={<Pencil />} onClick={() => { void renameContentEntity(activeDocument) }}>Rename</Button></div></>}
+        </div>}
         {activeDocument?.type === 'codexEntry' && <RoleplayParticipant entry={activeDocument} disabled={generationActive} onBeforeChange={beforeSeriesCodexChange} onRefresh={refreshSeriesCodexWorkspace} onStart={() => { void beforeSeriesCodexChange().then(() => setCharacterSetupEntry(activeDocument.id)).catch(error => showToast(error.message)) }} />}
         {activeDocument?.type === 'codexEntry' && currentBook && <CodexTimeline key={`timeline-${activeDocument.id}`} bookId={currentBook.id} entry={activeDocument} currentSceneId={activeSceneId || undefined} disabled={generationActive} onBeforeChange={beforeSeriesCodexChange} onRefresh={refreshSeriesCodexWorkspace} onViewChange={nonBaseline => setTimelineView({ entryId: activeDocument.id, nonBaseline })} />}
         {activeDocument?.type === 'codexEntry' && <CodexScopeControls key={`scope-${activeDocument.id}`} entry={activeDocument} seriesId={currentBook?.seriesId} disabled={generationActive} onBeforeChange={beforeSeriesCodexChange} onRefresh={refreshSeriesCodexWorkspace} />}
         {activeDocument?.type === 'note' && <NoteRoleControls key={`note-roles-${activeDocument.id}`} note={activeDocument} onChange={updated => { setActiveDocument(current => current?.id === updated.id ? { ...current, useAsChatSkill: updated.useAsChatSkill, useAsCodexTemplate: updated.useAsCodexTemplate, compatibleLoreTypeIds: updated.compatibleLoreTypeIds } : current); void reloadBookContent(updated.bookId) }} />}
-        {activeDocument?.type === 'codexEntry' && <div className={`document-metadata ${activeCodexArchived ? 'archived' : ''}`}><label><span>Category</span><LoreTypeSelect ownerId={activeDocument.bookId} disabled={activeCodexArchived || activeDocument.codexScope === 'inherited'} value={activeDocument.typeId ?? activeDocument.category} onChange={id => { void changeCodexCategory(id) }} /></label>{!activeCodexArchived && <label className="codex-summary-preference"><input type="checkbox" disabled={activeDocument.codexScope === 'inherited'} checked={activeDocument.preferSummaryForContext === true} onChange={(event) => { void changeCodexSummaryPreference(event.target.checked) }} /><span><strong>Prefer summary for AI context</strong><small>{codexSummaryPolicyText(activeDocument, summaryStates[activeDocument.id] ?? 'missing')}</small></span></label>}{!activeCodexArchived && <label className="codex-trigger-editor"><span><strong>Auto include when text contains</strong></span><textarea disabled={activeDocument.codexScope === 'inherited'} value={codexTriggerDraft} onChange={(event) => setCodexTriggerDraft(event.target.value)} onBlur={() => { void saveCodexTriggers() }} placeholder="One literal trigger per line" /><small>One name, alias, phrase, or #tag per line. New entries start with their title; removing it keeps it removed, and renaming the entry does not rewrite triggers.</small></label>}{activeCodexArchived && <p className="archived-document-note"><Archive aria-hidden="true" /><span><strong>Archived lore</strong><small>Readable here, but excluded from AI context, Chat discovery, and normal Codex search until restored.</small></span></p>}</div>}
+        {activeDocument?.type === 'codexEntry' && <section className={`document-metadata codex-document-metadata ${activeCodexArchived ? 'archived' : ''}`} aria-label="Codex metadata"><LoreTypeSelect label="Category" ownerId={activeDocument.bookId} disabled={activeCodexArchived || activeDocument.codexScope === 'inherited'} value={activeDocument.typeId ?? activeDocument.category} onChange={id => { void changeCodexCategory(id) }} />{!activeCodexArchived && <Checkbox className="codex-summary-preference" label="Prefer summary for AI context" description={codexSummaryPolicyText(activeDocument, summaryStates[activeDocument.id] ?? 'missing')} disabled={activeDocument.codexScope === 'inherited'} checked={activeDocument.preferSummaryForContext === true} onChange={(event) => { void changeCodexSummaryPreference(event.target.checked) }} />}{!activeCodexArchived && <label className="codex-trigger-editor"><span>Auto include when text contains</span><ExpandableTextInput disabled={activeDocument.codexScope === 'inherited'} value={codexTriggerDraft} onChange={setCodexTriggerDraft} onBlur={() => { void saveCodexTriggers() }} aria-label="Automatic Codex triggers" dialogTitle="Edit automatic Codex triggers" placeholder="One literal trigger per line" /><small>One name, alias, phrase, or #tag per line. New entries start with their title; removing it keeps it removed, and renaming the entry does not rewrite triggers.</small></label>}{activeCodexArchived && <p className="archived-document-note"><Archive aria-hidden="true" /><span><strong>Archived lore</strong><small>Readable here, but excluded from AI context, Chat discovery, and normal Codex search until restored.</small></span></p>}</section>}
         {activeDocument?.type === 'codexEntry' && activeDocument.codexScope !== 'inherited' && !activeCodexArchived && <CodexTemplates key={`templates-${activeDocument.id}`} bookId={activeDocument.bookId} targetId={activeDocument.id} typeId={activeDocument.typeId ?? activeDocument.category} body={storyMarkdown} editor={editorRef} disabled={generationActive} />}
         {activeDocument?.type === 'codexEntry' && <CodexDependenciesMetadata key={`dependencies-${activeDocument.id}`} source={activeDocument} entries={codexEntries} edges={codexDependencies} readOnly={activeCodexArchived || activeDocument.codexScope === 'inherited'} onAdd={(targetId) => addCodexDependency(activeDocument.id, targetId)} onUpdate={changeCodexDependency} onRemove={deleteCodexDependency} onOpen={(entryId) => { void loadDocument(entryId) }} />}
         {activeDocument?.type === 'summary' && summaryContextIndicator && <div className="summary-context-indicator">{summaryContextIndicator}</div>}
@@ -2018,7 +2028,7 @@ export default function Workspace() {
       {rightOpen && <aside className="book-panel">
         <header><div><small>{formatSeries(currentBook, seriesList)}</small><strong>{currentBook?.title ?? 'Untitled Book'}</strong></div><div className="book-panel-header-actions">{activeSceneId && <button type="button" onClick={() => { void loadScene(activeSceneId) }} aria-label="Return to Scene" title="Return to Scene"><CornerUpLeft aria-hidden="true" /></button>}<button type="button" onClick={() => setRightOpen(false)} aria-label="Close book workspace" title="Close book workspace"><X aria-hidden="true" /></button></div></header>
         <nav>{([['book', Settings2], ['outline', BookOpenText], ['notes', NotebookPen], ['codex', WandSparkles], ['chat', MessageCircle]] as const).map(([tab, Icon]) => <button type="button" className={rightTab === tab ? 'active' : ''} onClick={() => { setRightTab(tab); if (tab === 'chat') setChatPanel(screen === 'chat' ? 'settings' : 'list') }} key={tab}><Icon aria-hidden="true" /><span>{tab}</span></button>)}</nav>
-        <div className="panel-content">{rightTab === 'book' ? <><AuthorGoalsTasks key={currentBook?.id} bookId={currentBook?.id ?? ''} liveScene={activeDocument?.type === 'scene' ? { id: activeDocument.id, content: storyMarkdown } : undefined} onOpen={id => { void getEntity<EditableEntity>(id).then(entity => { if (!entity) return; if (entity.type === 'chapter') void openSummary(entity as unknown as StructuralEntity); else void loadDocument(id) }) }} /><BookSettings onBeforeExport={prepareBookExport} onImported={importedBook} book={currentBook} books={bookList} series={seriesList} onSave={saveBookMetadata} onCreateSeries={addSeries} onRenameSeries={renameSeries} onDelete={removeCurrentBookFromSettings} /></> : rightTab === 'outline' ? <Outline book={currentBook} entities={outlineEntities} activeSceneId={activeSceneId} summaryStates={summaryStates} expandedIds={expandedIds} onToggle={(id) => setExpandedIds((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })} onOpenScene={(id) => { void loadScene(id) }} onOpenSummary={(entity) => { void openSummary(entity) }} onCreate={(type, parentId) => { void addOutlineEntity(type, parentId) }} onAutotitle={(entity) => { void startAutotitle(entity) }} onRead={(entity) => { void readOutline(entity) }} onRename={(entity) => { void editOutlineTitle(entity) }} onMove={(entity, direction) => { void moveOutlineEntity(entity, direction) }} onDelete={(entity) => { void removeOutlineEntity(entity) }} /> : rightTab === 'notes' ? <Notes notes={notes} activeId={activeDocument?.type === 'note' ? activeDocument.id : null} onCreate={() => { void addNote() }} onOpen={(id) => { void loadDocument(id) }} onAutotitle={(entity) => { void startAutotitle(entity) }} onRead={(entity) => { void readNote(entity) }} onRename={(entity) => { void renameContentEntity(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> : rightTab === 'codex' ? <><LoreTypesManager key={currentBook?.id} bookId={currentBook?.id ?? ''} /><SeriesCodexManager bookId={currentBook?.id ?? ''} onBeforeChange={beforeSeriesCodexChange} onRefresh={refreshSeriesCodexWorkspace} /><CodexDashboard key={currentBook?.id} dependencies={codexDependencies} onBeforeChange={beforeSeriesCodexChange} onRefresh={refreshSeriesCodexWorkspace} bookId={currentBook?.id ?? ''} entries={codexEntries} activeId={activeDocument?.type === 'codexEntry' ? activeDocument.id : null} summaryStates={summaryStates} onCreate={() => { void addCodexEntry() }} onOpen={(id) => { void loadDocument(id) }} onOpenSummary={(entity) => { void openSummary(entity) }} onAutotitle={(entity) => { void startAutotitle(entity) }} onRename={(entity) => { void renameContentEntity(entity) }} onArchive={(entity) => { void archiveCodex(entity) }} onRestore={(entity) => { void restoreCodex(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /></> : <ChatSidebar currentSceneId={activeSceneId || undefined} bookId={currentBook?.id ?? ''} activeChatId={screen === 'chat' ? activeChatId : ''} onOpen={openChat} />}</div>
+        <div className="panel-content">{rightTab === 'book' ? <><AuthorGoalsTasks key={currentBook?.id} bookId={currentBook?.id ?? ''} liveScene={activeDocument?.type === 'scene' ? { id: activeDocument.id, content: storyMarkdown } : undefined} onOpen={id => { void getEntity<EditableEntity>(id).then(entity => { if (!entity) return; if (entity.type === 'chapter') void openSummary(entity as unknown as StructuralEntity); else void loadDocument(id) }) }} /><BookSettings onBeforeExport={prepareBookExport} onImported={importedBook} book={currentBook} books={bookList} series={seriesList} onSave={saveBookMetadata} onCreateSeries={addSeries} onRenameSeries={renameSeries} onDelete={removeCurrentBookFromSettings} /></> : rightTab === 'outline' ? <Outline book={currentBook} entities={outlineEntities} activeSceneId={activeSceneId} summaryStates={summaryStates} expandedIds={expandedIds} onToggle={(id) => setExpandedIds((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })} onOpenScene={(id) => { void loadScene(id) }} onOpenSummary={(entity) => { void openSummary(entity) }} onCreate={(type, parentId) => { void addOutlineEntity(type, parentId) }} onAutotitle={(entity) => { void startAutotitle(entity) }} onRead={(entity) => { void readOutline(entity) }} onRename={(entity) => { void editOutlineTitle(entity) }} onMove={(entity, direction) => { void moveOutlineEntity(entity, direction) }} onDelete={(entity) => { void removeOutlineEntity(entity) }} /> : rightTab === 'notes' ? <Notes notes={notes} activeId={activeDocument?.type === 'note' ? activeDocument.id : null} onCreate={() => { void addNote() }} onOpen={(id) => { void loadDocument(id) }} onAutotitle={(entity) => { void startAutotitle(entity) }} onRead={(entity) => { void readNote(entity) }} onRename={(entity) => { void renameContentEntity(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> : rightTab === 'codex' ? <CodexDashboard key={currentBook?.id} management={<><LoreTypesManager key={currentBook?.id} bookId={currentBook?.id ?? ''} /><SeriesCodexManager bookId={currentBook?.id ?? ''} onBeforeChange={beforeSeriesCodexChange} onRefresh={refreshSeriesCodexWorkspace} /></>} dependencies={codexDependencies} onBeforeChange={beforeSeriesCodexChange} onRefresh={refreshSeriesCodexWorkspace} bookId={currentBook?.id ?? ''} entries={codexEntries} activeId={activeDocument?.type === 'codexEntry' ? activeDocument.id : null} summaryStates={summaryStates} onCreate={() => { void addCodexEntry() }} onOpen={(id) => { void loadDocument(id) }} onOpenSummary={(entity) => { void openSummary(entity) }} onAutotitle={(entity) => { void startAutotitle(entity) }} onRename={(entity) => { void renameContentEntity(entity) }} onArchive={(entity) => { void archiveCodex(entity) }} onRestore={(entity) => { void restoreCodex(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> : <ChatSidebar currentSceneId={activeSceneId || undefined} bookId={currentBook?.id ?? ''} activeChatId={screen === 'chat' ? activeChatId : ''} onOpen={openChat} />}</div>
       </aside>}
     </main>
   )
@@ -2575,15 +2585,15 @@ function BookSettings({ book, books, series, onSave, onCreateSeries, onRenameSer
     </section>
     <section className="book-settings-group" aria-labelledby="story-profile-title">
       <div className="book-settings-group-title"><span>02</span><h3 id="story-profile-title">Story profile</h3></div>
-      <label className="book-field"><span>Book overview</span><textarea rows={5} value={draft.overview} onChange={(event) => update('overview', event.target.value)} placeholder="What is this book about?" /></label>
-      <Input className="book-field" label="Genre" value={draft.genre} onChange={(event) => update('genre', event.target.value)} placeholder="Fantasy, mystery, romance…" />
-      <Input className="book-field" label="Writing style" value={draft.writingStyle} onChange={(event) => update('writingStyle', event.target.value)} placeholder="Lyrical tension, clean and cinematic…" />
+      <label className="book-field"><span>Book overview</span><ExpandableTextInput rows={5} value={draft.overview} onChange={(value) => update('overview', value)} aria-label="Book overview" dialogTitle="Edit book overview" placeholder="What is this book about?" /></label>
+      <label className="book-field"><span>Genre</span><ExpandableTextInput value={draft.genre} onChange={(value) => update('genre', value)} aria-label="Genre" dialogTitle="Edit genre" placeholder="Fantasy, mystery, romance…" /></label>
+      <label className="book-field"><span>Writing style</span><ExpandableTextInput value={draft.writingStyle} onChange={(value) => update('writingStyle', value)} aria-label="Writing style" dialogTitle="Edit writing style" placeholder="Lyrical tension, clean and cinematic…" /></label>
       <Input className="book-field" label="Point of view" value={draft.pointOfView} onChange={(event) => update('pointOfView', event.target.value)} placeholder="Third person limited" />
       <div className="book-field-pair"><Input className="book-field" label="Tense" value={draft.tense} onChange={(event) => update('tense', event.target.value)} placeholder="Past" /><Input className="book-field" label="Primary language" value={draft.language} onChange={(event) => update('language', event.target.value)} placeholder="English" /></div>
     </section>
     <section className="book-danger" aria-labelledby="book-danger-title">
       <div><span>Danger zone</span><h3 id="book-danger-title">Delete this book</h3><p>Removes the manuscript and all local book data from this device.</p></div>
-      <div className="book-danger-actions"><button className={deleteConfirm ? 'confirming' : ''} type="button" onClick={() => { if (!deleteConfirm) setDeleteConfirm(true); else { savedRef.current = JSON.stringify(draft); void onDelete() } }}><Trash2 aria-hidden="true" />{deleteConfirm ? 'Confirm delete' : 'Delete book'}</button>{deleteConfirm && <button className="cancel" type="button" onClick={() => setDeleteConfirm(false)}>Cancel</button>}</div>
+      <div className="book-danger-actions"><Button variant="danger" leadingIcon={<Trash2 />} onClick={() => { if (!deleteConfirm) setDeleteConfirm(true); else { savedRef.current = JSON.stringify(draft); void onDelete() } }}>{deleteConfirm ? 'Confirm delete' : 'Delete book'}</Button>{deleteConfirm && <Button variant="ghost" onClick={() => setDeleteConfirm(false)}>Cancel</Button>}</div>
     </section>
     <BookStorage key={book.id} bookId={book.id} title={book.title} onImported={onImported} beforeExport={async () => {
       if (latestDraftRef.current) await onSave(latestDraftRef.current)
@@ -2632,37 +2642,31 @@ function CodexDependenciesMetadata({ source, entries, edges, readOnly, onAdd, on
     .sort((a, b) => a.title.localeCompare(b.title))
 
   return <section className={`codex-dependencies-metadata ${readOnly ? 'read-only' : ''}`} aria-label="Codex dependencies">
-    <details className="codex-dependency-section">
-      <summary><span>Dependencies · {outgoing.length}</span><small>Lore this entry may need when Arc includes it automatically.</small></summary>
-      <div className="codex-dependency-content">
+    <Disclosure className="codex-dependency-section" title={`Dependencies · ${outgoing.length}`} description="Lore this entry may need when Arc includes it automatically." bodyClassName="codex-dependency-content">
         {outgoing.length ? outgoing.map((edge) => {
           const target = byId.get(edge.targetId)
           const archived = Boolean(target && isCodexEntryArchived(target))
           return <article className={`codex-dependency-row ${archived ? 'archived' : ''}`} key={edge.id}>
             <button type="button" className="codex-dependency-open" disabled={!target} onClick={() => target && onOpen(target.id)}><span><strong>{target?.title ?? 'Missing dependency'}</strong><small>{target ? `${target.category}${archived ? ' · Archived · inactive for AI context' : ''}` : 'Target no longer exists'}</small></span><ChevronRight aria-hidden="true" /></button>
-            <label className="codex-dependency-label"><span>Relation</span><input disabled={readOnly} defaultValue={edge.relationLabel} placeholder="Optional, e.g. member of" onBlur={(event) => { if (event.target.value.trim() !== edge.relationLabel) void onUpdate(edge.id, { relationLabel: event.target.value }) }} /></label>
-            <label className="codex-dependency-include"><input type="checkbox" disabled={readOnly || archived || !target} checked={edge.includeWithSource} onChange={(event) => { void onUpdate(edge.id, { includeWithSource: event.target.checked }) }} /><span><strong>Include with this entry</strong><small>{archived ? 'Inactive while target is archived' : 'Available to automatic dependency cascade'}</small></span></label>
-            {!readOnly && <button type="button" className="codex-dependency-remove" onClick={() => { void onRemove(edge.id) }}><Trash2 aria-hidden="true" /> Remove</button>}
+            <Input className="codex-dependency-label" label="Relation" disabled={readOnly} defaultValue={edge.relationLabel} placeholder="Optional, e.g. member of" onBlur={(event) => { if (event.target.value.trim() !== edge.relationLabel) void onUpdate(edge.id, { relationLabel: event.target.value }) }} />
+            <Checkbox className="codex-dependency-include" label="Include with this entry" description={archived ? 'Inactive while target is archived' : 'Available to automatic dependency cascade'} disabled={readOnly || archived || !target} checked={edge.includeWithSource} onChange={(event) => { void onUpdate(edge.id, { includeWithSource: event.target.checked }) }} />
+            {!readOnly && <Button variant="danger" size="small" leadingIcon={<Trash2 />} onClick={() => { void onRemove(edge.id) }}>Remove</Button>}
           </article>
         }) : <p className="codex-dependency-empty">No dependencies yet.</p>}
         {!readOnly && <div className="codex-dependency-add">
-          <button type="button" onClick={() => { setAdding((value) => !value); setQuery('') }}><Plus aria-hidden="true" /> Add dependency</button>
+          <Button size="small" leadingIcon={<Plus />} onClick={() => { setAdding((value) => !value); setQuery('') }}>Add dependency</Button>
           {adding && <div className="codex-dependency-picker">
-            <label><Search aria-hidden="true" /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search active Codex by title or category" /></label>
+            <SearchField autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search active Codex by title or category" aria-label="Search active Codex by title or category" />
             <div>{candidates.length ? candidates.map((entry) => <button type="button" key={entry.id} onClick={() => { void onAdd(entry.id); setAdding(false); setQuery('') }}><span><strong>{entry.title}</strong><small>{entry.category}</small></span><Plus aria-hidden="true" /></button>) : <p>No available Codex entries match.</p>}</div>
           </div>}
         </div>}
-      </div>
-    </details>
-    <details className="codex-dependency-section needed-by">
-      <summary><span>Needed by · {incoming.length}</span><small>Entries that declare this lore as a dependency.</small></summary>
-      <div className="codex-dependency-content">
+    </Disclosure>
+    <Disclosure className="codex-dependency-section needed-by" title={`Needed by · ${incoming.length}`} description="Entries that declare this lore as a dependency." bodyClassName="codex-dependency-content">
         {incoming.length ? incoming.map((edge) => {
           const owner = byId.get(edge.sourceId)
           return <button className="codex-needed-by-row" type="button" key={edge.id} disabled={!owner} onClick={() => owner && onOpen(owner.id)}><span><strong>{owner?.title ?? 'Missing source'}</strong><small>{owner ? `${owner.category}${edge.relationLabel ? ` · ${edge.relationLabel}` : ''}` : 'Source no longer exists'}</small></span><ChevronRight aria-hidden="true" /></button>
         }) : <p className="codex-dependency-empty">No entries currently need this one.</p>}
-      </div>
-    </details>
+    </Disclosure>
   </section>
 }
 
@@ -2694,8 +2698,7 @@ function Outline({ book, entities, activeSceneId, summaryStates, expandedIds, on
   }
 
   return <section className="outline">
-    <div className="panel-title"><div><small>Manuscript</small><h2>Outline</h2></div></div>
-    <div className="outline-create"><button type="button" onClick={() => onCreate('act', book.id)}><Plus aria-hidden="true" /> Act</button><button type="button" onClick={() => onCreate('chapter', book.id)}><Plus aria-hidden="true" /> Chapter</button></div>
+    <PanelHeader eyebrow="Manuscript" title="Outline" actions={<><Button size="small" variant="secondary" leadingIcon={<Plus />} onClick={() => onCreate('act', book.id)}>Act</Button><Button size="small" variant="secondary" leadingIcon={<Plus />} onClick={() => onCreate('chapter', book.id)}>Chapter</Button></>} />
     <div className="tree">
       {acts.map((act, actIndex) => {
         const chapters = children(act.id, 'chapter')
@@ -2735,18 +2738,35 @@ function OutlineRow({ entity, label, wordCount, summaryState, selected = false, 
     {expandable ? <button className="tree-toggle" type="button" onClick={() => onToggle(entity.id)} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${entity.title}`}>{expanded ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}</button> : <span className="tree-spacer" />}
     <button className="tree-label" type="button" onClick={() => entity.type === 'scene' ? onOpenScene(entity.id) : onToggle(entity.id)}><small>{label} · {formatWordCount(wordCount)}</small><span>{entity.title}</span></button>
     <SummaryIcon state={summaryState} onOpen={() => onOpenSummary(entity)} />
-    <div className="outline-actions">
-      {entity.type === 'act' && <button type="button" onClick={() => onCreate('chapter', entity.id)} aria-label={`Add chapter to ${entity.title}`} title="Add chapter"><Plus aria-hidden="true" /></button>}
-      {entity.type === 'chapter' && <button type="button" onClick={() => onCreate('scene', entity.id)} aria-label={`Add scene to ${entity.title}`} title="Add scene"><Plus aria-hidden="true" /></button>}
-      <button className="autotitle-trigger" type="button" onClick={() => onAutotitle(entity)} aria-label={`Autotitle ${entity.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></button>
-      {(entity.type === 'scene' || entity.type === 'chapter') && <button className="read-aloud-action" type="button" onClick={() => onRead(entity)} aria-label={`Read ${entity.title} aloud`} title="Read aloud · paid TTS"><Volume2 aria-hidden="true" /></button>}
-      <button type="button" onClick={() => onRename(entity)} aria-label={`Rename ${entity.title}`} title="Rename"><Pencil aria-hidden="true" /></button>
-      <button type="button" onClick={() => onMove(entity, -1)} disabled={first} aria-label={`Move ${entity.title} up`} title="Move up"><ArrowUp aria-hidden="true" /></button>
-      <button type="button" onClick={() => onMove(entity, 1)} disabled={last} aria-label={`Move ${entity.title} down`} title="Move down"><ArrowDown aria-hidden="true" /></button>
-      <button type="button" className="delete" onClick={() => onDelete(entity)} aria-label={`Delete ${entity.title}`} title="Delete"><Trash2 aria-hidden="true" /></button>
-    </div>
+    <OutlineActionsMenu entity={entity} first={first} last={last} onCreate={onCreate} onAutotitle={onAutotitle} onRead={onRead} onRename={onRename} onMove={onMove} onDelete={onDelete} />
   </div>
 }
+
+function OutlineActionsMenu({ entity, first, last, onCreate, onAutotitle, onRead, onRename, onMove, onDelete }: {
+  entity: StructuralEntity
+  first: boolean
+  last: boolean
+  onCreate: (type: StructuralEntityType, parentId: string) => void
+  onAutotitle: (entity: StructuralEntity) => void
+  onRead: (entity: StructuralEntity) => void
+  onRename: (entity: StructuralEntity) => void
+  onMove: (entity: StructuralEntity, direction: -1 | 1) => void
+  onDelete: (entity: StructuralEntity) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const actions: ActionMenuItem[] = [
+    ...(entity.type === 'act' ? [{ label: 'Add chapter', onSelect: () => onCreate('chapter', entity.id) }] : []),
+    ...(entity.type === 'chapter' ? [{ label: 'Add scene', onSelect: () => onCreate('scene', entity.id) }] : []),
+    { label: 'Autotitle', onSelect: () => onAutotitle(entity) },
+    ...(['scene', 'chapter'].includes(entity.type) ? [{ label: 'Read aloud', onSelect: () => onRead(entity) }] : []),
+    { label: 'Rename', onSelect: () => onRename(entity) },
+    { label: 'Move up', onSelect: () => onMove(entity, -1), disabled: first },
+    { label: 'Move down', onSelect: () => onMove(entity, 1), disabled: last },
+    { label: 'Delete', onSelect: () => onDelete(entity), danger: true },
+  ]
+  return <ActionMenu title={entity.title} open={open} onToggle={() => setOpen(value => !value)} onClose={() => setOpen(false)} actions={actions} />
+}
+
 function Notes({ notes, activeId, onCreate, onOpen, onAutotitle, onRead, onRename, onDelete }: {
   notes: NoteEntity[]
   activeId: string | null
@@ -2760,7 +2780,7 @@ function Notes({ notes, activeId, onCreate, onOpen, onAutotitle, onRead, onRenam
   const [query, setQuery] = useState('')
   const normalizedQuery = query.trim().toLowerCase()
   const visible = notes.filter((note) => !normalizedQuery || `${note.title} ${note.content}`.toLowerCase().includes(normalizedQuery))
-  return <section><div className="panel-title"><div><small>Reference</small><h2>Notes</h2></div><button type="button" onClick={onCreate} aria-label="Add note"><Plus aria-hidden="true" /> New</button></div><Input className="panel-search" type="search" leadingIcon={<Search aria-hidden="true" />} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search notes" aria-label="Search notes" />{visible.length ? visible.map((note) => <article className={`content-row ${activeId === note.id ? 'selected' : ''}`} key={note.id}><button className="content-open" type="button" onClick={() => onOpen(note.id)}><NotebookPen aria-hidden="true" /><span><strong>{note.title}</strong><small>{formatEdited(note.updatedAt)}</small></span><ChevronRight aria-hidden="true" /></button><div className="content-actions"><button className="autotitle-trigger" type="button" onClick={() => onAutotitle(note)} aria-label={`Autotitle ${note.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></button><button className="read-aloud-action" type="button" onClick={() => onRead(note)} aria-label={`Read ${note.title} aloud`} title="Read aloud"><Volume2 aria-hidden="true" /></button><button type="button" onClick={() => onRename(note)} aria-label={`Rename ${note.title}`}><Pencil aria-hidden="true" /></button><button type="button" onClick={() => onDelete(note)} aria-label={`Delete ${note.title}`}><Trash2 aria-hidden="true" /></button></div></article>) : <p className="content-empty">{query ? 'No matching notes.' : 'No notes yet.'}</p>}</section>
+  return <section className="notes-panel"><PanelHeader eyebrow="Reference" title="Notes" actions={<Button size="small" variant="secondary" leadingIcon={<Plus />} onClick={onCreate}>New</Button>} /><Input className="notes-search" type="search" leadingIcon={<Search aria-hidden="true" />} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search notes" aria-label="Search notes" />{visible.length ? visible.map((note) => <article className={`content-row ${activeId === note.id ? 'selected' : ''}`} key={note.id}><button className="content-open" type="button" onClick={() => onOpen(note.id)}><NotebookPen aria-hidden="true" /><span><strong>{note.title}</strong><small>{formatEdited(note.updatedAt)}</small></span><ChevronRight aria-hidden="true" /></button><div className="content-actions"><button className="autotitle-trigger" type="button" onClick={() => onAutotitle(note)} aria-label={`Autotitle ${note.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></button><button className="read-aloud-action" type="button" onClick={() => onRead(note)} aria-label={`Read ${note.title} aloud`} title="Read aloud"><Volume2 aria-hidden="true" /></button><button type="button" onClick={() => onRename(note)} aria-label={`Rename ${note.title}`}><Pencil aria-hidden="true" /></button><button type="button" onClick={() => onDelete(note)} aria-label={`Delete ${note.title}`}><Trash2 aria-hidden="true" /></button></div></article>) : <p className="content-empty">{query ? 'No matching notes.' : 'No notes yet.'}</p>}</section>
 }
 
 
