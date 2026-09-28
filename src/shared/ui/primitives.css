@@ -78,6 +78,15 @@
 .arc-card__body { margin-top: 16px; }
 .arc-card > .arc-card__body:first-child { margin-top: 0; }
 
+.arc-panel-header { min-width: 0; margin-bottom: 20px; display: grid; gap: 12px; }
+.arc-panel-header__copy { min-width: 0; }
+.arc-panel-header__copy small { display: block; color: var(--accent); font-size: 10px; letter-spacing: .15em; text-transform: uppercase; }
+.arc-panel-header__copy h2 { margin: 4px 0 0; font: 500 27px/1.12 var(--serif); overflow-wrap: anywhere; }
+.arc-panel-header__actions { min-width: 0; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
+.arc-panel-header__actions .arc-button { min-height: 44px; }
+.arc-panel-header__actions .arc-button:empty,
+.arc-panel-header__actions .arc-button:has(> .arc-button__icon:only-child) { width: 44px; min-width: 44px; padding: 0; }
+
 @keyframes arc-button-spin { to { transform: rotate(360deg); } }
 @media (max-width: 720px) {
   .arc-choice { min-height: 58px; padding: 10px 11px; border-color: var(--line); background: color-mix(in srgb, var(--surface-2) 52%, transparent); align-items: center; }

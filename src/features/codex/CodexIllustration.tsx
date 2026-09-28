@@ -83,7 +83,7 @@ function FullImage({ image, title, onClose }: { image: Illustration; title: stri
 }
 
 type Panel = 'actions' | 'crop' | 'description' | 'view' | null
-export default function CodexIllustration({ entry, readOnly, children }: { entry: CodexEntryEntity; readOnly: boolean; children: ReactNode }) {
+export default function CodexIllustration({ entry, readOnly, actions, children }: { entry: CodexEntryEntity; readOnly: boolean; actions?: ReactNode; children: ReactNode }) {
   const { image, undo, error: loadError, loading } = useIllustration(entry.id, true)
   const input = useRef<HTMLInputElement>(null)
   const working = useRef(false)
@@ -137,9 +137,12 @@ export default function CodexIllustration({ entry, readOnly, children }: { entry
     <div className="codex-title-main">
       {image && thumbnail && <button className="codex-title-image" type="button" onClick={() => open('view')} aria-label={`View illustration of ${entry.title}`}><img src={thumbnail} alt="" /></button>}
       <div className="codex-title-text">{children}</div>
-      {image && !readOnly && <Button className="codex-image-menu" variant="ghost" disabled={busy} onClick={() => open('actions')} aria-label={`Image actions for ${entry.title}`} aria-haspopup="dialog" leadingIcon={<MoreHorizontal aria-hidden="true" />} />}
     </div>
-    {!image && !readOnly && <Button className="image-add" disabled={busy || loading || Boolean(loadError)} onClick={() => open('actions')} leadingIcon={<ImagePlus aria-hidden="true" />}>Add image</Button>}
+    <div className="codex-identity-actions document-title-actions">
+      {!image && !readOnly && <Button className="image-add" size="small" variant="secondary" disabled={busy || loading || Boolean(loadError)} onClick={() => open('actions')} leadingIcon={<ImagePlus aria-hidden="true" />}>Add image</Button>}
+      {image && !readOnly && <Button className="codex-image-menu" size="small" variant="secondary" disabled={busy} onClick={() => open('actions')} aria-label={`Image actions for ${entry.title}`} aria-haspopup="dialog" leadingIcon={<MoreHorizontal aria-hidden="true" />} />}
+      {actions}
+    </div>
     {!readOnly && <input ref={input} hidden type="file" accept="image/png,image/jpeg,image/webp" aria-label="Upload Codex illustration" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void upload(file) }} />}
     <div className="image-inline-feedback" aria-busy={busy}>
       {(busy || message || (undo && !readOnly)) && <div className="image-change-status"><span role="status">{phase === 'preparing' ? 'Preparing image…' : phase === 'saving' ? 'Saving…' : message || 'Image change saved on this device'}</span>{undo && !readOnly && !busy && <><Button size="small" variant="ghost" onClick={() => { void run(() => undoIllustration(entry.id, undo.id), false, 'Image change undone') }} aria-label="Undo image change">Undo</Button><Button size="small" variant="ghost" aria-label="Dismiss image undo" onClick={() => { void run(() => dismissIllustrationUndo(entry.id, undo.id), false, 'Undo dismissed') }}>Dismiss</Button></>}</div>}

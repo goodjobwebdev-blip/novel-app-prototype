@@ -280,12 +280,10 @@ button:focus-visible { outline:3px solid rgba(198,168,107,.3); outline-offset:2p
 .library-book-actions .library-book-action svg { width:16px; height:16px; }
 .library-book-actions .library-book-action.arc-button--danger { background:color-mix(in srgb,var(--danger) 14%,rgba(10,11,10,.78)); }
 
-.outline-create { margin:-7px 0 15px; display:flex; gap:7px; }
-.outline-create button { min-height:44px; padding:0 11px; border:1px solid var(--line); border-radius:var(--radius); background:rgba(255,255,255,.035); color:var(--soft); display:inline-flex; align-items:center; gap:5px; font-size:11px; cursor:pointer; }
-.outline-create button svg { width:14px; height:14px; }
+
 .tree .outline-branch,.tree > .direct-chapters { margin:0; padding:0; border:0; }
 .tree .tree-children { margin-left:13px; padding-left:9px; border-left:1px solid var(--line); }
-.outline-row { min-height:52px; margin:3px 0; padding:5px 4px; border:1px solid transparent; border-radius:11px; display:grid; grid-template-columns:18px minmax(0,1fr) 28px; align-items:center; gap:4px; }
+.outline-row { min-height:64px; padding:5px 4px; border:1px solid transparent; border-bottom-color:var(--line); border-radius:0; display:grid; grid-template-columns:18px minmax(0,1fr) 36px 44px; align-items:center; gap:4px; }
 .outline-row.selected { border-color:rgba(198,168,107,.24); background:rgba(198,168,107,.065); }
 .tree-toggle,.tree-label { padding:0; border:0; background:transparent; text-align:left; cursor:pointer; }
 .tree-toggle { width:18px; height:34px; display:grid; place-items:center; color:var(--soft); }
@@ -295,13 +293,7 @@ button:focus-visible { outline:3px solid rgba(198,168,107,.3); outline-offset:2p
 .tree-label small,.tree-label span { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .tree-label small { margin-bottom:2px; color:var(--faint); font:9px ui-sans-serif,system-ui; text-transform:uppercase; }
 .tree-label span { font:16px var(--serif); }
-.outline-row > .summary-status { justify-self:end; }
-.outline-actions { grid-column:2/4; min-width:0; padding-top:3px; display:flex; justify-content:flex-end; gap:2px; }
-.outline-actions button { width:29px; height:29px; padding:0; border:0; border-radius:8px; background:transparent; color:var(--faint); display:grid; place-items:center; cursor:pointer; }
-.outline-actions button:hover,.outline-actions button:focus-visible { background:rgba(255,255,255,.055); color:var(--soft); }
-.outline-actions button:disabled { opacity:.2; cursor:default; }
-.outline-actions button.delete { color:var(--danger); }
-.outline-actions button svg { width:13px; height:13px; }
+.outline-row > .summary-status,.outline-row > .arc-action-menu__trigger { justify-self:end; }
 .tree-empty { margin:4px 0 8px; padding:9px; color:var(--faint); font-size:10px; font-style:italic; }
 .tree-group-label { display:block; margin:17px 4px 7px; color:var(--accent); font-size:9px; letter-spacing:.1em; text-transform:uppercase; }
 .outline-empty { min-height:190px; padding:30px 18px; display:grid; place-content:center; justify-items:center; text-align:center; color:var(--faint); }
@@ -316,10 +308,10 @@ button:focus-visible { outline:3px solid rgba(198,168,107,.3); outline-offset:2p
 /* Persisted summaries, notes, and Codex documents */
 .summary-status.current { color:#9db38d; }
 .document-metadata { margin:-18px 0 24px; padding:12px; border:1px solid var(--line); border-radius:12px; background:rgba(255,255,255,.025); }
-.document-titlebar { margin:-17px 0 30px; padding-bottom:18px; border-bottom:1px solid var(--line); display:flex; align-items:end; justify-content:space-between; gap:14px; }
+.document-titlebar { margin:-17px 0 30px; padding-bottom:18px; border-bottom:1px solid var(--line); display:grid; gap:14px; }
 .document-titlebar > div:first-child { min-width:0; }
 .document-titlebar h1 { overflow-wrap:anywhere; }
-.document-title-actions { flex-wrap:wrap; justify-content:flex-end; }
+.document-title-actions { min-width:0; display:flex; align-items:center; flex-wrap:wrap; justify-content:flex-end; gap:7px; }
 .document-title-actions .arc-button { min-height:44px; }
 .document-icon-action.arc-button { width:44px; min-width:44px; padding:0; }
 .document-titlebar small { color:var(--accent); font:9px ui-sans-serif,system-ui; letter-spacing:.12em; text-transform:uppercase; }
@@ -404,20 +396,21 @@ input,.reload-button,.use-model,.create-theme,.panel-field textarea,.panel-field
 .panel-search .arc-input { background:rgba(255,255,255,.035); }
 
 /* Icon-only actions stay square and reach a 44px mobile touch target. */
-.favorite,.summary-status,.outline-actions button,.content-actions button,.document-titlebar .summary-status { border-radius:var(--radius); }
+.favorite,.summary-status,.content-actions button,.document-titlebar .summary-status { border-radius:var(--radius); }
 .favorite { width:36px; height:36px; display:grid; place-items:center; }
 .model-list article { grid-template-columns:36px minmax(0,1fr) auto; }
 .summary-status { width:36px; height:36px; }
-.tree p,.outline-row { grid-template-columns:18px minmax(0,1fr) 36px; }
-.outline-actions button,.content-actions button { width:34px; height:34px; }
+.tree p { grid-template-columns:18px minmax(0,1fr) 36px; }
+.outline-row { grid-template-columns:18px minmax(0,1fr) 36px 44px; }
+.content-actions button { width:34px; height:34px; }
 .content-open { padding-right:156px; }
 .document-titlebar .summary-status { width:40px; height:40px; min-height:40px; padding:0; display:grid; place-items:center; }
 @media (max-width:720px) {
-  .favorite,.summary-status,.outline-actions button,.content-actions button,.document-titlebar .summary-status { width:44px; height:44px; min-width:44px; min-height:44px; padding:0; }
+  .favorite,.summary-status,.content-actions button,.document-titlebar .summary-status { width:44px; height:44px; min-width:44px; min-height:44px; padding:0; }
   .model-list article { grid-template-columns:44px minmax(0,1fr) auto; }
-  .tree p,.outline-row { grid-template-columns:18px minmax(0,1fr) 44px; }
+  .tree p { grid-template-columns:18px minmax(0,1fr) 44px; }
+  .outline-row { grid-template-columns:18px minmax(0,1fr) 44px 44px; }
   .content-open { padding-right:196px; }
-  .document-titlebar:not(:has(.codex-image-identity)) { align-items:start; flex-direction:column; }
   .document-titlebar:not(:has(.codex-image-identity)) .document-title-actions { width:100%; }
 }
 

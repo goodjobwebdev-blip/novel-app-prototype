@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Plus, ChevronRight, LayoutGrid, List, Search } from 'lucide-react'
 import CodexActionsMenu, { type CodexAction } from './CodexActionsMenu'
 import { CodexThumbnail } from './CodexIllustration'
@@ -16,6 +16,7 @@ import type { SummaryState } from '../writing/summary-service'
 import Button from '../../shared/ui/Button'
 import Disclosure from '../../shared/ui/Disclosure'
 import Input from '../../shared/ui/Input'
+import PanelHeader from '../../shared/ui/PanelHeader'
 import SegmentedControl from '../../shared/ui/SegmentedControl'
 import Select from '../../shared/ui/Select'
 import './codex-ui-kit.css'
@@ -25,8 +26,8 @@ function Thumbnail({ entry }: { entry: CodexEntryEntity }) {
   useEffect(() => { if (!ref.current || !entry.primaryImageId) return; if (typeof IntersectionObserver === 'undefined') { setVisible(true); return } const observer = new IntersectionObserver(items => { if (items.some(item => item.isIntersecting)) { setVisible(true); observer.disconnect() } }, { rootMargin: '100px' }); observer.observe(ref.current); return () => observer.disconnect() }, [entry.id, entry.primaryImageId])
   return entry.primaryImageId ? <span ref={ref} className="codex-dashboard-thumbnail">{visible && <CodexThumbnail entryId={entry.id} title={entry.title} />}</span> : null
 }
-export default function CodexDashboard({ bookId, entries, activeId, summaryStates, dependencies = [], onCreate, onOpen, onOpenSummary, onAutotitle, onRename, onArchive, onRestore, onDelete, onBeforeChange, onRefresh }: {
-  bookId: string; entries: CodexEntryEntity[]; activeId: string | null; summaryStates: Record<string, SummaryState>; dependencies?: CodexDependencyEdge[]
+export default function CodexDashboard({ bookId, entries, activeId, summaryStates, dependencies = [], management, onCreate, onOpen, onOpenSummary, onAutotitle, onRename, onArchive, onRestore, onDelete, onBeforeChange, onRefresh }: {
+  bookId: string; entries: CodexEntryEntity[]; activeId: string | null; summaryStates: Record<string, SummaryState>; dependencies?: CodexDependencyEdge[]; management?: ReactNode
   onCreate: () => void; onOpen: (id: string) => void; onOpenSummary: (entry: CodexEntryEntity) => void; onAutotitle: (entry: CodexEntryEntity) => void; onRename: (entry: CodexEntryEntity) => void; onArchive: (entry: CodexEntryEntity) => void; onRestore: (entry: CodexEntryEntity) => void; onDelete: (entry: CodexEntryEntity) => void; onBeforeChange: () => Promise<void>; onRefresh: () => Promise<void>
 }) {
   const key = `arc-codex-dashboard-${bookId}`
@@ -45,7 +46,8 @@ export default function CodexDashboard({ bookId, entries, activeId, summaryState
   const entryIds = useMemo(() => new Set(entries.map(entry => entry.id)), [entries])
   const run = async (id: string, action: () => Promise<void>) => { if (busy) return; setBusy(id); setError(''); try { await onBeforeChange(); await action(); await onRefresh() } catch (reason) { setError((reason as Error).message) } finally { controller.current = null; setBusy('') } }
   return <section className="codex-dashboard" aria-label="Codex browser">
-    <div className="panel-title"><div><small>Book knowledge</small><h2>{prefs.archived ? 'Codex archive' : 'Codex'}</h2></div>{!prefs.archived && <Button size="small" leadingIcon={<Plus />} onClick={onCreate}>New</Button>}</div>
+    <PanelHeader eyebrow="Book knowledge" title={prefs.archived ? 'Codex archive' : 'Codex'} actions={!prefs.archived && <Button size="small" variant="secondary" leadingIcon={<Plus />} onClick={onCreate}>New</Button>} />
+    {management && <div className="codex-dashboard-management">{management}</div>}
     <div className="codex-view-controls"><SegmentedControl label="Codex view" value={prefs.view} options={[{ value: 'list', label: 'List', icon: <List /> }, { value: 'cards', label: 'Cards', icon: <LayoutGrid /> }]} onChange={view => update({ view })} /><Select className="codex-archive-mode" aria-label="Codex archive mode" value={prefs.archived ? 'archived' : 'active'} onChange={e => update({ archived: e.target.value === 'archived' })}><option value="active">Active</option><option value="archived">Archived</option></Select></div>
     <Input className="codex-dashboard-search" type="search" aria-label="Search Codex" value={prefs.query} onChange={e => update({ query: e.target.value })} placeholder="Search title, type, or prose" leadingIcon={<Search />} />
     <Disclosure className="codex-dashboard-filters" title="Filters and sort"><div className="codex-dashboard-filter-grid"><Select label="Type" value={prefs.typeId} onChange={e => update({ typeId: e.target.value })}><option value="">All types</option>{types.map(type => <option key={type.id} value={type.id}>{type.name}</option>)}{prefs.typeId && !types.some(type => type.id === prefs.typeId) && <option value={prefs.typeId}>Unavailable type</option>}</Select><Select label="Scope" value={prefs.scope} onChange={e => update({ scope: e.target.value as CodexDashboardPreferences['scope'] })}>{[['all','All scopes'],['book','Book-only'],['inherited','Inherited'],['override','Book override']].map(([id,label]) => <option key={id} value={id}>{label}</option>)}</Select><Select label="Summary" value={prefs.summary} onChange={e => update({ summary: e.target.value as CodexDashboardPreferences['summary'] })}>{['all','missing','current','outdated'].map(id => <option key={id} value={id}>{id === 'all' ? 'Any summary state' : id}</option>)}</Select><Select label="Triggers" value={prefs.triggers} onChange={e => update({ triggers: e.target.value as CodexDashboardPreferences['triggers'] })}><option value="all">Any</option><option value="yes">With triggers</option><option value="no">Without triggers</option></Select><Select label="Sort" aria-label="Codex sort" value={prefs.sort} onChange={e => update({ sort: e.target.value as CodexDashboardPreferences['sort'] })}><option value="title">Title A–Z</option><option value="edited">Recently edited</option><option value="type">Type, then title</option></Select></div><Button size="small" variant="ghost" onClick={() => update({ ...defaultCodexDashboard, view: prefs.view })}>Clear filters</Button></Disclosure>

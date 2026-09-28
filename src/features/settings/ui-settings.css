@@ -79,10 +79,9 @@ select {
 .provider-grid > button,
 .prompt-tabs button.active,
 .create-theme,
-.outline-create button,
+
 .empty-editor button,
-.document-titlebar button,
-.panel-title > button,
+
 .chips button,
 .expandable-text-trigger,
 .context-summary-row > button,

@@ -9,6 +9,7 @@ import Disclosure from './Disclosure'
 import ExpandableTextInput from './ExpandableTextInput'
 import GenerationActions from './GenerationActions'
 import Input from './Input'
+import PanelHeader from './PanelHeader'
 import ProgressBar from './ProgressBar'
 import RadioGroup from './RadioGroup'
 import SearchableSelect from './SearchableSelect'
@@ -100,6 +101,10 @@ export default function UiKitScreen({ onBack }: { onBack: () => void }) {
             <Button size="large">Large</Button>
             <Button loading>Loading</Button>
             <Button disabled>Disabled</Button>
+          </div>
+          <div className="ui-kit-panel-header-example">
+            <PanelHeader eyebrow="Reference" title="Panel header" actions={<><Button size="small" variant="secondary" leadingIcon={<Plus />}>New</Button><Button size="small" variant="secondary" leadingIcon={<SlidersHorizontal />}>Manage</Button></>} />
+            <p>Panel actions use one right-aligned row beneath the heading. The same pattern is used by Outline, Notes, Codex, and Chat sidebars.</p>
           </div>
         </Card>
       </section>
