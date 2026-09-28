@@ -281,7 +281,7 @@ button:focus-visible { outline:3px solid rgba(198,168,107,.3); outline-offset:2p
 .library-book-actions .library-book-action.arc-button--danger { background:color-mix(in srgb,var(--danger) 14%,rgba(10,11,10,.78)); }
 
 .outline-create { margin:-7px 0 15px; display:flex; gap:7px; }
-.outline-create button { min-height:36px; padding:0 11px; border:1px solid var(--line); border-radius:18px; background:rgba(255,255,255,.035); color:var(--soft); display:inline-flex; align-items:center; gap:5px; font-size:11px; cursor:pointer; }
+.outline-create button { min-height:44px; padding:0 11px; border:1px solid var(--line); border-radius:var(--radius); background:rgba(255,255,255,.035); color:var(--soft); display:inline-flex; align-items:center; gap:5px; font-size:11px; cursor:pointer; }
 .outline-create button svg { width:14px; height:14px; }
 .tree .outline-branch,.tree > .direct-chapters { margin:0; padding:0; border:0; }
 .tree .tree-children { margin-left:13px; padding-left:9px; border-left:1px solid var(--line); }
