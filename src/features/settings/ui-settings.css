@@ -95,7 +95,10 @@ select {
 }
 
 .floating-controls > button,
-.floating-control-group > button,
+.floating-control-group > button {
+  background: color-mix(in srgb, var(--surface) 30%, transparent);
+}
+
 .editor-bottom > button,
 .library-top > button {
   background: color-mix(in srgb, var(--surface) 76%, transparent);

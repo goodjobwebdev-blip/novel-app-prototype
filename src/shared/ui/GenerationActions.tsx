@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { Check, Ellipsis, Play, X } from 'lucide-react'
 
 type Action = {
@@ -11,10 +11,11 @@ type Action = {
 }
 
 /** Shared by Chat, the floating editor control, and the instruction drawer. */
-export default function GenerationActions({ label, onGenerate, actions, menuOnly = false, menuAlign = 'end' }: {
+export default function GenerationActions({ label, onGenerate, actions, menuOnly = false, menuAlign = 'end', shape = 'square' }: {
   label: string
   menuOnly?: boolean
   menuAlign?: 'start' | 'end'
+  shape?: 'circle' | 'square'
   onGenerate: () => void
   actions: Action[]
 }) {
@@ -61,7 +62,7 @@ export default function GenerationActions({ label, onGenerate, actions, menuOnly
     requestAnimationFrame(() => rootRef.current?.querySelector<HTMLButtonElement>('.generation-action-row:not(:disabled)')?.focus())
   }
 
-  return <div ref={rootRef} className={`generation-actions generation-actions--menu-${menuAlign}`} onKeyDown={(event) => {
+  return <div ref={rootRef} className={`generation-actions generation-actions--menu-${menuAlign} generation-actions--${shape}`} onKeyDown={(event) => {
     if (event.key === 'Escape' && open) { event.preventDefault(); close(true) }
   }} onBlur={(event) => {
     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) close()
@@ -69,9 +70,8 @@ export default function GenerationActions({ label, onGenerate, actions, menuOnly
     {open && <div className="generation-action-popover" id={panelId} role="group" aria-label={`${label} actions`}>
       <div className="generation-action-heading"><span>Quick actions</span><button type="button" onClick={() => close(true)} aria-label="Close quick actions"><X aria-hidden="true" /></button></div>
       <div className="generation-action-list">
-        {actions.map((action, index) => <button key={action.id} type="button"
+        {actions.map((action) => <button key={action.id} type="button"
           className={`generation-action-row ${selected === action.id ? 'just-selected' : ''}`}
-          style={{ '--action-curve-offset': `${Math.max(0, 72 - index * 18)}px` } as CSSProperties}
           disabled={action.disabled} aria-pressed={action.pressed}
           onClick={() => {
             setSelected(action.id)
@@ -88,7 +88,7 @@ export default function GenerationActions({ label, onGenerate, actions, menuOnly
       </div>
     </div>}
     {!menuOnly && <button ref={menuRef} type="button" className="generation-more" aria-label={`Open ${label} actions`} aria-expanded={open} aria-controls={open ? panelId : undefined} onClick={() => open ? close(true) : focusFirstAction(menuRef.current)}><Ellipsis aria-hidden="true" /></button>}
-    <button ref={primaryRef} type="button" className={`play generation-primary ${pressing ? 'pressing' : ''}`} aria-label={label}
+    <button ref={primaryRef} type="button" className={`play generation-primary ${pressing ? 'pressing' : ''}`} aria-label={open ? 'Close quick actions' : label}
       aria-expanded={open} aria-controls={open ? panelId : undefined}
       aria-description="Hold or press Arrow Up for quick actions."
       onContextMenu={(event) => event.preventDefault()}
@@ -105,9 +105,10 @@ export default function GenerationActions({ label, onGenerate, actions, menuOnly
       }}
       onClick={() => {
         if (heldRef.current) { heldRef.current = false; return }
+        if (open) { close(); return }
         if (menuOnly) { focusFirstAction(); return }
         close()
         onGenerate()
-      }}><Play aria-hidden="true" fill="currentColor" /><span>{label}</span></button>
+      }}>{open ? <X aria-hidden="true" /> : <Play aria-hidden="true" fill="currentColor" />}<span>{open ? 'Close' : label}</span></button>
   </div>
 }

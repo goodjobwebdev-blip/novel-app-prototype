@@ -11,6 +11,7 @@
 @media (max-width: 720px) {
   .composer-shell > .chat-config-strip > summary { min-height: 36px; }
   .composer-shell .composer-status-body { max-height: 23dvh; }
+  .workspace-composer .chat-config-strip > summary > svg { margin-left: auto; }
 }
 .scene-title { font: 500 1.8rem var(--serif); }
 .scene-writing-settings { margin: .5rem 0 2rem; border: 1px solid var(--line); border-radius: .75rem; padding: .6rem; color: var(--soft); font: .8rem var(--sans, sans-serif); }
@@ -75,21 +76,27 @@ body:has([role="dialog"]) .selection-tools { display: none; }
 .sensory-detail-dialog .sensory-empty, .sensory-detail-dialog .sensory-status { color: var(--soft); font-size: .8rem; }
 
 /* Editor-only drawer. Chat retains its own composer layout. */
-.workspace-composer .arc-prompt-field { padding-bottom: 0; }
-.workspace-composer .arc-prompt-field textarea { display: block; min-height: 48px; }
-.workspace-composer > .chat-compose-row { align-items: center; }
-.workspace-composer .workspace-composer-header { width: min(100%, 760px); margin: 0 auto; display: flex; align-items: center; gap: .5rem; }
+.chat-composer.workspace-composer { gap: 10px; padding: 10px max(14px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left)); border-top: 1px solid color-mix(in srgb,var(--accent) 22%,var(--line)); background: color-mix(in srgb,var(--surface) 18%,transparent); -webkit-backdrop-filter: blur(16px) saturate(112%); backdrop-filter: blur(16px) saturate(112%); box-shadow: 0 -8px 26px rgba(0,0,0,.14); }
+.workspace-composer .workspace-composer-header { width: min(100%,760px); margin: 0 auto; display: flex; align-items: center; gap: 8px; }
 .workspace-composer-header > details { flex: 1; min-width: 0; }
-.workspace-composer .composer-collapse { display: grid; place-items: center; flex: none; width: 44px; height: 44px; margin: 0; padding: 0; color: var(--soft); border: 1px solid var(--line); background: var(--surface); border-radius: 50%; cursor: pointer; }
-.workspace-composer .composer-collapse svg { width: 18px; height: 18px; }
+.workspace-composer .chat-config-strip { border-color: var(--line); border-radius: var(--radius); background: color-mix(in srgb,var(--surface-2) 72%,transparent); overflow: hidden; }
+.workspace-composer .chat-config-strip[open] { border-radius: var(--radius); background: color-mix(in srgb,var(--surface-2) 88%,transparent); }
+.workspace-composer .chat-config-strip > summary { min-height: 40px; padding: 0 12px; }
+.workspace-composer .composer-status-body button { border-radius: var(--radius); }
+.workspace-composer > .chat-compose-row { align-items: end; gap: 10px; }
+.workspace-composer .arc-prompt-field { padding-bottom: 0; }
+.workspace-composer .arc-prompt-field textarea { display: block; min-height: 56px; border-color: color-mix(in srgb,var(--ink) 22%,var(--line)); border-radius: var(--radius); }
+.workspace-composer .generation-actions .generation-primary { width: 56px; min-width: 56px; height: 56px; padding: 0; }
+.workspace-composer .generation-primary > span { display: none; }
+.workspace-composer .generation-primary .lucide-play { transform: translateX(1px); }
 .workspace-composer [hidden] { display: none; }
-.workspace-composer.is-collapsed { left: auto; right: 0; width: auto; border: 0; background: transparent; backdrop-filter: none; box-shadow: none; pointer-events: none; }
-.workspace-composer.is-collapsed > .chat-compose-row { display: flex; justify-content: flex-end; }
+.workspace-composer.is-collapsed { left: auto; right: max(12px,env(safe-area-inset-right)); bottom: max(12px,env(safe-area-inset-bottom)); width: auto; padding: 7px; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb,var(--surface) 22%,transparent); -webkit-backdrop-filter: blur(16px) saturate(112%); backdrop-filter: blur(16px) saturate(112%); box-shadow: 0 8px 24px rgba(0,0,0,.2); display: flex; align-items: center; gap: 7px; pointer-events: auto; }
+.workspace-composer.is-collapsed .workspace-composer-header { width: auto; margin: 0; gap: 7px; }
+.workspace-composer .composer-collapsed-status { min-height: 40px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius); color: var(--soft); display: inline-flex; align-items: center; font-size: 10px; white-space: nowrap; }
+.workspace-composer.is-collapsed > .chat-compose-row { width: auto; margin: 0; display: flex; justify-content: flex-end; }
 .workspace-composer.is-collapsed .generate-control-shell { pointer-events: auto; }
-/* The floating status is a pill, separate from the legacy circular composer buttons. */
-.workspace-composer .generation-running > .generation-activity-strip {
-  width: auto; height: 44px; margin: 0; display: inline-flex; border-radius: 999px;
-}
+.workspace-composer.is-collapsed .generation-actions .generation-primary { width: 56px!important; padding: 0!important; }
+.workspace-composer .generation-running > .generation-activity-strip { width: auto; height: 44px; margin: 0; display: inline-flex; border-radius: var(--radius); }
 .workspace-composer .generation-running > .generation-stop-circle { margin: 0; }
 .selection-tools { width: 128px; flex-direction: column; flex-wrap: nowrap; padding: 2px; overflow-y: auto; background: var(--surface); }
 .selection-tools.expanded { width: 204px; }
