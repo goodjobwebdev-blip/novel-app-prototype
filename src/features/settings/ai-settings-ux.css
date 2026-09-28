@@ -20,8 +20,8 @@
 .model-role-card strong { font-size: 13px; }.model-role-card span { overflow-wrap: anywhere; font-size: 14px; }.model-role-card small { color: var(--soft); }
 .ai-settings-shell h3 { font-size: 15px; font-weight: 600; }
 .ai-settings-shell :is(.speed-presets, .model-results, .message-undo) { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-.ai-settings-shell :is(.speed-presets, .reveal-preview, .model-results, .message-undo, .response-length-warning, .ai-settings-menu, .model-empty, .status) button { min-height: 44px; padding: 9px 14px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-2); color: var(--ink); font-size: 13px; }
-.reveal-setting { margin-top: 24px; }.reveal-setting > p { color: var(--soft); font-size: 13px; }
+.ai-settings-shell :is(.speed-presets, .reveal-preview, .model-results, .message-undo, .response-length-warning, .ai-settings-menu, .model-empty, .status) button { min-height: 44px; padding: 9px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); color: var(--ink); font-size: 13px; }
+.reveal-setting { margin-top: 24px; }.reveal-setting > p { color: var(--soft); font-size: 13px; }.reveal-speed-control { margin-top: 10px; }
 .reveal-preview { margin-top: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; }.reveal-preview p { min-height: 3em; margin: 0 0 10px; font: 18px/1.5 var(--serif); }
 .ai-advanced { margin: 18px 0; }.ai-advanced:not(.arc-disclosure) summary, .provider-card details:not(.arc-disclosure) > summary { min-height: 44px; padding: 12px 0; cursor: pointer; color: var(--soft); font-size: 13px; }
 .provider-connection { margin-top: 12px; }

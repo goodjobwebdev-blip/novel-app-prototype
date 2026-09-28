@@ -15,6 +15,7 @@ import Checkbox from '../shared/ui/Checkbox'
 import Button from '../shared/ui/Button'
 import Disclosure from '../shared/ui/Disclosure'
 import SearchableSelect from '../shared/ui/SearchableSelect'
+import SegmentedControl from '../shared/ui/SegmentedControl'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bot,
@@ -759,7 +760,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
           <Select label="Thinking effort" aria-label="Default thinking effort" description={`${modelRole === 'chat' ? 'Copied to new chats; each chat can change its own effort.' : 'Used for this role, including when its model falls back to Main.'} Higher effort may take longer and use more tokens. Available effort levels depend on the model; use Provider default if unsupported.`} value={settings[`${modelRole}ThinkingEffort`]} onChange={event => update(`${modelRole}ThinkingEffort`, normalizeThinkingEffort(event.target.value))}>{THINKING_EFFORT_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</Select>
           {modelRole === 'chat' && <p>Used for new chats. Leave empty to use Main. You can change the model inside each chat.</p>}
           {modelRole === 'chat' && !isBookSettings && <Select label="Max model rounds per response" aria-label="Default max model rounds per response" description="Default for new chats. One assistant model request is one round; several tools in that request still count as one. Existing chats keep their own limit." value={settings.chatMaxModelRounds} onChange={event => update('chatMaxModelRounds', Number(event.target.value))}>{Array.from({ length: 32 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</Select>}
-          <div className="reveal-setting"><h3>Text reveal speed</h3><p>Controls how quickly generated words appear.</p><div className="speed-presets">{([['Slow', '120'], ['Normal', '40'], ['Fast', '10']] as const).map(([label, delay]) => <button type="button" key={label} aria-pressed={settings.generationWordDelayMs === delay} onClick={() => update('generationWordDelayMs', delay)}>{label}</button>)}</div><TextRevealPreview delay={Number(settings.generationWordDelayMs)} /></div>
+          <div className="reveal-setting"><h3>Text reveal speed</h3><p>Controls how quickly generated words appear.</p><SegmentedControl className="reveal-speed-control" label="Text reveal speed" value={settings.generationWordDelayMs} onChange={delay => update('generationWordDelayMs', delay)} fullWidth options={[{ value: '120', label: 'Slow' }, { value: '40', label: 'Normal' }, { value: '10', label: 'Fast' }]} /><TextRevealPreview delay={Number(settings.generationWordDelayMs)} /></div>
           <Disclosure className="ai-advanced" title="Advanced" description="Speed and context limits">
           <label className="generation-speed-setting">
             <span><strong>Custom reveal speed</strong><em>Milliseconds per word</em></span>
