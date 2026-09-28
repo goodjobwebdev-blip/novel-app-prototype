@@ -159,10 +159,10 @@ export default function ImageWorkspace({ bookId, bookTitle, state, onStateChange
       <button type="button" onClick={onSettings} aria-label="Image settings"><Settings aria-hidden="true" /><span>Settings</span></button>
     </header>
     {storageError && <p role="alert">{storageError}</p>}
-    <Tabs className="image-tabs" label="Image workspace" value={state.tab} onChange={selectTab} items={[
+    <div className="image-tabs-wrap"><Tabs label="Image workspace" value={state.tab} onChange={selectTab} items={[
       { value: 'generate', label: 'Generate', id: 'image-tab-generate', panelId: 'image-panel-generate' },
       { value: 'gallery', label: 'Gallery', id: 'image-tab-gallery', panelId: 'image-panel-gallery' },
-    ]} />
+    ]} /></div>
     <div className="image-workspace-content" id={`image-panel-${state.tab}`} role="tabpanel" aria-labelledby={`image-tab-${state.tab}`}>
       {state.tab === 'generate' ? <ImageGenerateView bookId={bookId} state={state} onStateChange={onStateChange} onSettings={onSettings} /> : <ImageGalleryView bookId={bookId} state={state} onStateChange={onStateChange} />}
     </div>

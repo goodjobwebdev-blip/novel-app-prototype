@@ -66,11 +66,11 @@ export default function ImagePanel({ bookId, ai = loadAiSettings() }: { bookId?:
   const [tab, setTab] = useState<'generate' | 'gallery' | 'settings'>('generate')
   return <div className="image-ui image-panel">
     <h1 id="page-title">Images</h1>
-    <Tabs className="image-tabs" label="Images" value={tab} onChange={setTab} items={[
+    <div className="image-tabs-wrap"><Tabs label="Images" value={tab} onChange={setTab} items={[
       { value: 'generate', label: 'Generate', id: 'image-panel-tab-generate', panelId: 'image-panel-content-generate' },
       { value: 'gallery', label: 'Gallery', id: 'image-panel-tab-gallery', panelId: 'image-panel-content-gallery' },
       { value: 'settings', label: 'Settings', id: 'image-panel-tab-settings', panelId: 'image-panel-content-settings' },
-    ]} />
+    ]} /></div>
     <div id={`image-panel-content-${tab}`} role="tabpanel" aria-labelledby={`image-panel-tab-${tab}`}>
       {tab === 'gallery' ? <Gallery bookId={bookId} /> : tab === 'settings' ? <ImageSettingsPanel ai={ai} /> : <Generate bookId={bookId} onSettings={() => setTab('settings')} />}
     </div>

@@ -26,6 +26,7 @@
   text-align: left;
   cursor: pointer;
 }
+.arc-resource-row.without-icon .arc-resource-row__open { grid-template-columns: minmax(0,1fr); }
 .arc-resource-row__icon { width: 20px; height: 20px; color: var(--faint); display: grid; place-items: center; }
 .arc-resource-row__icon > svg { width: 16px; height: 16px; }
 .arc-resource-row__copy,.arc-resource-row__copy strong,.arc-resource-row__copy small { min-width: 0; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -48,12 +48,15 @@ import {
   X,
 } from 'lucide-react'
 import { streamChatCompletion, type ChatCompletionUsage } from './chat-api'
+import ActionMenu, { type ActionMenuItem } from '../../shared/ui/ActionMenu'
 import Button from '../../shared/ui/Button'
 import Checkbox from '../../shared/ui/Checkbox'
 import Disclosure from '../../shared/ui/Disclosure'
 import ExpandableTextInput, { type ExpandableTextInputDictationTarget } from '../../shared/ui/ExpandableTextInput'
 import GenerationActions from '../../shared/ui/GenerationActions'
 import Input from '../../shared/ui/Input'
+import PanelHeader from '../../shared/ui/PanelHeader'
+import ResourceListRow from '../../shared/ui/ResourceListRow'
 import SearchField from '../../shared/ui/SearchField'
 import Select from '../../shared/ui/Select'
 import PromptTemplateEditor from '../settings/PromptTemplateEditor'
@@ -1583,6 +1586,16 @@ function ChatGenerateButton({ sttState, generating, phase, elapsed, thinking, on
   ]} />
 }
 
+function ChatSidebarRow({ chat, selected, onOpen, onRename, onDelete }: { chat: ChatEntity; selected: boolean; onOpen: () => void; onRename: () => void; onDelete: () => void }) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const actions: ActionMenuItem[] = [
+    { label: 'Rename', icon: <Pencil />, onSelect: onRename },
+    { label: 'Delete', icon: <Trash2 />, onSelect: onDelete, danger: true },
+  ]
+  const preview = chat.lastMessagePreview || 'No messages yet'
+  return <ResourceListRow selected={selected} icon={<MessageCircle />} title={chat.title} meta={`${preview} · ${formatChatEdited(chat.updatedAt)}`} onOpen={onOpen} actions={<ActionMenu title={chat.title} open={menuOpen} onToggle={() => setMenuOpen(value => !value)} onClose={() => setMenuOpen(false)} actions={actions} />} />
+}
+
 export function ChatSidebar({ bookId, activeChatId, onOpen, currentSceneId, caret }: { bookId: string; activeChatId: string; onOpen: (chatId: string) => void; currentSceneId?: string; caret?: number }) {
   const [characterSetup, setCharacterSetup] = useState(false)
   const [items, setItems] = useState<ChatEntity[]>([])
@@ -1660,14 +1673,10 @@ export function ChatSidebar({ bookId, activeChatId, onOpen, currentSceneId, care
     if (bookIdRef.current === sourceBookId && activeChatIdRef.current === chat.id) onOpen('')
   }
 
-  return <section className="chat-sidebar"><div className="panel-title"><div><small>Conversations</small><h2>Chats</h2></div><Button className="chat-icon-action" size="small" variant="ghost" onClick={() => { void add() }} aria-label="Start new chat" leadingIcon={<Plus />} /></div>
-    <Button className="new-character-chat" leadingIcon={<MessageCircle />} onClick={() => setCharacterSetup(true)}>New character chat</Button>
+  return <section className="chat-sidebar"><PanelHeader eyebrow="Conversations" title="Chats" actions={<><Button size="small" variant="secondary" leadingIcon={<Plus />} onClick={() => { void add() }}>New</Button><Button size="small" variant="secondary" leadingIcon={<MessageCircle />} aria-label="New character chat" onClick={() => setCharacterSetup(true)}>Character</Button></>} />
     {characterSetup && <CharacterChatSetup bookId={bookId} currentSceneId={currentSceneId} caret={caret} onClose={() => setCharacterSetup(false)} onOpen={onOpen} />}
     <SearchField className="chat-sidebar-search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1) }} placeholder="Search chats" aria-label="Search chats" />
-    <div className="chat-sidebar-list">{visible.map((chat) => <article className={`chat-row-wrap ${activeChatId === chat.id ? 'selected' : ''}`} key={chat.id}>
-      <button className="chat-row" type="button" onClick={() => { if (chat.bookId === bookIdRef.current) onOpen(chat.id) }}><i><MessageCircle aria-hidden="true" /></i><span><strong>{chat.title}</strong><small>{chat.lastMessagePreview || 'No messages yet'}</small></span><em>{formatChatEdited(chat.updatedAt)}</em></button>
-      <div className="chat-row-actions"><Button className="chat-icon-action" size="small" variant="ghost" onClick={() => { void rename(chat) }} aria-label={`Rename ${chat.title}`} leadingIcon={<Pencil />} /><Button className="chat-icon-action" size="small" variant="ghost" onClick={() => { void remove(chat) }} aria-label={`Delete ${chat.title}`} leadingIcon={<Trash2 />} /></div>
-    </article>)}{!visible.length && <p className="content-empty">{query ? 'No matching chats.' : 'No chats yet.'}</p>}</div>
+    <div className="chat-sidebar-list">{visible.map((chat) => <ChatSidebarRow key={chat.id} chat={chat} selected={activeChatId === chat.id} onOpen={() => { if (chat.bookId === bookIdRef.current) onOpen(chat.id) }} onRename={() => { void rename(chat) }} onDelete={() => { void remove(chat) }} />)}{!visible.length && <p className="content-empty">{query ? 'No matching chats.' : 'No chats yet.'}</p>}</div>
     {pagination.totalPages > 1 && <nav className="chat-sidebar-pagination" aria-label="Chat list pages"><Button className="chat-icon-action" size="small" variant="ghost" disabled={pagination.page === 1} aria-label="Previous chat page" leadingIcon={<ChevronLeft />} onClick={() => setPage(current => Math.max(1, current - 1))} /><span>Page {pagination.page} of {pagination.totalPages}<small>{pagination.from}–{pagination.to} of {pagination.totalItems} chats</small></span><Button className="chat-icon-action" size="small" variant="ghost" disabled={pagination.page === pagination.totalPages} aria-label="Next chat page" leadingIcon={<ChevronRight />} onClick={() => setPage(current => Math.min(pagination.totalPages, current + 1))} /></nav>}
   </section>
 }

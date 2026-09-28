@@ -39,6 +39,8 @@ test('Book Settings debounce follows draft changes only and gates saved state to
   assert.match(block, /if \(sequence !== saveSequenceRef\.current\) return\s+savedRef\.current = JSON\.stringify\(draftSnapshot\)/)
   assert.match(block, /\}, \[draft\]\)/)
   assert.doesNotMatch(block, /\[draft, onSave\]/)
+  assert.ok(block.indexOf('story-profile-title') < block.indexOf('{planning}'))
+  assert.ok(block.indexOf('{planning}') < block.indexOf('book-danger'))
 })
 
 test('Book metadata persistence is transactional, field-level, and cannot recreate a deleted Book', () => {
