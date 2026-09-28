@@ -29,7 +29,7 @@
 .ai-settings-shell .provider-grid { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
 .ai-settings-shell .favorite { width: 44px; height: 44px; }.ai-settings-shell .model-list article { grid-template-columns: 44px minmax(0,1fr) auto; }.ai-settings-shell .use-model { min-height: 44px; font-size: 12px; }
 .model-results { padding: 14px; color: var(--soft); font-size: 13px; }.model-results button { margin-left: auto; }
-.response-length-warning { padding: 14px; border: 1px solid var(--accent); border-radius: 12px; font-size: 13px; color: var(--soft); }.response-length-warning p { margin: 8px 0; }
-.ai-settings-shell .prompt-tabs button { min-height: 44px; font-size: 13px; }.ai-settings-shell .story-message-actions button { min-width: 44px; min-height: 44px; }.message-undo { color: var(--soft); font-size: 13px; }
+.response-length-warning { padding: 14px; border: 1px solid var(--accent); border-radius: var(--radius); font-size: 13px; color: var(--soft); }.response-length-warning p { margin: 8px 0; }
+.ai-settings-shell .story-message-actions button { min-width: 44px; min-height: 44px; }.message-undo { color: var(--soft); font-size: 13px; }
 @media(max-width: 720px) { .model-role-settings { grid-template-columns: 1fr; } }
 @media(max-width: 560px) { .ai-settings-shell .model-list article { grid-template-columns: 44px minmax(0,1fr); }.ai-settings-shell .use-model { grid-column: 2; justify-self: start; }.ai-settings-shell .card-heading { align-items: start; } }

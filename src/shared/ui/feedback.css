@@ -1,5 +1,5 @@
 .arc-tabs { max-width: 100%; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb, var(--surface-2) 66%, transparent); display: flex; gap: 4px; overflow-x: auto; }
-.arc-tabs button { min-width: max-content; min-height: 40px; padding: 0 13px; border: 1px solid transparent; border-radius: var(--radius); background: transparent; color: var(--faint); display: inline-flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer; font-size: 11px; font-weight: 650; }
+.arc-tabs button { min-width: max-content; min-height: 44px; padding: 0 13px; border: 1px solid transparent; border-radius: var(--radius); background: transparent; color: var(--faint); display: inline-flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer; font-size: 11px; font-weight: 650; }
 .arc-tabs button:hover:not(:disabled) { color: var(--ink); }
 .arc-tabs button[aria-selected="true"] { border-color: color-mix(in srgb, var(--ink) 25%, var(--line)); background: color-mix(in srgb, var(--surface) 90%, var(--accent)); color: var(--ink); box-shadow: 0 5px 15px rgba(0,0,0,.18); }
 .arc-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

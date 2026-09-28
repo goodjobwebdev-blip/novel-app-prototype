@@ -16,6 +16,7 @@ import Button from '../shared/ui/Button'
 import Disclosure from '../shared/ui/Disclosure'
 import SearchableSelect from '../shared/ui/SearchableSelect'
 import SegmentedControl from '../shared/ui/SegmentedControl'
+import Tabs from '../shared/ui/Tabs'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bot,
@@ -797,7 +798,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
 
         <section hidden={aiSection !== 'prompts'} className="settings-card prompts-card" role="tabpanel" id="ai-panel-prompts" aria-labelledby="ai-tab-prompts">
           <div className="card-heading"><div><span>03</span><h2>Prompts</h2></div><p>System prompt, ordered predefined messages, then Arc’s current instruction.</p></div>
-          <div className="prompt-tabs" role="tablist" aria-label="Prompt purpose">{([['story', 'Story'], ['assistant', 'Chat'], ['lore', 'Codex'], ['summarize', 'Summary']] as const).map(([key, label]) => <button key={key} className={promptTab === key ? 'active' : ''} role="tab" id={`prompt-tab-${key}`} aria-selected={promptTab === key} aria-controls="prompt-panel" tabIndex={promptTab === key ? 0 : -1} onKeyDown={event => { const keys = ['story', 'assistant', 'lore', 'summarize'] as const; const index = keys.indexOf(key); const next = event.key === 'ArrowRight' ? (index + 1) % 4 : event.key === 'ArrowLeft' ? (index + 3) % 4 : event.key === 'Home' ? 0 : event.key === 'End' ? 3 : -1; if (next >= 0) { event.preventDefault(); setPromptTab(keys[next]); document.getElementById(`prompt-tab-${keys[next]}`)?.focus() } }} type="button" onClick={() => setPromptTab(key)}>{label}</button>)}</div>
+          <Tabs className="prompt-tabs" label="Prompt purpose" value={promptTab} onChange={setPromptTab} items={([['story', 'Story'], ['assistant', 'Chat'], ['lore', 'Codex'], ['summarize', 'Summary']] as const).map(([value, label]) => ({ value, label, id: `prompt-tab-${value}`, panelId: 'prompt-panel' }))} />
           <div role="tabpanel" id="prompt-panel" aria-labelledby={`prompt-tab-${promptTab}`} key={promptTab}>
           <PromptPresetControls
             scope={promptPresetScope[promptTab]}

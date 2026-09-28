@@ -35,9 +35,9 @@
   width: 100%;
   min-height: 92px;
   resize: vertical;
-  border: 1px solid rgba(255, 255, 255, 0.11);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
   color: inherit;
   padding: 11px 12px;
   font: inherit;
@@ -56,9 +56,9 @@
 }
 
 .response-length-presets button {
-  border: 1px solid rgba(255, 255, 255, 0.11);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
   color: inherit;
   padding: 6px 10px;
   font: inherit;
