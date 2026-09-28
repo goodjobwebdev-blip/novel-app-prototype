@@ -82,14 +82,15 @@
 .ui-kit-workspace-pattern-grid > .arc-card { min-width: 0; }
 .ui-kit-pattern-actions { margin-bottom: 12px; display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
 .ui-kit-pattern-actions .arc-button { min-height: 44px; }
+.ui-kit-outline-pattern { --ui-kit-tree-line: color-mix(in srgb,var(--ink) 24%,var(--line)); }
 .ui-kit-outline-tree,.ui-kit-outline-tree ul { margin: 0; padding: 0; list-style: none; }
 .ui-kit-outline-tree > li + li { margin-top: 2px; }
-.ui-kit-outline-children { position: relative; margin-left: 0!important; padding-left: 28px!important; border-left: 1px solid color-mix(in srgb,var(--ink) 24%,var(--line)); }
+.ui-kit-outline-children { position: relative; margin-left: 0!important; padding-left: 28px!important; border-left: 1px solid var(--ui-kit-tree-line); }
 .ui-kit-outline-children > li { position: relative; }
-.ui-kit-outline-children > li::before { content: ''; position: absolute; z-index: 0; left: -29px; top: 31px; width: 43px; border-top: 1px solid color-mix(in srgb,var(--ink) 24%,var(--line)); }
+.ui-kit-outline-children > li::before { content: ''; position: absolute; z-index: 0; left: -29px; top: 31px; width: 43px; border-top: 1px solid var(--ui-kit-tree-line); }
 .ui-kit-outline-children > li:last-child::after { content: ''; position: absolute; z-index: 0; left: -29px; top: 32px; bottom: 0; width: 2px; background: var(--canvas); }
-.ui-kit-outline-row { position: relative; z-index: 1; min-width: 0; min-height: 64px; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: 28px minmax(0,1fr) 44px 44px; align-items: center; gap: 4px; }
-.ui-kit-outline-row.selected { border-bottom-color: color-mix(in srgb,var(--accent) 28%,var(--line)); background: linear-gradient(to right,transparent 0 28px,color-mix(in srgb,var(--accent) 8%,transparent) 28px); }
+.ui-kit-outline-row { position: relative; z-index: 1; min-width: 0; min-height: 64px; border-bottom: 1px solid var(--ui-kit-tree-line); display: grid; grid-template-columns: 28px minmax(0,1fr) 44px 44px; align-items: center; gap: 4px; }
+.ui-kit-outline-row.selected { border-bottom-color: var(--ui-kit-tree-line); background: linear-gradient(to right,transparent 0 28px,color-mix(in srgb,var(--accent) 8%,transparent) 28px); }
 .ui-kit-outline-row.selected::after { content: ''; position: absolute; left: 28px; top: 5px; bottom: 5px; width: 3px; background: var(--accent); }
 .ui-kit-outline-toggle,.ui-kit-outline-leaf-node { width: 28px; height: 44px; padding: 0; border: 0; background: transparent; display: grid; place-items: center; }
 .ui-kit-outline-toggle { color: var(--soft); cursor: pointer; }
