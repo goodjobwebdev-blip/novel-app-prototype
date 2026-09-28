@@ -743,26 +743,46 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
 
         <section hidden={aiSection !== 'models'} className="settings-card models-card" role="tabpanel" id="ai-panel-models" aria-labelledby="ai-tab-models">
           <div className="card-heading"><div><span>02</span><h2>Models</h2></div><p>{isBookSettings ? 'Favorites are shared; model choices belong to this book.' : 'Main writes; Support summarizes; Codex builds your world; Chat assists.'}</p></div>
-          <div className="model-pickers">{modelRoles.map(({ key: role, label, description }) => <SearchableSelect
-            key={role}
-            label={`${label} model`}
-            value={settings[`${role}Model`]}
-            placeholder={role === 'codex' || role === 'chat' ? `Use Main · ${settings.mainModel || 'not selected'}` : 'Choose a model'}
-            searchPlaceholder={`Search ${label.split(' · ')[0]} models`}
-            emptyText={models.length ? 'No models match that search.' : 'Reload the provider model list first.'}
-            description={`${description}${role === 'codex' || role === 'chat' ? ' Leave empty to use Main.' : ''}`}
-            options={[
-              ...((role === 'codex' || role === 'chat') ? [{ value: '', title: `Use Main · ${settings.mainModel || 'not selected'}`, subtitle: 'No separate model for this role' }] : []),
-              ...(!models.some(model => model.id === settings[`${role}Model`]) && settings[`${role}Model`] ? [{ value: settings[`${role}Model`], title: settings[`${role}Model`], subtitle: 'Saved custom or unavailable model', badges: ['Custom'] }] : []),
-              ...[...models].sort((a, b) => Number(settings.favorites.includes(b.id)) - Number(settings.favorites.includes(a.id))).map(model => ({ value: model.id, title: model.name || model.id, subtitle: model.name && model.name !== model.id ? model.id : undefined, meta: formatContext(model.context_length), badges: [settings.favorites.includes(model.id) ? 'Favorite' : '', model.architecture?.modality || 'Text'].filter(Boolean) })),
-            ]}
-            onChange={modelId => selectModel(role, modelId)}
-          />)}</div>
-          <div className="model-effort-settings"><h3>Thinking effort by role</h3><div>{modelRoles.map(({ key: role, label }) => <Select key={role} label={label} description={role === 'chat' ? 'Copied to new chats; each chat can change it.' : 'Used for this role, including when it falls back to Main.'} value={settings[`${role}ThinkingEffort`]} onChange={event => update(`${role}ThinkingEffort`, normalizeThinkingEffort(event.target.value))}>{THINKING_EFFORT_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</Select>)}</div></div>
-          {!isBookSettings && <Select label="Max model rounds per chat response" description="Default for new chats. One assistant model request is one round; several tools in that request still count as one. Existing chats keep their own limit." value={settings.chatMaxModelRounds} onChange={event => update('chatMaxModelRounds', Number(event.target.value))}>{Array.from({ length: 32 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</Select>}
+          <div className="model-role-settings">{modelRoles.map(({ key: role, label, description }) => {
+            const configuredModel = settings[`${role}Model`].trim()
+            const mainModel = settings.mainModel.trim()
+            const emptyTitle = role === 'codex' || role === 'chat' ? `Use Main · ${mainModel || 'not selected'}` : `No ${label.split(' · ')[0]} model`
+            const emptySubtitle = role === 'main'
+              ? 'Story generation will be unavailable'
+              : role === 'support'
+                ? 'Summaries and prompt enhancement will be unavailable'
+                : 'No separate model for this role'
+            const effectiveModel = role === 'codex' || role === 'chat' ? configuredModel || mainModel : configuredModel
+            const priority = role === 'main'
+              ? effectiveModel ? `Effective model: ${effectiveModel}. Main has no fallback.` : 'Effective model: none. Main has no fallback, so story generation is unavailable.'
+              : role === 'support'
+                ? effectiveModel ? `Effective model: ${effectiveModel}. Support has priority for summaries, prompt enhancement, and automatic titles.` : mainModel ? `Effective model: none for summaries or prompt enhancement. Automatic titles alone fall back to Main: ${mainModel}.` : 'Effective model: none. Summaries, prompt enhancement, and automatic titles are unavailable.'
+                : role === 'codex'
+                  ? effectiveModel ? `Effective model: ${effectiveModel}. Priority: Codex, then Main.` : 'Effective model: none. Priority: Codex, then Main; Codex generation is unavailable when both are empty.'
+                  : effectiveModel ? `Effective model for new chats: ${effectiveModel}. Priority: Chat, then Main. Existing chats keep their own model.` : 'Effective model for new chats: none. Priority: Chat, then Main. Existing chats keep their own model.'
+            return <section className="model-role-setting" key={role} aria-labelledby={`${role}-model-heading`}>
+              <header><h3 id={`${role}-model-heading`}>{label}</h3><p>{description}</p></header>
+              <SearchableSelect
+                label="Catalog model"
+                value={settings[`${role}Model`]}
+                searchPlaceholder={`Search ${label.split(' · ')[0]} models`}
+                emptyText={models.length ? 'No models match that search.' : 'Reload the provider model list first.'}
+                description="Choose a model returned by the provider. Favorites are listed first."
+                options={[
+                  { value: '', title: emptyTitle, subtitle: emptySubtitle },
+                  ...(!models.some(model => model.id === settings[`${role}Model`]) && settings[`${role}Model`] ? [{ value: settings[`${role}Model`], title: settings[`${role}Model`], subtitle: 'Unlisted provider model', badges: ['Custom ID'] }] : []),
+                  ...[...models].sort((a, b) => Number(settings.favorites.includes(b.id)) - Number(settings.favorites.includes(a.id))).map(model => ({ value: model.id, title: model.name || model.id, subtitle: model.name && model.name !== model.id ? model.id : undefined, meta: formatContext(model.context_length), badges: [settings.favorites.includes(model.id) ? 'Favorite' : '', model.architecture?.modality || 'Text'].filter(Boolean) })),
+                ]}
+                onChange={modelId => selectModel(role, modelId)}
+              />
+              <Input label="Exact model ID" description="This edits the same model selection as the catalog picker. Use it only when the provider supports a model that is missing from the loaded catalog." value={settings[`${role}Model`]} onChange={event => selectModel(role, event.target.value)} placeholder={(role === 'codex' || role === 'chat') ? 'Leave empty to use Main' : 'Enter an unlisted model ID'} />
+              <Select label="Thinking effort" description={role === 'chat' ? 'Copied to new chats; each chat can change it.' : 'Used whenever this role runs, including when its model falls back to Main.'} value={settings[`${role}ThinkingEffort`]} onChange={event => update(`${role}ThinkingEffort`, normalizeThinkingEffort(event.target.value))}>{THINKING_EFFORT_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</Select>
+              <p className="effective-model-note">{priority}</p>
+              {role === 'chat' && !isBookSettings && <Select label="Max model rounds per response" description="Default for new chats. One assistant model request is one round; several tools in that request still count as one. Existing chats keep their own limit." value={settings.chatMaxModelRounds} onChange={event => update('chatMaxModelRounds', Number(event.target.value))}>{Array.from({ length: 32 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</Select>}
+            </section>
+          })}</div>
           <div className="reveal-setting"><h3>Text reveal speed</h3><p>Controls how quickly generated words appear.</p><SegmentedControl className="reveal-speed-control" label="Text reveal speed" value={settings.generationWordDelayMs} onChange={delay => update('generationWordDelayMs', delay)} fullWidth options={[{ value: '120', label: 'Slow' }, { value: '40', label: 'Normal' }, { value: '10', label: 'Fast' }]} /><TextRevealPreview delay={Number(settings.generationWordDelayMs)} /></div>
-          <Disclosure className="ai-advanced" title="Advanced" description="Custom model IDs, speed, and context limits">
-          <div className="custom-model-settings">{modelRoles.map(({ key: role, label }) => <Input key={role} label={`${label} custom model ID`} description="For compatible endpoints or models not present in the loaded catalog." value={settings[`${role}Model`]} onChange={event => selectModel(role, event.target.value)} placeholder={(role === 'codex' || role === 'chat') ? 'Leave empty to use Main' : 'Enter model ID'} />)}</div>
+          <Disclosure className="ai-advanced" title="Advanced" description="Speed and context limits">
           <label className="generation-speed-setting">
             <span><strong>Custom reveal speed</strong><em>Milliseconds per word</em></span>
             <input type="text" inputMode="numeric" pattern="[0-9]*" value={settings.generationWordDelayMs} onChange={(event) => update('generationWordDelayMs', event.target.value)} aria-describedby="generation-speed-help" spellCheck={false} />
