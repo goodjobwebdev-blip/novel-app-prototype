@@ -1,9 +1,9 @@
-import { useId, useLayoutEffect, useRef } from 'react'
+import { useId, useLayoutEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { MoreHorizontal } from 'lucide-react'
 import './action-menu.css'
 
-export type ActionMenuItem = { label: string; onSelect: () => void; disabled?: boolean; danger?: boolean }
+export type ActionMenuItem = { label: string; icon?: ReactNode; onSelect: () => void; disabled?: boolean; danger?: boolean }
 
 export default function ActionMenu({ title, open, onToggle, onClose, actions }: {
   title: string; open: boolean; onToggle: () => void; onClose: () => void; actions: ActionMenuItem[]
@@ -62,7 +62,7 @@ export default function ActionMenu({ title, open, onToggle, onClose, actions }: 
       const next = event.key === 'ArrowDown' ? (index + 1) % items.length : event.key === 'ArrowUp' ? (index - 1 + items.length) % items.length : event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : -1
       if (next >= 0) { event.preventDefault(); items[next]?.focus() }
     }}>
-      {actions.map(action => <button key={action.label} className={action.danger ? 'danger' : undefined} type="button" role="menuitem" tabIndex={-1} disabled={action.disabled} onClick={() => { closeAndFocus(); action.onSelect() }}>{action.label}</button>)}
+      {actions.map(action => <button key={action.label} className={action.danger ? 'danger' : undefined} type="button" role="menuitem" tabIndex={-1} disabled={action.disabled} onClick={() => { closeAndFocus(); action.onSelect() }}>{action.icon && <span className="arc-action-menu__item-icon" aria-hidden="true">{action.icon}</span>}<span>{action.label}</span></button>)}
     </div>, document.body)}
   </>
 }

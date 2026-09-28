@@ -17,7 +17,10 @@
 .arc-action-menu__trigger > span { display: none; }
 .arc-action-menu__trigger svg { width: 18px; height: 18px; }
 .arc-action-menu__popover { position: fixed; z-index: 200; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; padding: 4px; border: 1px solid var(--line); border-radius: var(--overlay-radius); background: var(--surface); color: var(--ink); box-shadow: 0 8px 24px #0003; }
-.arc-action-menu__popover button { display: block; width: 100%; min-height: 44px; padding: .5rem .65rem; border: 0; border-radius: var(--radius); background: transparent; color: inherit; text-align: left; overflow-wrap: anywhere; font: 400 .8rem/1.3 var(--input-font-family,ui-sans-serif,system-ui,sans-serif); cursor: pointer; }
+.arc-action-menu__popover button { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 44px; padding: .5rem .65rem; border: 0; border-radius: var(--radius); background: transparent; color: inherit; text-align: left; overflow-wrap: anywhere; font: 400 .8rem/1.3 var(--input-font-family,ui-sans-serif,system-ui,sans-serif); cursor: pointer; }
+.arc-action-menu__item-icon { width: 17px; height: 17px; flex: none; color: var(--faint); display: grid; place-items: center; }
+.arc-action-menu__item-icon svg { width: 15px; height: 15px; }
+.arc-action-menu__popover button:hover .arc-action-menu__item-icon,.arc-action-menu__popover button:focus-visible .arc-action-menu__item-icon { color: currentColor; }
 .arc-action-menu__popover button:hover,
 .arc-action-menu__popover button:focus-visible { background: color-mix(in srgb,var(--accent) 12%,var(--surface)); }
 .arc-action-menu__popover button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

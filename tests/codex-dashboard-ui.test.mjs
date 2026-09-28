@@ -83,7 +83,7 @@ const { default: Dashboard } = await moduleAt('features/codex/CodexDashboard')
 test('dashboard renders one bounded page, preserves selection across views, and remembers book preferences', async () => {
   const f = await fixture(8)
   const entries = Array.from({ length: 1050 }, (_, i) => ({ id: 'entry-'+i, type: 'codexEntry', bookId: f.book.id, parentId: f.book.id, title: 'Entry '+String(i).padStart(4,'0'), category: 'Character', typeId: 'lore-character', content: 'A compact description', createdAt: i, updatedAt: i }))
-  const props = { bookId: f.book.id, entries, activeId: 'entry-42', summaryStates: {}, onCreate() {}, onOpen() {}, onOpenSummary() {}, onAutotitle() {}, onRename() {}, onArchive() {}, onRestore() {}, onDelete() {}, onBeforeChange: async () => {}, onRefresh: async () => {} }
+  const props = { bookId: f.book.id, entries, activeId: 'entry-42', summaryStates: {}, onCreate() {}, onOpen() {}, onAutotitle() {}, onRename() {}, onArchive() {}, onRestore() {}, onDelete() {}, onBeforeChange: async () => {}, onRefresh: async () => {} }
   let root = createRoot(document.getElementById('root'))
   try {
     await act(async () => root.render(h(Dashboard, props)))
@@ -91,6 +91,9 @@ test('dashboard renders one bounded page, preserves selection across views, and 
     assert.equal(document.querySelectorAll('img').length, 0)
     assert.equal(button('List').getAttribute('aria-checked'), 'true')
     assert.ok(document.querySelector('.codex-dashboard-results.list'))
+    assert.equal(document.querySelectorAll('.codex-dashboard-results.list .arc-resource-row').length, 40)
+    assert.equal(document.querySelectorAll('.codex-dashboard-results.list .codex-dashboard-preview').length, 0)
+    assert.equal(document.querySelectorAll('.codex-entry-details').length, 0)
     await click('Next page')
     assert.match(document.querySelector('.codex-dashboard-entry').textContent, /Entry 0040/)
     assert.match(document.querySelector('[aria-current="true"]').textContent, /Entry 0042/)
@@ -99,6 +102,8 @@ test('dashboard renders one bounded page, preserves selection across views, and 
     assert.equal(button('List').getAttribute('aria-checked'), 'false')
     assert.ok(document.querySelector('.codex-dashboard-results.cards'))
     assert.equal(document.querySelectorAll('.codex-dashboard-entry').length, 40)
+    assert.equal(document.querySelectorAll('.codex-dashboard-results.cards .codex-dashboard-preview').length, 40)
+    assert.equal(document.querySelectorAll('.codex-dashboard-results.cards .codex-dashboard-entry > footer').length, 40)
     assert.match(document.querySelector('.codex-dashboard-entry').textContent, /Entry 0040/)
     assert.match(document.querySelector('[aria-current="true"]').textContent, /Entry 0042/)
     await click('List')
@@ -121,7 +126,7 @@ test('Codex Actions floats outside entries, selects the correct entry, and dismi
   const { book } = await fixture(8)
   const entries = ['Alice', 'Bob'].map(title => ({ id: title, type: 'codexEntry', bookId: book.id, parentId: book.id, title, category: 'Character', typeId: 'lore-character', content: 'An entry', createdAt: 1, updatedAt: 1 }))
   const selected = []
-  const props = { bookId: book.id, entries, activeId: 'Alice', summaryStates: {}, onCreate() {}, onOpen() {}, onOpenSummary() {}, onAutotitle() {}, onRename(entry) { selected.push(entry.id) }, onArchive() {}, onRestore() {}, onDelete() {}, onBeforeChange: async () => {}, onRefresh: async () => {} }
+  const props = { bookId: book.id, entries, activeId: 'Alice', summaryStates: {}, onCreate() {}, onOpen() {}, onAutotitle() {}, onRename(entry) { selected.push(entry.id) }, onArchive() {}, onRestore() {}, onDelete() {}, onBeforeChange: async () => {}, onRefresh: async () => {} }
   const root = createRoot(document.getElementById('root'))
   const trigger = title => document.querySelector(`button[aria-label="Actions for ${title}"]`)
   const menu = () => document.querySelector('[role="menu"]')
@@ -134,6 +139,8 @@ test('Codex Actions floats outside entries, selects the correct entry, and dismi
     assert.equal(document.querySelector('.codex-dashboard-entry').textContent, entryMarkup, 'Opening actions must not insert content into the entry')
     assert.equal(trigger('Alice').getAttribute('aria-expanded'), 'true')
     assert.equal(document.activeElement.textContent, 'Rename')
+    assert.equal(menu().querySelectorAll('.arc-action-menu__item-icon svg').length, menu().querySelectorAll('[role="menuitem"]').length)
+    assert.equal([...menu().querySelectorAll('[role="menuitem"]')].some(item => /summar/i.test(item.textContent)), false)
     await act(async () => document.activeElement.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
     assert.equal(document.activeElement.textContent, 'Autotitle')
     await act(async () => document.activeElement.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))

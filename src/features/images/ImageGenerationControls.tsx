@@ -2,8 +2,8 @@ import MediaPromptEditor from './MediaPromptEditor'
 import { useState } from 'react'
 import { X } from 'lucide-react'
 import SearchableSelect from '../../shared/ui/SearchableSelect'
-import SegmentedControl from '../../shared/ui/SegmentedControl'
 import Select from '../../shared/ui/Select'
+import Tabs from '../../shared/ui/Tabs'
 import { generationTaskNames, imageRatio, imageProviderNames } from './image-settings'
 import { useImageSettings, useImageUrl } from './image-hooks'
 import { assertImageFile } from './illustration-image'
@@ -67,7 +67,7 @@ export default function ImageGenerationControls({ value, onChange, disabled = fa
   }
   const addAsset = async (asset: GalleryImage) => addSource(await sourceFromBlob(asset.image, asset.id, asset.prompt || asset.modelAlias || 'Gallery image'))
   return <fieldset className="image-generation-controls" disabled={disabled}>
-    <SegmentedControl label="Generation type" value={task} options={(Object.keys(generationTaskNames) as GenerationTask[]).map(option => ({ value: option, label: generationTaskNames[option] }))} onChange={selectTask} fullWidth className="image-generation-task-control" />
+    <Tabs label="Generation type" value={task} items={(Object.keys(generationTaskNames) as GenerationTask[]).map(option => ({ value: option, label: generationTaskNames[option] }))} onChange={selectTask} className="image-generation-task-control" />
     <MediaPromptEditor key={bookId ?? 'global'} value={value} onChange={onChange} bookId={bookId} capability={favorite ? `${favorite.name}: ${favorite.description ?? ''}. Tasks: ${modelTasks(favorite).join(', ')}.` : 'No media model selected'} />
     <div className="image-generation-pickers">
       <ImageModelPicker value={favorite?.alias ?? ''} models={compatible} onChange={chooseModel} disabled={disabled} />

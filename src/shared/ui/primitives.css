@@ -89,6 +89,7 @@
 
 @keyframes arc-button-spin { to { transform: rotate(360deg); } }
 @media (max-width: 720px) {
+  .arc-panel-header__actions { justify-content: flex-start; }
   .arc-choice { min-height: 58px; padding: 10px 11px; border-color: var(--line); background: color-mix(in srgb, var(--surface-2) 52%, transparent); align-items: center; }
   .arc-choice:has(input:checked) { border-color: color-mix(in srgb, var(--accent) 42%, var(--line)); background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
   .arc-choice > input:is([type="checkbox"],[type="radio"]) { width: 22px; height: 22px; min-width: 22px; min-height: 22px; max-width: 22px; max-height: 22px; margin-top: 0; flex-basis: 22px; }

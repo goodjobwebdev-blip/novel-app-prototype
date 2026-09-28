@@ -29,6 +29,9 @@
 .image-modal button:focus-visible, .image-gesture-surface:focus-visible, .codex-image-identity button:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
 .image-modal button svg { width: 20px; height: 20px; flex: none; }
 .image-modal-header button { flex: none; width: 48px; height: 48px; padding: 0; border-radius: var(--radius); }
+.image-modal-header .image-modal-close { display:grid; place-items:center; }
+.image-modal-close .arc-button__icon,.image-modal-close .arc-button__icon > svg { width:20px; height:20px; }
+.image-modal-close .arc-button__icon > svg { display:block; }
 .image-modal-content { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0 max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
 .image-modal-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--line); padding: 12px max(16px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); background: var(--surface); }
 .image-modal-footer > span { color: var(--soft); font-size: 13px; }

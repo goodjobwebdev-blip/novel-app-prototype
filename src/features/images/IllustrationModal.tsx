@@ -36,7 +36,7 @@ export default function IllustrationModal({ title, onClose, children, footer, fu
   return createPortal(<dialog ref={dialog} className={`image-modal ${fullScreen ? 'image-modal-full' : 'image-modal-sheet'}`} aria-label={title}
     onCancel={(event) => { event.preventDefault(); onClose() }} onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
     <section className="image-modal-panel">
-      <header className="image-modal-header"><h2>{title}</h2><Button variant="ghost" onClick={onClose} aria-label={`Close ${title.toLowerCase()}`} leadingIcon={<X aria-hidden="true" />} /></header>
+      <header className="image-modal-header"><h2>{title}</h2><Button className="image-modal-close" variant="secondary" onClick={onClose} aria-label={`Close ${title.toLowerCase()}`} leadingIcon={<X aria-hidden="true" />} /></header>
       <div className="image-modal-content">{children}</div>
       {footer && <footer className="image-modal-footer">{footer}</footer>}
     </section>

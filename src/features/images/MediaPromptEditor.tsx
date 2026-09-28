@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import ExpandableTextInput, { type ExpandableTextInputDictationTarget } from '../../shared/ui/ExpandableTextInput'
 import Button from '../../shared/ui/Button'
+import Disclosure from '../../shared/ui/Disclosure'
 import RadioGroup from '../../shared/ui/RadioGroup'
 import { loadAiSettings } from '../../shared/ai/ai-settings'
 import { getBookAiSettings } from '../../data/persistence'
@@ -99,13 +100,13 @@ export default function MediaPromptEditor({ value, onChange, capability, bookId 
     } finally { if (owner.current === controller) { owner.current = null; setBusy(false) } }
   }
   return <section className="media-prompt-editor">
-    <label><span>Original prompt</span><ExpandableTextInput rows={5} maxLength={32000} value={value.prompt} onChange={prompt => change({ prompt })} aria-label="Original media prompt" dialogTitle="Original media prompt" placeholder="Describe your image or video…" onDictate={dictatePrompt} dictationStatus={sttState.target === 'media-prompt' ? sttState.status : 'idle'} dictationError={sttState.target === 'media-prompt' ? sttState.error : undefined} dictationDisabled={busy} onStopDictation={() => { if (ownsDictation.current) stopSttSession() }} onCancelDictation={cancelPromptDictation} /></label>
-    <div className="image-actions"><Button disabled={busy || !value.prompt.trim()} onClick={() => { void enhance(false) }}>Enhance</Button><Button disabled={busy} onClick={() => setGuidanceOpen(open => !open)}>Enhance with guidance</Button>{busy && <Button variant="danger" onClick={() => owner.current?.abort()}>Stop enhancement</Button>}</div>
+    <div className="media-prompt-primary"><label className="media-prompt-field"><span>Original prompt</span><ExpandableTextInput maxLength={32000} value={value.prompt} onChange={prompt => change({ prompt })} aria-label="Original media prompt" dialogTitle="Original media prompt" placeholder="Describe your image or video…" onDictate={dictatePrompt} dictationStatus={sttState.target === 'media-prompt' ? sttState.status : 'idle'} dictationError={sttState.target === 'media-prompt' ? sttState.error : undefined} dictationDisabled={busy} onStopDictation={() => { if (ownsDictation.current) stopSttSession() }} onCancelDictation={cancelPromptDictation} /></label>
+    <div className="image-actions"><Button disabled={busy || !value.prompt.trim()} onClick={() => { void enhance(false) }}>Enhance</Button><Button disabled={busy} onClick={() => setGuidanceOpen(open => !open)}>Enhance with guidance</Button>{busy && <Button variant="danger" onClick={() => owner.current?.abort()}>Stop enhancement</Button>}</div></div>
     {guidanceOpen && <div><label><span>Enhancement guidance</span><ExpandableTextInput aria-label="Enhancement guidance" dialogTitle="Enhancement guidance" value={value.enhancementGuidance ?? ''} onChange={enhancementGuidance => change({ enhancementGuidance })} /></label><div className="image-actions">{mediaGuidanceChips.map(chip => <button key={chip} type="button" onClick={() => change({ enhancementGuidance: [value.enhancementGuidance, chip].filter(Boolean).join('\n') })}>{chip}</button>)}</div><Button disabled={busy || !value.prompt.trim()} onClick={() => { void enhance(true) }}>Enhance with this guidance</Button></div>}
     {value.enhancedPrompt !== undefined && <><label><span>Enhanced prompt {mediaEnhancementIsStale(value, capability) && <small>· Out of date</small>}</span><ExpandableTextInput rows={5} maxLength={32000} aria-label="Enhanced media prompt" dialogTitle="Enhanced media prompt" value={value.enhancedPrompt} onChange={enhancedPrompt => change({ enhancedPrompt })} /></label><RadioGroup label="Generate from" name={`media-prompt-source-${bookId ?? 'global'}`} value={value.promptSelection === 'enhanced' ? 'enhanced' : 'original'} options={[{ value: 'original', label: 'Original' }, { value: 'enhanced', label: 'Enhanced' }]} onChange={promptSelection => change({ promptSelection: promptSelection as 'original' | 'enhanced' })} /></>}
     <p role="status">{status}</p>
-    <details><summary>Enhancement instructions</summary><ExpandableTextInput aria-label="Enhancement instructions" dialogTitle="Enhancement instructions" value={value.enhancementTemplate ?? defaultMediaEnhancementPrompt} onChange={enhancementTemplate => change({ enhancementTemplate })} /></details>
-    <details><summary>Final media prompt preview</summary><pre>{selectedMediaPrompt(value) || 'Enter a prompt.'}</pre></details>
-    {request && <details><summary>Last enhancement request · {request.model}</summary><pre>{JSON.stringify(request.request.providerMessages, null, 2)}</pre></details>}
+    <Disclosure title="Enhancement instructions"><ExpandableTextInput aria-label="Enhancement instructions" dialogTitle="Enhancement instructions" value={value.enhancementTemplate ?? defaultMediaEnhancementPrompt} onChange={enhancementTemplate => change({ enhancementTemplate })} /></Disclosure>
+    <Disclosure title="Final media prompt preview"><pre>{selectedMediaPrompt(value) || 'Enter a prompt.'}</pre></Disclosure>
+    {request && <Disclosure title={`Last enhancement request · ${request.model}`}><pre>{JSON.stringify(request.request.providerMessages, null, 2)}</pre></Disclosure>}
   </section>
 }

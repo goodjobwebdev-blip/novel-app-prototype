@@ -98,7 +98,7 @@ import '../features/codex/codex-triggers.css'
 import '../features/settings/settings-save-recovery.css'
 import type { PromptPresetScope } from '../features/settings/prompt-presets'
 type SettingsTab = 'ai' | 'context' | 'appearance' | 'speech' | 'images' | 'sync'
-type ContextSection = GenerationContextType | 'summary'
+type ContextSection = Exclude<GenerationContextType, 'note'>
 type SaveState = 'loading' | 'saved' | 'saving' | 'error'
 type ModelRole = 'main' | 'support' | 'codex' | 'chat'
 type RequestPreviewMessage = {
@@ -171,7 +171,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
   const [saveState, setSaveState] = useState<SaveState>(book ? 'loading' : 'saved')
   const [settingsTab, setSettingsTab] = useState<SettingsTab>(initialTab)
   const [settingsLoading, setSettingsLoading] = useState(Boolean(book))
-  const [contextSection, setContextSection] = useState<ContextSection>(() => book?.currentSummary ? 'summary' : book?.contextType ?? 'scene')
+  const [contextSection, setContextSection] = useState<ContextSection>(() => book?.contextType === 'codex' || book?.contextType === 'chat' ? book.contextType : 'scene')
   const [contextSettings, setContextSettings] = useState<BookContextSettings>(defaultBookContextSettings)
   const [chatContextProfile, setChatContextProfile] = useState<GenerationContextProfile | null>(null)
   const [contextSources, setContextSources] = useState<ArcEntity[]>([])
@@ -870,11 +870,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
         </> : settingsTab === 'context' ? (!contextReady ? <section className="settings-card"><h1 id="page-title">Context</h1><p role="status">{contextSaveError || 'Loading context settings…'}</p>{contextSaveError && <Button onClick={() => setContextLoadVersion(version => version + 1)}>Retry loading</Button>}</section> : book ? <>
           <SettingsSectionTabs tabs={contextSections} active={contextSection} onChange={setContextSection} idPrefix="context" label="Context type" />
           <div role="tabpanel" id={`context-panel-${contextSection}`} aria-labelledby={`context-tab-${contextSection}`}>
-            {contextSection === 'summary'
-              ? book.currentSummary ? <SummaryContextSettings book={book} source={summaryPreviewSource} error={summaryPreviewError} settings={settings} /> : <SummaryContextPlaceholder />
-              : contextSection === 'note'
-                ? <NoteContextPlaceholder />
-                : <ContextSettings bookId={book.id} bookTitle={book.title} bookPromptValues={book.promptValues} type={contextSection} currentDocumentId={(book.contextType ?? 'scene') === contextSection ? book.currentDocumentId : undefined} currentDocumentText={(book.contextType ?? 'scene') === contextSection ? book.currentDocumentText : undefined} insertionPosition={(book.contextType ?? 'scene') === contextSection ? book.insertionPosition : undefined} chatId={contextSection === 'chat' ? book.chatId : undefined} settings={settings} value={visibleContextSettings} sources={contextSources} saved={contextSaved} saveError={contextSaveError} onRetry={() => { void saveContextDefaults() }} onChange={(value) => updateContextDefaults(value, contextSection)} />}
+            <ContextSettings bookId={book.id} bookTitle={book.title} bookPromptValues={book.promptValues} type={contextSection} currentDocumentId={(book.contextType ?? 'scene') === contextSection ? book.currentDocumentId : undefined} currentDocumentText={(book.contextType ?? 'scene') === contextSection ? book.currentDocumentText : undefined} insertionPosition={(book.contextType ?? 'scene') === contextSection ? book.insertionPosition : undefined} chatId={contextSection === 'chat' ? book.chatId : undefined} settings={settings} value={visibleContextSettings} sources={contextSources} saved={contextSaved} saveError={contextSaveError} onRetry={() => { void saveContextDefaults() }} onChange={(value) => updateContextDefaults(value, contextSection)} />
           </div>
         </> : <GlobalContextDefaults value={contextSettings} saved={contextSaved} saveError={contextSaveError} onRetry={() => { void saveContextDefaults() }} onChange={updateContextDefaults} />)
           : settingsTab === 'images' ? <ImageSettingsPanel ref={imageSettingsRef} ai={settings} onDirtyChange={setImageSettingsDirty} />
@@ -892,8 +888,6 @@ const contextSections: ReadonlyArray<readonly [ContextSection, string]> = [
   ['scene', 'Story'],
   ['codex', 'Codex'],
   ['chat', 'Chat'],
-  ['summary', 'Summary'],
-  ['note', 'Note'],
 ]
 
 
@@ -957,19 +951,6 @@ function ContextSaveStatus({ saved, error, onRetry }: { saved: boolean; error: s
   return <div className={`context-save-status ${error ? 'error' : ''}`} role="status" aria-live="polite"><span>{error ? 'Save failed' : saved ? 'Saved' : 'Saving…'}</span>{error && <><small>{error}</small><Button size="small" onClick={onRetry}>Retry saving</Button></>}</div>
 }
 
-function SummaryContextSettings({ book, source, error, settings }: { book: NonNullable<AiSettingsProps['book']>; source: SummarySource | null; error: string; settings: AiSettings }) {
-  const summary = book.currentSummary!
-  const metadata = { ...(book.promptValues ?? { title: book.title, series: '', seriesOrder: '', overview: '', genre: '', style: '', pov: '', tense: '', language: '' }), responseLength: settings.responseLengths.summary }
-  const request = source ? assembleSummaryGenerationRequest({ composition: settings.promptCompositions.summarize, book: metadata, responseLength: settings.responseLengths.summary, summary: { id: summary.id, content: source.previousSummary ?? '' }, target: { id: source.source.id, type: source.source.type, title: source.source.title, source: source.content }, sourceDiagnostics: source.diagnostics }) : null
-  const promptErrors = [settings.promptCompositions.summarize.systemPrompt, ...settings.promptCompositions.summarize.predefinedMessages.filter(message => message.enabled).map(message => message.template)].flatMap(template => promptTemplateDiagnostics(template, 'summarize')).filter(diagnostic => diagnostic.severity === 'error')
-  const diagnostics = request && settings.supportModel.trim() && !promptErrors.length ? generationContextDiagnostics(settings.supportModel, settings.supportModelContextLength, '', normalizedRequestDiagnosticText(request)) : null
-  return <section className="context-defaults-settings"><header className="page-heading"><div><p>Summary source</p><h1 id="page-title">Summary context</h1><span>{source?.source.title || 'Loading source…'} · {book.title} · Read-only</span></div></header>
-    <p className="context-scope-banner">Summary generation builds its source from the entity being summarized. Story, Codex, and Chat selections do not change this source.</p>
-    <ContextBudget diagnostics={diagnostics} model={settings.supportModel} pending={!source && !error} error={error || promptErrors.map(item => item.message).join(' ')} />
-    <section className="settings-card"><h2>Source material</h2><p className="context-help">Scenes and Codex entries use their full body. Chapters and Acts use current child summaries where available, with full-source fallbacks for missing or outdated summaries.</p>{source?.diagnostics.map((item, index) => <article className="context-source-row" key={`${item.sourceId}-${index}`}><strong>{item.title || 'Untitled'}</strong><span>{item.representation}</span><small>{item.reason?.replace(/#77 hierarchy/g, 'summary hierarchy')}</small></article>)}{source && !source.diagnostics.length && <p>No child source material is available.</p>}</section>
-    <Disclosure className="settings-card context-inspector" title="Inspect summary request"><SummaryRequestPreview request={request} source={source} error={error} hasCurrentSummary model={settings.supportModel} modelContextLength={settings.supportModelContextLength} /></Disclosure>
-  </section>
-}
 
 function GlobalContextDefaults({ value, saved, saveError, onRetry, onChange }: { value: BookContextSettings; saved: boolean; saveError: string; onRetry: () => void; onChange: (value: BookContextSettings) => void }) {
   return <section className="context-defaults-settings">
@@ -980,21 +961,6 @@ function GlobalContextDefaults({ value, saved, saveError, onRetry, onChange }: {
   </section>
 }
 
-function NoteContextPlaceholder() {
-  return <section className="compact-settings-empty" aria-labelledby="page-title">
-    <MessageCircle aria-hidden="true" />
-    <h1 id="page-title">Note context</h1>
-    <p>Notes have no direct generation settings. Use Chat to create or revise a note, and choose its context in that conversation. Notes can also be selected as additional context for Story, Codex, and Chat.</p>
-  </section>
-}
-
-function SummaryContextPlaceholder() {
-  return <section className="compact-settings-empty" aria-labelledby="page-title">
-    <SlidersHorizontal aria-hidden="true" />
-    <h1 id="page-title">Summary context</h1>
-    <p>Summary context is assembled automatically from the item being summarized. Open a Summary to inspect its authoritative source and request preview.</p>
-  </section>
-}
 
 function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDocumentId, currentDocumentText, insertionPosition, chatId, settings, value, sources, saved, saveError, onRetry, onChange }: { bookId: string; bookTitle: string; bookPromptValues?: BookPromptValues; type: Exclude<GenerationContextType, 'note'>; currentDocumentId?: string; currentDocumentText?: string; insertionPosition?: number; chatId?: string; settings: AiSettings; value: BookContextSettings; sources: ArcEntity[]; saved: boolean; saveError: string; onRetry: () => void; onChange: (value: BookContextSettings) => void }) {
   const [previewPending, setPreviewPending] = useState(true)

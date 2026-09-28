@@ -245,36 +245,6 @@ input[type="range"] {
 .lore-types-manager > article button { min-width: 40px; min-height: 40px; margin: 0; }
 .lore-types-manager button:disabled { opacity: .45; cursor: not-allowed; }
 
-.chat-sidebar .new-character-chat {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 44px;
-  max-width: 100%;
-  margin-bottom: 12px;
-  padding: .5rem .75rem;
-  border: 1px solid var(--line);
-  border-radius: .65rem;
-  background: var(--surface);
-  color: var(--ink);
-  cursor: pointer;
-}
 
-.chat-sidebar .new-character-chat svg { width: 18px; height: 18px; flex: none; }
 .codex-dashboard { display: grid; gap: .65rem; }
 .codex-view-controls { flex-wrap: wrap; }
-
-/* The image form must reserve space for Expand and honor multi-line rows. */
-.image-ui .expandable-text-input > textarea {
-  height: auto;
-  max-height: min(40dvh, 18rem);
-  padding-right: 64px;
-}
-
-.image-ui .expandable-text-input > .expandable-text-trigger {
-  width: 40px;
-  height: 40px;
-  min-height: 40px;
-  padding: 0;
-}
