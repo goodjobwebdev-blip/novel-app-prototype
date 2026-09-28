@@ -48,13 +48,10 @@ export function loadSyncSettings(): SyncSettings {
 }
 
 export function saveSyncSettings(value: SyncSettings): SyncSettings {
-  const normalized = { ...value, endpoint: normalizeSyncEndpoint(value.endpoint) }
-  if (normalized.endpoint && (!normalized.basicUsername.trim() || !normalized.basicPassword || normalized.token.trim().length < 32)) {
-    throw new Error('Enter the Basic Auth username and password plus a sync token of at least 32 characters.')
-  }
-  localStorage.setItem(SYNC_SETTINGS_KEY, JSON.stringify(normalized))
+  const saved = { ...value }
+  localStorage.setItem(SYNC_SETTINGS_KEY, JSON.stringify(saved))
   window.dispatchEvent(new CustomEvent(SYNC_SETTINGS_EVENT))
-  return normalized
+  return saved
 }
 
 export function syncIsConfigured(value = loadSyncSettings()): boolean {
