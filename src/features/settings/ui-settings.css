@@ -155,6 +155,8 @@ select {
   min-height: 44px;
 }
 
+.ui-editor-toggles { display: grid; gap: 8px; }
+
 .expandable-text-input textarea,
 .expandable-text-dialog textarea,
 .arc-drawer textarea,
