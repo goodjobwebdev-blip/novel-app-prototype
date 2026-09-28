@@ -72,7 +72,7 @@ const codexPatternEntries = [
 function CodexPattern({ layout }: { layout: string }) {
   return <div className={`ui-kit-codex-pattern ${layout}`}>
     {codexPatternEntries.map((entry, index) => <article className={`ui-kit-codex-entry ${index === 0 ? 'selected' : ''}`} key={entry.title}>
-      <button className="ui-kit-codex-open" type="button"><span><small>{entry.category}</small><strong>{entry.title}</strong>{layout === 'cards' && <span>{entry.preview}</span>}</span><ChevronRight aria-hidden="true" /></button>
+      <button className="ui-kit-codex-open" type="button">{layout === 'list' && <BookOpen aria-hidden="true" />}<span><small>{entry.category}</small><strong>{entry.title}</strong>{layout === 'cards' && <span>{entry.preview}</span>}</span></button>
       <div className="ui-kit-codex-entry-actions"><PatternActions title={entry.title} /></div>
       {layout === 'cards' && <footer>{entry.meta}</footer>}
     </article>)}
