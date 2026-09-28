@@ -98,6 +98,7 @@ import type { PromptPresetScope } from '../features/settings/prompt-presets'
 type SettingsTab = 'ai' | 'context' | 'appearance' | 'speech' | 'images' | 'sync'
 type ContextSection = GenerationContextType | 'summary'
 type SaveState = 'loading' | 'saved' | 'saving' | 'error'
+type ModelRole = 'main' | 'support' | 'codex' | 'chat'
 type RequestPreviewMessage = {
   key: string
   role: 'system' | 'user' | 'assistant' | 'tool'
@@ -111,6 +112,12 @@ type RequestPreviewMessage = {
 }
 
 const providerLabels: Record<AiProvider, string> = { openrouter: 'OpenRouter', nanogpt: 'nano-gpt.com', openai: 'OpenAI', litellm: 'LiteLLM', compatible: 'OpenAI-compatible', fake: 'Fake (testing)' }
+const modelRoles: ReadonlyArray<{ key: ModelRole; label: string; description: string }> = [
+  { key: 'main', label: 'Main · Story writing', description: 'Writes story prose.' },
+  { key: 'support', label: 'Support · Summaries & titles', description: 'Creates summaries and titles.' },
+  { key: 'codex', label: 'Codex · Worldbuilding', description: 'Builds world and lore entries.' },
+  { key: 'chat', label: 'Chat · Assistant', description: 'Sets the default for new chats.' },
+]
 const promptPresetScope: Record<keyof AiPrompts, PromptPresetScope> = { story: 'story', assistant: 'chat', lore: 'codex', summarize: 'summary' }
 function formatContext(value?: number) {
   if (!value) return 'Context unknown'
@@ -153,7 +160,6 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
   const [promptTab, setPromptTab] = useState<keyof AiPrompts>('story')
   const [promptVariableQuery, setPromptVariableQuery] = useState('')
   const [aiSection, setAiSection] = useState<'connection' | 'models' | 'prompts'>('models')
-  const [modelRole, setModelRole] = useState<'main' | 'support' | 'codex' | 'chat'>('main')
   const [connectionExpanded, setConnectionExpanded] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [showKey, setShowKey] = useState(false)
@@ -389,7 +395,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
     changeAiSettings(() => next)
     setModels(provider === 'fake' ? [FAKE_PROVIDER_MODEL] : []); setStatus(provider === 'fake' ? 'Fake Test Model is available locally. Reload never contacts a network.' : 'Provider changed. Reload its model list when ready.'); setStatusKind(provider === 'fake' ? 'success' : 'quiet')
   }
-  function selectModel(kind: 'main' | 'support' | 'codex' | 'chat', id: string) {
+  function selectModel(kind: ModelRole, id: string) {
     const contextLength = models.find((model) => model.id === id)?.context_length
     changeAiSettings((current) => kind === 'main'
       ? { ...current, mainModel: id, mainModelContextLength: contextLength }
@@ -737,31 +743,26 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
 
         <section hidden={aiSection !== 'models'} className="settings-card models-card" role="tabpanel" id="ai-panel-models" aria-labelledby="ai-tab-models">
           <div className="card-heading"><div><span>02</span><h2>Models</h2></div><p>{isBookSettings ? 'Favorites are shared; model choices belong to this book.' : 'Main writes; Support summarizes; Codex builds your world; Chat assists.'}</p></div>
-          <div className="model-pickers">{(['main', 'support', 'codex', 'chat'] as const).map(role => {
-            const id = settings[`${role}Model`]
-            const model = models.find(item => item.id === id)
-            return <button className="model-role-card" type="button" key={role} aria-pressed={modelRole === role} onClick={() => setModelRole(role)}><strong>{role === 'main' ? 'Main · Story writing' : role === 'support' ? 'Support · Summaries & titles' : role === 'chat' ? 'Chat · Assistant' : 'Codex · Worldbuilding'}</strong><span>{model?.name || id || ((role === 'codex' || role === 'chat') ? `Use Main · ${settings.mainModel || 'not selected'}` : 'Choose a model')}</span><small>{formatContext(model?.context_length ?? settings[`${role}ModelContextLength`])}</small></button>
-          })}</div>
-          <SearchableSelect
-            label={`${modelRole === 'main' ? 'Main · Story writing' : modelRole === 'support' ? 'Support · Summaries & titles' : modelRole === 'chat' ? 'Chat · Assistant' : 'Codex · Worldbuilding'} model`}
-            value={settings[`${modelRole}Model`]}
-            placeholder={modelRole === 'codex' || modelRole === 'chat' ? `Use Main · ${settings.mainModel || 'not selected'}` : 'Choose a model'}
-            searchPlaceholder="Search loaded models"
+          <div className="model-pickers">{modelRoles.map(({ key: role, label, description }) => <SearchableSelect
+            key={role}
+            label={`${label} model`}
+            value={settings[`${role}Model`]}
+            placeholder={role === 'codex' || role === 'chat' ? `Use Main · ${settings.mainModel || 'not selected'}` : 'Choose a model'}
+            searchPlaceholder={`Search ${label.split(' · ')[0]} models`}
             emptyText={models.length ? 'No models match that search.' : 'Reload the provider model list first.'}
-            description={`${models.length} loaded model${models.length === 1 ? '' : 's'}. Favorites are shown first.`}
+            description={`${description}${role === 'codex' || role === 'chat' ? ' Leave empty to use Main.' : ''}`}
             options={[
-              ...((modelRole === 'codex' || modelRole === 'chat') ? [{ value: '', title: `Use Main · ${settings.mainModel || 'not selected'}`, subtitle: 'No separate model for this role' }] : []),
-              ...(!models.some(model => model.id === settings[`${modelRole}Model`]) && settings[`${modelRole}Model`] ? [{ value: settings[`${modelRole}Model`], title: settings[`${modelRole}Model`], subtitle: 'Saved custom or unavailable model', badges: ['Custom'] }] : []),
+              ...((role === 'codex' || role === 'chat') ? [{ value: '', title: `Use Main · ${settings.mainModel || 'not selected'}`, subtitle: 'No separate model for this role' }] : []),
+              ...(!models.some(model => model.id === settings[`${role}Model`]) && settings[`${role}Model`] ? [{ value: settings[`${role}Model`], title: settings[`${role}Model`], subtitle: 'Saved custom or unavailable model', badges: ['Custom'] }] : []),
               ...[...models].sort((a, b) => Number(settings.favorites.includes(b.id)) - Number(settings.favorites.includes(a.id))).map(model => ({ value: model.id, title: model.name || model.id, subtitle: model.name && model.name !== model.id ? model.id : undefined, meta: formatContext(model.context_length), badges: [settings.favorites.includes(model.id) ? 'Favorite' : '', model.architecture?.modality || 'Text'].filter(Boolean) })),
             ]}
-            onChange={modelId => selectModel(modelRole, modelId)}
-          />
-          <Input label="Custom model ID" description="Optional fallback for compatible endpoints or models not present in the loaded catalog." value={settings[`${modelRole}Model`]} onChange={event => selectModel(modelRole, event.target.value)} placeholder={(modelRole === 'codex' || modelRole === 'chat') ? 'Leave empty to use Main' : 'Enter model ID'} />
-          <Select label="Thinking effort" aria-label="Default thinking effort" description={`${modelRole === 'chat' ? 'Copied to new chats; each chat can change its own effort.' : 'Used for this role, including when its model falls back to Main.'} Higher effort may take longer and use more tokens. Available effort levels depend on the model; use Provider default if unsupported.`} value={settings[`${modelRole}ThinkingEffort`]} onChange={event => update(`${modelRole}ThinkingEffort`, normalizeThinkingEffort(event.target.value))}>{THINKING_EFFORT_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</Select>
-          {modelRole === 'chat' && <p>Used for new chats. Leave empty to use Main. You can change the model inside each chat.</p>}
-          {modelRole === 'chat' && !isBookSettings && <Select label="Max model rounds per response" aria-label="Default max model rounds per response" description="Default for new chats. One assistant model request is one round; several tools in that request still count as one. Existing chats keep their own limit." value={settings.chatMaxModelRounds} onChange={event => update('chatMaxModelRounds', Number(event.target.value))}>{Array.from({ length: 32 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</Select>}
+            onChange={modelId => selectModel(role, modelId)}
+          />)}</div>
+          <div className="model-effort-settings"><h3>Thinking effort by role</h3><div>{modelRoles.map(({ key: role, label }) => <Select key={role} label={label} description={role === 'chat' ? 'Copied to new chats; each chat can change it.' : 'Used for this role, including when it falls back to Main.'} value={settings[`${role}ThinkingEffort`]} onChange={event => update(`${role}ThinkingEffort`, normalizeThinkingEffort(event.target.value))}>{THINKING_EFFORT_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</Select>)}</div></div>
+          {!isBookSettings && <Select label="Max model rounds per chat response" description="Default for new chats. One assistant model request is one round; several tools in that request still count as one. Existing chats keep their own limit." value={settings.chatMaxModelRounds} onChange={event => update('chatMaxModelRounds', Number(event.target.value))}>{Array.from({ length: 32 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</Select>}
           <div className="reveal-setting"><h3>Text reveal speed</h3><p>Controls how quickly generated words appear.</p><SegmentedControl className="reveal-speed-control" label="Text reveal speed" value={settings.generationWordDelayMs} onChange={delay => update('generationWordDelayMs', delay)} fullWidth options={[{ value: '120', label: 'Slow' }, { value: '40', label: 'Normal' }, { value: '10', label: 'Fast' }]} /><TextRevealPreview delay={Number(settings.generationWordDelayMs)} /></div>
-          <Disclosure className="ai-advanced" title="Advanced" description="Speed and context limits">
+          <Disclosure className="ai-advanced" title="Advanced" description="Custom model IDs, speed, and context limits">
+          <div className="custom-model-settings">{modelRoles.map(({ key: role, label }) => <Input key={role} label={`${label} custom model ID`} description="For compatible endpoints or models not present in the loaded catalog." value={settings[`${role}Model`]} onChange={event => selectModel(role, event.target.value)} placeholder={(role === 'codex' || role === 'chat') ? 'Leave empty to use Main' : 'Enter model ID'} />)}</div>
           <label className="generation-speed-setting">
             <span><strong>Custom reveal speed</strong><em>Milliseconds per word</em></span>
             <input type="text" inputMode="numeric" pattern="[0-9]*" value={settings.generationWordDelayMs} onChange={(event) => update('generationWordDelayMs', event.target.value)} aria-describedby="generation-speed-help" spellCheck={false} />
