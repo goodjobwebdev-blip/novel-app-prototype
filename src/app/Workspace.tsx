@@ -1931,7 +1931,7 @@ export default function Workspace() {
     }}
   />
 
-  if (uiKitOpen) return <UiKitScreen onBack={() => setUiKitOpen(false)} />
+  if (uiKitOpen) return <UiKitScreen onHome={() => { setUiKitOpen(false); setRightOpen(false); setScreen('home') }} />
 
   if (screen === 'images') {
     const imageBook = imageReturnScreen === 'home' ? undefined : currentBook ?? undefined

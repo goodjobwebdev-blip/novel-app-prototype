@@ -125,4 +125,4 @@
 
 @media (max-width: 900px) { .ui-kit-workspace-pattern-grid { grid-template-columns: 1fr; } }
 @media (max-width: 720px) { .ui-kit-topbar { grid-template-columns: auto 1fr; }.ui-kit-topbar > div { justify-self: end; }.ui-kit-status { display: none; }.ui-kit-heading { display: block; }.ui-kit-heading > span { display: block; margin-top: 14px; }.ui-kit-card-grid,.ui-kit-expandable-grid,.ui-kit-toast-grid,.ui-kit-typography-controls,.ui-kit-typography-previews { grid-template-columns: 1fr; } }
-@media (max-width: 520px) { .ui-kit-input-grid,.ui-kit-form-example,.ui-kit-basic-form-grid,.ui-kit-progress-grid,.ui-kit-codex-pattern.cards { grid-template-columns: 1fr; }.ui-kit-choice-stack { gap: 7px; }.ui-kit-type-scale article { grid-template-columns: 1fr; gap: 10px; }.ui-kit-topbar .arc-button span { display: none; }.ui-kit-topbar .arc-button { width: 42px; padding: 0; } }
+@media (max-width: 520px) { .ui-kit-input-grid,.ui-kit-form-example,.ui-kit-basic-form-grid,.ui-kit-progress-grid,.ui-kit-codex-pattern.cards { grid-template-columns: 1fr; }.ui-kit-choice-stack { gap: 7px; }.ui-kit-type-scale article { grid-template-columns: 1fr; gap: 10px; } }

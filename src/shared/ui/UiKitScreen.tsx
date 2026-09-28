@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, BookOpen, Bot, BrainCircuit, ChevronDown, FileQuestion, ImagePlus, LayoutGrid, List, MessageCircle, Mic, Minus, Palette, Plus, Redo2, RefreshCw, Search, SlidersHorizontal, Sparkles, Trash2, Undo2, Volume2, Zap } from 'lucide-react'
+import { BookOpen, Bot, BrainCircuit, ChevronDown, FileQuestion, House, ImagePlus, LayoutGrid, List, MessageCircle, Mic, Minus, Palette, Plus, Redo2, RefreshCw, Search, SlidersHorizontal, Sparkles, Trash2, Undo2, Volume2, Zap } from 'lucide-react'
 import { builtInThemes, defaultUiSettings, loadUiSettings, saveUiSettings, UI_SETTINGS_EVENT, type UiSettings, type UiTypography } from '../../features/settings/ui-settings'
 import ActionMenu, { type ActionMenuItem } from './ActionMenu'
 import Button from './Button'
@@ -81,7 +81,7 @@ function CodexPattern({ layout }: { layout: string }) {
   </div>
 }
 
-export default function UiKitScreen({ onBack }: { onBack: () => void }) {
+export default function UiKitScreen({ onHome }: { onHome: () => void }) {
   const [settings, setSettings] = useState<UiSettings>(() => loadUiSettings())
   const [saveError, setSaveError] = useState('')
   const [sampleTitle, setSampleTitle] = useState('The City Beneath the Tide')
@@ -129,7 +129,7 @@ export default function UiKitScreen({ onBack }: { onBack: () => void }) {
 
   return <main className="ui-kit-screen">
     <header className="ui-kit-topbar">
-      <Button variant="ghost" leadingIcon={<ArrowLeft />} onClick={onBack}>Library</Button>
+      <Button className="ui-kit-home" variant="secondary" leadingIcon={<House />} onClick={onHome} aria-label="Go to Library home">Home</Button>
       <div><Palette aria-hidden="true" /><span>ARC UI KIT</span></div>
       <span className="ui-kit-status">Internal</span>
     </header>
