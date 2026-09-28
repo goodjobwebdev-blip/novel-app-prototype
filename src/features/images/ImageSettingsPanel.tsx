@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import type { AiSettings } from '../../shared/ai/ai-settings'
 import { modelTasks, type ImageModel, type ImageProvider, type ImageSettings, type OpenAIImageQuality, type OpenAIImageModeration } from './image-generation-types'
 import { documentedImageModels, generationTaskNames, imageSize, imageFavorite, imageProviderNames, imageRatio, IMAGE_PROVIDERS, loadImageSettings, resolveImageKey, resolvePrunaGatewayUrl, saveImageSettings } from './image-settings'
@@ -10,7 +10,7 @@ import Disclosure from '../../shared/ui/Disclosure'
 import Input from '../../shared/ui/Input'
 import SearchField from '../../shared/ui/SearchField'
 import Select from '../../shared/ui/Select'
-export type ImageSettingsPanelRef = { save(): boolean; discard(): void; isDirty(): boolean }
+export type ImageSettingsPanelRef = { save(): boolean; discard(): void }
 export type ImageSettingsPanelProps = { ai: AiSettings; onDirtyChange?: (dirty: boolean) => void }
 
 const ImageSettingsPanel = forwardRef<ImageSettingsPanelRef, ImageSettingsPanelProps>(function ImageSettingsPanel({ ai, onDirtyChange }, ref) {
@@ -19,8 +19,30 @@ const ImageSettingsPanel = forwardRef<ImageSettingsPanelRef, ImageSettingsPanelP
   const [catalogs, setCatalogs] = useState<Partial<Record<ImageProvider, ImageModel[]>>>(() => { try { const data = JSON.parse(localStorage.getItem('arc-image-catalog-v1') || '{}'); return Object.fromEntries(IMAGE_PROVIDERS.filter((p) => Array.isArray(data?.[p])).map((p) => [p, data[p].filter((m: ImageModel) => m?.provider === p && typeof m.id === 'string' && typeof m.name === 'string' && Array.isArray(m.sizes) && m.sizes.length && m.sizes.every((s) => typeof s?.value === 'string' && imageSize(s.value)))])) } catch { return {} } })
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [message, setMessage] = useState(''), [dirty, setDirty] = useState(false)
   const [editingFavorite, setEditingFavorite] = useState<number | null>(settings.favorites.length ? 0 : null)
-  const change = (value: ImageSettings) => { setSettings(value); setDirty(true); setMessage('') }
+  const saveTimerRef = useRef<number | null>(null)
+  const persist = (value: ImageSettings, normalizeState = false) => {
+    try {
+      const saved = saveImageSettings(value)
+      if (normalizeState) setSettings(saved)
+      setDirty(false)
+      setMessage('Saved automatically')
+      setError('')
+      return true
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Settings could not be saved.')
+      return false
+    }
+  }
+  const change = (value: ImageSettings) => {
+    setSettings(value)
+    setDirty(true)
+    setError('')
+    setMessage('Saving…')
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = window.setTimeout(() => { saveTimerRef.current = null; persist(value) }, 400)
+  }
   useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
+  useEffect(() => () => { if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current) }, [])
   const models = provider === 'pruna' ? documentedImageModels.filter((m) => m.provider === provider) : catalogs[provider] ?? documentedImageModels.filter((m) => m.provider === provider)
   const visibleModels = models.filter((model) => `${model.id} ${model.name}`.toLowerCase().includes(query.toLowerCase())).slice(0, 100)
   const refresh = async () => {
@@ -36,11 +58,12 @@ const ImageSettingsPanel = forwardRef<ImageSettingsPanelRef, ImageSettingsPanelP
     finally { setBusy(false) }
   }
   const save = () => {
-    try { setSettings(saveImageSettings(settings)); setDirty(false); setMessage('Image settings saved'); setError(''); return true }
-    catch (reason) { setError(reason instanceof Error ? reason.message : 'Settings could not be saved.'); return false }
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = null
+    return persist(settings, true)
   }
-  const discard = () => { const saved = loadImageSettings(); setSettings(saved); setDirty(false); setError(''); setMessage('Changes discarded'); setEditingFavorite(saved.favorites.length ? 0 : null) }
-  useImperativeHandle(ref, () => ({ save, discard, isDirty: () => dirty }), [dirty, settings])
+  const discard = () => { if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current); saveTimerRef.current = null; const saved = loadImageSettings(); setSettings(saved); setDirty(false); setError(''); setMessage('Changes discarded'); setEditingFavorite(saved.favorites.length ? 0 : null) }
+  useImperativeHandle(ref, () => ({ save, discard }), [settings])
   return <section className="image-settings image-ui">
     <h1 id="page-title">Image & video generation</h1>
     <p className="image-help">Configure device-global visual providers and favorite models. Source images are sent to the selected provider only when generation starts. These settings apply to every book on this device.</p>
@@ -96,11 +119,7 @@ const ImageSettingsPanel = forwardRef<ImageSettingsPanelRef, ImageSettingsPanelP
         </div>
       </Disclosure>
     })}
-    <div className="image-settings-save">
-      {error && <p role="alert">{error}</p>}
-      <Button variant="primary" onClick={save}>Save image settings{dirty ? ' *' : ''}</Button>
-      <span role="status">{message || (dirty ? 'Unsaved changes' : '')}</span>
-    </div>
+    <div className={`image-settings-status ${error ? 'error' : ''}`} role={error ? 'alert' : 'status'} aria-live="polite"><i />{error || message || (dirty ? 'Saving…' : 'Saved automatically')}</div>
   </section>
 })
 
