@@ -195,7 +195,7 @@
     height: 42px;
     min-height: 42px;
     padding: 0;
-    border-radius: 50%;
+    border-radius: var(--radius);
   }
 
   .functional-chat-composer .chat-system-prompt-button span {
