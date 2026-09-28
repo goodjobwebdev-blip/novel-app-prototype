@@ -11,7 +11,7 @@
 @media (max-width: 720px) {
   .composer-shell > .chat-config-strip > summary { min-height: 36px; }
   .composer-shell .composer-status-body { max-height: 23dvh; }
-  .workspace-composer .chat-config-strip > summary > svg { margin-left: auto; }
+  :is(.workspace-composer,.chat-message-composer) .chat-config-strip > summary > svg { margin-left: auto; }
 }
 .scene-title { font: 500 1.8rem var(--serif); }
 .scene-writing-settings { margin: .5rem 0 2rem; border: 1px solid var(--line); border-radius: .75rem; padding: .6rem; color: var(--soft); font: .8rem var(--sans, sans-serif); }
@@ -75,20 +75,40 @@ body:has([role="dialog"]) .selection-tools { display: none; }
 .sensory-edit-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .sensory-detail-dialog .sensory-empty, .sensory-detail-dialog .sensory-status { color: var(--soft); font-size: .8rem; }
 
-/* Editor-only drawer. Chat retains its own composer layout. */
-.chat-composer.workspace-composer { gap: 10px; padding: 10px max(14px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left)); border-top: 1px solid color-mix(in srgb,var(--accent) 22%,var(--line)); background: color-mix(in srgb,var(--surface) 18%,transparent); -webkit-backdrop-filter: blur(16px) saturate(112%); backdrop-filter: blur(16px) saturate(112%); box-shadow: 0 -8px 26px rgba(0,0,0,.14); }
+/* Shared docked drawer geometry; only accordion contents and action menus vary. */
+.chat-composer:is(.workspace-composer,.chat-message-composer) { gap: 10px; padding: 10px max(14px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left)); border-top: 1px solid color-mix(in srgb,var(--accent) 22%,var(--line)); background: color-mix(in srgb,var(--surface) 18%,transparent); -webkit-backdrop-filter: blur(16px) saturate(112%); backdrop-filter: blur(16px) saturate(112%); box-shadow: 0 -8px 26px rgba(0,0,0,.14); }
+:is(.workspace-composer,.chat-message-composer) .chat-config-strip { border-color: var(--line); border-radius: var(--radius); background: color-mix(in srgb,var(--surface-2) 72%,transparent); }
+:is(.workspace-composer,.chat-message-composer) .chat-config-strip[open] { border-radius: var(--radius); background: color-mix(in srgb,var(--surface-2) 88%,transparent); }
+:is(.workspace-composer,.chat-message-composer) .chat-config-strip > summary { min-height: 40px; padding: 0 12px; }
+:is(.workspace-composer,.chat-message-composer) > .chat-compose-row { align-items: end; gap: 10px; }
+:is(.workspace-composer,.chat-message-composer) .expandable-text-input textarea { display: block; height: 56px; min-height: 56px; max-height: 56px; border-color: color-mix(in srgb,var(--ink) 22%,var(--line)); border-radius: var(--radius); }
+:is(.workspace-composer,.chat-message-composer) .expandable-text-trigger { border-radius: var(--radius); }
+:is(.workspace-composer,.chat-message-composer) .generation-actions .generation-primary { width: 56px; min-width: 56px; height: 56px; padding: 0; }
+:is(.workspace-composer,.chat-message-composer) .generation-primary > span { display: none; }
+:is(.workspace-composer,.chat-message-composer) .generation-primary .lucide-play { transform: translateX(1px); }
+.chat-message-composer .chat-generation-running .play { width: 56px!important; height: 56px!important; border-radius: var(--radius)!important; }
+.functional-chat-composer:not(.workspace-composer) .chat-config-row { padding: 12px; gap: 12px; }
+.functional-chat-composer:not(.workspace-composer) .chat-model-picker > .chat-model-selector { height: 44px; min-height: 44px; border: 1px solid color-mix(in srgb,var(--ink) 28%,var(--line)); border-radius: var(--radius); background: color-mix(in srgb,var(--surface-2) 82%,transparent); }
+.functional-chat-composer:not(.workspace-composer) .chat-model-menu,.functional-chat-composer:not(.workspace-composer) .chat-model-search,.functional-chat-composer:not(.workspace-composer) .chat-model-options > button { border-radius: var(--radius); }
+.functional-chat-composer:not(.workspace-composer) .chat-thinking-settings { max-width: none; gap: 10px; }
+.functional-chat-composer:not(.workspace-composer) .chat-thinking-settings .chat-thinking-enabled { display: flex; }
+.functional-chat-composer:not(.workspace-composer) :is(.chat-round-limit,.chat-context-limit) { max-width: none; }
+.functional-chat-composer:not(.workspace-composer) :is(.chat-thinking-settings,.chat-round-limit) .arc-select { width: 100%; border-radius: var(--radius); }
+.functional-chat-composer:not(.workspace-composer) .chat-context-limit .arc-input { border-radius: var(--radius); }
+.functional-chat-composer:not(.workspace-composer) .chat-system-prompt-button { width: 100%; height: auto; min-height: 44px; padding: 0 14px; border-radius: var(--radius); }
+.functional-chat-composer:not(.workspace-composer) .chat-system-prompt-button > span { display: inline; }
+.functional-chat-composer:not(.workspace-composer) .chat-config-row > :is(.chat-skills,.chat-image-references) { margin: 0; padding: 0 10px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb,var(--surface-2) 50%,transparent); overflow: hidden; }
+.functional-chat-composer:not(.workspace-composer) .chat-config-row > :is(.chat-skills,.chat-image-references) > summary { min-height: 44px; margin: 0 -10px; padding: 0 10px; display: flex; align-items: center; list-style: none; }
+.functional-chat-composer:not(.workspace-composer) .chat-config-row > :is(.chat-skills,.chat-image-references) > summary::-webkit-details-marker { display: none; }
+.functional-chat-composer:not(.workspace-composer) .chat-config-row > :is(.chat-skills,.chat-image-references)[open] > summary { margin-bottom: 10px; border-bottom: 1px solid var(--line); }
+.functional-chat-composer:not(.workspace-composer) .chat-config-row :is(.chat-skills,.chat-image-references) button,.functional-chat-composer:not(.workspace-composer) .chat-skills article { border-radius: var(--radius); }
+.functional-chat-composer:not(.workspace-composer) .chat-config-row :is(.chat-skills,.chat-image-references) input[type="checkbox"] { width: 20px; height: 20px; min-width: 20px; min-height: 20px; flex: none; accent-color: var(--accent); }
+/* Editor-only drawer behavior layered on the shared drawer geometry. */
 .workspace-composer .workspace-composer-header { width: min(100%,760px); margin: 0 auto; display: flex; align-items: center; gap: 8px; }
 .workspace-composer-header > details { flex: 1; min-width: 0; }
-.workspace-composer .chat-config-strip { border-color: var(--line); border-radius: var(--radius); background: color-mix(in srgb,var(--surface-2) 72%,transparent); overflow: hidden; }
-.workspace-composer .chat-config-strip[open] { border-radius: var(--radius); background: color-mix(in srgb,var(--surface-2) 88%,transparent); }
-.workspace-composer .chat-config-strip > summary { min-height: 40px; padding: 0 12px; }
+.workspace-composer .chat-config-strip { overflow: hidden; }
 .workspace-composer .composer-status-body button { border-radius: var(--radius); }
-.workspace-composer > .chat-compose-row { align-items: end; gap: 10px; }
 .workspace-composer .arc-prompt-field { padding-bottom: 0; }
-.workspace-composer .arc-prompt-field textarea { display: block; min-height: 56px; border-color: color-mix(in srgb,var(--ink) 22%,var(--line)); border-radius: var(--radius); }
-.workspace-composer .generation-actions .generation-primary { width: 56px; min-width: 56px; height: 56px; padding: 0; }
-.workspace-composer .generation-primary > span { display: none; }
-.workspace-composer .generation-primary .lucide-play { transform: translateX(1px); }
 .workspace-composer [hidden] { display: none; }
 .workspace-composer.is-collapsed { left: auto; right: max(12px,env(safe-area-inset-right)); bottom: max(12px,env(safe-area-inset-bottom)); width: auto; padding: 7px; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb,var(--surface) 22%,transparent); -webkit-backdrop-filter: blur(16px) saturate(112%); backdrop-filter: blur(16px) saturate(112%); box-shadow: 0 8px 24px rgba(0,0,0,.2); display: flex; align-items: center; gap: 7px; pointer-events: auto; }
 .workspace-composer.is-collapsed .workspace-composer-header { width: auto; margin: 0; gap: 7px; }

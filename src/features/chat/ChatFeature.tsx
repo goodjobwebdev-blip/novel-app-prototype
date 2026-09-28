@@ -44,8 +44,12 @@ import {
   X,
 } from 'lucide-react'
 import { streamChatCompletion, type ChatCompletionUsage } from './chat-api'
+import Button from '../../shared/ui/Button'
+import Checkbox from '../../shared/ui/Checkbox'
 import ExpandableTextInput, { type ExpandableTextInputDictationTarget } from '../../shared/ui/ExpandableTextInput'
 import GenerationActions from '../../shared/ui/GenerationActions'
+import Input from '../../shared/ui/Input'
+import Select from '../../shared/ui/Select'
 import PromptTemplateEditor from '../settings/PromptTemplateEditor'
 import PromptPresetControls from '../settings/PromptPresetControls'
 import { chatMatchesBookSelection, onlyChatsForBook, reloadMatchesBookSelection } from './chat-book-guard'
@@ -1336,20 +1340,19 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
 
     {!followOutput && <button className="chat-follow-output" type="button" onClick={jumpToLatest}>↓ New content</button>}
 
-    <Composer strip={<details className="chat-config-strip">
+    <Composer className="chat-message-composer" strip={<details className="chat-config-strip">
         <summary><span>Generation settings</span><small>Thinking: {chat.thinking ? THINKING_EFFORT_OPTIONS.find(option => option.value === normalizeThinkingEffort(chat.thinkingEffort))?.label : 'Provider default'} · model · context</small><ChevronDown aria-hidden="true" /></summary>
         <div className="chat-config-row">
           <ChatModelPicker value={chat.model} models={sortedModels} onChange={(modelId) => { void changeModel(modelId) }} />
           <div className="chat-thinking-settings">
-            <label className="chat-thinking-enabled"><input type="checkbox" checked={chat.thinking} onChange={event => { void setThinking(event.target.checked) }} /><span>Customize thinking</span></label>
-            <label><span>Thinking effort</span><select aria-label="Chat thinking effort" value={normalizeThinkingEffort(chat.thinkingEffort)} disabled={!chat.thinking} onChange={event => { void setThinking(true, normalizeThinkingEffort(event.target.value)) }}>{THINKING_EFFORT_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
-            <small>Higher effort may take longer and use more tokens. Supported levels depend on the model. Changes apply to the next response.</small>
+            <Checkbox className="chat-thinking-enabled" label="Customize thinking" checked={chat.thinking} onChange={event => { void setThinking(event.target.checked) }} />
+            <Select label="Thinking effort" value={normalizeThinkingEffort(chat.thinkingEffort)} disabled={!chat.thinking} onChange={event => { void setThinking(true, normalizeThinkingEffort(event.target.value)) }} description="Higher effort may take longer and use more tokens. Supported levels depend on the model.">{THINKING_EFFORT_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</Select>
           </div>
           {!chat.character && <ChatSkillsPicker key={chat.id} chat={chat} onChange={updated => applyIfCurrentChat(chat, () => setChat(updated))} />}
           <ChatImageReferences chat={chat} disabled={generating} onChange={updated => applyIfCurrentChat(chat, () => setChat(updated))} />
-          <label className="chat-round-limit"><span>Max model rounds per response</span><select aria-label="Max model rounds per response" value={normalizeChatRoundLimit(chat.maxModelRounds)} onChange={event => { const captured = chat; void updateChat(captured.id, { maxModelRounds: Number(event.target.value) }).then(updated => applyIfCurrentChat(captured, () => setChat(updated))).catch(error => onToast(error.message)) }}>{Array.from({ length: 32 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</select><small>One model request is one round, even with several tool calls. Changes apply to the next run.</small></label>
-          <label className={`chat-context-limit ${contextLimitInputError(limitDraft) ? 'invalid' : ''}`}><span>Context cap</span><input value={limitDraft} onChange={(event) => setLimitDraft(event.target.value)} onBlur={() => { void saveEffectiveContextLimit() }} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} placeholder="Model max" inputMode="text" aria-label="Chat effective context cap" /><small>{contextLimitInputError(limitDraft) || 'Empty uses the model maximum. 32k / 1m supported.'}</small></label>
-          <button className="chat-system-prompt-button" type="button" onClick={() => { setCompositionDraft(clonePromptComposition(chat.promptComposition)); setPromptOpen(true) }}><Bot aria-hidden="true" /><span>Request composition</span></button>
+          <Select className="chat-round-limit" label="Max model rounds per response" value={normalizeChatRoundLimit(chat.maxModelRounds)} onChange={event => { const captured = chat; void updateChat(captured.id, { maxModelRounds: Number(event.target.value) }).then(updated => applyIfCurrentChat(captured, () => setChat(updated))).catch(error => onToast(error.message)) }} description="One model request is one round, even with several tool calls.">{Array.from({ length: 32 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</Select>
+          <Input className="chat-context-limit" label="Context cap" value={limitDraft} onChange={(event) => setLimitDraft(event.target.value)} onBlur={() => { void saveEffectiveContextLimit() }} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} placeholder="Model max" inputMode="text" aria-label="Chat effective context cap" error={contextLimitInputError(limitDraft) || undefined} description={contextLimitInputError(limitDraft) ? undefined : 'Empty uses the model maximum. 32k / 1m supported.'} />
+          <Button className="chat-system-prompt-button" variant="secondary" leadingIcon={<Bot aria-hidden="true" />} onClick={() => { setCompositionDraft(clonePromptComposition(chat.promptComposition)); setPromptOpen(true) }}>Request composition</Button>
           {modelStatus && <small className="chat-model-status">{modelStatus}</small>}
         </div>
       </details>}>
