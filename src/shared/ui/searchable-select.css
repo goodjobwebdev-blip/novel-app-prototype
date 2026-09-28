@@ -1,0 +1,42 @@
+.arc-searchable-select { position: relative; min-width: 0; display: grid; gap: 7px; }
+.arc-searchable-select__label { color: var(--soft); font-size: 12px; font-weight: 600; }
+.arc-searchable-select__trigger { width: 100%; min-height: 54px; padding: 7px 11px; border: 1px solid color-mix(in srgb, var(--ink) 28%, var(--line)); border-radius: var(--radius); background: color-mix(in srgb, var(--surface-2) 82%, transparent); color: var(--ink); display: grid; grid-template-columns: minmax(0,1fr) 18px; align-items: center; gap: 10px; text-align: left; cursor: pointer; }
+.arc-searchable-select__trigger.has-icon { grid-template-columns: auto minmax(0,1fr) 18px; }
+.arc-searchable-select__trigger:focus-visible { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); outline: 3px solid color-mix(in srgb, var(--accent) 13%, transparent); }
+.arc-searchable-select__trigger:disabled { opacity: .5; cursor: not-allowed; }
+.arc-searchable-select__trigger > span:not(.arc-searchable-select__trigger-icon),.arc-searchable-select__trigger strong,.arc-searchable-select__trigger small { min-width: 0; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.arc-searchable-select__trigger strong { font-size: 12px; }
+.arc-searchable-select__trigger small { margin-top: 4px; color: var(--faint); font-size: 10px; font-weight: 400; }
+.arc-searchable-select__trigger > svg { width: 17px; height: 17px; justify-self: end; color: var(--faint); transition: transform 160ms ease; }
+.arc-searchable-select__trigger[aria-expanded="true"] > svg { transform: rotate(180deg); }
+.arc-searchable-select__trigger-icon,.arc-searchable-select__option-icon { width: 34px; height: 34px; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb, var(--accent) 9%, var(--surface)); color: var(--accent); display: grid; place-items: center; }
+.arc-searchable-select__trigger-icon svg,.arc-searchable-select__option-icon svg { width: 16px; height: 16px; }
+.arc-searchable-select__description { color: var(--faint); font-size: 10px; line-height: 1.45; }
+.arc-searchable-select__panel { position: absolute; z-index: 100; top: calc(100% + 7px); left: 0; right: 0; max-height: min(430px,calc(100dvh - 120px)); padding: 6px; border: 1px solid color-mix(in srgb, var(--ink) 24%, var(--line)); border-radius: var(--radius); background: color-mix(in srgb, var(--deep) 97%, var(--accent)); box-shadow: 0 18px 50px rgba(0,0,0,.42); overflow: hidden; }
+.arc-searchable-select__search { min-height: 44px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb, var(--surface-2) 82%, transparent); display: flex; align-items: center; gap: 8px; }
+.arc-searchable-select__search > svg { width: 16px; height: 16px; flex: none; color: var(--faint); }
+.arc-searchable-select__search input { min-width: 0; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.arc-searchable-select__options { max-height: 350px; margin-top: 6px; overflow: auto; display: grid; align-content: start; gap: 3px; }
+.arc-searchable-select__option { width: 100%; min-height: 62px; padding: 8px; border: 1px solid transparent; border-radius: var(--radius); background: transparent; color: var(--soft); display: grid; grid-template-columns: auto minmax(0,1fr) auto auto; align-items: center; gap: 9px; text-align: left; cursor: pointer; }
+.arc-searchable-select__option:hover:not(:disabled),.arc-searchable-select__option:focus-visible { border-color: var(--line); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); color: var(--ink); outline: none; }
+.arc-searchable-select__option[aria-selected="true"] { border-color: color-mix(in srgb, var(--accent) 42%, var(--line)); background: color-mix(in srgb, var(--accent) 11%, var(--surface)); color: var(--ink); }
+.arc-searchable-select__option:disabled { opacity: .42; cursor: not-allowed; }
+.arc-searchable-select__option-copy,.arc-searchable-select__option-copy strong,.arc-searchable-select__option-copy small { min-width: 0; display: block; }
+.arc-searchable-select__option-copy strong { color: inherit; font-size: 12px; }
+.arc-searchable-select__option-copy small { margin-top: 3px; overflow: hidden; color: var(--faint); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.arc-searchable-select__badges { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+.arc-searchable-select__badges em { padding: 2px 5px; border: 1px solid var(--line); border-radius: var(--radius); color: var(--faint); font-size: 8px; font-style: normal; }
+.arc-searchable-select__meta { color: var(--accent-bright); font-size: 9px; white-space: nowrap; }
+.arc-searchable-select__check { width: 16px; height: 16px; color: var(--accent); }
+.arc-searchable-select__empty { margin: 0; padding: 30px 14px; color: var(--faint); font-size: 11px; text-align: center; }
+.arc-searchable-select__modal { width: 100%; max-width: none; height: 100%; max-height: none; margin: 0; padding: max(14px,env(safe-area-inset-top)) 12px max(14px,env(safe-area-inset-bottom)); border: 0; background: rgba(8,9,8,.74); color: var(--ink); }
+.arc-searchable-select__modal::backdrop { background: rgba(8,9,8,.74); backdrop-filter: blur(8px); }
+.arc-searchable-select__modal > section { width: min(100%,560px); max-height: 100%; margin: 0 auto; padding: 12px; border: 1px solid color-mix(in srgb, var(--ink) 24%, var(--line)); border-radius: var(--radius); background: var(--deep); box-shadow: 0 24px 80px rgba(0,0,0,.55); display: grid; grid-template-rows: auto auto minmax(0,1fr); }
+.arc-searchable-select__modal header { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.arc-searchable-select__modal header > strong { font: 500 21px var(--serif); }
+.arc-searchable-select__modal header button { width: 40px; height: 40px; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb, var(--surface-2) 82%, transparent); display: grid; place-items: center; cursor: pointer; }
+.arc-searchable-select__modal header button svg { width: 17px; height: 17px; }
+.arc-searchable-select__modal .arc-searchable-select__options { max-height: none; min-height: 0; }
+@media (max-width: 720px) {
+  .arc-searchable-select__modal > section { height: 100%; }
+}
