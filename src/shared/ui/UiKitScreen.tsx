@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, BookOpen, Bot, BrainCircuit, ChevronDown, ImagePlus, LayoutGrid, List, MessageCircle, Mic, Palette, Plus, Redo2, RefreshCw, Search, SlidersHorizontal, Sparkles, Trash2, Undo2, Volume2, Zap } from 'lucide-react'
+import { BookOpen, Bot, BrainCircuit, ChevronDown, FileQuestion, House, ImagePlus, LayoutGrid, List, MessageCircle, Mic, Minus, Palette, Plus, Redo2, RefreshCw, Search, SlidersHorizontal, Sparkles, Trash2, Undo2, Volume2, Zap } from 'lucide-react'
 import { builtInThemes, defaultUiSettings, loadUiSettings, saveUiSettings, UI_SETTINGS_EVENT, type UiSettings, type UiTypography } from '../../features/settings/ui-settings'
+import ActionMenu, { type ActionMenuItem } from './ActionMenu'
 import Button from './Button'
 import Card from './Card'
 import Checkbox from './Checkbox'
@@ -12,6 +13,7 @@ import Input from './Input'
 import PanelHeader from './PanelHeader'
 import ProgressBar from './ProgressBar'
 import RadioGroup from './RadioGroup'
+import ResourceListRow from './ResourceListRow'
 import SearchableSelect from './SearchableSelect'
 import SegmentedControl from './SegmentedControl'
 import Select from './Select'
@@ -21,7 +23,65 @@ import Toast, { type ToastVariant } from './Toast'
 import TypographyControls from './TypographyControls'
 import './ui-kit.css'
 
-export default function UiKitScreen({ onBack }: { onBack: () => void }) {
+function PatternActions({ title }: { title: string }) {
+  const [open, setOpen] = useState(false)
+  const actions: ActionMenuItem[] = [
+    { label: 'Autotitle', onSelect: () => {} },
+    { label: 'Rename', onSelect: () => {} },
+    { label: 'Move up', onSelect: () => {} },
+    { label: 'Move down', onSelect: () => {} },
+    { label: 'Delete', danger: true, onSelect: () => {} },
+  ]
+  return <ActionMenu title={title} open={open} onToggle={() => setOpen(value => !value)} onClose={() => setOpen(false)} actions={actions} />
+}
+
+function OutlinePatternRow({ eyebrow, title, expanded, selected = false }: { eyebrow: string; title: string; expanded?: boolean; selected?: boolean }) {
+  return <div className={`ui-kit-outline-row ${selected ? 'selected' : ''}`}>
+    {expanded === undefined ? <span className="ui-kit-outline-leaf-node" aria-hidden="true" /> : <button className="ui-kit-outline-toggle" type="button" aria-label={`${expanded ? 'Collapse' : 'Expand'} ${title}`}><span aria-hidden="true">{expanded ? <Minus /> : <Plus />}</span></button>}
+    <button className="ui-kit-outline-open" type="button"><small>{eyebrow}</small><strong>{title}</strong></button>
+    <Button className="ui-kit-pattern-icon-action" size="small" variant="secondary" aria-label={`Open summary for ${title}`} leadingIcon={<FileQuestion />} />
+    <PatternActions title={title} />
+  </div>
+}
+
+function OutlinePattern() {
+  return <div className="ui-kit-outline-pattern">
+    <div className="ui-kit-pattern-actions"><Button size="small" variant="secondary" leadingIcon={<Plus />}>Act</Button><Button size="small" variant="secondary" leadingIcon={<Plus />}>Chapter</Button></div>
+    <ul className="ui-kit-outline-tree" role="tree">
+      <li><OutlinePatternRow eyebrow="Act 1 · 92 words" title="The doors remember" expanded />
+        <ul className="ui-kit-outline-children" role="group">
+          <li><OutlinePatternRow eyebrow="Chapter 1 · 92 words" title="The Cartographer’s Door" expanded />
+            <ul className="ui-kit-outline-children" role="group">
+              <li><OutlinePatternRow eyebrow="Scene 1 · 92 words" title="The voice beyond" selected /></li>
+              <li><OutlinePatternRow eyebrow="Scene 2 · 0 words" title="Crossing" /></li>
+            </ul>
+          </li>
+          <li><OutlinePatternRow eyebrow="Chapter 2 · 0 words" title="What the sea kept" /><p className="ui-kit-outline-empty">No scenes yet</p></li>
+        </ul>
+      </li>
+      <li><OutlinePatternRow eyebrow="Act 2 · 2 chapters · 0 words" title="The map without coastlines" expanded={false} /></li>
+    </ul>
+  </div>
+}
+
+const codexPatternEntries = [
+  { category: 'Object', title: 'Brass Compass', preview: 'One of several compasses that point toward remembered places.', meta: '3 triggers · 2 relationships · 1 checkpoint' },
+  { category: 'Character', title: 'Mara Vale', preview: 'A cartographer who inherited her father’s rules and unfinished map.', meta: '2 triggers · 4 relationships' },
+  { category: 'Place', title: 'The Drowned Quarter', preview: 'A district exposed only at low tide.', meta: '1 trigger · No relationships' },
+]
+
+function CodexPattern({ layout }: { layout: string }) {
+  if (layout === 'list') return <div className="ui-kit-codex-pattern list">{codexPatternEntries.map((entry, index) => <ResourceListRow key={entry.title} selected={index === 0} icon={<BookOpen />} title={entry.title} meta={entry.category} onOpen={() => {}} actions={<PatternActions title={entry.title} />} />)}</div>
+  return <div className="ui-kit-codex-pattern cards">
+    {codexPatternEntries.map((entry, index) => <article className={`ui-kit-codex-entry ${index === 0 ? 'selected' : ''}`} key={entry.title}>
+      <button className="ui-kit-codex-open" type="button"><span><small>{entry.category}</small><strong>{entry.title}</strong><span>{entry.preview}</span></span></button>
+      <div className="ui-kit-codex-entry-actions"><PatternActions title={entry.title} /></div>
+      <footer>{entry.meta}</footer>
+    </article>)}
+  </div>
+}
+
+export default function UiKitScreen({ onHome }: { onHome: () => void }) {
   const [settings, setSettings] = useState<UiSettings>(() => loadUiSettings())
   const [saveError, setSaveError] = useState('')
   const [sampleTitle, setSampleTitle] = useState('The City Beneath the Tide')
@@ -36,6 +96,7 @@ export default function UiKitScreen({ onBack }: { onBack: () => void }) {
   const [narrativePerson, setNarrativePerson] = useState('third')
   const [sampleTab, setSampleTab] = useState('story')
   const [sampleLayout, setSampleLayout] = useState('cards')
+  const [codexPatternLayout, setCodexPatternLayout] = useState('list')
   const [demoToast, setDemoToast] = useState<ToastVariant | null>(null)
 
   useEffect(() => {
@@ -68,7 +129,7 @@ export default function UiKitScreen({ onBack }: { onBack: () => void }) {
 
   return <main className="ui-kit-screen">
     <header className="ui-kit-topbar">
-      <Button variant="ghost" leadingIcon={<ArrowLeft />} onClick={onBack}>Library</Button>
+      <Button className="ui-kit-home" variant="secondary" leadingIcon={<House />} onClick={onHome} aria-label="Go to Library home">Home</Button>
       <div><Palette aria-hidden="true" /><span>ARC UI KIT</span></div>
       <span className="ui-kit-status">Internal</span>
     </header>
@@ -236,8 +297,21 @@ export default function UiKitScreen({ onBack }: { onBack: () => void }) {
         </Card>
       </section>
 
+      <section className="ui-kit-section" aria-labelledby="ui-kit-workspace-patterns">
+        <header><small>07</small><div><h2 id="ui-kit-workspace-patterns">Workspace patterns</h2><p>Review these complete patterns before they replace the current Outline and Codex implementations.</p></div></header>
+        <div className="ui-kit-workspace-pattern-grid">
+          <Card variant="outlined" eyebrow="Hierarchical list" title="Outline tree" description="Continuous branch connections, compact rows, and a selected scene that remains part of its branch.">
+            <OutlinePattern />
+          </Card>
+          <Card variant="outlined" eyebrow="Resource browser" title="Codex entries" description="List is one compact row. Cards provide preview and metadata without a large Details disclosure.">
+            <SegmentedControl label="Codex pattern layout" value={codexPatternLayout} onChange={setCodexPatternLayout} options={[{ value: 'list', label: 'List', icon: <List /> }, { value: 'cards', label: 'Cards', icon: <LayoutGrid /> }]} />
+            <CodexPattern layout={codexPatternLayout} />
+          </Card>
+        </div>
+      </section>
+
       <section className="ui-kit-section" aria-labelledby="ui-kit-progress">
-        <header><small>07</small><div><h2 id="ui-kit-progress">Progress bars</h2><p>Default and semantic progress states.</p></div></header>
+        <header><small>08</small><div><h2 id="ui-kit-progress">Progress bars</h2><p>Default and semantic progress states.</p></div></header>
         <Card variant="outlined">
           <div className="ui-kit-progress-grid">
             <ProgressBar label="Generating chapter" value={42} />
@@ -251,7 +325,7 @@ export default function UiKitScreen({ onBack }: { onBack: () => void }) {
       </section>
 
       <section className="ui-kit-section" aria-labelledby="ui-kit-toasts">
-        <header><small>08</small><div><h2 id="ui-kit-toasts">Warnings and toasts</h2><p>Success, warning, and error feedback with optional dismissal.</p></div></header>
+        <header><small>09</small><div><h2 id="ui-kit-toasts">Warnings and toasts</h2><p>Success, warning, and error feedback with optional dismissal.</p></div></header>
         <Card variant="outlined">
           <div className="ui-kit-toast-grid">
             <Toast variant="success" title="Changes saved">Your appearance settings are up to date.</Toast>
@@ -269,7 +343,7 @@ export default function UiKitScreen({ onBack }: { onBack: () => void }) {
       {demoToast && <Toast fixed duration={5000} variant={demoToast} title={demoToast === 'success' ? 'Changes saved' : demoToast === 'warning' ? 'Check this request' : 'Something went wrong'} onDismiss={() => setDemoToast(null)}>{demoToast === 'success' ? 'Your changes were saved successfully.' : demoToast === 'warning' ? 'Review the context before continuing.' : 'Please try again or check the provider settings.'}</Toast>}
 
       <section className="ui-kit-section" aria-labelledby="ui-kit-typography">
-        <header><small>09</small><div><h2 id="ui-kit-typography">Typography</h2><p>Responsive type roles for mobile and desktop application UI.</p></div></header>
+        <header><small>10</small><div><h2 id="ui-kit-typography">Typography</h2><p>Responsive type roles for mobile and desktop application UI.</p></div></header>
         <Card variant="outlined" eyebrow="Playground" title="User-controlled typography" description="These are the same two typography scopes available in Appearance settings. Only their matching previews change.">
           <div className="ui-kit-typography-controls">
             <TypographyControls title="Main editor" description="Scenes, notes, Codex entries, and summaries." value={settings.editor} onChange={value => updateTypography('editor', value)} onReset={() => updateTypography('editor', { ...defaultUiSettings.editor })} />

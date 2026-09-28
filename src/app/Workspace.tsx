@@ -103,6 +103,7 @@ import GenerationActions from '../shared/ui/GenerationActions'
 import UiKitScreen from '../shared/ui/UiKitScreen'
 import Input from '../shared/ui/Input'
 import PanelHeader from '../shared/ui/PanelHeader'
+import ResourceListRow from '../shared/ui/ResourceListRow'
 import SearchField from '../shared/ui/SearchField'
 import MarkdownEditor, { type CodexMentionClick, type GenerationContext, type GenerationResult, type MarkdownEditorHandle } from '../features/editor/MarkdownEditor'
 import type { NanoGPTStreamMetadata } from '../shared/ai/nanogpt'
@@ -1930,7 +1931,7 @@ export default function Workspace() {
     }}
   />
 
-  if (uiKitOpen) return <UiKitScreen onBack={() => setUiKitOpen(false)} />
+  if (uiKitOpen) return <UiKitScreen onHome={() => { setUiKitOpen(false); setRightOpen(false); setScreen('home') }} />
 
   if (screen === 'images') {
     const imageBook = imageReturnScreen === 'home' ? undefined : currentBook ?? undefined
@@ -2780,7 +2781,7 @@ function Notes({ notes, activeId, onCreate, onOpen, onAutotitle, onRead, onRenam
   const [query, setQuery] = useState('')
   const normalizedQuery = query.trim().toLowerCase()
   const visible = notes.filter((note) => !normalizedQuery || `${note.title} ${note.content}`.toLowerCase().includes(normalizedQuery))
-  return <section className="notes-panel"><PanelHeader eyebrow="Reference" title="Notes" actions={<Button size="small" variant="secondary" leadingIcon={<Plus />} onClick={onCreate}>New</Button>} /><Input className="notes-search" type="search" leadingIcon={<Search aria-hidden="true" />} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search notes" aria-label="Search notes" />{visible.length ? visible.map((note) => <article className={`content-row ${activeId === note.id ? 'selected' : ''}`} key={note.id}><button className="content-open" type="button" onClick={() => onOpen(note.id)}><NotebookPen aria-hidden="true" /><span><strong>{note.title}</strong><small>{formatEdited(note.updatedAt)}</small></span><ChevronRight aria-hidden="true" /></button><div className="content-actions"><button className="autotitle-trigger" type="button" onClick={() => onAutotitle(note)} aria-label={`Autotitle ${note.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></button><button className="read-aloud-action" type="button" onClick={() => onRead(note)} aria-label={`Read ${note.title} aloud`} title="Read aloud"><Volume2 aria-hidden="true" /></button><button type="button" onClick={() => onRename(note)} aria-label={`Rename ${note.title}`}><Pencil aria-hidden="true" /></button><button type="button" onClick={() => onDelete(note)} aria-label={`Delete ${note.title}`}><Trash2 aria-hidden="true" /></button></div></article>) : <p className="content-empty">{query ? 'No matching notes.' : 'No notes yet.'}</p>}</section>
+  return <section className="notes-panel"><PanelHeader eyebrow="Reference" title="Notes" actions={<Button size="small" variant="secondary" leadingIcon={<Plus />} onClick={onCreate}>New</Button>} /><Input className="notes-search" type="search" leadingIcon={<Search aria-hidden="true" />} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search notes" aria-label="Search notes" />{visible.length ? visible.map((note) => <ResourceListRow key={note.id} selected={activeId === note.id} icon={<NotebookPen />} title={note.title} meta={formatEdited(note.updatedAt)} onOpen={() => onOpen(note.id)} actions={<><button className="autotitle-trigger" type="button" onClick={() => onAutotitle(note)} aria-label={`Autotitle ${note.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></button><button className="read-aloud-action" type="button" onClick={() => onRead(note)} aria-label={`Read ${note.title} aloud`} title="Read aloud"><Volume2 aria-hidden="true" /></button><button type="button" onClick={() => onRename(note)} aria-label={`Rename ${note.title}`}><Pencil aria-hidden="true" /></button><button className="danger" type="button" onClick={() => onDelete(note)} aria-label={`Delete ${note.title}`}><Trash2 aria-hidden="true" /></button></>} />) : <p className="content-empty">{query ? 'No matching notes.' : 'No notes yet.'}</p>}</section>
 }
 
 

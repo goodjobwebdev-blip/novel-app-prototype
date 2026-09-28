@@ -1,8 +1,7 @@
 .codex-panel-actions { display: flex; align-items: center; gap: 6px; }
 .codex-panel-actions button { display: inline-flex; align-items: center; gap: 5px; }
 .codex-panel-actions button.active { opacity: .86; }
-.codex-content-row.archived { opacity: .68; }
-.codex-content-row.archived.selected { opacity: .82; }
+
 .document-titlebar.archived { opacity: .82; }
 .document-metadata.archived select { opacity: .62; cursor: not-allowed; }
 .archived-document-note { display: flex; align-items: flex-start; gap: 8px; margin: 10px 0 0; padding: 10px 12px; border: 1px dashed rgba(255,255,255,.16); border-radius: var(--radius); }

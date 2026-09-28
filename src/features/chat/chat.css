@@ -252,9 +252,11 @@
 .chat-skills article { padding: 10px; border: 1px solid var(--border); margin: 8px 0; border-radius: var(--radius); }
 .note-roles { display: flex; align-items: center; gap: 16px; }
 
-.codex-scope-controls { padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 12px; }
-.codex-scope-controls p { color: var(--muted); font-size: 12px; }
-.codex-scope-controls button { margin: 4px; }
+.codex-scope-controls { min-width: 0; display: grid; justify-items: start; gap: 8px; }
+.codex-scope-controls > strong { color: var(--ink); font-size: 12px; }
+.codex-scope-controls p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.codex-scope-actions { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.codex-scope-actions .arc-button { min-height: 44px; margin: 0; }
 .series-source-editor { padding: 18px; }
 .series-source-editor label { display: grid; gap: 6px; margin: 10px 0; }
 .series-source-editor .codemirror-shell { min-height: 200px; }
@@ -283,8 +285,12 @@
 .note-template-types-disclosure p { margin: 0 0 10px; }
 .note-role-error { margin: 0; color: var(--danger)!important; }
 
-.character-position, .roleplay-participant { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .6rem; padding: .5rem .8rem; border-bottom: 1px solid var(--border); }
+.character-position { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .6rem; padding: .5rem .8rem; border-bottom: 1px solid var(--border); }
 .character-position p { margin: 0; font-size: .85rem; color: var(--muted); }
+.roleplay-participant { min-width: 0; display: grid; justify-items: start; gap: 7px; }
+.roleplay-participant > .arc-choice { width: 100%; }
+.roleplay-participant > .arc-button { min-height: 44px; }
+.roleplay-participant > p { margin: 0; color: var(--danger); font-size: 11px; }
 .character-chat-setup { display: grid; gap: 1rem; }
 
 .character-chat-setup fieldset { max-height: 45vh; overflow: auto; border: 1px solid var(--border); }
