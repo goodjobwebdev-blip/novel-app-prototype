@@ -6,7 +6,9 @@ import { orderedContextScenes, structuralSelectionIds } from './context-source-s
 import Button from '../ui/Button'
 import Checkbox from '../ui/Checkbox'
 import Choice from '../ui/Choice'
+import Disclosure from '../ui/Disclosure'
 import Input from '../ui/Input'
+import ProgressBar from '../ui/ProgressBar'
 
 type SelectionKey = 'structuralIds' | 'noteIds' | 'codexEntryIds'
 export function ContextSourcePicker({ sources, currentDocumentId, anchorId, profile, onToggle, onClear, fullCodex = false }: {
@@ -41,7 +43,7 @@ export function ContextSourcePicker({ sources, currentDocumentId, anchorId, prof
     if (ancestors.includes(item.id) || !hasMatch(item)) return null
     const descendants = children(item.id)
     if (item.type === 'scene') return <div key={item.id}>{row(item)}</div>
-    return <details key={`${item.id}-${Boolean(normalized || selectedOnly)}`} className="context-tree-branch" open={normalized || selectedOnly ? true : undefined}><summary>{item.title || 'Untitled'} <small>{item.type} · {descendants.length} children</small></summary>{row(item)}<div className="context-tree-children">{descendants.map(child => branch(child, [...ancestors, item.id]))}</div></details>
+    return <Disclosure key={`${item.id}-${Boolean(normalized || selectedOnly)}`} className="context-tree-branch" title={item.title || 'Untitled'} description={`${item.type} · ${descendants.length} children`} open={normalized || selectedOnly ? true : undefined}>{row(item)}<div className="context-tree-children">{descendants.map(child => branch(child, [...ancestors, item.id]))}</div></Disclosure>
   }
   const structuralIds = new Set(available.filter(item => ['act', 'chapter', 'scene'].includes(item.type)).map(item => item.id))
   const roots = available.filter(item => structuralIds.has(item.id) && !structuralIds.has(item.parentId ?? '')).sort((a, b) => Number(a.order ?? 0) - Number(b.order ?? 0))
@@ -57,7 +59,7 @@ export function ContextBudget({ diagnostics, model, pending, error }: { diagnost
   return <section className={`context-budget-summary ${error || diagnostics && (!diagnostics.fits || !diagnostics.limitValid) ? 'error' : ''}`} role="status" aria-live="polite" aria-busy={pending}>
     <strong>{pending ? 'Updating preview…' : error ? 'Preview needs attention' : !model ? 'Choose a model to estimate the budget' : !diagnostics ? 'Budget unavailable' : !diagnostics.limitValid ? 'Invalid context limit' : diagnostics.fits ? diagnostics.warning ? 'Near the context limit' : 'Context fits the estimated budget' : 'Over the context limit · Generation blocked'}</strong>
     <span>{model || 'No model selected'}</span>{error && <p>{error}</p>}
-    {!pending && diagnostics && <><progress aria-label="Estimated context budget used" max={100} value={Math.min(100, Math.round(diagnostics.usageRatio * 100))} /><span>{diagnostics.requestTokens.toLocaleString()} estimated input tokens / {diagnostics.usableInputTokens.toLocaleString()} usable · {Math.round(diagnostics.usageRatio * 100)}%</span><small>{diagnostics.responseReserveTokens.toLocaleString()} tokens reserved for the response. {diagnostics.modelContextKnown ? 'Catalog model limit.' : 'Model limit is estimated.'} Preview excludes any new instruction you enter after opening settings.</small>{!diagnostics.fits && <small>Remove optional sources or use summaries. Context is never silently trimmed.</small>}{diagnostics.limitError && <small>{diagnostics.limitError}</small>}</>}
+    {!pending && diagnostics && <><ProgressBar label="Estimated context budget used" value={Math.min(100, Math.round(diagnostics.usageRatio * 100))} variant={!diagnostics.fits || !diagnostics.limitValid ? 'error' : diagnostics.warning ? 'warning' : 'default'} compact showLabel={false} /><span>{diagnostics.requestTokens.toLocaleString()} estimated input tokens / {diagnostics.usableInputTokens.toLocaleString()} usable · {Math.round(diagnostics.usageRatio * 100)}%</span><small>{diagnostics.responseReserveTokens.toLocaleString()} tokens reserved for the response. {diagnostics.modelContextKnown ? 'Catalog model limit.' : 'Model limit is estimated.'} Preview excludes any new instruction you enter after opening settings.</small>{!diagnostics.fits && <small>Remove optional sources or use summaries. Context is never silently trimmed.</small>}{diagnostics.limitError && <small>{diagnostics.limitError}</small>}</>}
   </section>
 }
 

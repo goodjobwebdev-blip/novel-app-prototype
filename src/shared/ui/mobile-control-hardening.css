@@ -24,27 +24,6 @@ input[type="range"] {
 }
 
 
-/* The trigger window is a number-field row, not a generic checkbox row. */
-.context-defaults-card > label.context-trigger-window {
-  grid-template-columns: minmax(0, 1fr) minmax(86px, 120px);
-  align-items: center;
-  gap: 12px;
-}
-
-.context-defaults-card > label.context-trigger-window > span {
-  min-width: 0;
-  margin: 0;
-}
-
-.context-defaults-card > label.context-trigger-window > input[type="number"] {
-  width: 100%;
-  min-width: 0;
-  min-height: 42px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
 
 /* Ensure the searchable Chat model trigger can actually shrink inside the row. */
 .functional-chat-composer .chat-config-row,
@@ -132,17 +111,6 @@ input[type="range"] {
 }
 
 @media (max-width: 640px) {
-  .context-defaults-card > label.context-trigger-window {
-    grid-template-columns: minmax(0, 1fr);
-    align-items: stretch;
-  }
-
-  .context-defaults-card > label.context-trigger-window > input[type="number"] {
-    width: min(100%, 160px);
-    justify-self: start;
-    text-align: left;
-  }
-
   .codex-panel-actions {
     min-width: 0;
     flex-wrap: wrap;

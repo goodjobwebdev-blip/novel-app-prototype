@@ -135,40 +135,25 @@ input::placeholder,textarea::placeholder { color:var(--faint); }
 .compact-settings-empty h1 { margin:0; color:var(--ink); font:500 25px var(--serif); }
 .compact-settings-empty p { margin:9px 0 0; color:var(--faint); font-size:13px; }
 .context-defaults-card { display:grid; gap:10px; }
-.context-defaults-card > label,.context-default-locked { min-height:66px; padding:11px 12px; border:1px solid var(--line); border-radius:13px; background:rgba(255,255,255,.025); display:grid; grid-template-columns:22px minmax(0,1fr) auto; align-items:center; gap:10px; }
-.context-defaults-card input { width:17px; min-height:17px; accent-color:var(--accent); }
-.context-defaults-card > label > span { display:block; margin:0; }
-.context-defaults-card strong,.context-defaults-card small { display:block; }
-.context-defaults-card strong { color:var(--ink); font-size:12px; }
-.context-defaults-card small { margin-top:4px; color:var(--faint); font-size:10px; line-height:1.4; }
+.context-default-locked { min-height:66px; padding:11px 12px; border:1px solid var(--line); border-radius:var(--radius); background:rgba(255,255,255,.025); display:grid; grid-template-columns:22px minmax(0,1fr) auto; align-items:center; gap:10px; }
+.context-default-locked strong,.context-default-locked small { display:block; }
+.context-default-locked strong { color:var(--ink); font-size:12px; }
+.context-default-locked small { margin-top:4px; color:var(--faint); font-size:10px; line-height:1.4; }
 .context-default-locked > svg { width:17px; color:#9db38d; }
 .context-default-locked > b { color:var(--accent); font-size:9px; letter-spacing:.08em; text-transform:uppercase; }
 .context-sources-card { display:grid; gap:14px; }
-.summary-range { margin:0; padding:12px; border:1px solid var(--line); border-radius:13px; display:grid; gap:8px; }
-.summary-range legend { padding:0 5px; color:var(--accent); font-size:9px; letter-spacing:.1em; text-transform:uppercase; }
-.summary-range label { min-height:34px; display:flex; align-items:center; gap:9px; color:var(--soft); font-size:11px; }
-.summary-range input,.context-managed-list input { width:17px; min-height:17px; accent-color:var(--accent); }
-.context-source-search { min-height:44px; padding:0 11px; border:1px solid var(--line); border-radius:11px; display:flex; align-items:center; gap:8px; }
-.context-source-search svg { width:16px; color:var(--faint); }
-.context-source-search input { min-height:0; padding:0; border:0; background:transparent; }
-.context-managed-list { max-height:430px; overflow:auto; display:grid; gap:12px; }
-.context-managed-list h3 { margin:0 0 5px; color:var(--accent); font-size:9px; letter-spacing:.1em; text-transform:uppercase; }
-.context-managed-list label { min-height:48px; padding:7px 9px; border-radius:10px; display:flex; align-items:center; gap:9px; }
-.context-managed-list label:hover { background:rgba(255,255,255,.025); }
-.context-managed-list span,.context-managed-list strong,.context-managed-list small { display:block; }
-.context-managed-list strong { font-size:11px; }.context-managed-list small { margin-top:3px; color:var(--faint); font-size:8px; text-transform:capitalize; }
 .context-preview-card { display:grid; gap:14px; }
 .context-preview-rendered { display:grid; gap:12px; }
-.context-preview-rendered > section { overflow:hidden; border:1px solid var(--line); border-radius:13px; background:rgba(7,8,7,.26); }
+.context-preview-rendered > section { overflow:hidden; border:1px solid var(--line); border-radius:var(--radius); background:rgba(7,8,7,.26); }
 .context-preview-rendered header { min-height:42px; padding:8px 12px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .context-preview-rendered h3 { margin:0; color:var(--ink); font:500 14px var(--serif); }
 .context-preview-rendered header span { color:var(--accent); font-size:8px; letter-spacing:.08em; text-transform:uppercase; }
 .context-preview-copy { max-height:220px; overflow:auto; padding:12px; color:var(--soft); font:12px/1.65 var(--mono); white-space:pre-wrap; overflow-wrap:anywhere; }
 .context-preview-empty,.context-preview-error { margin:0; padding:12px; color:var(--faint); font-size:11px; line-height:1.5; }
 .context-preview-error { color:#d9a59a; }
-.context-preview-raw { border-top:1px solid var(--line); padding-top:12px; }
-.context-preview-raw summary { color:var(--soft); font-size:11px; cursor:pointer; }
-.context-preview-raw pre { max-height:340px; overflow:auto; margin:10px 0 0; padding:13px; border:1px solid var(--line); border-radius:11px; background:#0b0c0a; color:var(--soft); font:11px/1.6 var(--mono); white-space:pre-wrap; overflow-wrap:anywhere; }
+.context-preview-raw { background:transparent; }
+.context-preview-raw > .arc-disclosure__body { padding:0; }
+.context-preview-raw pre { max-height:340px; overflow:auto; margin:0; padding:13px; border:0; border-radius:0; background:#0b0c0a; color:var(--soft); font:11px/1.6 var(--mono); white-space:pre-wrap; overflow-wrap:anywhere; }
 button:focus-visible { outline:3px solid rgba(198,168,107,.3); outline-offset:2px; }
 
 @media (min-width: 760px) {
@@ -382,7 +367,7 @@ button:focus-visible { outline:3px solid rgba(198,168,107,.3); outline-offset:2p
 /* UI Kit consistency: keep ordinary fields and panels on the shared radius. */
 .arc-field > .arc-input-wrap,.arc-field > .arc-select-wrap { margin-bottom:0; color:inherit; font-size:inherit; display:flex; justify-content:initial; }
 .arc-choice > span { margin-bottom:0; display:block; justify-content:initial; }
-.settings-card,.generation-speed-setting,.prompt-validation-summary,.prompt-local-preview,.prompt-reference,.story-predefined > article,.context-defaults-card > label,.context-default-locked,.summary-range,.context-source-search,.context-preview-rendered > section,.context-preview-raw pre,.book-settings-group,.book-danger,.document-metadata { border-radius:var(--radius); }
+.settings-card,.generation-speed-setting,.prompt-validation-summary,.prompt-local-preview,.prompt-reference,.story-predefined > article,.context-default-locked,.context-preview-rendered > section,.book-settings-group,.book-danger,.document-metadata { border-radius:var(--radius); }
 input,.reload-button,.use-model,.create-theme,.panel-field textarea,.panel-field select,.book-field textarea,.appearance-field .arc-select { border-radius:var(--radius); }
 
 /* Shared search inputs retain the integrated panel-search layout. */

@@ -55,8 +55,6 @@ textarea,
 select,
 .model-browser,
 .prompt-reference,
-.summary-range,
-.context-source-search,
 .context-preview-rendered > section {
   color: var(--ink);
   border-color: var(--line);
