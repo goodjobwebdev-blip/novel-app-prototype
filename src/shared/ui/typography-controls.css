@@ -1,0 +1,15 @@
+.arc-typography-controls { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb, var(--surface-2) 46%, transparent); display: grid; gap: 16px; }
+.arc-typography-controls > header { min-height: 42px; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.arc-typography-controls > header strong { color: var(--ink); font: 500 18px var(--serif); }
+.arc-typography-controls > header p { margin: 4px 0 0; color: var(--faint); font-size: 10px; line-height: 1.45; }
+.arc-typography-ranges { display: grid; gap: 14px; }
+.arc-typography-range { min-width: 0; display: grid; gap: 7px; }
+.arc-typography-range > span { margin: 0; color: var(--soft); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.arc-typography-range > span strong { font-size: 11px; }
+.arc-typography-range > span em { color: var(--faint); font-size: 10px; font-style: normal; font-variant-numeric: tabular-nums; }
+.arc-typography-range > div { display: grid; grid-template-columns: minmax(0,1fr) 72px; align-items: center; gap: 10px; }
+.arc-typography-range input[type="range"] { width: 100%; min-height: 22px; padding: 0; border: 0; background: transparent; box-shadow: none; accent-color: var(--accent); cursor: pointer; }
+.arc-typography-range input[type="number"] { width: 72px; min-height: 38px; padding: 6px 7px; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb, var(--surface) 82%, transparent); color: var(--ink); text-align: right; font-size: 11px; font-variant-numeric: tabular-nums; }
+@media (max-width: 520px) {
+  .arc-typography-controls { padding: 12px; }
+}

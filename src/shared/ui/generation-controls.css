@@ -404,7 +404,7 @@
   padding: 10px 52px 10px 12px;
   overflow-y: auto;
   resize: none;
-  border-radius: 15px;
+  border-radius: var(--radius);
 }
 
 .expandable-text-trigger {
@@ -415,7 +415,7 @@
   height: 36px;
   padding: 0;
   border: 1px solid var(--line);
-  border-radius: 11px;
+  border-radius: var(--radius);
   background: rgba(20, 18, 17, 0.72);
   color: var(--soft);
   display: grid;
@@ -465,7 +465,7 @@
   min-height: 0;
   padding: 16px;
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: var(--radius);
   background: var(--deep);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
   display: flex;
@@ -496,7 +496,7 @@
   height: 40px;
   padding: 0;
   border: 1px solid var(--line);
-  border-radius: 50%;
+  border-radius: var(--radius);
   background: rgba(255, 255, 255, 0.04);
   color: var(--ink);
   display: grid;
@@ -518,7 +518,7 @@
   padding: 14px;
   overflow: auto;
   resize: none;
-  border-radius: 13px;
+  border-radius: var(--radius);
   line-height: 1.55;
 }
 
@@ -530,7 +530,7 @@
 .expandable-text-dialog footer button {
   min-height: 44px;
   padding: 0 18px;
-  border-radius: 999px;
+  border-radius: var(--radius);
   font-weight: 700;
   cursor: pointer;
 }

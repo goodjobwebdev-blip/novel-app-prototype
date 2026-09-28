@@ -16,7 +16,25 @@
   --accent-bright: #e0c88f;
   --line: rgba(233, 228, 217, .11);
   --danger: #e18e87;
+  --radius: 5px;
+  --text-display: 40px;
+  --text-page-title: 32px;
+  --text-section-title: 24px;
+  --text-card-title: 20px;
+  --text-body: 14px;
+  --text-control: 14px;
+  --text-supporting: 12px;
+  --text-caption: 10px;
   --serif: Iowan Old Style, Baskerville, "Times New Roman", serif;
+}
+@media (min-width: 760px) {
+  :root {
+    --text-display: 54px;
+    --text-page-title: 42px;
+    --text-section-title: 28px;
+    --text-card-title: 22px;
+    --text-body: 15px;
+  }
 }
 * { box-sizing: border-box; }
 html { background: var(--canvas); }
