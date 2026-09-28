@@ -21,6 +21,7 @@ import {
 import Button from '../../shared/ui/Button'
 import Checkbox from '../../shared/ui/Checkbox'
 import Input from '../../shared/ui/Input'
+import ThemeChoice from '../../shared/ui/ThemeChoice'
 import Toast from '../../shared/ui/Toast'
 import { contrastWarnings } from './appearance-utils'
 import SettingsSectionTabs from './SettingsSectionTabs'
@@ -114,24 +115,17 @@ const colorLabels: Array<[keyof ThemePalette, string]> = [
   ['error', 'Error'],
 ]
 
-function ThemeSwatch({ palette }: { palette: ThemePalette }) {
-  return <span className="ui-theme-swatch" style={{ background: palette.background, borderColor: palette.border }}>
-    <i style={{ background: palette.editor }} /><b style={{ background: palette.accent }} /><em style={{ color: palette.text }}>Aa</em>
-  </span>
-}
-
-function ThemeOption({ id, name, palette, active, custom, onSelect, onDuplicate, onDelete }: { id: string; name: string; palette: ThemePalette; active: boolean; custom?: boolean; onSelect: () => void; onDuplicate: () => void; onDelete?: () => void }) {
-  return <div className={`ui-theme-option ${active ? 'selected' : ''}`} data-theme-id={id}>
-    <button className="ui-theme-select" aria-pressed={active} type="button" onClick={onSelect}>
-      <ThemeSwatch palette={palette} />
-      <span><strong>{name}</strong><small>{custom ? 'Custom theme' : 'Built in'}</small></span>
-      {active && <Check aria-hidden="true" />}
-    </button>
-    <div className="ui-theme-actions">
-      <Button className="ui-icon-action" size="small" variant="ghost" leadingIcon={<Copy />} onClick={onDuplicate} aria-label={`Duplicate ${name}`} title="Duplicate to customize" />
-      {custom && onDelete && <Button className="ui-icon-action" size="small" variant="danger" leadingIcon={<Trash2 />} onClick={onDelete} aria-label={`Delete ${name}`} title="Delete theme" />}
-    </div>
-  </div>
+function ThemeOption({ name, palette, active, custom, onSelect, onDuplicate, onDelete }: { name: string; palette: ThemePalette; active: boolean; custom?: boolean; onSelect: () => void; onDuplicate: () => void; onDelete?: () => void }) {
+  return <ThemeChoice
+    name={name}
+    subtitle={custom ? 'Custom theme' : 'Built in'}
+    background={palette.background}
+    border={palette.border}
+    accent={palette.accent}
+    selected={active}
+    onSelect={onSelect}
+    actions={<><Button className="ui-theme-copy-action" size="small" variant="ghost" leadingIcon={<Copy />} onClick={onDuplicate} aria-label={`Copy ${name} to customize`} title="Copy to customize">Copy</Button>{custom && onDelete && <Button className="ui-icon-action" size="small" variant="danger" leadingIcon={<Trash2 />} onClick={onDelete} aria-label={`Delete ${name}`} title="Delete theme" />}</>}
+  />
 }
 
 function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
@@ -227,11 +221,11 @@ function UiSettingsPanel() {
     </div><section hidden={section !== 'theme'} className="settings-card ui-themes-card" role="tabpanel" id="appearance-panel-theme" aria-labelledby="appearance-tab-theme">
       <div className="card-heading"><div><span>03</span><h2>Themes</h2></div><p>Typography stays independent when the theme changes.</p></div>
       <div className="ui-theme-group"><h3>Built in</h3><div className="ui-theme-grid">
-        {builtInThemes.map((theme) => <ThemeOption key={theme.id} id={theme.id} name={theme.name} palette={theme.palette} active={settings.activeThemeId === theme.id} onSelect={() => selectTheme(theme.id)} onDuplicate={() => duplicate(theme.id)} />)}
+        {builtInThemes.map((theme) => <ThemeOption key={theme.id} name={theme.name} palette={theme.palette} active={settings.activeThemeId === theme.id} onSelect={() => selectTheme(theme.id)} onDuplicate={() => duplicate(theme.id)} />)}
       </div></div>
 
       <div className="ui-theme-group ui-custom-themes"><header><h3>Custom</h3><Button className="ui-create-theme" leadingIcon={<Plus />} onClick={() => duplicate(activeTheme.id)}>Create theme</Button></header>
-        {settings.customThemes.length ? <div className="ui-theme-grid">{settings.customThemes.map((theme) => <ThemeOption key={theme.id} id={theme.id} name={theme.name} palette={theme.palette} active={settings.activeThemeId === theme.id} custom onSelect={() => selectTheme(theme.id)} onDuplicate={() => duplicate(theme.id)} onDelete={() => removeCustomTheme(theme)} />)}</div> : <p className="ui-custom-empty">Create a theme from the active palette, or duplicate any built-in theme to customize it.</p>}
+        {settings.customThemes.length ? <div className="ui-theme-grid">{settings.customThemes.map((theme) => <ThemeOption key={theme.id} name={theme.name} palette={theme.palette} active={settings.activeThemeId === theme.id} custom onSelect={() => selectTheme(theme.id)} onDuplicate={() => duplicate(theme.id)} onDelete={() => removeCustomTheme(theme)} />)}</div> : <p className="ui-custom-empty">Create a theme from the active palette, or duplicate any built-in theme to customize it.</p>}
       </div>
 
     </section>

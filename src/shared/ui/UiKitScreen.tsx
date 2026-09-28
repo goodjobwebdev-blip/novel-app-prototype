@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, BookOpen, Bot, BrainCircuit, Check, ChevronDown, ImagePlus, LayoutGrid, List, MessageCircle, Mic, Palette, Plus, Redo2, RefreshCw, Search, SlidersHorizontal, Sparkles, Trash2, Undo2, Volume2, Zap } from 'lucide-react'
+import { ArrowLeft, BookOpen, Bot, BrainCircuit, ChevronDown, ImagePlus, LayoutGrid, List, MessageCircle, Mic, Palette, Plus, Redo2, RefreshCw, Search, SlidersHorizontal, Sparkles, Trash2, Undo2, Volume2, Zap } from 'lucide-react'
 import { builtInThemes, defaultUiSettings, loadUiSettings, saveUiSettings, UI_SETTINGS_EVENT, type UiSettings, type UiTypography } from '../../features/settings/ui-settings'
 import Button from './Button'
 import Card from './Card'
@@ -15,6 +15,7 @@ import SearchableSelect from './SearchableSelect'
 import SegmentedControl from './SegmentedControl'
 import Select from './Select'
 import Tabs from './Tabs'
+import ThemeChoice from './ThemeChoice'
 import Toast, { type ToastVariant } from './Toast'
 import TypographyControls from './TypographyControls'
 import './ui-kit.css'
@@ -62,7 +63,7 @@ export default function UiKitScreen({ onBack }: { onBack: () => void }) {
     }
   }
 
-  const themes = [...builtInThemes, ...settings.customThemes.map(theme => ({ ...theme, tone: 'dark' as const }))]
+  const themes = [...builtInThemes.map(theme => ({ ...theme, custom: false })), ...settings.customThemes.map(theme => ({ ...theme, tone: 'dark' as const, custom: true }))]
 
   return <main className="ui-kit-screen">
     <header className="ui-kit-topbar">
@@ -79,11 +80,7 @@ export default function UiKitScreen({ onBack }: { onBack: () => void }) {
 
       <Card eyebrow="Theme tester" title="Themes" description="Changes are applied globally and saved using the existing Appearance settings.">
         <div className="ui-kit-themes" role="group" aria-label="Select theme">
-          {themes.map(theme => <button key={theme.id} className={settings.activeThemeId === theme.id ? 'selected' : ''} type="button" onClick={() => selectTheme(theme.id)} aria-pressed={settings.activeThemeId === theme.id}>
-            <i style={{ background: theme.palette.background, borderColor: theme.palette.border }}><b style={{ background: theme.palette.accent }} /></i>
-            <span>{theme.name}</span>
-            {settings.activeThemeId === theme.id && <Check aria-hidden="true" />}
-          </button>)}
+          {themes.map(theme => <ThemeChoice key={theme.id} name={theme.name} subtitle={theme.custom ? 'Custom theme' : 'Built in'} background={theme.palette.background} border={theme.palette.border} accent={theme.palette.accent} selected={settings.activeThemeId === theme.id} onSelect={() => selectTheme(theme.id)} />)}
         </div>
         {saveError && <p className="ui-kit-error" role="alert">{saveError}</p>}
       </Card>
