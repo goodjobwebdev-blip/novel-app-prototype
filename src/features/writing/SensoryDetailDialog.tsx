@@ -4,6 +4,7 @@ import { Pencil, X } from 'lucide-react'
 import { sensoryPrompts } from './prose-transformations'
 import { generateSensoryDetails, validSensoryReplacement, type SensoryVariant } from './sensory-details'
 import type { QuickToolCapture } from './quick-tools'
+import Button from '../../shared/ui/Button'
 
 export default function SensoryDetailDialog({ capture, apply, close }: { capture: QuickToolCapture; apply: (text: string) => boolean; close: () => void }) {
   const [variants, setVariants] = useState<SensoryVariant[]>([])
@@ -57,7 +58,7 @@ export default function SensoryDetailDialog({ capture, apply, close }: { capture
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
     }
   }}>
-    <header><h2 id="sensory-detail-title">Sensory detail</h2><button type="button" className="sensory-close" aria-label="Close sensory detail" onClick={dismiss}><X size={18} /></button></header>
+    <header><h2 id="sensory-detail-title">Sensory detail</h2><Button className="sensory-close" variant="ghost" style={{ borderRadius: 'var(--radius)' }} aria-label="Close sensory detail" onClick={dismiss} leadingIcon={<X size={18} />} /></header>
     <p>Choose an idea to replace the selected passage. Use its pencil to review or edit the variant first.</p>
     <details className="sensory-original"><summary>Selected passage</summary><pre className="rewrite-original">{capture.snapshot.text}</pre></details>
     <div className="sensory-groups">{sensoryPrompts.map(sense => {
@@ -71,12 +72,12 @@ export default function SensoryDetailDialog({ capture, apply, close }: { capture
         {!ideas.length && <p className="sensory-empty">{running ? 'Finding ideas…' : 'No ideas for this sense yet.'}</p>}
         {editing && ideas.some(variant => variant.id === editing.id) && <div className="sensory-edit-panel">
           <label htmlFor="sensory-variant-text">Edit variant</label><textarea id="sensory-variant-text" ref={editInput} value={editing.text} onChange={event => setEditing({ ...editing, text: event.target.value })} rows={6} />
-          <div className="sensory-edit-actions"><button type="button" disabled={!validSensoryReplacement(editing.text)} onClick={() => choose(editing.text)}>Use this variant</button><button type="button" disabled={!validSensoryReplacement(editing.text)} onClick={() => { setVariants(current => current.map(variant => variant.id === editing.id ? { ...variant, text: editing.text, edited: true } : variant)); finishEdit() }}>Save edit</button><button type="button" onClick={finishEdit}>Cancel edit</button></div>
+          <div className="sensory-edit-actions"><Button variant="primary" disabled={!validSensoryReplacement(editing.text)} onClick={() => choose(editing.text)}>Use this variant</Button><Button disabled={!validSensoryReplacement(editing.text)} onClick={() => { setVariants(current => current.map(variant => variant.id === editing.id ? { ...variant, text: editing.text, edited: true } : variant)); finishEdit() }}>Save edit</Button><Button variant="ghost" onClick={finishEdit}>Cancel edit</Button></div>
         </div>}
       </section>
     })}</div>
     <p className="sensory-status" role="status">{status}{variants.length > 0 && ` ${variants.length} ideas available.`}</p>
     {error && <p role="alert">{error}</p>}
-    <footer><button type="button" onClick={dismiss}>Cancel</button>{running ? <button type="button" onClick={stop}>Stop</button> : <button type="button" onClick={() => { void run() }}>{variants.length ? 'More ideas' : 'Try again'}</button>}</footer>
+    <footer><Button variant="ghost" onClick={dismiss}>Cancel</Button>{running ? <Button variant="danger" onClick={stop}>Stop</Button> : <Button onClick={() => { void run() }}>{variants.length ? 'More ideas' : 'Try again'}</Button>}</footer>
   </section></div>, document.body)
 }

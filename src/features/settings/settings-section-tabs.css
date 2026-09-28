@@ -1,4 +1,4 @@
-.settings-section-tabs {
+.settings-section-tabs.settings-section-tabs {
   display: flex;
   gap: 6px;
   overflow-x: auto;

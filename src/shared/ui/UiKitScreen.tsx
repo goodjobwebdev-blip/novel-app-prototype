@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, BookOpen, Bot, BrainCircuit, Check, ChevronDown, ImagePlus, MessageCircle, Mic, Palette, Plus, Redo2, RefreshCw, Search, SlidersHorizontal, Sparkles, Trash2, Undo2, Volume2, Zap } from 'lucide-react'
+import { ArrowLeft, BookOpen, Bot, BrainCircuit, Check, ChevronDown, ImagePlus, LayoutGrid, List, MessageCircle, Mic, Palette, Plus, Redo2, RefreshCw, Search, SlidersHorizontal, Sparkles, Trash2, Undo2, Volume2, Zap } from 'lucide-react'
 import { builtInThemes, defaultUiSettings, loadUiSettings, saveUiSettings, UI_SETTINGS_EVENT, type UiSettings, type UiTypography } from '../../features/settings/ui-settings'
 import Button from './Button'
 import Card from './Card'
 import Checkbox from './Checkbox'
+import Choice from './Choice'
+import Disclosure from './Disclosure'
 import ExpandableTextInput from './ExpandableTextInput'
 import GenerationActions from './GenerationActions'
 import Input from './Input'
 import ProgressBar from './ProgressBar'
 import RadioGroup from './RadioGroup'
 import SearchableSelect from './SearchableSelect'
+import SegmentedControl from './SegmentedControl'
 import Select from './Select'
 import Tabs from './Tabs'
 import Toast, { type ToastVariant } from './Toast'
@@ -27,8 +30,10 @@ export default function UiKitScreen({ onBack }: { onBack: () => void }) {
   const [sampleAuthor, setSampleAuthor] = useState('Mara Voss')
   const [sampleChapters, setSampleChapters] = useState('12')
   const [includeSummary, setIncludeSummary] = useState(true)
+  const [includeArchiveNotes, setIncludeArchiveNotes] = useState(true)
   const [narrativePerson, setNarrativePerson] = useState('third')
   const [sampleTab, setSampleTab] = useState('story')
+  const [sampleLayout, setSampleLayout] = useState('cards')
   const [demoToast, setDemoToast] = useState<ToastVariant | null>(null)
 
   useEffect(() => {
@@ -127,10 +132,9 @@ export default function UiKitScreen({ onBack }: { onBack: () => void }) {
         <header><small>04</small><div><h2 id="ui-kit-expandable">Expandable elements</h2><p>Current disclosure, editor, collapsible surface, and action-menu patterns.</p></div></header>
         <div className="ui-kit-expandable-grid">
           <Card variant="outlined" eyebrow="Disclosure" title="Accordion">
-            <details className="ui-kit-disclosure">
-              <summary><span><strong>Advanced settings</strong><small>Optional controls and supporting information.</small></span><ChevronDown aria-hidden="true" /></summary>
-              <div><p>Expanded content stays visually connected to its trigger and remains keyboard accessible.</p><Input label="Context limit" value="32,000" readOnly /></div>
-            </details>
+            <Disclosure title="Advanced settings" description="Optional controls and supporting information.">
+              <p>Expanded content stays visually connected to its trigger and remains keyboard accessible.</p><Input label="Context limit" value="32,000" readOnly />
+            </Disclosure>
           </Card>
 
           <Card variant="outlined" eyebrow="Editor" title="Expandable text field">
@@ -201,13 +205,25 @@ export default function UiKitScreen({ onBack }: { onBack: () => void }) {
               { value: 'third', label: 'Third person', description: 'She crossed the empty room.' },
               { value: 'second', label: 'Second person', description: 'You crossed the empty room.', disabled: true },
             ]} />
+            <div className="ui-kit-choice-stack">
+              <span>Rich source choice</span>
+              <Choice title="Flooded archive notes" description="Uses this note’s full text and makes it available to generation prompts." meta="note · 1,240 words" badges={['Reference', 'Chronology safe']} checked={includeArchiveNotes} onChange={event => setIncludeArchiveNotes(event.target.checked)} />
+            </div>
           </div>
         </Card>
       </section>
 
       <section className="ui-kit-section" aria-labelledby="ui-kit-tabs">
-        <header><small>06</small><div><h2 id="ui-kit-tabs">Tabs</h2><p>Switch between related views without leaving the current context.</p></div></header>
-        <Card variant="outlined">
+        <header><small>06</small><div><h2 id="ui-kit-tabs">Segmented controls and tabs</h2><p>Use segmented controls to change a value within one view; use tabs to switch between panels.</p></div></header>
+        <Card variant="outlined" eyebrow="Value choice" title="Segmented control" description="Arrow keys, Home, and End move the selected value without creating tab-panel semantics.">
+          <SegmentedControl label="Results layout" value={sampleLayout} onChange={setSampleLayout} options={[
+            { value: 'list', label: 'List', icon: <List /> },
+            { value: 'cards', label: 'Cards', icon: <LayoutGrid /> },
+            { value: 'gallery', label: 'Gallery', disabled: true },
+          ]} />
+          <div className="ui-kit-tab-panel">Selected layout: <strong>{sampleLayout}</strong></div>
+        </Card>
+        <Card variant="outlined" eyebrow="Panel navigation" title="Tabs">
           <Tabs label="Workspace views" value={sampleTab} onChange={setSampleTab} items={[
             { value: 'story', label: 'Story', icon: <BookOpen aria-hidden="true" /> },
             { value: 'chat', label: 'Chat', icon: <MessageCircle aria-hidden="true" /> },
@@ -226,6 +242,8 @@ export default function UiKitScreen({ onBack }: { onBack: () => void }) {
             <ProgressBar label="Saved successfully" value={100} variant="success" />
             <ProgressBar label="Context budget" value={78} variant="warning" />
             <ProgressBar label="Storage limit" value={94} variant="error" />
+            <ProgressBar label="Compact context budget" value={61} compact />
+            <ProgressBar label="Preparing request" compact indeterminate showValue={false} />
           </div>
         </Card>
       </section>
@@ -237,6 +255,7 @@ export default function UiKitScreen({ onBack }: { onBack: () => void }) {
             <Toast variant="success" title="Changes saved">Your appearance settings are up to date.</Toast>
             <Toast variant="warning" title="Context nearly full">This request uses 82% of the available context.</Toast>
             <Toast variant="error" title="Generation failed">The provider did not return a response.</Toast>
+            <Toast variant="success" title="Theme deleted" action={{ label: 'Undo', onClick: () => setLastAction('Undo theme deletion') }}>The custom theme was removed.</Toast>
           </div>
           <div className="ui-kit-row ui-kit-toast-actions">
             <Button size="small" onClick={() => setDemoToast('success')}>Show success</Button>

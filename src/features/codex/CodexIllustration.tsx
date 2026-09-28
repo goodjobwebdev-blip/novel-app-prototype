@@ -6,6 +6,7 @@ import { centeredImageView, type ImageView } from '../images/image-gestures'
 import { clearDescriptionDraft, readDescriptionDraft, saveDescriptionDraft } from '../images/illustration-drafts'
 import IllustrationModal from '../images/IllustrationModal'
 import IllustrationGestures from '../images/IllustrationGestures'
+import Button from '../../shared/ui/Button'
 import '../images/illustrations.css'
 
 export const IMAGE_CHANGED = 'arc-illustrations-changed'
@@ -55,7 +56,7 @@ function DescriptionEditor({ image, busy, error, onClose, onSave }: {
 }) {
   const [draft, setDraft] = useState(() => readDescriptionDraft(image.entryId, image.id) ?? { caption: image.caption, alt: image.alt })
   const change = (value: typeof draft) => { setDraft(value); saveDescriptionDraft(image.entryId, image.id, value) }
-  return <IllustrationModal title="Image description" onClose={onClose} footer={<><span>Draft kept when closed</span><button className="image-primary" disabled={busy} type="button" onClick={() => { void onSave({ ...image, ...draft }) }}>{busy ? 'Saving…' : 'Save description'}</button></>}>
+  return <IllustrationModal title="Image description" onClose={onClose} footer={<><span>Draft kept when closed</span><Button variant="primary" disabled={busy} onClick={() => { void onSave({ ...image, ...draft }) }}>{busy ? 'Saving…' : 'Save description'}</Button></>}>
     <fieldset disabled={busy} className="image-description-fields"><label>Caption<input maxLength={2000} value={draft.caption} onChange={(event) => change({ ...draft, caption: event.target.value })} /></label><label>Image description (alt text)<textarea rows={4} maxLength={2000} value={draft.alt} onChange={(event) => change({ ...draft, alt: event.target.value })} /></label><p className="illustration-help">Describe the important visual details for someone who cannot see the image.</p></fieldset>
     {error && <p className="illustration-error" role="alert">{error}</p>}
   </IllustrationModal>
@@ -65,7 +66,7 @@ function CropEditor({ image, src, busy, error, onClose, onSave }: {
   image: Illustration; src: string; busy: boolean; error: string; onClose: () => void; onSave: (details: ImageDetails) => Promise<void>
 }) {
   const [crop, setCrop] = useState<ImageView>({ x: image.cropX, y: image.cropY, zoom: image.cropZoom ?? 1 })
-  return <IllustrationModal title="Adjust thumbnail" onClose={onClose} footer={<><span>Full image stays unchanged</span><button type="button" className="image-primary" disabled={busy} onClick={() => { void onSave({ ...image, cropX: crop.x, cropY: crop.y, cropZoom: crop.zoom }) }}>{busy ? 'Saving…' : 'Done'}</button></>}>
+  return <IllustrationModal title="Adjust thumbnail" onClose={onClose} footer={<><span>Full image stays unchanged</span><Button variant="primary" disabled={busy} onClick={() => { void onSave({ ...image, cropX: crop.x, cropY: crop.y, cropZoom: crop.zoom }) }}>{busy ? 'Saving…' : 'Done'}</Button></>}>
     <p className="illustration-help">Drag to position. Pinch or use the buttons to zoom.</p>
     <IllustrationGestures src={src} alt="Thumbnail crop preview" image={image} value={crop} onChange={setCrop} crop disabled={busy} />
     {error && <p className="illustration-error" role="alert">{error}</p>}
@@ -136,17 +137,17 @@ export default function CodexIllustration({ entry, readOnly, children }: { entry
     <div className="codex-title-main">
       {image && thumbnail && <button className="codex-title-image" type="button" onClick={() => open('view')} aria-label={`View illustration of ${entry.title}`}><img src={thumbnail} alt="" /></button>}
       <div className="codex-title-text">{children}</div>
-      {image && !readOnly && <button className="codex-image-menu" type="button" disabled={busy} onClick={() => open('actions')} aria-label={`Image actions for ${entry.title}`} aria-haspopup="dialog"><MoreHorizontal aria-hidden="true" /></button>}
+      {image && !readOnly && <Button className="codex-image-menu" variant="ghost" disabled={busy} onClick={() => open('actions')} aria-label={`Image actions for ${entry.title}`} aria-haspopup="dialog" leadingIcon={<MoreHorizontal aria-hidden="true" />} />}
     </div>
-    {!image && !readOnly && <button className="image-add" type="button" disabled={busy || loading || Boolean(loadError)} onClick={() => open('actions')}><ImagePlus aria-hidden="true" />Add image</button>}
+    {!image && !readOnly && <Button className="image-add" disabled={busy || loading || Boolean(loadError)} onClick={() => open('actions')} leadingIcon={<ImagePlus aria-hidden="true" />}>Add image</Button>}
     {!readOnly && <input ref={input} hidden type="file" accept="image/png,image/jpeg,image/webp" aria-label="Upload Codex illustration" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void upload(file) }} />}
     <div className="image-inline-feedback" aria-busy={busy}>
-      {(busy || message || (undo && !readOnly)) && <div className="image-change-status"><span role="status">{phase === 'preparing' ? 'Preparing image…' : phase === 'saving' ? 'Saving…' : message || 'Image change saved on this device'}</span>{undo && !readOnly && !busy && <><button type="button" onClick={() => { void run(() => undoIllustration(entry.id, undo.id), false, 'Image change undone') }} aria-label="Undo image change">Undo</button><button type="button" aria-label="Dismiss image undo" onClick={() => { void run(() => dismissIllustrationUndo(entry.id, undo.id), false, 'Undo dismissed') }}>Dismiss</button></>}</div>}
-      {(error || loadError) && <p className="illustration-error" role="alert">{error || loadError}<button type="button" onClick={() => { setError(''); notify(entry.id) }}>Reload</button></p>}
+      {(busy || message || (undo && !readOnly)) && <div className="image-change-status"><span role="status">{phase === 'preparing' ? 'Preparing image…' : phase === 'saving' ? 'Saving…' : message || 'Image change saved on this device'}</span>{undo && !readOnly && !busy && <><Button size="small" variant="ghost" onClick={() => { void run(() => undoIllustration(entry.id, undo.id), false, 'Image change undone') }} aria-label="Undo image change">Undo</Button><Button size="small" variant="ghost" aria-label="Dismiss image undo" onClick={() => { void run(() => dismissIllustrationUndo(entry.id, undo.id), false, 'Undo dismissed') }}>Dismiss</Button></>}</div>}
+      {(error || loadError) && <p className="illustration-error" role="alert">{error || loadError}<Button size="small" variant="ghost" onClick={() => { setError(''); notify(entry.id) }}>Reload</Button></p>}
     </div>
     {panel === 'actions' && !readOnly && <IllustrationModal title={image ? 'Illustration' : 'Add image'} onClose={close}>
       <p className="illustration-help">PNG, JPEG or WebP, up to 20 MB. Saved on this device at up to 1600 pixels. Keep the original for print quality.{image ? ` Current image: ${formatBytes(image.image.size + image.thumbnail.size)}.` : ''}</p>
-      <div className="image-sheet-actions"><button disabled={busy} type="button" onClick={() => input.current?.click()}><Upload aria-hidden="true" />{image ? 'Replace image' : 'Choose image'}</button>{image && <><button disabled={busy} type="button" onClick={() => open('crop')}><Crop aria-hidden="true" />Adjust thumbnail</button><button disabled={busy} type="button" onClick={() => open('description')}><Pencil aria-hidden="true" />Edit description</button><button disabled={busy} className="image-remove" type="button" onClick={() => { void run(() => removeIllustration(entry.id, image.id)) }}><Trash2 aria-hidden="true" />Remove image</button></>}</div>
+      <div className="image-sheet-actions"><Button disabled={busy} onClick={() => input.current?.click()} leadingIcon={<Upload aria-hidden="true" />}>{image ? 'Replace image' : 'Choose image'}</Button>{image && <><Button disabled={busy} onClick={() => open('crop')} leadingIcon={<Crop aria-hidden="true" />}>Adjust thumbnail</Button><Button disabled={busy} onClick={() => open('description')} leadingIcon={<Pencil aria-hidden="true" />}>Edit description</Button><Button disabled={busy} className="image-remove" variant="danger" onClick={() => { void run(() => removeIllustration(entry.id, image.id)) }} leadingIcon={<Trash2 aria-hidden="true" />}>Remove image</Button></>}</div>
       {busy && <p role="status">{phase === 'preparing' ? 'Preparing image…' : 'Saving…'}</p>}
       {error && <p className="illustration-error" role="alert">{error}</p>}
     </IllustrationModal>}

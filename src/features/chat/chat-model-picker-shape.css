@@ -16,6 +16,5 @@
 @media (max-width: 720px) {
   .functional-chat-composer .chat-model-picker > .chat-model-selector {
     width: 100%;
-    border-radius: 14px;
   }
 }

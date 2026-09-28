@@ -9,6 +9,13 @@ import { ContextSourcePicker, ContextSourceInventory, ContextBudget } from '../s
 import '../shared/context/context-settings-ux.css'
 import { switchProviderProfile } from '../features/settings/provider-profiles'
 import { TextRevealPreview } from '../shared/ui/TextRevealPreview'
+import Input from '../shared/ui/Input'
+import Select from '../shared/ui/Select'
+import Checkbox from '../shared/ui/Checkbox'
+import Button from '../shared/ui/Button'
+import Disclosure from '../shared/ui/Disclosure'
+import SearchableSelect from '../shared/ui/SearchableSelect'
+import SegmentedControl from '../shared/ui/SegmentedControl'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bot,
@@ -23,7 +30,6 @@ import {
   RefreshCw,
   Search,
   SlidersHorizontal,
-  Star,
   Trash2,
   Type,
   Volume2,
@@ -146,10 +152,8 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
   const [models, setModels] = useState<ProviderModel[]>([])
   const [promptTab, setPromptTab] = useState<keyof AiPrompts>('story')
   const [promptVariableQuery, setPromptVariableQuery] = useState('')
-  const [modelSearch, setModelSearch] = useState('')
   const [aiSection, setAiSection] = useState<'connection' | 'models' | 'prompts'>('models')
   const [modelRole, setModelRole] = useState<'main' | 'support' | 'codex' | 'chat'>('main')
-  const [modelCount, setModelCount] = useState(8)
   const [connectionExpanded, setConnectionExpanded] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [showKey, setShowKey] = useState(false)
@@ -296,10 +300,6 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
     return () => { cancelled = true }
   }, [book?.id, book?.chatId, contextLoadVersion])
 
-  const visibleModels = useMemo(() => {
-    const query = modelSearch.trim().toLowerCase()
-    return models.filter((model) => !query || `${model.id} ${model.name ?? ''}`.toLowerCase().includes(query)).sort((a, b) => Number(settings.favorites.includes(b.id)) - Number(settings.favorites.includes(a.id)))
-  }, [modelSearch, models, settings.favorites])
 
   function persistAiSettings(snapshot: AiSettings, scope: string, version: number): Promise<boolean> {
     const pending = aiSaveQueueRef.current.run(scope, async () => {
@@ -457,7 +457,6 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
       }
     }
   }
-  function toggleFavorite(id: string) { changeAiSettings((current) => ({ ...current, favorites: current.favorites.includes(id) ? current.favorites.filter((favorite) => favorite !== id) : [...current.favorites, id] })) }
 
   async function resetFromDefaults() {
     if (!book || !window.confirm(`Replace the AI settings for “${book.title}” with the current defaults?`)) return
@@ -709,9 +708,9 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
         <SettingsSectionTabs tabs={aiSections} active={aiSection} onChange={setAiSection} idPrefix="ai" label="AI sections" />
         <section hidden={aiSection !== 'connection'} className="settings-card provider-card" role="tabpanel" id="ai-panel-connection" aria-labelledby="ai-tab-connection">
           <div className="card-heading"><div><span>01</span><h2>Provider</h2></div><p>Connection details stay in this browser.</p></div>
-          <p className="connection-summary">{providerLabels[settings.provider]} · {settings.provider === 'fake' ? 'Local testing' : settings.apiKey ? 'Key saved on this device' : 'Setup required'}</p><details open={connectionExpanded || (!settings.apiKey && settings.provider !== 'fake')} onToggle={event => setConnectionExpanded(event.currentTarget.open)}><summary>Edit connection</summary><div className="provider-grid">{(Object.keys(providerLabels) as AiProvider[]).map((provider) => <button key={provider} className={settings.provider === provider ? 'selected' : ''} type="button" aria-pressed={settings.provider === provider} onClick={() => selectProvider(provider)}><i>{provider === 'fake' ? 'T' : provider === 'nanogpt' ? 'N' : provider === 'openrouter' ? 'O' : provider === 'openai' ? 'AI' : provider === 'litellm' ? 'LLM' : '{ }'}</i><span><strong>{providerLabels[provider]}</strong><small>{provider === 'fake' ? 'Local · no network' : provider === 'compatible' ? 'Custom endpoint' : provider === 'litellm' ? 'Self-hosted gateway' : 'Managed endpoint'}</small></span><b>{settings.provider === provider ? '✓' : ''}</b></button>)}</div>
+          <p className="connection-summary">{providerLabels[settings.provider]} · {settings.provider === 'fake' ? 'Local testing' : settings.apiKey ? 'Key saved on this device' : 'Setup required'}</p><Disclosure className="provider-connection" title="Edit connection" description="Provider endpoint, credentials, and model catalog." open={connectionExpanded || (!settings.apiKey && settings.provider !== 'fake')} onToggle={event => setConnectionExpanded(event.currentTarget.open)}><div className="provider-grid">{(Object.keys(providerLabels) as AiProvider[]).map((provider) => <button key={provider} className={settings.provider === provider ? 'selected' : ''} type="button" aria-pressed={settings.provider === provider} onClick={() => selectProvider(provider)}><i>{provider === 'fake' ? 'T' : provider === 'nanogpt' ? 'N' : provider === 'openrouter' ? 'O' : provider === 'openai' ? 'AI' : provider === 'litellm' ? 'LLM' : '{ }'}</i><span><strong>{providerLabels[provider]}</strong><small>{provider === 'fake' ? 'Local · no network' : provider === 'compatible' ? 'Custom endpoint' : provider === 'litellm' ? 'Self-hosted gateway' : 'Managed endpoint'}</small></span><b>{settings.provider === provider ? '✓' : ''}</b></button>)}</div>
           <div className="connection-fields">
-            {(settings.provider === 'compatible' || settings.provider === 'litellm') && <label><span>{settings.provider === 'litellm' ? 'LiteLLM base URL' : 'Endpoint URL'}</span><input value={settings.baseUrl} onChange={(event) => updateConnection('baseUrl', event.target.value)} placeholder={settings.provider === 'litellm' ? 'https://webdev.serveblog.net:9447/v1' : 'https://provider.example/v1'} /></label>}
+            {(settings.provider === 'compatible' || settings.provider === 'litellm') && <Input label={settings.provider === 'litellm' ? 'LiteLLM base URL' : 'Endpoint URL'} value={settings.baseUrl} onChange={(event) => updateConnection('baseUrl', event.target.value)} placeholder={settings.provider === 'litellm' ? 'https://webdev.serveblog.net:9447/v1' : 'https://provider.example/v1'} />}
             {settings.provider !== 'fake' && <label><span>{settings.provider === 'litellm' ? 'LiteLLM API key' : 'API key'}</span><div className="input-action"><input
               type={showKey ? 'text' : 'password'}
               name="arc-provider-token"
@@ -727,31 +726,42 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
               spellCheck={false}
             /><button type="button" onClick={() => setShowKey((value) => !value)}>{showKey ? 'Hide' : 'Show'}</button></div></label>}
             {settings.provider === 'fake' && <div className="status success" role="note"><i />Testing provider — responses, errors, reasoning, and tool calls are generated locally and deterministically. No text-AI network request is sent.</div>}
-            <button className="reload-button" type="button" onClick={refreshModels} disabled={loading}><RefreshCw className={loading ? 'spinning' : ''} aria-hidden="true" />{loading ? 'Loading models…' : 'Reload model list'}</button>
+            <Button className="reload-button" onClick={refreshModels} disabled={loading} leadingIcon={<RefreshCw className={loading ? 'spinning' : ''} aria-hidden="true" />}>{loading ? 'Loading models…' : 'Reload model list'}</Button>
           </div>
-          </details><p className={`status ${statusKind}`}  role="status"><i />{status}</p>
+          </Disclosure><p className={`status ${statusKind}`} role="status"><i />{status}</p>
         </section>
 
-        {settings.provider === 'fake' && aiSection === 'connection' && <section className="settings-card provider-card" aria-label="Fake provider request trace">
-          <div className="card-heading"><div><span>T</span><h2>Request trace</h2></div><p>Session only · last 20 Fake requests</p></div>
-          <div className="connection-fields"><button className="reload-button" type="button" onClick={clearFakeProviderTrace} disabled={!fakeTrace.length}>Clear trace</button></div>
-          <details><summary>{fakeTrace.length ? `${fakeTrace.length} request${fakeTrace.length === 1 ? '' : 's'}` : 'No Fake requests yet'}</summary><pre>{fakeTrace.length ? JSON.stringify(fakeTrace, null, 2) : 'Generate, summarize, autotitle, or chat with Fake (testing) to inspect the exact provider-boundary request.'}</pre></details>
-        </section>}
+        {settings.provider === 'fake' && aiSection === 'connection' && <Disclosure className="settings-card provider-trace" bodyClassName="provider-trace-body" eyebrow="Testing provider" title="Request trace" description={fakeTrace.length ? `${fakeTrace.length} request${fakeTrace.length === 1 ? '' : 's'} captured` : 'No Fake requests yet'} aria-label="Fake provider request trace">
+          <p>Session only · last 20 requests. Inspect the exact provider-boundary payload generated by Arc.</p><Button size="small" variant="ghost" onClick={clearFakeProviderTrace} disabled={!fakeTrace.length}>Clear trace</Button><pre>{fakeTrace.length ? JSON.stringify(fakeTrace, null, 2) : 'Generate, summarize, autotitle, or chat with Fake (testing) to capture a request.'}</pre>
+        </Disclosure>}
 
         <section hidden={aiSection !== 'models'} className="settings-card models-card" role="tabpanel" id="ai-panel-models" aria-labelledby="ai-tab-models">
           <div className="card-heading"><div><span>02</span><h2>Models</h2></div><p>{isBookSettings ? 'Favorites are shared; model choices belong to this book.' : 'Main writes; Support summarizes; Codex builds your world; Chat assists.'}</p></div>
           <div className="model-pickers">{(['main', 'support', 'codex', 'chat'] as const).map(role => {
             const id = settings[`${role}Model`]
             const model = models.find(item => item.id === id)
-            return <button className="model-role-card" type="button" key={role} aria-pressed={modelRole === role} onClick={() => { setModelRole(role); setModelSearch(''); setModelCount(8) }}><strong>{role === 'main' ? 'Main · Story writing' : role === 'support' ? 'Support · Summaries & titles' : role === 'chat' ? 'Chat · Assistant' : 'Codex · Worldbuilding'}</strong><span>{model?.name || id || ((role === 'codex' || role === 'chat') ? `Use Main · ${settings.mainModel || 'not selected'}` : 'Choose a model')}</span><small>{formatContext(model?.context_length ?? settings[`${role}ModelContextLength`])}</small></button>
+            return <button className="model-role-card" type="button" key={role} aria-pressed={modelRole === role} onClick={() => setModelRole(role)}><strong>{role === 'main' ? 'Main · Story writing' : role === 'support' ? 'Support · Summaries & titles' : role === 'chat' ? 'Chat · Assistant' : 'Codex · Worldbuilding'}</strong><span>{model?.name || id || ((role === 'codex' || role === 'chat') ? `Use Main · ${settings.mainModel || 'not selected'}` : 'Choose a model')}</span><small>{formatContext(model?.context_length ?? settings[`${role}ModelContextLength`])}</small></button>
           })}</div>
-          <h3>Choose {modelRole === 'main' ? 'Main' : modelRole === 'support' ? 'Support' : modelRole === 'chat' ? 'Chat' : 'Codex'} model</h3>
-          <label><span>Model ID <em>Choose below or enter a custom ID</em></span><input value={settings[`${modelRole}Model`]} onChange={event => selectModel(modelRole, event.target.value)} placeholder={(modelRole === 'codex' || modelRole === 'chat') ? 'Leave empty to use Main' : 'Enter model ID'} /></label>
-          <label><span>Thinking effort</span><select aria-label="Default thinking effort" value={settings[`${modelRole}ThinkingEffort`]} onChange={event => update(`${modelRole}ThinkingEffort`, normalizeThinkingEffort(event.target.value))}>{THINKING_EFFORT_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><small>{modelRole === 'chat' ? 'Copied to new chats; each chat can change its own effort.' : 'Used for this role, including when its model falls back to Main.'} Higher effort may take longer and use more tokens. Available effort levels depend on the model; use Provider default if unsupported.</small></label>
+          <SearchableSelect
+            label={`${modelRole === 'main' ? 'Main · Story writing' : modelRole === 'support' ? 'Support · Summaries & titles' : modelRole === 'chat' ? 'Chat · Assistant' : 'Codex · Worldbuilding'} model`}
+            value={settings[`${modelRole}Model`]}
+            placeholder={modelRole === 'codex' || modelRole === 'chat' ? `Use Main · ${settings.mainModel || 'not selected'}` : 'Choose a model'}
+            searchPlaceholder="Search loaded models"
+            emptyText={models.length ? 'No models match that search.' : 'Reload the provider model list first.'}
+            description={`${models.length} loaded model${models.length === 1 ? '' : 's'}. Favorites are shown first.`}
+            options={[
+              ...((modelRole === 'codex' || modelRole === 'chat') ? [{ value: '', title: `Use Main · ${settings.mainModel || 'not selected'}`, subtitle: 'No separate model for this role' }] : []),
+              ...(!models.some(model => model.id === settings[`${modelRole}Model`]) && settings[`${modelRole}Model`] ? [{ value: settings[`${modelRole}Model`], title: settings[`${modelRole}Model`], subtitle: 'Saved custom or unavailable model', badges: ['Custom'] }] : []),
+              ...[...models].sort((a, b) => Number(settings.favorites.includes(b.id)) - Number(settings.favorites.includes(a.id))).map(model => ({ value: model.id, title: model.name || model.id, subtitle: model.name && model.name !== model.id ? model.id : undefined, meta: formatContext(model.context_length), badges: [settings.favorites.includes(model.id) ? 'Favorite' : '', model.architecture?.modality || 'Text'].filter(Boolean) })),
+            ]}
+            onChange={modelId => selectModel(modelRole, modelId)}
+          />
+          <Input label="Custom model ID" description="Optional fallback for compatible endpoints or models not present in the loaded catalog." value={settings[`${modelRole}Model`]} onChange={event => selectModel(modelRole, event.target.value)} placeholder={(modelRole === 'codex' || modelRole === 'chat') ? 'Leave empty to use Main' : 'Enter model ID'} />
+          <Select label="Thinking effort" aria-label="Default thinking effort" description={`${modelRole === 'chat' ? 'Copied to new chats; each chat can change its own effort.' : 'Used for this role, including when its model falls back to Main.'} Higher effort may take longer and use more tokens. Available effort levels depend on the model; use Provider default if unsupported.`} value={settings[`${modelRole}ThinkingEffort`]} onChange={event => update(`${modelRole}ThinkingEffort`, normalizeThinkingEffort(event.target.value))}>{THINKING_EFFORT_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</Select>
           {modelRole === 'chat' && <p>Used for new chats. Leave empty to use Main. You can change the model inside each chat.</p>}
-          {modelRole === 'chat' && !isBookSettings && <label><span>Max model rounds per response</span><select aria-label="Default max model rounds per response" value={settings.chatMaxModelRounds} onChange={event => update('chatMaxModelRounds', Number(event.target.value))}>{Array.from({ length: 32 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</select><small>Default for new chats. One assistant model request is one round; several tools in that request still count as one. Existing chats keep their own limit.</small></label>}
-          <div className="reveal-setting"><h3>Text reveal speed</h3><p>Controls how quickly generated words appear.</p><div className="speed-presets">{([['Slow', '120'], ['Normal', '40'], ['Fast', '10']] as const).map(([label, delay]) => <button type="button" key={label} aria-pressed={settings.generationWordDelayMs === delay} onClick={() => update('generationWordDelayMs', delay)}>{label}</button>)}</div><TextRevealPreview delay={Number(settings.generationWordDelayMs)} /></div>
-          <details className="ai-advanced"><summary>Advanced · Speed & context limits</summary>
+          {modelRole === 'chat' && !isBookSettings && <Select label="Max model rounds per response" aria-label="Default max model rounds per response" description="Default for new chats. One assistant model request is one round; several tools in that request still count as one. Existing chats keep their own limit." value={settings.chatMaxModelRounds} onChange={event => update('chatMaxModelRounds', Number(event.target.value))}>{Array.from({ length: 32 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</Select>}
+          <div className="reveal-setting"><h3>Text reveal speed</h3><p>Controls how quickly generated words appear.</p><SegmentedControl className="reveal-speed-control" label="Text reveal speed" value={settings.generationWordDelayMs} onChange={delay => update('generationWordDelayMs', delay)} fullWidth options={[{ value: '120', label: 'Slow' }, { value: '40', label: 'Normal' }, { value: '10', label: 'Fast' }]} /><TextRevealPreview delay={Number(settings.generationWordDelayMs)} /></div>
+          <Disclosure className="ai-advanced" title="Advanced" description="Speed and context limits">
           <label className="generation-speed-setting">
             <span><strong>Custom reveal speed</strong><em>Milliseconds per word</em></span>
             <input type="text" inputMode="numeric" pattern="[0-9]*" value={settings.generationWordDelayMs} onChange={(event) => update('generationWordDelayMs', event.target.value)} aria-describedby="generation-speed-help" spellCheck={false} />
@@ -761,7 +771,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
             <label className={contextLimitInputError(settings.mainEffectiveContextLimit) ? 'invalid' : ''}><span><strong>Story / Main context cap</strong><em>Effective input window</em></span><input type="text" value={settings.mainEffectiveContextLimit} onChange={(event) => update('mainEffectiveContextLimit', event.target.value)} placeholder="Model maximum" spellCheck={false} /><small>{contextLimitInputError(settings.mainEffectiveContextLimit) || 'Optional. Accepts tokens such as 32000, 32k, or 1m. The model hard maximum still wins.'}</small></label>
             <label className={contextLimitInputError(settings.codexEffectiveContextLimit) ? 'invalid' : ''}><span><strong>Codex model context cap</strong><em>Used when a Codex model is set</em></span><input type="text" value={settings.codexEffectiveContextLimit} onChange={(event) => update('codexEffectiveContextLimit', event.target.value)} placeholder="Model maximum" spellCheck={false} /><small>{contextLimitInputError(settings.codexEffectiveContextLimit) || (settings.codexModel.trim() ? 'Optional cap for the selected Codex model.' : 'Codex currently falls back to Main, so the Story / Main cap applies.')}</small></label>
           </div>
-          </details><div className="model-browser"><div className="model-search"><Search aria-hidden="true" /><input value={modelSearch} onChange={(event) => { setModelSearch(event.target.value); setModelCount(8) }} placeholder="Search loaded models" /></div>{models.length ? <div className="model-list">{visibleModels.slice(0, modelCount).map((model) => <article key={model.id}><button className={`favorite ${settings.favorites.includes(model.id) ? 'active' : ''}`} type="button" onClick={() => toggleFavorite(model.id)} aria-pressed={settings.favorites.includes(model.id)} aria-label={`Favorite ${model.id}`}><Star fill={settings.favorites.includes(model.id) ? 'currentColor' : 'none'} aria-hidden="true" /></button><div><strong>{model.name || model.id}</strong>{model.name && model.name !== model.id && <small>{model.id}</small>}<p><span>{formatContext(model.context_length)}</span><span>{model.architecture?.modality || 'Text'}</span></p></div><button className="use-model" type="button" onClick={() => selectModel(modelRole, model.id)}>Use for {modelRole === 'main' ? 'Main' : modelRole === 'support' ? 'Support' : modelRole === 'chat' ? 'Chat' : 'Codex'}</button></article>)}<div className="model-results" role="status">Showing {Math.min(modelCount, visibleModels.length)} of {visibleModels.length} matching models{visibleModels.length > modelCount && <button type="button" onClick={() => setModelCount(count => count + 8)}>Show more</button>}{!visibleModels.length && <span>Try a different search.</span>}</div></div> : <div className="model-empty"><Bot aria-hidden="true" /><strong>No models loaded</strong><p>Connect a provider to browse models, or enter a model ID above.</p><button type="button" onClick={() => setAiSection('connection')}>Set up connection</button></div>}</div>
+          </Disclosure>
         </section>
 
         <section hidden={aiSection !== 'prompts'} className="settings-card prompts-card" role="tabpanel" id="ai-panel-prompts" aria-labelledby="ai-tab-prompts">
@@ -819,7 +829,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
           <details className="prompt-reference">
             <summary><CircleHelp aria-hidden="true" /><span>Variables & syntax</span></summary>
             <div className="prompt-syntax"><span>Insert a value</span><code>{'{{book.title}}'}</code><span>Include a block only when a value exists</span><code>{'{% if book.genre %}Genre: {{book.genre}}{% endif %}'}</code></div>
-            <label className="prompt-variable-search"><span>Search variables</span><input type="search" value={promptVariableQuery} onChange={(event) => setPromptVariableQuery(event.target.value)} placeholder={`Search ${promptTab} variables`} /></label>
+            <Input className="prompt-variable-search" label="Search variables" type="search" value={promptVariableQuery} onChange={(event) => setPromptVariableQuery(event.target.value)} placeholder={`Search ${promptTab} variables`} />
             <div className="prompt-variable-list">{availablePromptVariables.map((variable) => {
               const previewName = variable.aliasFor ?? variable.name
               const previewValue = promptPreviewValues?.[previewName]
@@ -834,7 +844,7 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
           <div className="prompt-footer"><button type="button" onClick={() => { if (window.confirm('Reset this prompt and all predefined messages to the Arc default?')) changeAiSettings((current) => resetPromptComposition(current, promptTab)) }}>Reset prompt composition</button></div></div>
         </section>
 
-        </> : settingsTab === 'context' ? (!contextReady ? <section className="settings-card"><h1 id="page-title">Context</h1><p role="status">{contextSaveError || 'Loading context settings…'}</p>{contextSaveError && <button type="button" onClick={() => setContextLoadVersion(version => version + 1)}>Retry loading</button>}</section> : book ? <>
+        </> : settingsTab === 'context' ? (!contextReady ? <section className="settings-card"><h1 id="page-title">Context</h1><p role="status">{contextSaveError || 'Loading context settings…'}</p>{contextSaveError && <Button onClick={() => setContextLoadVersion(version => version + 1)}>Retry loading</Button>}</section> : book ? <>
           <SettingsSectionTabs tabs={contextSections} active={contextSection} onChange={setContextSection} idPrefix="context" label="Context type" />
           <div role="tabpanel" id={`context-panel-${contextSection}`} aria-labelledby={`context-tab-${contextSection}`}>
             {contextSection === 'summary'
@@ -921,7 +931,7 @@ function PredefinedMessages({ scope = 'story', messages, previewValues, onChange
 }
 
 function ContextSaveStatus({ saved, error, onRetry }: { saved: boolean; error: string; onRetry: () => void }) {
-  return <div className={`context-save-status ${error ? 'error' : ''}`} role="status" aria-live="polite"><span>{error ? 'Save failed' : saved ? 'Saved' : 'Saving…'}</span>{error && <><small>{error}</small><button type="button" onClick={onRetry}>Retry saving</button></>}</div>
+  return <div className={`context-save-status ${error ? 'error' : ''}`} role="status" aria-live="polite"><span>{error ? 'Save failed' : saved ? 'Saved' : 'Saving…'}</span>{error && <><small>{error}</small><Button size="small" onClick={onRetry}>Retry saving</Button></>}</div>
 }
 
 function SummaryContextSettings({ book, source, error, settings }: { book: NonNullable<AiSettingsProps['book']>; source: SummarySource | null; error: string; settings: AiSettings }) {
@@ -1159,11 +1169,9 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
 
 function SpeechSettingsPanel({ bookId, settings, scope, onChange }: { bookId?: string; settings: AiSettings; scope: 'book' | 'defaults'; onChange: (speech: AiSettings['speech']) => void }) {
   const [models, setModels] = useState<SpeechModel[]>([])
-  const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
   const [sttModels, setSttModels] = useState<SttModel[]>([])
-  const [sttQuery, setSttQuery] = useState('')
   const [sttLoading, setSttLoading] = useState(false)
   const [sttMessage, setSttMessage] = useState('')
   const latestSpeechRef = useRef(settings.speech)
@@ -1175,8 +1183,6 @@ function SpeechSettingsPanel({ bookId, settings, scope, onChange }: { bookId?: s
   const selected = models.find((model) => model.id === settings.speech.model)
   const selectedStt = sttModels.find((model) => model.id === settings.speech.transcriptionModel)
   const voices = selected?.voices ?? []
-  const filtered = models.filter((model) => !query.trim() || `${model.id} ${model.name}`.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 80)
-  const filteredStt = sttModels.filter((model) => !sttQuery.trim() || `${model.provider} ${model.modelId} ${model.name}`.toLowerCase().includes(sttQuery.trim().toLowerCase())).slice(0, 100)
 
   function invalidateTtsLoad() {
     ttsLoadSequenceRef.current += 1
@@ -1292,33 +1298,31 @@ function SpeechSettingsPanel({ bookId, settings, scope, onChange }: { bookId?: s
       <div className="card-heading"><div><span>01</span><h2>Speech credentials</h2></div><p>Speech credentials are separate from text AI.</p></div>
       <div className="speech-settings-grid">
         <label><span>NanoGPT Speech API key</span><div className="speech-key-row"><input type="password" value={settings.speech.apiKey} onChange={(event) => updateSpeech({ apiKey: event.target.value })} autoComplete="off" spellCheck={false} />{settings.provider === 'nanogpt' && settings.apiKey.trim() && <button type="button" onClick={() => updateSpeech({ apiKey: settings.apiKey })}>Copy NanoGPT key from AI settings</button>}</div><small className="speech-help">Used by NanoGPT TTS and NanoGPT transcription models.</small></label>
-        <label><span>OpenAI Speech API key</span><input type="password" value={settings.speech.openaiApiKey} onChange={(event) => updateSpeech({ openaiApiKey: event.target.value })} autoComplete="off" spellCheck={false} /><small className="speech-help">Used only for OpenAI transcription. Stored with this Speech configuration on this device.</small></label>
+        <Input label="OpenAI Speech API key" description="Used only for OpenAI transcription. Stored with this Speech configuration on this device." type="password" value={settings.speech.openaiApiKey} onChange={(event) => updateSpeech({ openaiApiKey: event.target.value })} autoComplete="off" spellCheck={false} />
       </div>
     </section>
     <section className="settings-card">
-      <div className="card-heading"><div><span>02</span><h2>Text to speech</h2></div><button type="button" onClick={() => { void loadModels() }} disabled={loading}><RefreshCw className={loading ? 'spinning' : ''} aria-hidden="true" /> Reload</button></div>
-      <div className="speech-model-search"><Search aria-hidden="true" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search TTS models" /></div>
+      <div className="card-heading"><div><span>02</span><h2>Text to speech</h2></div><Button size="small" variant="ghost" onClick={() => { void loadModels() }} disabled={loading} leadingIcon={<RefreshCw className={loading ? 'spinning' : ''} aria-hidden="true" />}>{loading ? 'Loading…' : 'Reload'}</Button></div>
       {message && <p className="speech-help">{message}</p>}
       {unavailableModel && <p className="speech-model-unavailable" role="alert">Saved model “{settings.speech.model}” is unavailable. Arc will not silently switch paid models.</p>}
-      <div className="speech-model-list">{filtered.map((model) => <button type="button" key={model.id} className={model.id === settings.speech.model ? 'selected' : ''} onClick={() => updateSpeech({ model: model.id, voice: model.voices.includes(settings.speech.voice) ? settings.speech.voice : model.voices[0] ?? '' })}><span><strong>{model.name}</strong><small>{model.id}</small></span><small>{model.price || 'Price unavailable'}</small></button>)}</div>
+      <SearchableSelect label="Text-to-speech model" value={settings.speech.model} searchPlaceholder="Search TTS models" emptyText={models.length ? 'No TTS models match that search.' : 'Reload to fetch TTS models.'} description={`${models.length} text-to-speech model${models.length === 1 ? '' : 's'} available.`} options={[...(!selected && settings.speech.model ? [{ value: settings.speech.model, title: settings.speech.model, subtitle: 'Saved model is unavailable', disabled: true }] : []), ...models.map(model => ({ value: model.id, title: model.name, subtitle: model.id, meta: model.price || 'Price unavailable', badges: model.voices.length ? [`${model.voices.length} voices`] : undefined }))]} onChange={modelId => { const model = models.find(candidate => candidate.id === modelId); if (model) updateSpeech({ model: model.id, voice: model.voices.includes(settings.speech.voice) ? settings.speech.voice : model.voices[0] ?? '' }) }} />
       <div className="speech-settings-grid">
-        <label><span>Voice</span>{voices.length ? <select value={settings.speech.voice} onChange={(event) => updateSpeech({ voice: event.target.value })}>{unavailableVoice && <option value={settings.speech.voice}>{settings.speech.voice} — unavailable</option>}{voices.map((voice) => <option key={voice} value={voice}>{voice}</option>)}</select> : <input value={settings.speech.voice} onChange={(event) => updateSpeech({ voice: event.target.value })} placeholder="Enter provider voice ID" />}{unavailableVoice ? <small className="speech-model-unavailable">Choose an available voice before reading aloud.</small> : <small className="speech-help">{voices.length ? `${voices.length} voices supplied by NanoGPT for this model.` : 'NanoGPT supplied no voice list; enter a provider-supported voice ID manually.'}</small>}</label>
-        <label><span>Maximum parallel TTS requests</span><input type="number" min="1" max="8" value={settings.speech.maxParallelRequests} onChange={(event) => updateSpeech({ maxParallelRequests: event.target.value })} /><small className="speech-help">Default 1. Audio may generate concurrently but always plays in prose order.</small></label>
+        {voices.length ? <Select label="Voice" error={unavailableVoice ? 'Choose an available voice before reading aloud.' : undefined} description={unavailableVoice ? undefined : `${voices.length} voices supplied by NanoGPT for this model.`} value={settings.speech.voice} onChange={(event) => updateSpeech({ voice: event.target.value })}>{unavailableVoice && <option value={settings.speech.voice}>{settings.speech.voice} — unavailable</option>}{voices.map((voice) => <option key={voice} value={voice}>{voice}</option>)}</Select> : <Input label="Voice" description="NanoGPT supplied no voice list; enter a provider-supported voice ID manually." value={settings.speech.voice} onChange={(event) => updateSpeech({ voice: event.target.value })} placeholder="Enter provider voice ID" />}
+        <Input label="Maximum parallel TTS requests" description="Default 1. Audio may generate concurrently but always plays in prose order." type="number" min="1" max="8" value={settings.speech.maxParallelRequests} onChange={(event) => updateSpeech({ maxParallelRequests: event.target.value })} />
       </div>
-      <label className="speech-toggle"><span><input type="checkbox" checked={settings.speech.readAloudAfterGeneration} onChange={(event) => updateSpeech({ readAloudAfterGeneration: event.target.checked })} /> Read aloud after generation</span><small className="speech-help">Story reads only the latest generated passage; Codex reads the resulting entry; Chat reads the new visible assistant answer.</small></label>
+      <Checkbox className="speech-toggle" label="Read aloud after generation" description="Story reads only the latest generated passage; Codex reads the resulting entry; Chat reads the new visible assistant answer." checked={settings.speech.readAloudAfterGeneration} onChange={(event) => updateSpeech({ readAloudAfterGeneration: event.target.checked })} />
     </section>
     <section className="settings-card stt-settings-card">
-      <div className="card-heading"><div><span>03</span><h2>Speech to text</h2></div><button type="button" onClick={() => { void loadSttModels() }} disabled={sttLoading}><RefreshCw className={sttLoading ? 'spinning' : ''} aria-hidden="true" /> Reload</button></div>
+      <div className="card-heading"><div><span>03</span><h2>Speech to text</h2></div><Button size="small" variant="ghost" onClick={() => { void loadSttModels() }} disabled={sttLoading} leadingIcon={<RefreshCw className={sttLoading ? 'spinning' : ''} aria-hidden="true" />}>{sttLoading ? 'Loading…' : 'Reload'}</Button></div>
       <p className="speech-help">Dictation sends microphone audio only to the provider named by the selected transcription model. Raw recordings are not stored by Arc.</p>
-      <div className="speech-model-search"><Search aria-hidden="true" /><input value={sttQuery} onChange={(event) => setSttQuery(event.target.value)} placeholder="Search transcription models" /></div>
       {sttMessage && <p className="speech-help">{sttMessage}</p>}
       {unavailableStt && <p className="speech-model-unavailable" role="alert">Saved transcription model “{settings.speech.transcriptionModel}” is unavailable in the loaded catalogs. Arc will not silently substitute another paid model.</p>}
-      <div className="speech-model-list stt-model-list">{filteredStt.map((model) => <button type="button" key={model.id} className={model.id === settings.speech.transcriptionModel ? 'selected' : ''} onClick={() => updateSpeech({ transcriptionModel: model.id, streamTranscription: model.supportsLive })}><span><strong>{model.provider === 'openai' ? 'OpenAI' : 'NanoGPT'} · {model.name}</strong><small>{model.modelId} · {model.supportsLive ? 'Live + file transcription' : 'File transcription'}</small></span><small>{model.price || 'Price not supplied by catalog'}</small></button>)}</div>
+      <SearchableSelect label="Transcription model" value={settings.speech.transcriptionModel} searchPlaceholder="Search transcription models" emptyText={sttModels.length ? 'No transcription models match that search.' : 'Reload to fetch transcription models.'} description={`${sttModels.length} transcription model${sttModels.length === 1 ? '' : 's'} available.`} options={[...(!selectedStt && settings.speech.transcriptionModel ? [{ value: settings.speech.transcriptionModel, title: settings.speech.transcriptionModel, subtitle: 'Saved model is unavailable', disabled: true }] : []), ...sttModels.map(model => ({ value: model.id, title: model.name, subtitle: `${model.provider === 'openai' ? 'OpenAI' : 'NanoGPT'} · ${model.modelId}`, meta: model.price || 'Price unavailable', badges: [model.supportsLive ? 'Live' : 'File'] }))]} onChange={modelId => { const model = sttModels.find(candidate => candidate.id === modelId); if (model) updateSpeech({ transcriptionModel: model.id, streamTranscription: model.supportsLive }) }} />
       <div className="speech-settings-grid">
-        <label><span>Language hint</span><input value={settings.speech.transcriptionLanguage === 'auto' ? '' : settings.speech.transcriptionLanguage} onChange={(event) => updateSpeech({ transcriptionLanguage: event.target.value.trim() || 'auto' })} placeholder="Auto-detect" /><small className="speech-help">Leave empty for Auto-detect. Enter a provider-supported language code/name to provide a hint.</small></label>
-        <label className="speech-toggle stt-live-toggle"><span><input type="checkbox" checked={settings.speech.streamTranscription && liveSupported} disabled={!liveSupported} onChange={(event) => updateSpeech({ streamTranscription: event.target.checked })} /> Stream text while speaking</span><small className="speech-help">{liveSupported ? 'Supported by this model. Partial text stays provisional until Stop/finalization.' : selectedStt ? 'This selected model does not expose live partial transcription.' : 'Load/select a model to check live-transcription capability.'}</small></label>
+        <Input label="Language hint" description="Leave empty for Auto-detect. Enter a provider-supported language code/name to provide a hint." value={settings.speech.transcriptionLanguage === 'auto' ? '' : settings.speech.transcriptionLanguage} onChange={(event) => updateSpeech({ transcriptionLanguage: event.target.value.trim() || 'auto' })} placeholder="Auto-detect" />
+        <Checkbox className="speech-toggle stt-live-toggle" label="Stream text while speaking" description={liveSupported ? 'Supported by this model. Partial text stays provisional until Stop/finalization.' : selectedStt ? 'This selected model does not expose live partial transcription.' : 'Load/select a model to check live-transcription capability.'} checked={settings.speech.streamTranscription && liveSupported} disabled={!liveSupported} onChange={(event) => updateSpeech({ streamTranscription: event.target.checked })} />
       </div>
-      {settings.speech.transcriptionModel.startsWith('openai:') && <p className="speech-help"><Mic aria-hidden="true" /> OpenAI live-capable models use a direct browser Realtime connection; ordinary models record locally and upload once after Stop.</p>}
+      {settings.speech.transcriptionModel.startsWith('openai:') && <p className="speech-help speech-provider-note"><Mic aria-hidden="true" /><span>OpenAI live-capable models use a direct browser Realtime connection; ordinary models record locally and upload once after Stop.</span></p>}
     </section>
   </section>
 }
@@ -1346,7 +1350,7 @@ function AppearanceSettings({ scope }: { scope: 'book' | 'defaults' }) {
   return <section className="appearance-settings">
     <div className="page-heading"><div><p>{scope === 'book' ? 'Book UI' : 'Default UI'}</p><h1 id="page-title">Reading surface</h1><span>{scope === 'book' ? 'These values will apply only to this book.' : 'These values are copied when a new book is created.'}</span></div><Type aria-hidden="true" /></div>
     <div className="settings-card appearance-card">
-      <label className="appearance-field"><span>Editor font</span><select defaultValue="Iowan Old Style"><option>Iowan Old Style</option><option>Literata</option><option>Source Serif</option></select></label>
+      <Select className="appearance-field" label="Editor font" defaultValue="Iowan Old Style"><option>Iowan Old Style</option><option>Literata</option><option>Source Serif</option></Select>
       <label className="appearance-field"><span>Text size <b>{textSize} px</b></span><input type="range" min="16" max="30" value={textSize} onChange={(event) => setTextSize(Number(event.target.value))} /></label>
       <div className="theme-grid" aria-label="Default theme">
         <button className={`theme-card ${theme === 'night' ? 'selected' : ''}`} type="button" onClick={() => setTheme('night')}><i className="theme-night" /><span>Ink at Night</span>{theme === 'night' && <Check aria-hidden="true" />}</button>

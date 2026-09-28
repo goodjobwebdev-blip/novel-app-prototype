@@ -1,6 +1,10 @@
 import { selectedMediaPrompt } from './media-prompt'
-import { useState, type KeyboardEvent } from 'react'
-import { ArrowLeft, Settings } from 'lucide-react'
+import { useState } from 'react'
+import { ArrowLeft, Search, Settings } from 'lucide-react'
+import Button from '../../shared/ui/Button'
+import Input from '../../shared/ui/Input'
+import Select from '../../shared/ui/Select'
+import Tabs from '../../shared/ui/Tabs'
 import ImageGenerationControls, { type ImageDraft } from './ImageGenerationControls'
 import ImageJobs, { ImageAssetPreview } from './ImageResults'
 import { useImageQuery, useImageSettings } from './image-hooks'
@@ -118,21 +122,21 @@ export function ImageGalleryView({ bookId, state, onStateChange }: Omit<ImageWor
         <button type="button" aria-pressed={scope === 'all'} onClick={() => updateGallery({ scope: 'all', limit: 40 })}>All</button>
         {bookId && <button type="button" aria-pressed={scope === 'book'} onClick={() => updateGallery({ scope: 'book', limit: 40 })}>This book</button>}
       </div>
-      <input type="search" aria-label="Search gallery" placeholder="Search images" value={state.gallery.query} onChange={(event) => updateGallery({ query: event.target.value, limit: 40 })} />
+      <Input className="image-gallery-search" type="search" aria-label="Search gallery" placeholder="Search images" leadingIcon={<Search aria-hidden="true" />} value={state.gallery.query} onChange={(event) => updateGallery({ query: event.target.value, limit: 40 })} />
     </div>
     <p className="image-help">All kept images and Codex illustrations on this device. Removing an image from chat keeps its gallery copy.</p>
     {(error || message) && <p role="status">{error || message}</p>}
     <div className="image-gallery-grid">{visible.slice(0, state.gallery.limit).map((asset) => <article key={asset.id}>
       <ImageAssetPreview asset={asset} onOpen={() => { setEntryId(''); setMessage('') }} renderViewerActions={(close) => <div className="image-gallery-viewer-actions">
-        {bookId && (asset.kind ?? 'image') === 'image' && <div className="image-codex-action"><label>Codex entry<select value={entryId} onChange={(event) => setEntryId(event.target.value)}><option value="">Choose an entry</option>{entries.map((entry) => <option key={entry.id} value={entry.id}>{entry.title}</option>)}</select></label>{!entries.length && <p>Create a Codex entry in this book first.</p>}<button type="button" disabled={!entryId || busy} onClick={() => { void action(async () => { if (await attach(asset)) close() }) }}>Use in Codex</button></div>}
-        <button className="image-danger-action" type="button" disabled={busy} onClick={() => { const kind = asset.kind ?? 'image'; const confirmed = window.confirm(asset.entryId ? 'Remove this illustration from its Codex entry? You can undo it from the entry.' : `Delete this ${kind} from the gallery and its chat results? Download it first if you want a backup.`); if (confirmed) void action(async () => { await remove(asset); close() }) }}>Delete {asset.kind ?? 'image'}</button>
+        {bookId && (asset.kind ?? 'image') === 'image' && <div className="image-codex-action"><Select label="Codex entry" value={entryId} onChange={(event) => setEntryId(event.target.value)}><option value="">Choose an entry</option>{entries.map((entry) => <option key={entry.id} value={entry.id}>{entry.title}</option>)}</Select>{!entries.length && <p>Create a Codex entry in this book first.</p>}<Button disabled={!entryId || busy} onClick={() => { void action(async () => { if (await attach(asset)) close() }) }}>Use in Codex</Button></div>}
+        <Button className="image-danger-action" variant="danger" disabled={busy} onClick={() => { const kind = asset.kind ?? 'image'; const confirmed = window.confirm(asset.entryId ? 'Remove this illustration from its Codex entry? You can undo it from the entry.' : `Delete this ${kind} from the gallery and its chat results? Download it first if you want a backup.`); if (confirmed) void action(async () => { await remove(asset); close() }) }}>Delete {asset.kind ?? 'image'}</Button>
         {message && <p role="alert">{message}</p>}
       </div>} />
       <p className="image-prompt-preview">{asset.prompt || 'Codex illustration'}</p>
       <small>{asset.modelAlias || 'Uploaded illustration'}</small>
     </article>)}</div>
     {!visible.length && <p>No media match. Generate and keep an image or video, or upload a Codex illustration.</p>}
-    {visible.length > state.gallery.limit && <button type="button" onClick={() => updateGallery({ limit: state.gallery.limit + 40 })}>Show more images</button>}
+    {visible.length > state.gallery.limit && <Button onClick={() => updateGallery({ limit: state.gallery.limit + 40 })}>Show more images</Button>}
   </section>
 }
 
@@ -147,19 +151,7 @@ export type ImageWorkspaceProps = {
 }
 
 export default function ImageWorkspace({ bookId, bookTitle, state, onStateChange, onBack, onSettings, storageError }: ImageWorkspaceProps) {
-  const tabs: ImageWorkspaceTab[] = ['generate', 'gallery']
   const selectTab = (tab: ImageWorkspaceTab) => onStateChange({ ...state, tab })
-  const selectTabFromKeyboard = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
-    const next = event.key === 'ArrowRight' ? (index + 1) % tabs.length
-      : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length
-        : event.key === 'Home' ? 0
-          : event.key === 'End' ? tabs.length - 1
-            : -1
-    if (next < 0) return
-    event.preventDefault()
-    selectTab(tabs[next])
-    document.getElementById(`image-tab-${tabs[next]}`)?.focus()
-  }
   return <main className="image-ui image-workspace">
     <header className="image-workspace-header">
       <button type="button" onClick={onBack} aria-label="Back"><ArrowLeft aria-hidden="true" /><span>Back</span></button>
@@ -167,10 +159,10 @@ export default function ImageWorkspace({ bookId, bookTitle, state, onStateChange
       <button type="button" onClick={onSettings} aria-label="Image settings"><Settings aria-hidden="true" /><span>Settings</span></button>
     </header>
     {storageError && <p role="alert">{storageError}</p>}
-    <nav className="image-tabs" aria-label="Image workspace" role="tablist">
-      <button type="button" role="tab" id="image-tab-generate" aria-selected={state.tab === 'generate'} aria-controls="image-panel-generate" tabIndex={state.tab === 'generate' ? 0 : -1} onKeyDown={(event) => selectTabFromKeyboard(event, 0)} onClick={() => selectTab('generate')}>Generate</button>
-      <button type="button" role="tab" id="image-tab-gallery" aria-selected={state.tab === 'gallery'} aria-controls="image-panel-gallery" tabIndex={state.tab === 'gallery' ? 0 : -1} onKeyDown={(event) => selectTabFromKeyboard(event, 1)} onClick={() => selectTab('gallery')}>Gallery</button>
-    </nav>
+    <Tabs className="image-tabs" label="Image workspace" value={state.tab} onChange={selectTab} items={[
+      { value: 'generate', label: 'Generate', id: 'image-tab-generate', panelId: 'image-panel-generate' },
+      { value: 'gallery', label: 'Gallery', id: 'image-tab-gallery', panelId: 'image-panel-gallery' },
+    ]} />
     <div className="image-workspace-content" id={`image-panel-${state.tab}`} role="tabpanel" aria-labelledby={`image-tab-${state.tab}`}>
       {state.tab === 'generate' ? <ImageGenerateView bookId={bookId} state={state} onStateChange={onStateChange} onSettings={onSettings} /> : <ImageGalleryView bookId={bookId} state={state} onStateChange={onStateChange} />}
     </div>

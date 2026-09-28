@@ -29,6 +29,8 @@ import { applyChatManagementChange } from '../data/persistence'
 import Composer from '../features/chat/Composer'
 import { startImageQueue } from '../features/images/image-queue'
 import ImageWorkspace from '../features/images/ImageWorkspace'
+import Button from '../shared/ui/Button'
+import Toast, { type ToastVariant } from '../shared/ui/Toast'
 import { useImageQuery } from '../features/images/image-hooks'
 import { listImageJobs } from '../features/images/image-store'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -98,6 +100,7 @@ import { summaryGenerationOwnsUi, type SummaryGenerationOwner } from '../feature
 import ExpandableTextInput, { type ExpandableTextInputDictationTarget } from '../shared/ui/ExpandableTextInput'
 import GenerationActions from '../shared/ui/GenerationActions'
 import UiKitScreen from '../shared/ui/UiKitScreen'
+import Input from '../shared/ui/Input'
 import MarkdownEditor, { type CodexMentionClick, type GenerationContext, type GenerationResult, type MarkdownEditorHandle } from '../features/editor/MarkdownEditor'
 import type { NanoGPTStreamMetadata } from '../shared/ai/nanogpt'
 import { fetchTextProviderModelContextLength, streamTextProviderCompletion, textProviderRequestText } from '../shared/ai/text-provider'
@@ -180,7 +183,7 @@ type RightTab = 'book' | 'outline' | 'notes' | 'codex' | 'chat'
 type ChatPanel = 'list' | 'settings'
 type SaveState = 'loading' | 'saving' | 'saved' | 'error'
 type GenerationPhase = 'sending' | 'thinking' | 'writing' | 'stopping'
-type ToastMessage = { id: number; message: string }
+type ToastMessage = { id: number; message: string; variant: ToastVariant; title: string }
 type AutotitleUiState = { targetId: string; targetType: AutotitleTargetType; targetTitle: string; status: 'loading' | 'ready' | 'error'; suggestion?: string; error?: string; request?: AutotitleRequest }
 type LoreMentionPreview = { entryId: string; title: string; category: string; content: string; source: 'summary' | 'excerpt' }
 type LoreMentionPopupState = { id: number; term: CodexMentionTerm; anchor: CodexMentionClick['rect']; selectedId?: string; loading?: boolean; preview?: LoreMentionPreview; error?: string }
@@ -1151,9 +1154,9 @@ export default function Workspace() {
     if (!opened) showToast('Could not save the current document. Chat was not opened because its context could be stale.')
   }
 
-  function showToast(message: string) {
+  function showToast(message: string, variant: ToastVariant = 'error', title = variant === 'error' ? 'Something went wrong' : variant === 'warning' ? 'Check this action' : 'Done') {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
-    setToast({ id: Date.now(), message })
+    setToast({ id: Date.now(), message, variant, title })
     toastTimerRef.current = setTimeout(() => setToast(null), 5200)
   }
 
@@ -1942,10 +1945,10 @@ export default function Workspace() {
   if (screen === 'home') return (
     <main className="library-screen">
       {autotitleOverlay}
-      {toast && <div className="app-toast" role="alert" key={toast.id}><span>{toast.message}</span><button type="button" onClick={() => setToast(null)} aria-label="Dismiss notification"><X aria-hidden="true" /></button></div>}
+      {toast && <Toast fixed key={toast.id} variant={toast.variant} title={toast.title} onDismiss={() => setToast(null)}>{toast.message}</Toast>}
       <header className="library-top"><div className="arc-brand"><Feather aria-hidden="true" /> ARC</div><button className="ui-kit-entry" type="button" onClick={() => setUiKitOpen(true)} aria-label="Open UI Kit" title="UI Kit"><Palette aria-hidden="true" /></button><button className="image-destination-button" type="button" onClick={() => { void openImages('home') }} aria-label="Open images and gallery"><ImageIcon aria-hidden="true" /><ImageActivityBadge active={activeImageJobs} review={reviewImageJobs} attention={attentionImageJobs} /></button><button type="button" onClick={() => openSettings('home')} aria-label="Open default settings"><Settings2 aria-hidden="true" /></button></header>
       <section className="library-content">
-        <div className="library-title"><div><small>Your library</small><h1>Books</h1></div><button type="button" aria-label="New book" disabled={libraryState !== 'ready' || creatingBook} onClick={() => { void makeBook() }}><Plus aria-hidden="true" /><span>{creatingBook ? 'Creating…' : 'New book'}</span></button></div>
+        <div className="library-title"><div><small>Your library</small><h1>Books</h1></div><Button variant="primary" size="large" aria-label="New book" disabled={libraryState !== 'ready' || creatingBook} onClick={() => { void makeBook() }} leadingIcon={<Plus aria-hidden="true" />}>{creatingBook ? 'Creating…' : 'New book'}</Button></div>
         {!aiReady && <div className="setup-warning"><Bot aria-hidden="true" /><div><strong>Text AI is not set up</strong><p>Choose a provider and models before using generation or chat.</p></div><button type="button" onClick={() => openSettings('home')}>Set up AI <ChevronRight aria-hidden="true" /></button></div>}
         {libraryState === 'loading' && <div className="library-storage-status" role="status"><p>Loading your books…</p>{librarySlow && <><p>Storage is taking longer to open. Close other tabs or windows of this app so a pending update can finish. Keep this tab open and do not clear browser data.</p><button type="button" onClick={() => window.location.reload()}>Reload app</button></>}</div>}
         {libraryError && <div className="library-storage-status" role="alert"><strong>{libraryState === 'error' ? 'Your library could not be loaded' : 'Your books loaded, but series information could not be updated'}</strong><p>{libraryError}</p><p>Keep your browser data. This error does not mean your books were deleted.</p><button type="button" onClick={retryLibrary}>Retry loading books</button><button type="button" onClick={() => window.location.reload()}>Reload app</button></div>}
@@ -1953,7 +1956,7 @@ export default function Workspace() {
         <div className="library-import-actions"><BookBackupImport onImported={importedBook} /><LocalBookSync books={bookList} beforeSync={prepareBookExport} onConfigure={() => openSettings('home', 'sync')} onRemoteApplied={importedBook} /><CloudBookImport onImported={importedBook} /></div>
         <div className="library-grid">{bookList.map((book, index) => <article className="library-book-card" key={book.id}>
           <button type="button" className="library-book" onClick={() => { void openBook(book.id).catch((error) => showToast(error instanceof Error ? error.message : 'Could not open the book.')) }}><i className={`mock-cover ${['tide', 'orchard', 'fires'][index % 3]}`}>{book.title.slice(0,1)}</i><span><small>{formatSeries(book, seriesList)}</small><strong>{book.title}</strong><em>{formatEdited(book.updatedAt)}</em></span></button>
-          <div className="library-book-actions"><button className="autotitle-trigger" type="button" onClick={() => { void startAutotitle(book) }} aria-label={`Autotitle ${book.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></button><button type="button" onClick={() => { void editBookTitle(book) }} aria-label={`Rename ${book.title}`}><Pencil aria-hidden="true" /></button><button type="button" onClick={() => { void removeBook(book) }} aria-label={`Delete ${book.title}`}><Trash2 aria-hidden="true" /></button></div>
+          <div className="library-book-actions"><Button className="library-book-action autotitle-trigger" variant="ghost" onClick={() => { void startAutotitle(book) }} aria-label={`Autotitle ${book.title}`} title="Autotitle" leadingIcon={<WandSparkles aria-hidden="true" />} /><Button className="library-book-action" variant="ghost" onClick={() => { void editBookTitle(book) }} aria-label={`Rename ${book.title}`} leadingIcon={<Pencil aria-hidden="true" />} /><Button className="library-book-action" variant="danger" onClick={() => { void removeBook(book) }} aria-label={`Delete ${book.title}`} leadingIcon={<Trash2 aria-hidden="true" />} /></div>
         </article>)}</div>
       </section>
     </main>
@@ -1967,7 +1970,7 @@ export default function Workspace() {
         <button type="button" onClick={() => setRightOpen(true)} aria-label="Open book workspace" title="Book workspace"><PanelRightOpen aria-hidden="true" /></button>
       </header>
 
-      {toast && <div className="app-toast" role="alert" key={toast.id}><span>{toast.message}</span><button type="button" onClick={() => setToast(null)} aria-label="Dismiss notification"><X aria-hidden="true" /></button></div>}
+      {toast && <Toast fixed key={toast.id} variant={toast.variant} title={toast.title} onDismiss={() => setToast(null)}>{toast.message}</Toast>}
       <TtsStatusBar />
       <SttStatusBar />
 
@@ -2548,7 +2551,7 @@ function BookSettings({ book, books, series, onSave, onCreateSeries, onRenameSer
     <div className="panel-title book-settings-title"><div><small>Current book</small><h2>Identity & voice</h2></div><span className={`book-save-status ${saveStatus}`} aria-live="polite"><i />{saveStatus === 'saving' ? 'Saving' : saveStatus === 'error' ? 'Save failed' : 'Saved'}</span></div>
     <section className="book-settings-group" aria-labelledby="book-identity-title">
       <div className="book-settings-group-title"><span>01</span><h3 id="book-identity-title">Identity</h3></div>
-      <label className="book-field"><span>Book title</span><input value={draft.title} onChange={(event) => update('title', event.target.value)} onBlur={() => { if (!draft.title.trim()) update('title', book.title) }} placeholder="Untitled Book" /></label>
+      <Input className="book-field" label="Book title" value={draft.title} onChange={(event) => update('title', event.target.value)} onBlur={() => { if (!draft.title.trim()) update('title', book.title) }} placeholder="Untitled Book" />
       <div className="book-field series-control">
         <span>Series</span>
         <button ref={seriesTriggerRef} className="series-trigger" type="button" aria-haspopup="listbox" aria-expanded={seriesPickerMode !== null} onClick={() => { setSeriesQuery(''); setSeriesError(''); setSeriesPickerMode('choose') }}><span><strong>{selectedSeries?.title ?? 'Standalone'}</strong><small>{selectedSeries ? `${seriesUsage(selectedSeries.id)} book${seriesUsage(selectedSeries.id) === 1 ? '' : 's'}` : 'Not part of a series'}</small></span><ChevronDown aria-hidden="true" /></button>
@@ -2568,15 +2571,15 @@ function BookSettings({ book, books, series, onSave, onCreateSeries, onRenameSer
           {seriesError && <p className="series-error" role="alert">{seriesError}</p>}
         </section>}
       </div>
-      {draft.seriesId && <label className="book-field compact"><span>Book index in series</span><input value={draft.seriesOrder} onChange={(event) => update('seriesOrder', event.target.value)} placeholder="1" /></label>}
+      {draft.seriesId && <Input className="book-field compact" label="Book index in series" value={draft.seriesOrder} onChange={(event) => update('seriesOrder', event.target.value)} placeholder="1" />}
     </section>
     <section className="book-settings-group" aria-labelledby="story-profile-title">
       <div className="book-settings-group-title"><span>02</span><h3 id="story-profile-title">Story profile</h3></div>
       <label className="book-field"><span>Book overview</span><textarea rows={5} value={draft.overview} onChange={(event) => update('overview', event.target.value)} placeholder="What is this book about?" /></label>
-      <label className="book-field"><span>Genre</span><input value={draft.genre} onChange={(event) => update('genre', event.target.value)} placeholder="Fantasy, mystery, romance…" /></label>
-      <label className="book-field"><span>Writing style</span><input value={draft.writingStyle} onChange={(event) => update('writingStyle', event.target.value)} placeholder="Lyrical tension, clean and cinematic…" /></label>
-      <label className="book-field"><span>Point of view</span><input value={draft.pointOfView} onChange={(event) => update('pointOfView', event.target.value)} placeholder="Third person limited" /></label>
-      <div className="book-field-pair"><label className="book-field"><span>Tense</span><input value={draft.tense} onChange={(event) => update('tense', event.target.value)} placeholder="Past" /></label><label className="book-field"><span>Primary language</span><input value={draft.language} onChange={(event) => update('language', event.target.value)} placeholder="English" /></label></div>
+      <Input className="book-field" label="Genre" value={draft.genre} onChange={(event) => update('genre', event.target.value)} placeholder="Fantasy, mystery, romance…" />
+      <Input className="book-field" label="Writing style" value={draft.writingStyle} onChange={(event) => update('writingStyle', event.target.value)} placeholder="Lyrical tension, clean and cinematic…" />
+      <Input className="book-field" label="Point of view" value={draft.pointOfView} onChange={(event) => update('pointOfView', event.target.value)} placeholder="Third person limited" />
+      <div className="book-field-pair"><Input className="book-field" label="Tense" value={draft.tense} onChange={(event) => update('tense', event.target.value)} placeholder="Past" /><Input className="book-field" label="Primary language" value={draft.language} onChange={(event) => update('language', event.target.value)} placeholder="English" /></div>
     </section>
     <section className="book-danger" aria-labelledby="book-danger-title">
       <div><span>Danger zone</span><h3 id="book-danger-title">Delete this book</h3><p>Removes the manuscript and all local book data from this device.</p></div>
@@ -2757,10 +2760,10 @@ function Notes({ notes, activeId, onCreate, onOpen, onAutotitle, onRead, onRenam
   const [query, setQuery] = useState('')
   const normalizedQuery = query.trim().toLowerCase()
   const visible = notes.filter((note) => !normalizedQuery || `${note.title} ${note.content}`.toLowerCase().includes(normalizedQuery))
-  return <section><div className="panel-title"><div><small>Reference</small><h2>Notes</h2></div><button type="button" onClick={onCreate} aria-label="Add note"><Plus aria-hidden="true" /> New</button></div><input className="panel-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search notes"/>{visible.length ? visible.map((note) => <article className={`content-row ${activeId === note.id ? 'selected' : ''}`} key={note.id}><button className="content-open" type="button" onClick={() => onOpen(note.id)}><NotebookPen aria-hidden="true" /><span><strong>{note.title}</strong><small>{formatEdited(note.updatedAt)}</small></span><ChevronRight aria-hidden="true" /></button><div className="content-actions"><button className="autotitle-trigger" type="button" onClick={() => onAutotitle(note)} aria-label={`Autotitle ${note.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></button><button className="read-aloud-action" type="button" onClick={() => onRead(note)} aria-label={`Read ${note.title} aloud`} title="Read aloud"><Volume2 aria-hidden="true" /></button><button type="button" onClick={() => onRename(note)} aria-label={`Rename ${note.title}`}><Pencil aria-hidden="true" /></button><button type="button" onClick={() => onDelete(note)} aria-label={`Delete ${note.title}`}><Trash2 aria-hidden="true" /></button></div></article>) : <p className="content-empty">{query ? 'No matching notes.' : 'No notes yet.'}</p>}</section>
+  return <section><div className="panel-title"><div><small>Reference</small><h2>Notes</h2></div><button type="button" onClick={onCreate} aria-label="Add note"><Plus aria-hidden="true" /> New</button></div><Input className="panel-search" type="search" leadingIcon={<Search aria-hidden="true" />} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search notes" aria-label="Search notes" />{visible.length ? visible.map((note) => <article className={`content-row ${activeId === note.id ? 'selected' : ''}`} key={note.id}><button className="content-open" type="button" onClick={() => onOpen(note.id)}><NotebookPen aria-hidden="true" /><span><strong>{note.title}</strong><small>{formatEdited(note.updatedAt)}</small></span><ChevronRight aria-hidden="true" /></button><div className="content-actions"><button className="autotitle-trigger" type="button" onClick={() => onAutotitle(note)} aria-label={`Autotitle ${note.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></button><button className="read-aloud-action" type="button" onClick={() => onRead(note)} aria-label={`Read ${note.title} aloud`} title="Read aloud"><Volume2 aria-hidden="true" /></button><button type="button" onClick={() => onRename(note)} aria-label={`Rename ${note.title}`}><Pencil aria-hidden="true" /></button><button type="button" onClick={() => onDelete(note)} aria-label={`Delete ${note.title}`}><Trash2 aria-hidden="true" /></button></div></article>) : <p className="content-empty">{query ? 'No matching notes.' : 'No notes yet.'}</p>}</section>
 }
 
 
-function ChatList({onOpen,activeChat,onSettings}:{onOpen:(title:string)=>void;activeChat:string;onSettings:()=>void}) { return <section><div className="panel-title"><div><small>Conversations</small><h2>Chats</h2></div><button type="button" aria-label="Start new chat"><Plus aria-hidden="true" /></button></div>{activeChat && <button className="current-chat" onClick={onSettings}><Settings2 aria-hidden="true" /><span><small>Current chat</small>{activeChat} settings</span><ChevronRight aria-hidden="true" /></button>}<input className="panel-search" placeholder="Search chats"/>{chats.map(([title,preview,time]) => <button className="chat-row" key={title} onClick={() => onOpen(title)}><i><MessageCircle aria-hidden="true" /></i><span><strong>{title}</strong><small>{preview}</small></span><em>{time}</em></button>)}</section> }
+function ChatList({onOpen,activeChat,onSettings}:{onOpen:(title:string)=>void;activeChat:string;onSettings:()=>void}) { return <section><div className="panel-title"><div><small>Conversations</small><h2>Chats</h2></div><button type="button" aria-label="Start new chat"><Plus aria-hidden="true" /></button></div>{activeChat && <button className="current-chat" onClick={onSettings}><Settings2 aria-hidden="true" /><span><small>Current chat</small>{activeChat} settings</span><ChevronRight aria-hidden="true" /></button>}<Input className="panel-search" type="search" leadingIcon={<Search aria-hidden="true" />} placeholder="Search chats" aria-label="Search chats" />{chats.map(([title,preview,time]) => <button className="chat-row" key={title} onClick={() => onOpen(title)}><i><MessageCircle aria-hidden="true" /></i><span><strong>{title}</strong><small>{preview}</small></span><em>{time}</em></button>)}</section> }
 function ChatSettings({title,onBack}:{title:string;onBack:()=>void}) { return <section><button className="back-list" onClick={onBack}><ArrowLeft aria-hidden="true" /> All chats</button><div className="panel-title"><div><small>Current chat</small><h2>{title}</h2></div></div><label className="panel-field"><span>System prompt</span><textarea defaultValue="You are a thoughtful story collaborator. Use only selected book context."/></label><label className="panel-field"><span>Model</span><select><option>Claude 3.7 Sonnet</option><option>GPT-4.1</option></select></label><label className="thinking"><span>Thinking<small>Allow longer internal reasoning</small></span><input type="checkbox" defaultChecked/></label><label className="panel-field"><span>Context</span><div className="chips"><button>Chapter 7 <X aria-hidden="true" /></button><button>Codex <X aria-hidden="true" /></button><button><Plus aria-hidden="true" /> Add</button></div></label></section> }
 

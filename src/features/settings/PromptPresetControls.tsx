@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { PromptComposition } from '../../shared/ai/prompt-composition'
+import Button from '../../shared/ui/Button'
+import Disclosure from '../../shared/ui/Disclosure'
+import Select from '../../shared/ui/Select'
 import {
   applyPromptCompositionPreset,
   deletePromptCompositionPreset,
@@ -98,15 +101,15 @@ export default function PromptPresetControls({ scope, composition, arcDefault, o
 
   return <section className="prompt-preset-controls" aria-label={`${scopeLabels[scope]} prompt composition presets`}>
     <div className="prompt-preset-picker">
-      <label><span>Prompt preset</span><select value={selected?.id ?? ''} onChange={(event) => { setSelectedId(event.target.value); setNotice('') }}>{presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}{preset.kind === 'built-in' ? ' · built-in' : ''}</option>)}</select></label>
-      <button type="button" onClick={applySelected}>Apply preset</button>
-      <button type="button" onClick={saveCurrent}>Save as preset</button>
+      <Select label="Prompt preset" value={selected?.id ?? ''} onChange={(event) => { setSelectedId(event.target.value); setNotice('') }}>{presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}{preset.kind === 'built-in' ? ' · built-in' : ''}</option>)}</Select>
+      <Button variant="primary" onClick={applySelected}>Apply preset</Button>
+      <Button onClick={saveCurrent}>Save as preset</Button>
     </div>
     <small>Selecting a preset does not change the composition. Apply replaces the complete System prompt and predefined-message list.</small>
     {notice && <p className="prompt-preset-notice" role="status">{notice}</p>}
-    <details className="prompt-preset-library"><summary>Manage presets</summary><div>{presets.map((preset) => <article key={preset.id}>
+    <Disclosure className="prompt-preset-library" title="Manage presets" description={`${presets.length} preset${presets.length === 1 ? '' : 's'} available`}><div>{presets.map((preset) => <article key={preset.id}>
       <div><strong>{preset.name}</strong><span>{scopeLabels[preset.scope]} · {preset.kind === 'built-in' ? 'Built-in' : 'Saved on this device'} · {preset.predefinedMessages.length} message{preset.predefinedMessages.length === 1 ? '' : 's'}</span>{preset.updatedAt && <small>Updated {new Date(preset.updatedAt).toLocaleString()}</small>}</div>
-      <div><button type="button" onClick={() => duplicate(preset)}>Duplicate</button>{preset.kind === 'user' && <><button type="button" onClick={() => rename(preset)}>Rename</button><button type="button" onClick={() => remove(preset)}>Delete</button></>}</div>
-    </article>)}</div></details>
+      <div><Button size="small" onClick={() => duplicate(preset)}>Duplicate</Button>{preset.kind === 'user' && <><Button size="small" variant="ghost" onClick={() => rename(preset)}>Rename</Button><Button size="small" variant="danger" onClick={() => remove(preset)}>Delete</Button></>}</div>
+    </article>)}</div></Disclosure>
   </section>
 }

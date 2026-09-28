@@ -1,6 +1,7 @@
 import { useId, useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { MoreHorizontal } from 'lucide-react'
+import './codex-ui-kit.css'
 
 export type CodexAction = { label: string; onSelect: () => void; disabled?: boolean }
 

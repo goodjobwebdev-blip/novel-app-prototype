@@ -13,7 +13,11 @@
 .arc-progress--success .arc-progress__track > i { background: #8fbd91; }
 .arc-progress--warning .arc-progress__track > i { background: #d8b96f; }
 .arc-progress--error .arc-progress__track > i { background: var(--danger); }
-.arc-toast { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb, var(--deep) 94%, var(--surface)); color: var(--ink); display: grid; grid-template-columns: 20px minmax(0,1fr) auto; align-items: start; gap: 10px; box-shadow: 0 14px 40px rgba(0,0,0,.28); }
+.arc-progress--compact { gap: 4px; }
+.arc-progress--compact > div:first-child { font-size: 9px; }
+.arc-progress--compact .arc-progress__track { height: 5px; }
+.arc-progress--indeterminate .arc-progress__track > i { width: 38%; animation: arc-progress-indeterminate 1.2s ease-in-out infinite; }
+.arc-toast { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb, var(--deep) 94%, var(--surface)); color: var(--ink); display: grid; grid-template-columns: 20px minmax(0,1fr) auto auto; align-items: start; gap: 10px; box-shadow: 0 14px 40px rgba(0,0,0,.28); }
 .arc-toast--success { border-color: color-mix(in srgb, #8fbd91 45%, var(--line)); }
 .arc-toast--warning { border-color: color-mix(in srgb, #d8b96f 48%, var(--line)); }
 .arc-toast--error { border-color: color-mix(in srgb, var(--danger) 52%, var(--line)); }
@@ -24,11 +28,15 @@
 .arc-toast strong,.arc-toast p { display: block; margin: 0; }
 .arc-toast strong { font-size: 11px; }
 .arc-toast p { margin-top: 4px; color: var(--soft); font-size: 10px; line-height: 1.45; }
-.arc-toast button { width: 32px; height: 32px; margin: -7px -7px -7px 0; padding: 0; border: 0; border-radius: var(--radius); background: transparent; color: var(--faint); display: grid; place-items: center; cursor: pointer; }
-.arc-toast button:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink); }
+.arc-toast button { border: 0; border-radius: var(--radius); background: transparent; color: var(--faint); cursor: pointer; }
+.arc-toast button:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink); }
+.arc-toast button:disabled { opacity: .5; cursor: not-allowed; }
+.arc-toast button.arc-toast__action { min-height: 32px; padding: 0 9px; color: var(--accent-bright); font-size: 10px; font-weight: 700; }
+.arc-toast button.arc-toast__dismiss { width: 32px; height: 32px; margin: -7px -7px -7px 0; padding: 0; display: grid; place-items: center; }
 .arc-toast button svg { width: 15px; height: 15px; }
 .arc-toast--fixed { position: fixed; z-index: 300; top: max(16px,env(safe-area-inset-top)); left: 50%; width: min(calc(100% - 28px),480px); transform: translateX(-50%); animation: arc-toast-enter 180ms ease-out both; }
 @keyframes arc-toast-enter { from { opacity: 0; transform: translate(-50%,-8px); } }
+@keyframes arc-progress-indeterminate { from { transform: translateX(-105%); } to { transform: translateX(265%); } }
 @media (max-width: 520px) {
   .arc-tabs { width: 100%; }
   .arc-tabs button { flex: 1; padding: 0 10px; }
@@ -36,5 +44,6 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .arc-progress__track > i { transition: none; }
+  .arc-progress--indeterminate .arc-progress__track > i { animation-duration: 2.4s; }
   .arc-toast--fixed { animation: none; }
 }

@@ -191,9 +191,9 @@
   }
 
   .functional-chat-composer .chat-system-prompt-button {
-    width: 42px;
-    height: 42px;
-    min-height: 42px;
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
     padding: 0;
     border-radius: var(--radius);
   }
@@ -273,7 +273,7 @@
   width: min(36rem, calc(100vw - 28px));
   padding: .55rem;
   border: 1px solid var(--line);
-  border-radius: 1rem;
+  border-radius: var(--overlay-radius);
   background: rgba(12, 13, 12, .985);
   box-shadow: 0 18px 50px rgba(0,0,0,.52);
   backdrop-filter: blur(22px);

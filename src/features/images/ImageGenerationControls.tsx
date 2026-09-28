@@ -1,17 +1,26 @@
 import MediaPromptEditor from './MediaPromptEditor'
 import { useState } from 'react'
-import { ChevronDown, Search, X } from 'lucide-react'
-import IllustrationModal from './IllustrationModal'
+import { X } from 'lucide-react'
+import SearchableSelect from '../../shared/ui/SearchableSelect'
+import SegmentedControl from '../../shared/ui/SegmentedControl'
+import Select from '../../shared/ui/Select'
 import { generationTaskNames, imageRatio, imageProviderNames } from './image-settings'
 import { useImageSettings, useImageUrl } from './image-hooks'
 import { assertImageFile } from './illustration-image'
 import { generationTask, modelTasks, type FavoriteImageModel, type GalleryImage, type GenerationSource, type GenerationTask } from './image-generation-types'
 export type { MediaGenerationDraft as ImageDraft } from './image-generation-types'
 import type { MediaGenerationDraft as ImageDraft } from './image-generation-types'
-export function ImageModelPicker({ models, value, onChange }: { models: FavoriteImageModel[]; value: string; onChange: (model: FavoriteImageModel) => void }) {
-  const [open, setOpen] = useState(false), [query, setQuery] = useState('')
-  const visible = models.filter((model) => `${model.alias} ${model.name} ${model.provider}`.toLowerCase().includes(query.toLowerCase()))
-  return <><button type="button" className="image-model-picker" onClick={() => { setQuery(''); setOpen(true) }} aria-haspopup="dialog"><span>{value || 'Choose model'}</span><ChevronDown size={18} /></button>{open && <IllustrationModal title="Choose generation model" onClose={() => setOpen(false)}><label className="image-search"><Search size={18} /><input type="search" aria-label="Search generation models" placeholder="Search favorites" value={query} onChange={(event) => setQuery(event.target.value)} /></label><div className="image-model-options">{visible.map((model) => <button type="button" key={model.alias} aria-pressed={value === model.alias} onClick={() => { onChange(model); setOpen(false) }}><strong>{model.alias}</strong><small>{imageProviderNames[model.provider]} · {model.name}</small></button>)}{!visible.length && <p>{models.length ? 'No favorite models match that search.' : 'Add a compatible favorite model in Settings → Images.'}</p>}</div></IllustrationModal>}</>
+export function ImageModelPicker({ models, value, onChange, disabled = false }: { models: FavoriteImageModel[]; value: string; onChange: (model: FavoriteImageModel) => void; disabled?: boolean }) {
+  return <SearchableSelect
+    label="Model"
+    value={value}
+    disabled={disabled}
+    placeholder="Choose model"
+    searchPlaceholder="Search favorites"
+    emptyText={models.length ? 'No favorite models match that search.' : 'Add a compatible favorite model in Settings → Images.'}
+    options={models.map(model => ({ value: model.alias, title: model.alias, subtitle: `${imageProviderNames[model.provider]} · ${model.name}` }))}
+    onChange={alias => { const model = models.find(candidate => candidate.alias === alias); if (model) onChange(model) }}
+  />
 }
 function SourcePreview({ source, onRemove }: { source: GenerationSource; onRemove: () => void }) {
   const url = useImageUrl(source.data)
@@ -58,12 +67,19 @@ export default function ImageGenerationControls({ value, onChange, disabled = fa
   }
   const addAsset = async (asset: GalleryImage) => addSource(await sourceFromBlob(asset.image, asset.id, asset.prompt || asset.modelAlias || 'Gallery image'))
   return <fieldset className="image-generation-controls" disabled={disabled}>
-    <div className="image-task-options" role="group" aria-label="Generation type">{(Object.keys(generationTaskNames) as GenerationTask[]).map((option) => <button type="button" key={option} aria-pressed={task === option} onClick={() => selectTask(option)}>{generationTaskNames[option]}</button>)}</div>
+    <SegmentedControl label="Generation type" value={task} options={(Object.keys(generationTaskNames) as GenerationTask[]).map(option => ({ value: option, label: generationTaskNames[option] }))} onChange={selectTask} fullWidth className="image-generation-task-control" />
     <MediaPromptEditor key={bookId ?? 'global'} value={value} onChange={onChange} bookId={bookId} capability={favorite ? `${favorite.name}: ${favorite.description ?? ''}. Tasks: ${modelTasks(favorite).join(', ')}.` : 'No media model selected'} />
     <div className="image-generation-pickers">
-      <label>Model<ImageModelPicker value={favorite?.alias ?? ''} models={compatible} onChange={chooseModel} /></label>
-      {!isVideo && <label>Size<select value={value.size} onChange={(event) => onChange({ ...value, size: event.target.value })}>{!favorite?.enabledSizes.includes(value.size) && <option value={value.size}>{value.size || 'Choose size'} — unavailable</option>}{favorite?.sizes.filter((size) => favorite.enabledSizes.includes(size.value)).map((size) => <option key={size.value} value={size.value}>{imageRatio(size)} · {size.width} × {size.height}</option>)}</select></label>}
-      {isVideo && <><label>Resolution<select value={value.resolution ?? favorite?.videoResolutions?.[0] ?? ''} onChange={(event) => onChange({ ...value, resolution: event.target.value })}>{(favorite?.videoResolutions ?? []).map((resolution) => <option key={resolution}>{resolution}</option>)}</select></label><label>Duration<select value={value.duration ?? favorite?.videoDurations?.[0] ?? 5} onChange={(event) => onChange({ ...value, duration: Number(event.target.value) })}>{(favorite?.videoDurations?.length ? favorite.videoDurations : [5]).map((duration) => <option key={duration} value={duration}>{duration} seconds</option>)}</select></label><label>Aspect ratio<select value={value.aspectRatio ?? favorite?.aspectRatios?.[0] ?? '16:9'} onChange={(event) => onChange({ ...value, aspectRatio: event.target.value })}>{(favorite?.aspectRatios ?? ['16:9']).map((ratio) => <option key={ratio}>{ratio}</option>)}</select></label></>}
+      <ImageModelPicker value={favorite?.alias ?? ''} models={compatible} onChange={chooseModel} disabled={disabled} />
+      {!isVideo && <Select label="Size" value={value.size} disabled={disabled} onChange={event => onChange({ ...value, size: event.target.value })}>
+        {!favorite?.enabledSizes.includes(value.size) && <option value={value.size} disabled>{value.size || 'Choose size'} — unavailable</option>}
+        {favorite?.sizes.filter(size => favorite.enabledSizes.includes(size.value)).map(size => <option key={size.value} value={size.value}>{imageRatio(size)} · {size.width} × {size.height}</option>)}
+      </Select>}
+      {isVideo && <>
+        <Select label="Resolution" value={value.resolution ?? favorite?.videoResolutions?.[0] ?? ''} disabled={disabled} onChange={event => onChange({ ...value, resolution: event.target.value })}>{(favorite?.videoResolutions ?? []).map(resolution => <option key={resolution} value={resolution}>{resolution}</option>)}</Select>
+        <Select label="Duration" value={value.duration ?? favorite?.videoDurations?.[0] ?? 5} disabled={disabled} onChange={event => onChange({ ...value, duration: Number(event.target.value) })}>{(favorite?.videoDurations?.length ? favorite.videoDurations : [5]).map(duration => <option key={duration} value={duration}>{duration} seconds</option>)}</Select>
+        <Select label="Aspect ratio" value={value.aspectRatio ?? favorite?.aspectRatios?.[0] ?? '16:9'} disabled={disabled} onChange={event => onChange({ ...value, aspectRatio: event.target.value })}>{(favorite?.aspectRatios ?? ['16:9']).map(ratio => <option key={ratio} value={ratio}>{ratio}</option>)}</Select>
+      </>}
     </div>
     {needsSource && <section className="image-source-picker" aria-labelledby="image-source-heading"><h3 id="image-source-heading">Source {favorite?.maxSourceImages === 1 ? 'image' : 'images'}</h3><p className="image-help">Source images are copied into the queued request and uploaded to {favorite ? imageProviderNames[favorite.provider] : 'the selected provider'} only after you press Generate.</p><label className="image-source-upload">Upload image<input type="file" accept="image/png,image/jpeg,image/webp" multiple={(favorite?.maxSourceImages ?? 1) > 1} onChange={(event) => { void upload(event.target.files); event.target.value = '' }} /></label>{Boolean(sourceAssets.length) && <div className="image-source-library">{sourceAssets.filter((asset) => (asset.kind ?? 'image') === 'image').slice(0, 30).map((asset) => <button type="button" key={asset.id} disabled={sources.some((source) => source.id === asset.id) || sources.length >= (favorite?.maxSourceImages ?? 0)} onClick={() => { void addAsset(asset) }}><span>{asset.prompt || asset.modelAlias || 'Gallery image'}</span></button>)}</div>}{sourceError && <p role="alert">{sourceError}</p>}<ol className="image-source-list">{sources.map((source) => <SourcePreview key={source.id} source={source} onRemove={() => onChange({ ...value, sources: sources.filter((item) => item.id !== source.id) })} />)}</ol><small>{sources.length} / {favorite?.maxSourceImages ?? 0} selected</small></section>}
     {favorite && <p className="image-model-summary"><strong>{favorite.name}</strong><span>{imageProviderNames[favorite.provider]}{favorite.cost != null ? ` · estimated $${favorite.cost.toFixed(4)} per output` : ' · Cost unavailable'}</span></p>}
