@@ -15,9 +15,15 @@
 .codex-dashboard .codex-actions-trigger { width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 0; border: 1px solid transparent; border-radius: var(--radius); justify-content: center; }
 .codex-dashboard .codex-actions-trigger:hover { border-color: var(--line); background: color-mix(in srgb, var(--surface-2) 72%, transparent); }
 .codex-dashboard .codex-actions-trigger > span { display: none; }
-.codex-actions-popover, .codex-actions-popover button { border-radius: var(--radius); }
+.codex-actions-popover { border-radius: var(--overlay-radius); }
+.codex-actions-popover button { border-radius: var(--radius); }
 
 .codex-dashboard .arc-segmented-control { flex: none; }
 .codex-dashboard .arc-segmented-control > .arc-segmented-control__option { min-height: 44px; padding: 8px 12px; border: 0; border-right: 1px solid var(--line); border-radius: 0; background: transparent; }
 .codex-dashboard .arc-segmented-control > .arc-segmented-control__option:last-child { border-right: 0; }
 .codex-dashboard .arc-segmented-control > .arc-segmented-control__option[aria-checked="true"] { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); color: var(--accent-bright); }
+
+@media (max-width: 520px) {
+  .codex-dashboard-filter-grid { grid-template-columns: 1fr; }
+  .codex-view-controls > .arc-field { flex: 1; }
+}
