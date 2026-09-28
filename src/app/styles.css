@@ -350,11 +350,13 @@ button:focus-visible { outline:3px solid rgba(198,168,107,.3); outline-offset:2p
 .author-planning-content { display:grid; gap:14px; }
 .author-planning p { white-space:pre-wrap; overflow-wrap:anywhere; }
 .author-planning strong { overflow-wrap:anywhere; }
-.author-active-goal,.author-empty-goal { padding:14px; border:1px solid var(--line); border-radius:var(--radius); background:color-mix(in srgb,var(--accent) 6%,var(--surface)); }
+.author-active-goal { padding:14px; border:1px solid var(--line); border-radius:var(--radius); background:color-mix(in srgb,var(--accent) 6%,var(--surface)); }
+.author-empty-goal { display:grid; justify-items:start; gap:9px; }
 .author-active-goal header small,.author-active-goal header strong { display:block; }
 .author-active-goal header small { margin-bottom:4px; color:var(--accent); font-size:9px; letter-spacing:.1em; text-transform:uppercase; }
 .author-active-goal header strong { color:var(--ink); font:500 18px/1.25 var(--serif); }
-.author-active-goal > p,.author-empty-goal > p { margin:8px 0 0; color:var(--soft); font-size:11px; line-height:1.5; }
+.author-active-goal > p { margin:8px 0 0; color:var(--soft); font-size:11px; line-height:1.5; }
+.author-empty-goal > p { margin:0; color:var(--soft); font-size:11px; line-height:1.5; }
 .author-active-goal .arc-progress { margin-top:14px; }
 .author-help { margin:0; color:var(--faint); font-size:10px; line-height:1.5; }
 .author-actions { display:flex; align-items:center; flex-wrap:wrap; gap:7px; margin-top:12px; }
