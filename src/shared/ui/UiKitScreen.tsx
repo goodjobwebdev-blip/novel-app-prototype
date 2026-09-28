@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, BookOpen, Bot, BrainCircuit, ChevronDown, ChevronRight, FileQuestion, ImagePlus, LayoutGrid, List, MessageCircle, Mic, Palette, Plus, Redo2, RefreshCw, Search, SlidersHorizontal, Sparkles, Trash2, Undo2, Volume2, Zap } from 'lucide-react'
+import { ArrowLeft, BookOpen, Bot, BrainCircuit, ChevronDown, FileQuestion, ImagePlus, LayoutGrid, List, MessageCircle, Mic, Palette, Plus, Redo2, RefreshCw, Search, SlidersHorizontal, Sparkles, Trash2, Undo2, Volume2, Zap } from 'lucide-react'
 import { builtInThemes, defaultUiSettings, loadUiSettings, saveUiSettings, UI_SETTINGS_EVENT, type UiSettings, type UiTypography } from '../../features/settings/ui-settings'
 import ActionMenu, { type ActionMenuItem } from './ActionMenu'
 import Button from './Button'
@@ -36,7 +36,7 @@ function PatternActions({ title }: { title: string }) {
 
 function OutlinePatternRow({ eyebrow, title, expanded, selected = false }: { eyebrow: string; title: string; expanded?: boolean; selected?: boolean }) {
   return <div className={`ui-kit-outline-row ${selected ? 'selected' : ''}`}>
-    <button className="ui-kit-outline-toggle" type="button" aria-label={`${expanded ? 'Collapse' : 'Expand'} ${title}`}>{expanded === undefined ? null : expanded ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}</button>
+    {expanded === undefined ? <span className="ui-kit-outline-leaf-node" aria-hidden="true" /> : <button className="ui-kit-outline-toggle" type="button" aria-label={`${expanded ? 'Collapse' : 'Expand'} ${title}`}><span aria-hidden="true">{expanded ? '−' : '+'}</span></button>}
     <button className="ui-kit-outline-open" type="button"><small>{eyebrow}</small><strong>{title}</strong></button>
     <Button className="ui-kit-pattern-icon-action" size="small" variant="secondary" aria-label={`Open summary for ${title}`} leadingIcon={<FileQuestion />} />
     <PatternActions title={title} />
@@ -55,10 +55,10 @@ function OutlinePattern() {
               <li><OutlinePatternRow eyebrow="Scene 2 · 0 words" title="Crossing" /></li>
             </ul>
           </li>
-          <li><OutlinePatternRow eyebrow="Chapter 2 · 0 words" title="What the sea kept" expanded /><p className="ui-kit-outline-empty">No scenes yet</p></li>
+          <li><OutlinePatternRow eyebrow="Chapter 2 · 0 words" title="What the sea kept" /><p className="ui-kit-outline-empty">No scenes yet</p></li>
         </ul>
       </li>
-      <li><OutlinePatternRow eyebrow="Act 2 · 0 words" title="The map without coastlines" expanded /><p className="ui-kit-outline-empty">No chapters yet</p></li>
+      <li><OutlinePatternRow eyebrow="Act 2 · 2 chapters · 0 words" title="The map without coastlines" expanded={false} /></li>
     </ul>
   </div>
 }
