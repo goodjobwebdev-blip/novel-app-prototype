@@ -408,6 +408,8 @@ select {
   margin: 0;
 }
 
+.ui-custom-theme-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+
 .ui-theme-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -613,10 +615,7 @@ select {
 .ui-color-field input[aria-invalid="true"] { border-color: var(--danger); }.ui-color-field small { display: block; margin-top: 6px; color: var(--danger); font-size: 12px; }
 .ui-contrast-warning { padding: 14px; border: 1px solid var(--accent); border-radius: var(--radius); color: var(--soft); font-size: 13px; line-height: 1.5; }
 .ui-contrast-warning ul { margin-bottom: 0; padding-left: 18px; }
-.ui-draft-actions, .ui-delete-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
-
-.ui-customization-card > p, .ui-delete-notice { color: var(--soft); font-size: 13px; line-height: 1.5; }
-.ui-customization-card > button + button { margin-left: 8px; }
+.ui-draft-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
 @media (max-width: 759px) { .ui-appearance-tools { position: relative; }.ui-appearance-tools nav { flex-basis: 100%; }.ui-settings-panel .ui-safe-reset { width: 100%; }.ui-range-grid { grid-template-columns: 1fr; } }
 @media (min-width: 760px) and (max-width: 1120px) { .ui-range-grid { grid-template-columns: 1fr; } }
 .ui-scope-summary { flex-basis: 100%; color: var(--soft); font-size: 12px; }

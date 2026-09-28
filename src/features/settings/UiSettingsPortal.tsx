@@ -146,11 +146,11 @@ function ThemeEditor({ theme, onChange, onApply, onCancel }: { theme: CustomUiTh
   </section>
 }
 
-const appearanceSections = [['theme', 'Theme'], ['typography', 'Typography'], ['editor', 'Editor'], ['customization', 'Customization']] as const
+const appearanceSections = [['theme', 'Theme'], ['typography', 'Typography'], ['editor', 'Editor']] as const
 
 function UiSettingsPanel() {
   const [settings, setSettings] = useState<UiSettings>(() => pendingSettings ?? loadUiSettings())
-  const [section, setSection] = useState<'theme' | 'typography' | 'editor' | 'customization'>('theme')
+  const [section, setSection] = useState<'theme' | 'typography' | 'editor'>('theme')
   const [saveError, setSaveError] = useState(Boolean(pendingSettings))
   const [draft, setDraft] = useState<CustomUiTheme | null>(pendingTheme)
   const [deleted, setDeleted] = useState<{ theme: CustomUiTheme; wasActive: boolean } | null>(null)
@@ -175,12 +175,12 @@ function UiSettingsPanel() {
     if (draft && !window.confirm('Discard the current theme draft and create another?')) return
     const next = createCustomTheme(settings, themeId)
     editDraft(next.customThemes[next.customThemes.length - 1])
-    setSection('customization')
+    setSection('theme')
   }
   function beginEdit(theme: CustomUiTheme) {
     if (draft && draft.id !== theme.id && !window.confirm('Discard the current theme draft?')) return
     editDraft({ ...theme, palette: { ...theme.palette } })
-    setSection('customization')
+    setSection('theme')
   }
   function applyDraft() {
     if (!draft) return
@@ -209,7 +209,7 @@ function UiSettingsPanel() {
 
     {saveError && <p className="ui-save-error" role="alert">Changes could not be saved on this device. They are kept here for retry; a reload will use the last saved appearance.</p>}
     <div className="ui-appearance-tools"><span className="ui-scope-summary">All books on this device · {saveError ? 'Not saved' : 'Saved automatically'}</span><Button className="ui-safe-reset" onClick={resetTheme}>Reset to readable theme</Button></div>
-    <SettingsSectionTabs tabs={appearanceSections.map(([tab, label]) => [tab, tab === 'customization' && draft ? `${label} · Draft` : label] as const)} active={section} onChange={setSection} idPrefix="appearance" label="Appearance sections" />
+    <SettingsSectionTabs tabs={appearanceSections} active={section} onChange={setSection} idPrefix="appearance" label="Appearance sections" />
     <section hidden={section !== 'editor'} role="tabpanel" id="appearance-panel-editor" aria-labelledby="appearance-tab-editor" className="settings-card ui-editor-settings"><h2>Editor</h2>
       <Checkbox label="Highlight dialogue" description="Use the theme’s accent color for text inside quotation marks in story scenes." checked={settings.highlightDialogue === true} onChange={event => commit(current => ({ ...current, highlightDialogue: event.target.checked }))} />
       <div className="ui-dialogue-preview" aria-label="Dialogue styling preview">She paused. “<span className={settings.highlightDialogue ? 'cm-dialogue' : undefined}>Tell me what happened.</span>” The room fell silent.</div>
@@ -224,13 +224,12 @@ function UiSettingsPanel() {
         {builtInThemes.map((theme) => <ThemeOption key={theme.id} name={theme.name} palette={theme.palette} active={settings.activeThemeId === theme.id} onSelect={() => selectTheme(theme.id)} onDuplicate={() => duplicate(theme.id)} />)}
       </div></div>
 
-      <div className="ui-theme-group ui-custom-themes"><header><h3>Custom</h3><Button className="ui-create-theme" leadingIcon={<Plus />} onClick={() => duplicate(activeTheme.id)}>Create theme</Button></header>
-        {settings.customThemes.length ? <div className="ui-theme-grid">{settings.customThemes.map((theme) => <ThemeOption key={theme.id} name={theme.name} palette={theme.palette} active={settings.activeThemeId === theme.id} custom onSelect={() => selectTheme(theme.id)} onDuplicate={() => duplicate(theme.id)} onDelete={() => removeCustomTheme(theme)} />)}</div> : <p className="ui-custom-empty">Create a theme from the active palette, or duplicate any built-in theme to customize it.</p>}
+      <div className="ui-theme-group ui-custom-themes"><header><h3>Custom</h3><div className="ui-custom-theme-actions">{activeCustom && <Button size="small" variant="ghost" onClick={() => beginEdit(activeCustom)}>Edit active</Button>}<Button className="ui-create-theme" size="small" leadingIcon={<Plus />} onClick={() => duplicate(activeTheme.id)}>Create theme</Button></div></header>
+        {settings.customThemes.length ? <div className="ui-theme-grid">{settings.customThemes.map((theme) => <ThemeOption key={theme.id} name={theme.name} palette={theme.palette} active={settings.activeThemeId === theme.id} custom onSelect={() => selectTheme(theme.id)} onDuplicate={() => duplicate(theme.id)} onDelete={() => removeCustomTheme(theme)} />)}</div> : <p className="ui-custom-empty">Create a theme from the active palette, or copy any built-in theme to customize it.</p>}
       </div>
-
+      {draft && <ThemeEditor key={draft.id} theme={draft} onChange={editDraft} onApply={applyDraft} onCancel={() => editDraft(null)} />}
     </section>
     {deleted && <Toast fixed variant="success" title={`Deleted “${deleted.theme.name}”`} onDismiss={() => setDeleted(null)} action={{ label: 'Undo', onClick: () => { commit(current => ({ ...current, customThemes: [...current.customThemes.filter(theme => theme.id !== deleted.theme.id), deleted.theme], activeThemeId: deleted.wasActive ? deleted.theme.id : current.activeThemeId })); setDeleted(null) } }}>The custom theme was removed from this device.</Toast>}
-    <section hidden={section !== 'customization'} className="settings-card ui-customization-card" role="tabpanel" id="appearance-panel-customization" aria-labelledby="appearance-tab-customization"><h2>Customization</h2>{draft ? <ThemeEditor key={draft.id} theme={draft} onChange={editDraft} onApply={applyDraft} onCancel={() => editDraft(null)} /> : <><p>Edit a copy of a built-in palette, or customize the active custom theme.</p>{activeCustom && <Button onClick={() => beginEdit(activeCustom)}>Edit {activeCustom.name}</Button>}<Button onClick={() => duplicate(activeTheme.id)}>Create from {activeTheme.name}</Button></>}</section>
   </section>
 }
 
