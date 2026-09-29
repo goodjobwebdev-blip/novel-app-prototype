@@ -284,7 +284,6 @@ export default function Workspace() {
   const [toast, setToast] = useState<ToastMessage | null>(null)
   const [lastGeneratedPassage, setLastGeneratedPassage] = useState('')
   const [sttState, setSttState] = useState<SttState>(() => getSttState())
-  const [ttsState, setTtsState] = useState<TtsState>(() => getTtsState())
   const [editorHistory, setEditorHistory] = useState({ canUndo: false, canRedo: false })
   const [autotitle, setAutotitle] = useState<AutotitleUiState | null>(null)
   const [loreMention, setLoreMention] = useState<LoreMentionPopupState | null>(null)
@@ -372,7 +371,6 @@ export default function Workspace() {
   }, [])
 
   useEffect(() => subscribeSttState(setSttState), [])
-  useEffect(() => subscribeTtsState(setTtsState), [])
 
   useEffect(() => () => {
     generationAbortRef.current?.abort()
@@ -2025,7 +2023,7 @@ export default function Workspace() {
             {generationDetails ? <><p>{generationDetails.provider} · {generationDetails.requestedModel} · {generationDetails.targetTitle}</p>{generationDetails.thoughts ? <pre>{generationDetails.thoughts}</pre> : <p>No thoughts provided by this model.</p>}<button type="button" onClick={() => setGenerationDetailsOpen(true)}>Request details</button></> : <p>Start a generation to see its status and any thoughts provided by the model.</p>}
           </div>
         </details></div>
-      }><div className="arc-prompt-field" hidden={drawerCollapsed}><ExpandableTextInput ref={promptRef} value={activeDocument.type === 'codexEntry' ? lorePrompt : arcPrompt} onChange={activeDocument.type === 'codexEntry' ? setLorePrompt : setArcPrompt} readOnly={sttState.target === 'instruction' && ['requesting-permission', 'recording', 'recording-live', 'stopping', 'transcribing', 'finalizing'].includes(sttState.status)} aria-label="generation prompt" dialogTitle="Edit generation prompt" onDictate={dictateInstruction} dictationStatus={sttState.target === 'instruction' ? sttState.status : 'idle'} dictationError={sttState.target === 'instruction' ? sttState.error : undefined} dictationDisabled={generationActive} onStopDictation={stopSttSession} onCancelDictation={cancelSttSession} /></div><GenerateControl inDrawer={!drawerCollapsed} drawerCollapsed={drawerCollapsed} onToggleDrawer={() => setDrawerCollapsed(value => !value)} onInsertImage={() => setImageInsertRequest(activeDocument.id)} isGenerating={generationActive} phase={generationPhase} elapsedSeconds={generationElapsedSeconds} sttState={sttState} ttsState={ttsState} canUndo={editorHistory.canUndo} canRedo={editorHistory.canRedo} onOpenDetails={() => setGenerationDetailsOpen(true)} onGenerate={generate} onStop={stopGeneration} onMicro={() => { void dictateEditor() }} onMicro2={() => { void dictateInstruction() }} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} onReadAloud={() => { void readCurrentDocument() }} readAloudDisabled={activeDocument?.type === 'scene' && !lastGeneratedPassage.trim()} readAloudTitle={activeDocument?.type === 'scene' ? 'Read latest generated passage' : 'Read full Codex entry'} /></Composer>}
+      }><div className="arc-prompt-field" hidden={drawerCollapsed}><ExpandableTextInput ref={promptRef} value={activeDocument.type === 'codexEntry' ? lorePrompt : arcPrompt} onChange={activeDocument.type === 'codexEntry' ? setLorePrompt : setArcPrompt} readOnly={sttState.target === 'instruction' && ['requesting-permission', 'recording', 'recording-live', 'stopping', 'transcribing', 'finalizing'].includes(sttState.status)} aria-label="generation prompt" dialogTitle="Edit generation prompt" onDictate={dictateInstruction} dictationStatus={sttState.target === 'instruction' ? sttState.status : 'idle'} dictationError={sttState.target === 'instruction' ? sttState.error : undefined} dictationDisabled={generationActive} onStopDictation={stopSttSession} onCancelDictation={cancelSttSession} /></div><GenerateControl inDrawer={!drawerCollapsed} drawerCollapsed={drawerCollapsed} onToggleDrawer={() => setDrawerCollapsed(value => !value)} onInsertImage={() => setImageInsertRequest(activeDocument.id)} isGenerating={generationActive} phase={generationPhase} elapsedSeconds={generationElapsedSeconds} sttState={sttState} canUndo={editorHistory.canUndo} canRedo={editorHistory.canRedo} onOpenDetails={() => setGenerationDetailsOpen(true)} onGenerate={generate} onStop={stopGeneration} onMicro={() => { void dictateEditor() }} onMicro2={() => { void dictateInstruction() }} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} onReadAloud={() => { void readCurrentDocument() }} readAloudDisabled={activeDocument?.type === 'scene' && !lastGeneratedPassage.trim()} readAloudTitle={activeDocument?.type === 'scene' ? 'Read latest generated passage' : 'Read full Codex entry'} /></Composer>}
 
       {rightOpen && <aside className="book-panel">
         <header><div><small>{formatSeries(currentBook, seriesList)}</small><strong>{currentBook?.title ?? 'Untitled Book'}</strong></div><div className="book-panel-header-actions">{activeSceneId && <button type="button" onClick={() => { void loadScene(activeSceneId) }} aria-label="Return to Scene" title="Return to Scene"><CornerUpLeft aria-hidden="true" /></button>}<button type="button" onClick={() => setRightOpen(false)} aria-label="Close book workspace" title="Close book workspace"><X aria-hidden="true" /></button></div></header>
@@ -2187,7 +2185,7 @@ function GenerationActivityStrip({ phase, elapsedSeconds, placement, onOpenDetai
   </button>
 }
 
-function GenerateControl({ inDrawer = false, drawerCollapsed = false, onToggleDrawer, onInsertImage, isGenerating, phase, elapsedSeconds, sttState, ttsState, canUndo, canRedo, onOpenDetails, onGenerate, onStop, onMicro, onMicro2, onUndo, onRedo, onRegenerate, onReadAloud, readAloudDisabled, readAloudTitle }: {
+function GenerateControl({ inDrawer = false, drawerCollapsed = false, onToggleDrawer, onInsertImage, isGenerating, phase, elapsedSeconds, sttState, canUndo, canRedo, onOpenDetails, onGenerate, onStop, onMicro, onMicro2, onUndo, onRedo, onRegenerate, onReadAloud, readAloudDisabled, readAloudTitle }: {
   inDrawer?: boolean
   drawerCollapsed?: boolean
   onToggleDrawer?: () => void
@@ -2196,7 +2194,6 @@ function GenerateControl({ inDrawer = false, drawerCollapsed = false, onToggleDr
   phase: GenerationPhase | null
   elapsedSeconds: number
   sttState: SttState
-  ttsState: TtsState
   canUndo: boolean
   canRedo: boolean
   onOpenDetails: () => void
@@ -2215,7 +2212,6 @@ function GenerateControl({ inDrawer = false, drawerCollapsed = false, onToggleDr
   const sttActive = sttState.presentation !== 'expanded' && (sttState.target === 'editor' || sttState.target === 'instruction') && ['requesting-permission', 'recording', 'recording-live', 'stopping', 'transcribing', 'finalizing'].includes(sttState.status)
   const sttRecording = sttActive && ['recording', 'recording-live'].includes(sttState.status)
   const sttPermissionPending = sttActive && sttState.status === 'requesting-permission'
-  const ttsActive = ['preparing', 'generating', 'playing', 'paused', 'waiting', 'stopping'].includes(ttsState.status)
   const generationActions = [
     ...(onInsertImage ? [{ id: 'image', label: 'Insert image', icon: <ImagePlus aria-hidden="true" />, onSelect: onInsertImage }] : []),
     ...(onToggleDrawer ? [{ id: 'drawer', label: drawerCollapsed ? 'Show instruction drawer' : 'Hide instruction drawer', icon: <ChevronDown aria-hidden="true" />, onSelect: onToggleDrawer }] : []),
@@ -2269,17 +2265,6 @@ function GenerateControl({ inDrawer = false, drawerCollapsed = false, onToggleDr
     </div>
   }
 
-  if (ttsActive) {
-    const label = ttsState.status === 'preparing' ? 'Preparing audio…'
-      : ttsState.status === 'generating' ? 'Generating audio…'
-      : ttsState.status === 'playing' ? 'Playing'
-      : ttsState.status === 'paused' ? 'Paused'
-      : ttsState.status === 'waiting' ? 'Waiting for next chunk…'
-      : 'Stopping…'
-    return <div className="generate-control-shell mode playback-mode">
-      <div className="generate-mode-card playback" role="status" aria-live="polite"><Volume2 aria-hidden="true" /><span><strong>{ttsState.label || 'Read aloud'}</strong><small>{label}</small></span><div className="generate-mode-actions">{ttsState.status === 'playing' && <button type="button" onClick={pauseTtsSession}><Pause aria-hidden="true" /><span>Pause</span></button>}{ttsState.status === 'paused' && <button type="button" onClick={() => { void resumeTtsSession() }}><Play aria-hidden="true" /><span>Resume</span></button>}<button type="button" className="cancel" onClick={stopTtsSession}><Square aria-hidden="true" fill="currentColor" /><span>Stop</span></button></div></div>
-    </div>
-  }
 
   if (drawerCollapsed) return <div className="generate-control-shell collapsed-generate-control">
     <button className="collapsed-dictation-button" type="button" onClick={onMicro} aria-label="Dictate into editor" title="Dictate into editor"><Mic aria-hidden="true" /></button>
