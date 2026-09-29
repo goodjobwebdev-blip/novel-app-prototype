@@ -48,7 +48,7 @@ export function loadSyncSettings(): SyncSettings {
 }
 
 export function saveSyncSettings(value: SyncSettings): SyncSettings {
-  const saved = { ...value }
+  const saved = { ...value, endpoint: normalizeSyncEndpoint(value.endpoint) }
   localStorage.setItem(SYNC_SETTINGS_KEY, JSON.stringify(saved))
   window.dispatchEvent(new CustomEvent(SYNC_SETTINGS_EVENT))
   return saved

@@ -55,7 +55,7 @@ test('switching notes and returning to a scene never leaves duplicate note contr
     for (const title of ['First note', 'Second note', 'First note']) {
       await click(button('Open book workspace'))
       await click([...document.querySelectorAll('.book-panel nav button')].find(item => item.textContent === 'notes'))
-      await click([...document.querySelectorAll('.content-open')].find(item => item.textContent.includes(title)))
+      await click([...document.querySelectorAll('.notes-panel .arc-resource-row__open')].find(item => item.textContent.includes(title)))
       await settle(() => document.querySelector('.document-titlebar h1')?.textContent === title)
       assert.equal(document.querySelectorAll('.note-roles').length, 1, 'Only the current note has role controls')
       assert.equal(document.querySelectorAll('.note-roles input[type="checkbox"]').length, 2)

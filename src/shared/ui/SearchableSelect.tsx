@@ -4,6 +4,15 @@ import { createPortal } from 'react-dom'
 import SearchField from './SearchField'
 import './searchable-select.css'
 
+function scheduleFrame(callback: FrameRequestCallback) {
+  return typeof window.requestAnimationFrame === 'function' ? window.requestAnimationFrame(callback) : window.setTimeout(() => callback(performance.now()), 0)
+}
+
+function cancelFrame(handle: number) {
+  if (typeof window.cancelAnimationFrame === 'function') window.cancelAnimationFrame(handle)
+  else window.clearTimeout(handle)
+}
+
 export type SearchableSelectOption = {
   value: string
   title: string
@@ -54,6 +63,7 @@ export default function SearchableSelect({
   }, [options, query])
 
   useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return
     const media = window.matchMedia('(max-width: 720px)')
     const sync = () => setMobile(media.matches)
     sync()
@@ -64,9 +74,9 @@ export default function SearchableSelect({
   useEffect(() => {
     if (!open) return
     if (mobile) dialogRef.current?.showModal()
-    const frame = requestAnimationFrame(() => searchRef.current?.focus())
+    const frame = scheduleFrame(() => searchRef.current?.focus())
     return () => {
-      cancelAnimationFrame(frame)
+      cancelFrame(frame)
       if (dialogRef.current?.open) dialogRef.current.close()
     }
   }, [open, mobile])
@@ -88,7 +98,7 @@ export default function SearchableSelect({
 
   function close(restoreFocus = true) {
     setOpen(false)
-    if (restoreFocus) requestAnimationFrame(() => triggerRef.current?.focus())
+    if (restoreFocus) scheduleFrame(() => triggerRef.current?.focus())
   }
 
   function choose(option: SearchableSelectOption) {

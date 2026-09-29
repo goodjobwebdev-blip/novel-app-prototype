@@ -35,7 +35,7 @@ const h=React.createElement
 async function settle(predicate){for(let i=0;i<200&&!predicate();i++)await act(async()=>new Promise(r=>setTimeout(r,10)));assert.ok(predicate(),document.body.textContent)}
 const button=text=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text)
 async function click(text){assert.ok(button(text),text);await act(async()=>button(text).click())}
-async function input(label,value){const element=document.querySelector(`[aria-label="${label}"]`);assert.ok(element,label);await act(async()=>{Object.getOwnPropertyDescriptor(element.tagName==='SELECT'?dom.window.HTMLSelectElement.prototype:dom.window.HTMLInputElement.prototype,'value').set.call(element,value);element.dispatchEvent(new dom.window.Event(element.tagName==='SELECT'?'change':'input',{bubbles:true}))})}
+async function input(label,value){const element=document.querySelector(`[aria-label="${label}"]`)??[...document.querySelectorAll('label.arc-field')].find(field=>field.querySelector('.arc-field__label')?.textContent.trim()===label)?.querySelector('input,select');assert.ok(element,label);await act(async()=>{Object.getOwnPropertyDescriptor(element.tagName==='SELECT'?dom.window.HTMLSelectElement.prototype:dom.window.HTMLInputElement.prototype,'value').set.call(element,value);element.dispatchEvent(new dom.window.Event(element.tagName==='SELECT'?'change':'input',{bubbles:true}))})}
 async function submit(){await act(async()=>document.querySelector('.author-draft').dispatchEvent(new dom.window.Event('submit',{bubbles:true,cancelable:true})));await settle(()=>!document.querySelector('.author-draft'))}
 test('Book planning UI creates a goal and linked task, filters status, reflects deletion and preserves history after reload',async()=>{
  const {book}=await p.createBook(ai.initialAiSettings,'Book');const chapter=await p.createStructuralEntity('chapter',book.id,book.id,'Chapter');const scene=await p.createStructuralEntity('scene',book.id,chapter.id,'Opening');await p.saveDocumentContent(scene.id,'One two three')
@@ -43,10 +43,10 @@ test('Book planning UI creates a goal and linked task, filters status, reflects 
  const view=content=>h(AuthorGoalsTasks,{bookId:book.id,liveScene:{id:scene.id,content},onOpen:id=>{opened=id}})
  try{
   await act(async()=>root.render(view('One two three')));await settle(()=>button('New goal')&&!button('New goal').disabled)
-  await click('New goal');await input('Goal title','Finish my draft');await input('Target manuscript words','2');await submit()
-  assert.match(document.body.textContent,/3 \/ 2 manuscript words/);assert.ok(button('Complete goal'))
-  await act(async()=>root.render(view('One')));assert.match(document.body.textContent,/1 \/ 2 manuscript words/)
-  await click('New task');await input('Task title','Revise opening');await input('Task linked item',scene.id);await submit()
+  await click('New goal');await input('Title','Finish my draft');await input('Target manuscript words (optional)','2');await submit()
+  assert.match(document.body.textContent,/3 of 2 manuscript words/);assert.ok(button('Complete goal'))
+  await act(async()=>root.render(view('One')));assert.match(document.body.textContent,/1 of 2 manuscript words/)
+  await click('New task');await input('Title','Revise opening');await input('Linked item',scene.id);await submit()
   await act(async()=>document.querySelector('.author-task-link').click());assert.equal(opened,scene.id)
   await input('Status: Revise opening','done');await settle(()=>document.querySelector('[aria-label="Status: Revise opening"]').value==='done')
   await input('Filter author tasks','todo');assert.match(document.body.textContent,/No tasks in this view/)

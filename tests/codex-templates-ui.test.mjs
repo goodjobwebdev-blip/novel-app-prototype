@@ -82,7 +82,7 @@ const { default: Templates } = await moduleAt('features/codex/CodexTemplates')
 const { default: MarkdownEditor } = await moduleAt('features/editor/MarkdownEditor')
 const templateService = await moduleAt('features/codex/codex-templates')
 const templateBody = '## History\n\nKeep {{ author placeholder }} literal.\n\n| Detail | Guidance |\n| --- | --- |\n| Goal | Write here |'
-const checkbox = text => [...document.querySelectorAll('label')].find(label => label.textContent.trim() === text)?.querySelector('input')
+const checkbox = text => [...document.querySelectorAll('label.arc-choice')].find(label => label.querySelector('strong')?.textContent.trim() === text)?.querySelector('input[type="checkbox"]')
 test('Note role controls coexist; Apply is one undoable editor change and preserves metadata', async () => {
   const f = await fixture(8), entry = await p.createCodexEntry(f.book.id, 'Existing canonical title'), note = await p.createNote(f.book.id, 'Not an inserted title')
   await p.saveDocumentContent(note.id, templateBody)

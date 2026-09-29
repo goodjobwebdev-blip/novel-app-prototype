@@ -104,11 +104,13 @@ test('new, reset, and forked Chats clone the correct composition', () => {
 
 test('Book and individual Chat settings expose the complete composition editor and preview', () => {
   assert.match(app, /<PredefinedMessages\s+[\s\S]*scope=\{promptTab\}/)
-  assert.match(feature, /ChatPredefinedMessages/)
-  assert.match(feature, /Variables & syntax/)
-  assert.match(feature, /Request Preview/)
-  assert.match(feature, /estimated input tokens/)
-  assert.match(feature, /Last sent provider payload/)
+  assert.match(feature, /<PromptPresetControls scope="chat"/)
+  assert.match(feature, /<PromptTemplateEditor[\s\S]*ariaLabel="Chat system prompt template"/)
+  assert.match(feature, /<ChatPredefinedMessages /)
+  assert.match(feature, /<Disclosure className="chat-composition-reference" title="Variables & syntax"/)
+  assert.match(feature, /<Disclosure className="chat-request-preview" title="Request preview"/)
+  assert.match(feature, /previewDiagnostics\.requestTokens[\s\S]*estimated input tokens/)
+  assert.match(feature, /lastFinalizedRequest && <Disclosure title="Last sent provider payload"/)
 })
 
 test('legacy hidden context, response length, and transport reordering are removed', () => {

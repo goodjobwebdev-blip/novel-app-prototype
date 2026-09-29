@@ -75,10 +75,10 @@ test('editable chat proposal → repeated generation → navigate → keep → c
     await click('Open generation tool')
     await settle(() => Boolean(document.querySelector('textarea')))
     assert.equal(document.querySelector('textarea').value, 'Edited moonlit gate')
-    await click('Portrait')
-    await input(document.querySelector('input[type=search]'), 'Fast')
-    assert.equal(document.querySelectorAll('.image-model-options button').length, 1)
-    await act(async () => document.querySelector('.image-model-options button').click())
+    await act(async () => document.querySelector('.arc-searchable-select__trigger').click())
+    await input(document.querySelector('.arc-searchable-select input[type=search]'), 'Fast')
+    assert.equal(document.querySelectorAll('.arc-searchable-select__options button').length, 1)
+    await act(async () => document.querySelector('.arc-searchable-select__options button').click())
     await act(async () => { const select = document.querySelector('select'); select.value = '1344x768'; select.dispatchEvent(new dom.window.Event('change', { bubbles: true })) })
     assert.equal(button('Accept proposal'), undefined)
     assert.ok(button('Generate'))
@@ -139,11 +139,11 @@ test('image settings save selected model aliases and enabled sizes; invalid defa
     await act(async () => { const select = document.querySelector('select'); select.value = 'pruna'; select.dispatchEvent(new dom.window.Event('change', { bubbles: true })) })
     await click('Favorite')
     await input(document.querySelector('.image-favorite input:not([type])'), 'Fast art')
-    await click('Save image settings *')
+    await settle(() => settings.loadImageSettings().favorites[0]?.alias === 'Fast art')
     assert.equal(settings.loadImageSettings().favorites[0].alias, 'Fast art')
     assert.equal(settings.loadImageSettings().favorites[0].defaultSize, '1024x1024')
     await act(async () => { for (const box of document.querySelectorAll('.image-favorite input[type=checkbox]')) box.click() })
-    await click('Save image settings *')
+    await settle(() => document.querySelector('[role=alert]')?.textContent.includes('Enable at least one size'))
     assert.match(document.querySelector('[role=alert]').textContent, /Enable at least one size/)
     assert.ok(settings.loadImageSettings().favorites[0].enabledSizes.length > 0)
   } finally { await act(async () => root.unmount()) }
@@ -167,7 +167,7 @@ test('OpenAI favorite quality and moderation controls default to low and persist
     assert.equal(selectIn(pruna, 'Image moderation'), undefined)
     await act(async () => { quality.value = 'medium'; quality.dispatchEvent(new dom.window.Event('change', { bubbles: true })) })
     await act(async () => { moderation.value = 'auto'; moderation.dispatchEvent(new dom.window.Event('change', { bubbles: true })) })
-    await click('Save image settings *')
+    await settle(() => settings.loadImageSettings().favorites[0]?.quality === 'medium' && settings.loadImageSettings().favorites[0]?.moderation === 'auto')
     await act(async () => root.unmount())
     root = createRoot(document.getElementById('root'))
     await act(async () => root.render(h(Panel, { ai: initialAiSettings })))
@@ -188,6 +188,8 @@ test('image choices keep compact checkbox geometry under shared settings styles'
   // Match the app's cascade: component styles load before global form rules.
   style.textContent = [
     'features/images/image-generation.css',
+    'shared/ui/primitives.css',
+    'shared/ui/choice.css',
     'app/styles.css',
     'features/settings/ui-settings.css',
     'shared/ui/mobile-control-hardening.css',
@@ -201,10 +203,12 @@ test('image choices keep compact checkbox geometry under shared settings styles'
     const favorite = document.querySelector('.image-favorite')
     for (const control of favorite.querySelectorAll('input[type=checkbox], input[type=radio]')) {
       const geometry = dom.window.getComputedStyle(control)
-      assert.equal(geometry.width, '20px')
-      assert.equal(geometry.height, '20px')
-      assert.equal(geometry.flexShrink, '0')
-      assert.equal(parseFloat(geometry.minHeight), 0)
+      assert.equal(geometry.width, '18px')
+      assert.equal(geometry.height, '18px')
+      assert.equal(geometry.minWidth, '18px')
+      assert.equal(geometry.minHeight, '18px')
+      assert.equal(geometry.maxWidth, '18px')
+      assert.equal(geometry.maxHeight, '18px')
     }
     const tile = favorite.querySelector('.image-size-option')
     const checkbox = tile.querySelector('input')
@@ -212,7 +216,7 @@ test('image choices keep compact checkbox geometry under shared settings styles'
     await act(async () => tile.querySelector('strong').click())
     assert.equal(checkbox.checked, false)
     assert.match(favorite.querySelector('legend').textContent, /2 selected/)
-    assert.match(document.querySelector('.image-settings-save').textContent, /Unsaved changes/)
+    assert.match(document.querySelector('.image-settings-status').textContent, /Saving…|Saved automatically/)
   } finally { await act(async () => root.unmount()); style.remove() }
 })
 

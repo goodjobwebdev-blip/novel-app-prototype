@@ -5,28 +5,40 @@ import { readFileSync } from 'node:fs'
 const app = readFileSync
 (new URL('../src/app/App.tsx', import.meta.url), 'utf8')
 const appearance = readFileSync(new URL('../src/features/settings/UiSettingsPortal.tsx', import.meta.url), 'utf8')
-const tabs = readFileSync(new URL('../src/features/settings/SettingsSectionTabs.tsx', import.meta.url), 'utf8')
+const settingsTabs = readFileSync(new URL('../src/features/settings/SettingsSectionTabs.tsx', import.meta.url), 'utf8')
+const tabs = readFileSync(new URL('../src/shared/ui/Tabs.tsx', import.meta.url), 'utf8')
 const styles = readFileSync(new URL('../src/features/settings/settings-section-tabs.css', import.meta.url), 'utf8')
 
-test('settings subsections share one tab component and visual treatment', () => {
+test('settings subsections delegate to the shared Tabs component and visual treatment', () => {
   assert.match(app, /<SettingsSectionTabs tabs=\{aiSections\}[\s\S]*idPrefix="ai" label="AI sections"/)
   assert.match(app, /<SettingsSectionTabs tabs=\{contextSections\}[\s\S]*idPrefix="context" label="Context type"/)
-  assert.match(appearance, /<SettingsSectionTabs tabs=\{appearanceSections\.map[\s\S]*idPrefix="appearance" label="Appearance sections"/)
-  assert.doesNotMatch(app, /className="ai-section-nav"/)
-  assert.doesNotMatch(app, /className="context-section-tabs"/)
+  assert.match(appearance, /<SettingsSectionTabs tabs=\{appearanceSections\}[\s\S]*idPrefix="appearance" label="Appearance sections"/)
+  assert.match(settingsTabs, /import Tabs from '\.\.\/\.\.\/shared\/ui\/Tabs'/)
+  assert.match(settingsTabs, /return <Tabs[\s\S]*className="settings-section-tabs"[\s\S]*items=\{tabs\.map/)
+  assert.doesNotMatch(app, /className="ai-section-nav"|className="context-section-tabs"/)
   assert.match(styles, /\.settings-section-tabs/)
 })
 
-test('shared settings tabs expose accessible selection and keyboard navigation', () => {
+test('shared settings tabs inherit accessible selection and keyboard navigation from Tabs', () => {
+  assert.match(settingsTabs, /value: tab[\s\S]*id: `\$\{idPrefix\}-tab-\$\{tab\}`[\s\S]*panelId: `\$\{idPrefix\}-panel-\$\{tab\}`/)
   assert.match(tabs, /role="tablist"/)
   assert.match(tabs, /role="tab"/)
-  assert.match(tabs, /aria-selected=\{active === tab\}/)
-  assert.match(tabs, /tabIndex=\{active === tab \? 0 : -1\}/)
+  assert.match(tabs, /aria-controls=\{item\.ariaControls \?\? item\.panelId\}/)
+  assert.match(tabs, /aria-selected=\{item\.value === value\}/)
+  assert.match(tabs, /tabIndex=\{item\.value === value \? 0 : -1\}/)
   for (const key of ['ArrowRight', 'ArrowLeft', 'Home', 'End']) assert.match(tabs, new RegExp(`event\\.key === '${key}'`))
 })
 
 test('each settings tab controls a labelled panel', () => {
-  for (const panel of ['ai-panel-connection', 'ai-panel-models', 'ai-panel-prompts', 'context-panel-', 'appearance-panel-theme', 'appearance-panel-typography', 'appearance-panel-customization']) {
-    assert.match(`${app}\n${appearance}`, new RegExp(panel))
+  for (const [panel, tab] of [
+    ['ai-panel-connection', 'ai-tab-connection'],
+    ['ai-panel-models', 'ai-tab-models'],
+    ['ai-panel-prompts', 'ai-tab-prompts'],
+    ['appearance-panel-theme', 'appearance-tab-theme'],
+    ['appearance-panel-typography', 'appearance-tab-typography'],
+    ['appearance-panel-editor', 'appearance-tab-editor'],
+  ]) {
+    assert.match(`${app}\n${appearance}`, new RegExp(`role="tabpanel"[^>]*id="${panel}"[^>]*aria-labelledby="${tab}"|role="tabpanel"[^>]*aria-labelledby="${tab}"[^>]*id="${panel}"`))
   }
+  assert.match(app, /role="tabpanel" id=\{`context-panel-\$\{contextSection\}`\} aria-labelledby=\{`context-tab-\$\{contextSection\}`\}/)
 })
