@@ -80,7 +80,7 @@ body:has([role="dialog"]) .selection-tools { display: none; }
 :is(.workspace-composer,.chat-message-composer) .chat-config-strip { border-color: var(--line); border-radius: var(--radius); background: color-mix(in srgb,var(--surface-2) 72%,transparent); }
 :is(.workspace-composer,.chat-message-composer) .chat-config-strip[open] { border-radius: var(--radius); background: color-mix(in srgb,var(--surface-2) 88%,transparent); }
 :is(.workspace-composer,.chat-message-composer) .chat-config-strip > summary { min-height: 44px; padding: 0 12px; }
-:is(.workspace-composer,.chat-message-composer) > .chat-compose-row { align-items: end; gap: 10px; }
+:is(.workspace-composer,.chat-message-composer) > .chat-compose-row { min-height: 56px; align-items: end; gap: 10px; }
 :is(.workspace-composer,.chat-message-composer) .expandable-text-input textarea { display: block; height: 56px; min-height: 56px; max-height: 56px; border-color: color-mix(in srgb,var(--ink) 22%,var(--line)); border-radius: var(--radius); }
 :is(.workspace-composer,.chat-message-composer) .expandable-text-trigger { border-radius: var(--radius); }
 :is(.workspace-composer,.chat-message-composer) .generation-actions .generation-primary { width: 56px; min-width: 56px; height: 56px; padding: 0; }
@@ -107,13 +107,21 @@ body:has([role="dialog"]) .selection-tools { display: none; }
 .workspace-composer .arc-prompt-field { padding-bottom: 0; }
 .workspace-composer [hidden] { display: none; }
 .workspace-composer.is-collapsed { left: auto; right: max(12px,env(safe-area-inset-right)); bottom: max(12px,env(safe-area-inset-bottom)); width: auto; padding: 7px; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb,var(--surface) 22%,transparent); -webkit-backdrop-filter: blur(16px) saturate(112%); backdrop-filter: blur(16px) saturate(112%); box-shadow: 0 8px 24px rgba(0,0,0,.2); display: flex; align-items: center; gap: 7px; pointer-events: auto; }
-.workspace-composer.is-collapsed .workspace-composer-header { width: auto; margin: 0; gap: 7px; }
-.workspace-composer .composer-collapsed-status { min-height: 40px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius); color: var(--soft); display: inline-flex; align-items: center; font-size: 10px; white-space: nowrap; }
 .workspace-composer.is-collapsed > .chat-compose-row { width: auto; margin: 0; display: flex; justify-content: flex-end; }
 .workspace-composer.is-collapsed .generate-control-shell { pointer-events: auto; }
+.workspace-composer .generate-control-shell:not(.mode) { height: 56px; min-height: 56px; }
+.workspace-composer.is-collapsed .collapsed-generate-control { align-items: center; gap: 8px; }
 .workspace-composer.is-collapsed .generation-actions .generation-primary { width: 56px!important; padding: 0!important; }
 .workspace-composer .generation-running > .generation-activity-strip { width: auto; height: 44px; margin: 0; display: inline-flex; border-radius: var(--radius); }
 .workspace-composer .generation-running > .generation-stop-circle { margin: 0; }
+.workspace-composer .collapsed-dictation-button { width: 44px; height: 44px; min-width: 44px; padding: 0; flex: none; display: grid; place-items: center; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb,var(--deep) 90%,var(--accent)); color: var(--soft); cursor: pointer; touch-action: manipulation; }
+.workspace-composer .collapsed-dictation-button svg { width: 17px; height: 17px; }
+.workspace-composer .collapsed-dictation-button:hover:not(:disabled),.workspace-composer .collapsed-dictation-button:focus-visible { border-color: color-mix(in srgb,var(--accent) 48%,var(--line)); color: var(--accent-bright); }
+.workspace-composer .collapsed-dictation-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.workspace-composer .collapsed-dictation-button:disabled { opacity: .42; cursor: not-allowed; }
+.workspace-composer .collapsed-dictation-button.recording { border-color: var(--danger); background: var(--danger); color: var(--on-danger,#000); opacity: 1; cursor: pointer; }
+.workspace-composer .dictation-activity-strip .generation-phase { width: auto; }
+.workspace-composer .collapsed-dictation-mode .generation-actions { flex: none; }
 .selection-tools { width: 128px; flex-direction: column; flex-wrap: nowrap; padding: 2px; overflow-y: auto; background: var(--surface); }
 .selection-tools.expanded { width: 204px; }
 .selection-tools button { min-height: 40px; flex: none; text-align: left; padding: .4rem .65rem; font: 500 12px ui-sans-serif, system-ui, sans-serif; }
