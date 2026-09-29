@@ -19,6 +19,14 @@ test('outline TTS status renders above the open book workspace', () => {
   assert.ok(zIndex(ttsStyles, '.tts-status') > zIndex(styles, '.book-panel'))
 })
 
+test('TTS uses one global player without replacing generation controls', () => {
+  assert.equal(workspace.match(/<TtsStatusBar \/>/g)?.length, 1)
+  assert.doesNotMatch(workspace, /playback-mode/)
+  assert.doesNotMatch(workspace, /ttsState=\{ttsState\}/)
+  assert.match(ttsStyles, /bottom: calc\(var\(--composer-height, 0px\) \+ max\(14px, env\(safe-area-inset-bottom\)\)\)/)
+  assert.match(ttsStyles, /\.tts-player \{ top: calc\(max\(14px, env\(safe-area-inset-top\)\) \+ 58px\); bottom: auto; \}/)
+})
+
 test('autotitle is a portaled modal above workspace panels', () => {
   const start = workspace.indexOf('function AutotitlePanel(')
   const end = workspace.indexOf('\nfunction GenerationDetailsDialog(', start)
