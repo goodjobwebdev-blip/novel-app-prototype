@@ -100,7 +100,7 @@ test('the actual home screen keeps New book accessible and displays creation fai
       return original.call(this, value, ...args)
     }
     await act(async () => newBook().click())
-    await settle(() => document.querySelector('.app-toast')?.textContent.includes('Not enough storage'))
+    await settle(() => document.querySelector('.arc-toast[role="alert"]')?.textContent.includes('Not enough storage'))
     assert.equal(newBook().disabled, false)
     assert.match(document.body.textContent, /My existing novel/)
   } finally {

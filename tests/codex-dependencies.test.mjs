@@ -23,13 +23,14 @@ test('permanent deletion cleans both outgoing and incoming dependency edges', ()
   assert.match(block, /codexDependencies.*bulkDelete/s)
 })
 
-test('opened Codex metadata exposes Dependencies and read-only Needed by without list-row management', () => {
-  assert.match(workspace, /CodexDependenciesMetadata/)
-  assert.match(workspace, /Dependencies · \{outgoing\.length\}/)
-  assert.match(workspace, /Needed by · \{incoming\.length\}/)
-  assert.match(workspace, /Include with this entry/)
-  assert.match(workspace, /Add dependency/)
-  assert.match(workspace, /!isCodexEntryArchived\(entry\)/)
+test('opened Codex metadata exposes editable Dependencies and read-only Needed by through shared controls', () => {
+  assert.match(workspace, /<CodexDependenciesMetadata[\s\S]*readOnly=\{activeCodexArchived \|\| activeDocument\.codexScope === 'inherited'\}/)
+  assert.match(workspace, /<Disclosure className="codex-dependency-section" title=\{`Dependencies · \$\{outgoing\.length\}`\}/)
+  assert.match(workspace, /<Disclosure className="codex-dependency-section needed-by" title=\{`Needed by · \$\{incoming\.length\}`\}/)
+  assert.match(workspace, /<Checkbox className="codex-dependency-include" label="Include with this entry"[\s\S]*disabled=\{readOnly \|\| archived \|\| !target\}/)
+  assert.match(workspace, /!readOnly && <Button[\s\S]*>Add dependency<\/Button>/)
+  assert.match(workspace, /\.filter\(\(entry\) => entry\.id !== source\.id && !linkedIds\.has\(entry\.id\) && !isCodexEntryArchived\(entry\)\)/)
+  assert.doesNotMatch(workspace, /codex-needed-by-row[\s\S]*onUpdate|codex-needed-by-row[\s\S]*onRemove/)
 })
 
 test('Chat explicit Codex reads expose both dependency directions', () => {

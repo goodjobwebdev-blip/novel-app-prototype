@@ -19,15 +19,16 @@ test('Fake is a text-only provider and clears text connection credentials in nor
   assert.match(aiSettings, /settings\.provider === 'fake'.*settings\.mainModel\.trim\(\) === 'fake\/test'/s)
 })
 
-test('AI settings expose one local Fake model without API key or endpoint fields and keep a persistent warning', () => {
+test('AI settings expose one local Fake model without credentials and retain local-only status and trace controls', () => {
   assert.match(app, /fake: 'Fake \(testing\)'/)
   assert.match(app, /settings\.provider === 'fake' \? \{ models: \[FAKE_PROVIDER_MODEL\] \}/)
   assert.match(app, /if \(requestSettings\.provider === 'fake'\) \{[\s\S]*setModels\(\[FAKE_PROVIDER_MODEL\]\)[\s\S]*No network request was made/)
+  assert.match(app, /\(settings\.provider === 'compatible' \|\| settings\.provider === 'litellm'\) && <Input[\s\S]*'Endpoint URL'/)
   assert.match(app, /settings\.provider !== 'fake' && <label><span>\{settings\.provider === 'litellm' \? 'LiteLLM API key' : 'API key'\}/)
-  assert.doesNotMatch(app, /settings\.provider === 'fake'.*Endpoint URL/)
-  assert.match(app, /Testing provider — responses, errors, reasoning, and tool calls are generated locally and deterministically\. No text-AI network request is sent\./)
-  assert.match(app, /Session only · last 20 Fake requests/)
-  assert.match(app, /onClick=\{clearFakeProviderTrace\}/)
+  assert.match(app, /settings\.provider === 'fake' && <div className="status success" role="note">[\s\S]*No text-AI network request is sent\./)
+  assert.match(app, /settings\.provider === 'fake' && aiSection === 'connection' && <Disclosure[\s\S]*aria-label="Fake provider request trace"/)
+  assert.match(app, /Session only · last 20 requests\./)
+  assert.match(app, /<Button[\s\S]*onClick=\{clearFakeProviderTrace\}[\s\S]*>Clear trace<\/Button>/)
 })
 
 test('Story, Codex, and Summary use the shared text provider boundary and diagnostics serialize that same message representation', () => {

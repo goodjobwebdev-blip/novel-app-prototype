@@ -96,7 +96,7 @@ test('actual Chat context settings save character references, preview them, and 
  f.chat = await chatService.updateChat(f.chat.id, { promptComposition: { systemPrompt: 'Answer as Mara.', predefinedMessages: [] } })
  const settingsProps = { initialTab: 'context', book: { id: f.book.id, title: f.book.title, contextType: 'chat', chatId: f.chat.id } }
  let root = createRoot(document.getElementById('root'))
- const selection = title => [...document.querySelectorAll('.context-selection-row')].find(row => row.querySelector('strong').textContent === title)?.querySelector('input')
+ const selection = title => [...document.querySelectorAll('.context-selection-row')].find(row => row.querySelector('.arc-rich-choice__title')?.textContent.trim() === title)?.querySelector('input')
  try {
    await act(async () => root.render(h(Settings, settingsProps)))
    await settle(() => selection('Compass memory') && document.querySelector('.context-help')?.textContent.includes('full Codex'))
