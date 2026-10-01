@@ -1,3 +1,4 @@
+import { createEditorStateWithHistory } from './editor-history-bridge'
 import { editorBlockPreview } from './EditorBlockPreview'
 import { rangeTouchesProtected, protectedRanges, type LocatedBlock } from './document-projection.ts'
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
@@ -42,6 +43,7 @@ type MarkdownEditorProps = {
   onChange: (value: string) => void
   ariaLabel?: string
   className?: string
+  historyKey?: string
   readOnly?: boolean
   mentionTerms?: CodexMentionTerm[]
   onMentionClick?: (mention: CodexMentionClick) => void
@@ -474,7 +476,7 @@ function runHistoryCommand(view: EditorView | null, command: (target: EditorView
 }
 
 const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor(
-  { value, onChange, bookId = '', onEditBlock, showBeats = true, highlightDialogue = false, onBeatAction, onSelectionChange, ariaLabel = 'Markdown editor', className = '', readOnly = false, mentionTerms = [], onMentionClick, onHistoryChange },
+  { value, onChange, historyKey, bookId = '', onEditBlock, showBeats = true, highlightDialogue = false, onBeatAction, onSelectionChange, ariaLabel = 'Markdown editor', className = '', readOnly = false, mentionTerms = [], onMentionClick, onHistoryChange },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null)
@@ -676,7 +678,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     if (!hostRef.current) return
     pendingLocalDocumentsRef.current = []
 
-    const state = EditorState.create({
+    const state = createEditorStateWithHistory({
       doc: value,
       extensions: [
         markdown({ base: markdownLanguage }),
@@ -724,7 +726,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
           '.cm-activeLine': { backgroundColor: 'rgba(255,255,255,.018)' },
         }),
       ],
-    })
+    }, historyKey)
 
     editorIdRef.current = crypto.randomUUID()
     const view = new EditorView({ state, parent: hostRef.current })
@@ -742,7 +744,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       view.destroy()
       if (viewRef.current === view) viewRef.current = null
     }
-  }, [ariaLabel, readOnly])
+  }, [ariaLabel, readOnly, historyKey])
 
   useEffect(() => {
     const view = viewRef.current

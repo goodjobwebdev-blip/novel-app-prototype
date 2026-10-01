@@ -1,56 +1,31 @@
-import { StateEffect, StateField, type EditorState } from '@codemirror/state'
+import { historyField } from '@codemirror/commands'
+import { EditorState, type EditorSelection, type EditorStateConfig } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 
-const savedStates = new Map<string, EditorState>()
-const trackedViews = new WeakSet<EditorView>()
-const historyPersistenceMarker = StateField.define<boolean>({
-  create: () => true,
-  update: (value) => value,
-})
+type SavedHistory = { document: string; selection: EditorSelection; history: unknown }
+const savedStates = new Map<string, SavedHistory>()
 
-function editorKey(view: EditorView) {
-  const storyEditor = view.dom.closest<HTMLElement>('.story-editor')
-  const documentPath = storyEditor?.querySelector<HTMLElement>('.document-path')?.textContent?.trim() ?? ''
-  const documentTitle = storyEditor?.querySelector<HTMLElement>('.document-titlebar h1')?.textContent?.trim() ?? ''
-  const ariaLabel = view.contentDOM.getAttribute('aria-label')?.trim() ?? 'Markdown editor'
-  return [documentPath, documentTitle, ariaLabel].filter(Boolean).join('\u241f')
+function remember(key: string, state: EditorState) {
+  savedStates.set(key, { document: state.doc.toString(), selection: state.selection, history: state.field(historyField) })
 }
 
-function persistViewState(view: EditorView, key: string) {
-  savedStates.set(key, view.state)
-}
+/** Restore history into fresh extensions so callbacks belong to this editor. */
+export function createEditorStateWithHistory(config: EditorStateConfig, key?: string) {
+  if (!key) return EditorState.create(config)
+  const saved = savedStates.get(key)
+  const source = typeof config.doc === 'string' ? config.doc : config.doc?.toString() ?? ''
+  const matching = saved?.document === source ? saved : undefined
+  if (saved && !matching) savedStates.delete(key)
 
-function trackEditor(view: EditorView) {
-  if (trackedViews.has(view)) return
-  trackedViews.add(view)
-
-  const key = editorKey(view)
-  const savedState = savedStates.get(key)
-  if (savedState && savedState.doc.toString() === view.state.doc.toString()) {
-    view.setState(savedState)
-  } else if (savedState) {
-    savedStates.delete(key)
-  }
-
-  if (!view.state.field(historyPersistenceMarker, false)) {
-    view.dispatch({
-      effects: StateEffect.appendConfig.of([
-        historyPersistenceMarker,
-        EditorView.updateListener.of((update) => persistViewState(update.view, key)),
-      ]),
-    })
-  }
-
-  persistViewState(view, key)
-}
-
-function trackMountedEditors() {
-  document.querySelectorAll<HTMLElement>('.markdown-editor .cm-editor').forEach((editor) => {
-    const view = EditorView.findFromDOM(editor)
-    if (view) trackEditor(view)
+  const state = EditorState.create({
+    ...config,
+    selection: config.selection ?? matching?.selection,
+    extensions: [
+      config.extensions ?? [],
+      matching ? historyField.init(() => matching.history) : [],
+      EditorView.updateListener.of(update => remember(key, update.state)),
+    ],
   })
+  remember(key, state)
+  return state
 }
-
-const observer = new MutationObserver(trackMountedEditors)
-observer.observe(document.documentElement, { childList: true, subtree: true })
-queueMicrotask(trackMountedEditors)
