@@ -59,6 +59,7 @@ import PanelHeader from '../../shared/ui/PanelHeader'
 import ResourceListRow from '../../shared/ui/ResourceListRow'
 import SearchField from '../../shared/ui/SearchField'
 import Select from '../../shared/ui/Select'
+import type { ToastVariant } from '../../shared/ui/Toast'
 import PromptTemplateEditor from '../settings/PromptTemplateEditor'
 import PromptPresetControls from '../settings/PromptPresetControls'
 import { chatMatchesBookSelection, onlyChatsForBook, reloadMatchesBookSelection } from './chat-book-guard'
@@ -134,7 +135,7 @@ type ChatViewProps = {
   bookPromptValues: BookPromptValues
   currentSceneId?: string | null
   onChatChange: (chatId: string) => void
-  onToast: (message: string) => void
+  onToast: (message: string, variant?: ToastVariant) => void
 }
 
 function formatElapsed(seconds: number) {
@@ -1107,7 +1108,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     try {
       await applyChatDocumentEdit(message.id, proposal.id)
       await reloadAndContinueAfterProposal(message)
-      onToast(`Applied changes to “${proposal.entityTitle}”.`)
+      onToast(`Applied changes to “${proposal.entityTitle}”.`, 'success')
     } catch (error) {
       await reloadMessages().catch(() => undefined)
       onToast(error instanceof Error ? error.message : 'Could not apply the proposed edit.')
@@ -1127,7 +1128,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     try {
       await createChatCodexEntry(message.id, proposal.id)
       await reloadAndContinueAfterProposal(message)
-      onToast(`Created Codex entry “${proposal.title}”.`)
+      onToast(`Created Codex entry “${proposal.title}”.`, 'success')
     } catch (error) {
       await reloadMessages().catch(() => undefined)
       onToast(error instanceof Error ? error.message : 'Could not create the proposed Codex entry.')
@@ -1157,7 +1158,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       if (!isCurrentChat({ id: message.parentId, bookId: message.bookId })) return
       await reloadAndContinueAfterProposal(message)
       const verb = isSummary ? 'Regenerated summary for' : proposal.action === 'create_note' ? 'Created' : proposal.action === 'rename' ? 'Renamed' : proposal.action === 'delete' ? 'Deleted' : 'Updated'
-      onToast(`${verb} “${proposal.entityTitle}”.`)
+      onToast(`${verb} “${proposal.entityTitle}”.`, 'success')
     } catch (error) {
       if (!isCurrentChat({ id: message.parentId, bookId: message.bookId })) return
       await reloadMessages().catch(() => undefined)
@@ -1211,7 +1212,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     try {
       await applyChatOutlineAction(message.id, proposal.id)
       await reloadAndContinueAfterProposal(message)
-      onToast(`Approved ${proposal.action} for “${proposal.entityTitle}”.`)
+      onToast(`Approved ${proposal.action} for “${proposal.entityTitle}”.`, 'success')
     } catch (error) {
       await reloadMessages().catch(() => undefined)
       onToast(error instanceof Error ? error.message : 'Could not apply the outline proposal.')
