@@ -36,15 +36,15 @@ function validCutoff(cutoff: StoryCutoff, world: TimelineWorld, bookId: string) 
   const scene = timelineScenes(world, bookId).find(scene => scene.id === cutoff.sceneId)
   if (cutoff.bookId !== bookId || !scene || !Number.isInteger(cutoff.position) || cutoff.position! < 0 || cutoff.position! > String(scene.content ?? '').length) throw new Error('Choose an existing scene and a position within its current text.')
 }
-export async function createCharacterChat(bookId: string, participants: Array<{ entryId: string; label: string }>, cutoff: StoryCutoff, composition = characterPromptComposition, contextProfile?: GenerationContextProfile) {
+export async function createCharacterChat(bookId: string, participants: Array<{ entryId: string; label: string }>, cutoff: StoryCutoff, composition?: PromptComposition, contextProfile?: GenerationContextProfile) {
   const validated = await validateParticipants(bookId, participants), world = await readTimelineWorld(bookId)
   validCutoff(cutoff, world, bookId)
-  const created = await createChat(bookId, `Character chat · ${validated.map(p => p.label).join(', ')}`)
   const config: CharacterChatConfig = { sessionId: crypto.randomUUID(), participants: validated, cutoff: { ...cutoff } }
-  const db = await database()
-  await db.table('entities').update(created.id, { character: config, promptComposition: structuredClone(composition), skillNoteIds: [], contextProfile: structuredClone(contextProfile ?? { includeLastScene: false, includePreviousSceneWhenEmpty: false, structuralIds: [], noteIds: [], codexEntryIds: [], summaryRange: 'none', loreAtCurrentScene: true }) })
-  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('arc-chat-changed', { detail: { bookId } }))
-  return (await getChat(created.id))!
+  return createChat(bookId, `Character chat · ${validated.map(p => p.label).join(', ')}`, 'character', {
+    character: config,
+    promptComposition: composition,
+    contextProfile: contextProfile ?? { includeLastScene: false, includePreviousSceneWhenEmpty: false, structuralIds: [], noteIds: [], codexEntryIds: [], summaryRange: 'none', loreAtCurrentScene: true },
+  })
 }
 export async function moveCharacterChat(chatId: string, cutoff: StoryCutoff, restart = false) {
   const chat = await getChat(chatId)

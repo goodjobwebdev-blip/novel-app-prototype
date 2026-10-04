@@ -12,7 +12,7 @@ export async function prepareSummaryGeneration(book: BookEntity, summary: Summar
   signal.throwIfAborted()
   if (summary.bookId !== book.id) throw new Error('The summary does not belong to this book.')
   const defaults = loadAiSettings()
-  let settings = await getBookAiSettings(book.id, defaults.favorites)
+  const settings = await getBookAiSettings(book.id, defaults.favorites)
   signal.throwIfAborted()
   if (!['nanogpt', 'litellm', 'fake'].includes(settings.provider) || (settings.provider !== 'fake' && !settings.apiKey.trim()) || !settings.supportModel.trim()) {
     throw new Error('Choose NanoGPT, LiteLLM, or Fake (testing) and a Support model in Book settings before summarizing.')
@@ -37,7 +37,8 @@ export async function prepareSummaryGeneration(book: BookEntity, summary: Summar
   const modelContextLength = settings.supportModelContextLength ?? await fetchTextProviderModelContextLength({ provider: settings.provider, apiKey: settings.apiKey.trim(), baseUrl: settings.baseUrl, model: settings.supportModel }).catch(() => undefined)
   signal.throwIfAborted()
   if (modelContextLength && modelContextLength !== settings.supportModelContextLength) {
-    settings = await saveBookAiSettings(book.id, { ...settings, supportModelContextLength: modelContextLength })
+    // The metadata writer resolves live profiles; keep this operation's captured settings.
+    await saveBookAiSettings(book.id, { ...settings, supportModelContextLength: modelContextLength })
     signal.throwIfAborted()
   }
   const messages = normalizedRequest.providerMessages

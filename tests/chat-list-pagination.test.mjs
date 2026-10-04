@@ -1,3 +1,5 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { CHAT_LIST_PAGE_SIZE, chatListPageForIndex, paginateChatList } from '../src/features/chat/chat-list-pagination.ts'

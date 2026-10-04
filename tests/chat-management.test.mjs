@@ -1,9 +1,12 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { registerHooks } from 'node:module'
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import 'fake-indexeddb/auto'
+import { assignBookTestProfiles } from './settings-profile-fixture.mjs'
 
 const storage = new Map()
 globalThis.localStorage = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)), removeItem: (key) => storage.delete(key) }
@@ -18,7 +21,9 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   return nextResolve(specifier, context)
 } })
 const db = await import('../src/data/persistence.ts')
-const { initialAiSettings, copyAiSettings } = await import('../src/shared/ai/ai-settings.ts')
+const ai = await import('../src/shared/ai/ai-settings.ts')
+const { initialAiSettings, copyAiSettings } = ai
+const profiles = await import('../src/features/settings/settings-profiles.ts')
 const { executeChatManagementTool } = await import('../src/features/chat/chat-management-tools.ts')
 const { executeChatWorkspaceTool } = await import('../src/features/chat/chat-tools.ts')
 const { applyChatEntityAction, rejectChatEntityAction } = await import('../src/features/chat/chat-entity-tools.ts')
@@ -40,8 +45,13 @@ async function fixture() {
   settings.supportModelContextLength = 100000
   settings.promptCompositions.summarize.systemPrompt = 'Book {{book.title}}. Summary custom instructions. [DELAY_MS:0]'
   const result = await db.createBook(settings, 'Tool test book')
+  const selections = await assignBookTestProfiles({ persistence: db, ai, profiles }, result.book.id, settings, ['text', 'summary'])
   const chat = await createChat(result.book.id)
-  return { ...result, chat, settings }
+  return { ...result, chat, settings, selections }
+}
+function saveFixtureSummary(f) {
+  const preset = profiles.loadSettingsProfiles().profiles.find(profile => profile.id === f.selections.summary)
+  return profiles.saveSettingsProfile({ ...preset, settings: { ...preset.settings, promptCompositions: { ...preset.settings.promptCompositions, summarize: f.settings.promptCompositions.summarize } } })
 }
 async function persist(f, proposal) {
   assert.ok(proposal)
@@ -230,14 +240,14 @@ test('failed and cancelled summary regeneration keeps previous content and allow
   const summary = await db.getOrCreateSummary(source)
   await db.saveSummaryContent(summary.id, 'Keep me', source.updatedAt)
   f.settings.promptCompositions.summarize.systemPrompt = '[REQUEST_FAIL]'
-  await db.saveBookAiSettings(f.book.id, f.settings)
+  saveFixtureSummary(f)
   const result = await execute(f.book.id, 'propose_summary_regeneration', { entity_id: source.id })
   const message = await persist(f, result.proposal)
   await assert.rejects(applyChatEntityAction(message.id, result.proposal.id))
   assert.equal((await db.getEntity(summary.id)).content, 'Keep me')
   assert.equal((await readProposal(message, result.proposal)).status, 'proposed')
   f.settings.promptCompositions.summarize.systemPrompt = '[DELAY_MS:100]'
-  await db.saveBookAiSettings(f.book.id, f.settings)
+  saveFixtureSummary(f)
   const controller = new AbortController()
   const pending = applyChatEntityAction(message.id, result.proposal.id, controller.signal)
   const timeout = setTimeout(() => controller.abort(), 30)
@@ -250,7 +260,7 @@ test('failed and cancelled summary regeneration keeps previous content and allow
 test('a newer summary edit is preserved when generation finishes', async () => {
   const f = await fixture()
   f.settings.promptCompositions.summarize.systemPrompt = '[DELAY_MS:10]'
-  await db.saveBookAiSettings(f.book.id, f.settings)
+  saveFixtureSummary(f)
   const summary = await db.getOrCreateSummary(f.scene)
   const pending = regenerateEntitySummary(f.book.id, f.scene.id, new AbortController().signal)
   await new Promise((resolve) => setTimeout(resolve, 20))
@@ -262,7 +272,7 @@ test('a newer summary edit is preserved when generation finishes', async () => {
 test('summary commit checks that the approving message still exists', async () => {
   const f = await fixture()
   f.settings.promptCompositions.summarize.systemPrompt = '[DELAY_MS:10]'
-  await db.saveBookAiSettings(f.book.id, f.settings)
+  saveFixtureSummary(f)
   const summary = await db.getOrCreateSummary(f.scene)
   await db.saveSummaryContent(summary.id, 'Keep after message deletion', 1)
   const result = await execute(f.book.id, 'propose_summary_regeneration', { entity_id: f.scene.id })

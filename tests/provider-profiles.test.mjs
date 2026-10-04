@@ -1,3 +1,5 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { DEFAULT_LITELLM_BASE_URL, switchProviderProfile } from '../src/features/settings/provider-profiles.ts'

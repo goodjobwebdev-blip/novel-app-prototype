@@ -1,3 +1,5 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { transitionProposalList } from '../src/features/chat/chat-proposal-transition.ts'

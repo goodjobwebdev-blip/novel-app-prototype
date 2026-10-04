@@ -1,3 +1,5 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
 import { registerHooks } from 'node:module'
@@ -13,6 +15,8 @@ const { initialAiSettings } = await import('../src/shared/ai/ai-settings.ts')
 const { assembleChatGenerationRequest, emptyCharacterBook } = await import('../src/features/chat/chat-request.ts')
 const { availableChatTools } = await import('../src/features/chat/chat-tool-availability.ts')
 const images = await import('../src/features/chat/chat-direct-images.ts'), settings = await import('../src/features/images/image-settings.ts')
+const profiles = await import('../src/features/settings/settings-profiles.ts')
+const { loadBookImageSettings } = await import('../src/features/images/book-image-settings.ts')
 const { copyBookArchive } = await import('../src/data/book-archive.ts')
 const { resolveCodexState } = await import('../src/features/codex/codex-timeline.ts')
 const { readTimelineWorld } = await import('../src/features/codex/codex-timeline-service.ts')
@@ -154,7 +158,16 @@ test('only eligible distinct participants and available scene positions can star
  await f.db.table('entities').update(f.entry.id,{roleplayParticipant:true})
  assert.equal((await c.listCharacterCandidates(f.book.id)).length,1)
 })
-function configure(){const model=settings.documentedImageModels.find(m=>m.id==='gpt-image-1');const favorite=settings.imageFavorite(model,[]);favorite.alias='portrait';settings.saveImageSettings({keys:{nanogpt:'',openai:'',pruna:''},favorites:[favorite],defaultAlias:'portrait'})}
+async function configure(bookId, enabled = true) {
+ const model = settings.documentedImageModels.find(m => m.id === 'gpt-image-1')
+ const favorite = settings.imageFavorite(model, []); favorite.alias = 'portrait'
+ const profile = profiles.createSettingsProfile('image', 'Direct image fixture')
+ profile.media = { favorites: enabled ? [favorite] : [], defaultAlias: enabled ? 'portrait' : '', defaultAliases: {} }
+ profiles.saveSettingsProfile(profile)
+ const selections = await p.getBookProfileSelections(bookId)
+ await p.saveBookProfileSelections(bookId, { ...selections, image: profile.id })
+ return loadBookImageSettings(bookId)
+}
 test('direct images are advertised only for explicit current-turn requests',()=>{
  for(const text of ['Hello','Do not generate an image','What does "send me a photo" mean?','Show me how to draw a picture','Suggest an image prompt','If I ask you, generate a picture']) assert.equal(images.explicitlyRequestsImage(text),false,text)
  for(const text of ['Send me a photo of yourself','Please generate a portrait','Can you draw a picture of Mara?']) assert.equal(images.explicitlyRequestsImage(text),true,text)
@@ -162,8 +175,9 @@ test('direct images are advertised only for explicit current-turn requests',()=>
  assert.ok(!availableChatTools(false,[{role:'user',content:'Send me a photo'},{role:'assistant',content:'Here'}]).some(t=>t.function.name==='generate_requested_image'))
 })
 test('direct jobs are durable and idempotent across duplicate calls, reloads, clearing, and foreign requests',async()=>{
- configure();const f=await fixture(),user=await chat.createChatMessage(f.conversation,'user','Send me a photo of Mara')
- const input={chat:f.conversation,userMessageId:user.id,userText:user.content,responseId:'image-response',roundNumber:1,callId:'call-one',prompt:'Mara by the gate'}
+ const f=await fixture(),user=await chat.createChatMessage(f.conversation,'user','Send me a photo of Mara')
+ const mediaSettings = await configure(f.book.id)
+ const input={chat:f.conversation,userMessageId:user.id,userText:user.content,responseId:'image-response',roundNumber:1,callId:'call-one',prompt:'Mara by the gate',mediaSettings}
  const [one,two]=await Promise.all([images.queueRequestedImage(input),images.queueRequestedImage({...input,callId:'call-two'})])
  assert.equal(one.jobId,two.jobId);assert.equal((await f.db.table('imageJobs').where('bookId').equals(f.book.id).toArray()).length,1)
  const job=await f.db.table('imageJobs').get(one.jobId);assert.equal(job.status,'queued');assert.equal((job.sources ?? []).length,0)
@@ -173,10 +187,12 @@ test('direct jobs are durable and idempotent across duplicate calls, reloads, cl
  const foreign=await fixture();await assert.rejects(images.queueRequestedImage({...input,chat:foreign.conversation}),/originating/)
 })
 test('missing configuration, unavailable references and cancellation create no paid job',async()=>{
- const f=await fixture(),user=await chat.createChatMessage(f.conversation,'user','Create an image of Mara'),input={chat:f.conversation,userMessageId:user.id,userText:user.content,responseId:'failed-response',roundNumber:1,callId:'failure',prompt:'Mara'}
- settings.saveImageSettings({keys:{},favorites:[],defaultAlias:''})
+ const f=await fixture(),user=await chat.createChatMessage(f.conversation,'user','Create an image of Mara')
+ const mediaSettings = await configure(f.book.id, false)
+ const input={chat:f.conversation,userMessageId:user.id,userText:user.content,responseId:'failed-response',roundNumber:1,callId:'failure',prompt:'Mara',mediaSettings}
  await assert.rejects(images.queueRequestedImage(input),/model|favorite|Settings/i)
- configure();const controller=new AbortController();controller.abort();await assert.rejects(images.queueRequestedImage({...input,signal:controller.signal}))
+ input.mediaSettings = await configure(f.book.id)
+ const controller=new AbortController();controller.abort();await assert.rejects(images.queueRequestedImage({...input,signal:controller.signal}))
  const changed=await chat.updateChat(f.conversation.id,{directImageReferenceIds:['missing']});await assert.rejects(images.queueRequestedImage({...input,chat:changed}),/reference is unavailable/)
  assert.equal((await f.db.table('imageJobs').where('bookId').equals(f.book.id).toArray()).length,0)
 })

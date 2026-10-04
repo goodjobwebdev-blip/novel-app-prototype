@@ -1,3 +1,5 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { registerHooks } from 'node:module'
@@ -8,12 +10,16 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   if (specifier.startsWith('.') && context.parentURL?.startsWith('file:')) { const url = new URL(specifier + '.ts', context.parentURL); if (existsSync(fileURLToPath(url))) return nextResolve(url.href, context) }
   return nextResolve(specifier, context)
 } })
-globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} }
+const storage = new Map()
+globalThis.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)), removeItem: key => storage.delete(key) }
 const { prepareAutomaticBeat, beatPassage, bindBeatPassage, passageMarkers, sceneBeats } = await import('../src/features/writing/scene-beats.ts')
 const { proseText, encodeDocumentBlock } = await import('../src/features/editor/document-projection.ts')
 const { prepareSceneBeatRequest } = await import('../src/features/writing/scene-beat-generation.ts')
 const db = await import('../src/data/persistence.ts')
-const { initialAiSettings, copyAiSettings } = await import('../src/shared/ai/ai-settings.ts')
+const ai = await import('../src/shared/ai/ai-settings.ts')
+const { initialAiSettings, copyAiSettings } = ai
+const profiles = await import('../src/features/settings/settings-profiles.ts')
+const { assignBookTestProfiles } = await import('./settings-profile-fixture.mjs')
 const { executeChatManagementTool } = await import('../src/features/chat/chat-management-tools.ts')
 const { executeChatWorkspaceTool } = await import('../src/features/chat/chat-tools.ts')
 const { buildContextValues } = await import('../src/shared/context/context-service.ts')
@@ -47,6 +53,7 @@ test('beat capture retries without duplication; stable markers track edits and r
 test('beat requests include only the active instruction once, and Chat planning is typed and approval based', async () => {
   const settings = copyAiSettings(initialAiSettings); settings.provider = 'fake'; settings.mainModel = settings.supportModel = 'fake/test'; settings.mainModelContextLength = 100000
   const f = await db.createBook(settings, 'Beats test')
+    await assignBookTestProfiles({ persistence: db, ai, profiles }, f.book.id, settings)
   const first = prepareAutomaticBeat('Before.\n\nAfter.', 9, 'CURRENT_BEAT', 'beat-one')
   const source = first.source.slice(0, first.position) + 'Old passage.' + first.source.slice(first.position) + '\n' + encodeDocumentBlock({ id: 'other', type: 'beat', text: 'OTHER_BEAT' })
   await db.saveDocumentContent(f.scene.id, source)

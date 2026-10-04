@@ -1,3 +1,5 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test, { after } from 'node:test'
 import { transpileSourceTree } from './transpile-source-tree.mjs'
 import assert from 'node:assert/strict'
@@ -6,8 +8,10 @@ import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { JSDOM } from 'jsdom'
 import 'fake-indexeddb/auto'
+import { assignBookTestProfiles } from './settings-profile-fixture.mjs'
 
 const dom = new JSDOM('<html><body><div id="root"></div></body></html>', { url: 'https://arc.test/', pretendToBeVisual: true })
+after(() => dom.window.close())
 for (const key of ['window', 'document', 'HTMLElement', 'HTMLDialogElement', 'sessionStorage', 'localStorage', 'Event', 'CustomEvent']) globalThis[key] = dom.window[key]
 dom.window.HTMLElement.prototype.scrollIntoView = function () {}
 dom.window.HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', '') }
@@ -18,13 +22,16 @@ const React = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { act } = React
 const directory = mkdtempSync(new URL('../node_modules/.arc-stop-ui-test-', import.meta.url))
+after(() => rmSync(directory, { recursive: true, force: true }))
 transpileSourceTree(directory)
 const moduleAt = name => import(pathToFileURL(`${directory}/${name}.mjs`))
 const p = await moduleAt('data/persistence')
+after(async () => (await p.database()).close())
 const ai = await moduleAt('shared/ai/ai-settings')
+const profiles = await moduleAt('features/settings/settings-profiles')
 const chatService = await moduleAt('features/chat/chat-service')
 const { ChatView } = await moduleAt('features/chat/ChatFeature')
-after(async () => { (await p.database()).close(); dom.window.close(); rmSync(directory, { recursive: true, force: true }) })
+
 const button = text => [...document.querySelectorAll('button')].find(item => item.textContent.trim() === text)
 const stopButton = () => document.querySelector('button[aria-label="Stop chat generation"]')
 async function settle(predicate) {
@@ -48,18 +55,27 @@ for (const phase of ['sending', 'thinking', 'writing']) {
   test(`Chat Stop during ${phase} exits Stopping, keeps the partial response and allows another send`, async t => {
     const settings = ai.copyAiSettings(ai.initialAiSettings)
     Object.assign(settings, { provider: 'nanogpt', apiKey: 'test-only', baseUrl: 'https://provider.invalid/v1', mainModel: 'test', mainModelContextLength: 100000 })
+    ai.saveAiSettings(settings)
     const { book } = await p.createBook(settings, 'Stop test')
+    await assignBookTestProfiles({ persistence: p, ai, profiles }, book.id, settings)
     let chat = await chatService.createChat(book.id)
     chat = await chatService.updateChat(chat.id, { model: 'test', modelContextLength: 100000, thinking: true })
-    let requests = 0, cancelled = 0, releaseHeaders
+    let requests = 0, cancelled = 0, releaseHeaders, source, finishCancellation
     const pendingHeaders = new Promise(resolve => { releaseHeaders = resolve })
     const firstResponse = new Response(new ReadableStream({
       start(controller) {
+        source = controller
         if (phase === 'thinking') controller.enqueue(encoder.encode(event({ reasoning_content: 'Partial thought' })))
         if (phase === 'writing') controller.enqueue(encoder.encode(event({ reasoning_content: 'Partial thought', content: 'Partial answer' })))
       },
-      cancel() { cancelled++; return new Promise(() => {}) },
+      // Cancellation stays stalled until teardown; Stop must not await the provider.
+      cancel() { cancelled++; return new Promise(resolve => { finishCancellation = resolve }) },
     }))
+    t.after(async () => { await act(async () => {
+      releaseHeaders(firstResponse)
+      source.error(new Error('Test stream cleanup'))
+      finishCancellation?.()
+    }) })
     t.mock.method(globalThis, 'fetch', async (url, init) => {
       assert.equal(url, 'https://provider.invalid/v1/chat/completions')
       assert.equal(init.method, 'POST')
@@ -69,6 +85,7 @@ for (const phase of ['sending', 'thinking', 'writing']) {
     })
     const toasts = []
     const root = createRoot(document.getElementById('root'))
+    t.after(async () => { await act(async () => root.unmount()) })
     try {
       await act(async () => root.render(React.createElement(ChatView, { bookId: book.id, chatId: chat.id, bookPromptValues: { title: book.title }, onChatChange() {}, onToast(message) { toasts.push(message) } })))
       await send('First message')

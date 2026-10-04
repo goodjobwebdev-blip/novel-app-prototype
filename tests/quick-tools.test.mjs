@@ -1,3 +1,5 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { registerHooks } from 'node:module'
@@ -5,9 +7,13 @@ import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import 'fake-indexeddb/auto'
 registerHooks({ resolve(specifier, context, nextResolve) { if (specifier.startsWith('.') && context.parentURL?.startsWith('file:')) { const url = new URL(specifier + '.ts', context.parentURL); if (existsSync(fileURLToPath(url))) return nextResolve(url.href, context) } return nextResolve(specifier, context) } })
-globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} }
+const storage = new Map()
+globalThis.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)), removeItem: key => storage.delete(key) }
 const db = await import('../src/data/persistence.ts')
-const { initialAiSettings, copyAiSettings } = await import('../src/shared/ai/ai-settings.ts')
+const ai = await import('../src/shared/ai/ai-settings.ts')
+const { initialAiSettings, copyAiSettings } = ai
+const profiles = await import('../src/features/settings/settings-profiles.ts')
+const { assignBookTestProfiles } = await import('./settings-profile-fixture.mjs')
 const { encodeDocumentBlock } = await import('../src/features/editor/document-projection.ts')
 const { selectionProse } = await import('../src/features/writing/quick-tools.ts')
 const { prepareQuickToolRequest } = await import('../src/features/writing/quick-tool-generation.ts')
@@ -16,6 +22,7 @@ const book = { title: 'Test', series: '', seriesOrder: '', overview: '', genre: 
 test('selection requests use Main, projected context and effective settings while preserving exact selected Markdown', async () => {
   const settings = copyAiSettings(initialAiSettings); settings.provider = 'fake'; settings.mainModel = 'fake/main'; settings.codexModel = 'fake/codex'; settings.supportModel = 'fake/support'; settings.mainModelContextLength = 100000
   const f = await db.createBook(settings, 'Quick tools')
+    await assignBookTestProfiles({ persistence: db, ai, profiles }, f.book.id, settings)
   const privateBlock = encodeDocumentBlock({ id: 'private', type: 'comment', text: 'PRIVATE_SENTINEL' })
   const beat = encodeDocumentBlock({ id: 'plan', type: 'beat', text: 'BEAT_SENTINEL' })
   const source = `Before.\n\n${privateBlock}\n\n**SELECTED_PROSE**\n\n${beat}\n\nAfter.`
@@ -44,6 +51,7 @@ test('synonyms use only bounded word context and Support; previews preserve surr
   const { synonymContext, prepareSynonymRequest, parseSynonyms } = await import('../src/features/writing/synonyms.ts')
   const settings = copyAiSettings(initialAiSettings); settings.provider = 'fake'; settings.mainModel = 'fake/main'; settings.supportModel = 'fake/support'; settings.supportModelContextLength = 100000
   const f = await db.createBook(settings, 'Synonyms')
+    await assignBookTestProfiles({ persistence: db, ai, profiles }, f.book.id, settings)
   const source = 'Bright rain fell. A quiet bell rang.\n\nDISTANT_BOOK_SENTINEL ' + 'x'.repeat(2000)
   const from = source.indexOf('quiet'), to = from + 5
   const capture = { bookId: f.book.id, book, document: f.scene, snapshot: { editorId: 'editor', revision: 1, document: source, from, to, text: 'quiet' } }

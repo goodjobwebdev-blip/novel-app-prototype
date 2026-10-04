@@ -2,7 +2,7 @@ import { selectedMediaPrompt } from './media-prompt'
 import { useRef, useState } from 'react'
 import type { ChatMessageEntity } from '../chat/chat-service'
 import type { ChatImageProposal } from './image-generation-types'
-import { useImageQuery } from './image-hooks'
+import { useImageQuery, useImageSettings } from './image-hooks'
 import ImageGenerationControls, { type ImageDraft } from './ImageGenerationControls'
 import IllustrationModal from './IllustrationModal'
 import ImageJobs from './ImageResults'
@@ -15,6 +15,7 @@ export default function ImageProposalCard({ message, proposal, onResolved }: { m
   const { data: current, error: readError } = useImageQuery(() => getEntity<ChatMessageEntity>(message.id), [message.id], message as ChatMessageEntity | undefined)
   const value = current?.imageGenerations?.find(p => p.id === proposal.id) ?? proposal
   const { data: sourceAssets } = useImageQuery(() => listGalleryImages(message.bookId), [message.bookId], [])
+  const settings = useImageSettings(message.bookId)
   const { data: jobs } = useImageQuery(listImageJobs, [], [])
   const ownedJobs = jobs.filter(job => job.bookId === message.bookId && job.chatId === message.parentId && job.messageId === message.id && job.proposalId === proposal.id && !job.hiddenInChat)
   const [draft, setDraft] = useState<ImageDraft>(() => proposalDraft(value))
@@ -43,8 +44,10 @@ export default function ImageProposalCard({ message, proposal, onResolved }: { m
     setDraft(proposalDraft(saved)); setExpanded(true)
   }) }
   const generate = async () => {
+    const snapshot = structuredClone(draft)
+    const displayedSettings = settings
     await pendingSave.current
-    await enqueueImageProposal(draft, { ...origin, submissionId: crypto.randomUUID() })
+    await enqueueImageProposal(snapshot, { ...origin, submissionId: crypto.randomUUID() }, displayedSettings)
     onResolved?.()
   }
   const latestJob = ownedJobs.at(-1)
@@ -59,7 +62,7 @@ export default function ImageProposalCard({ message, proposal, onResolved }: { m
     {expanded && <IllustrationModal title="Generation tool" onClose={close} footer={<div className="image-actions">
       <button type="button" disabled={busy} onClick={close}>Close tool</button>
       {value.status === 'proposed' && <button type="button" disabled={busy} onClick={() => { void action(async () => { await pendingSave.current; await setImageProposal(message.id, value.id, 'rejected'); setExpanded(false); onResolved?.() }) }}>Reject</button>}
-      <button type="button" className="image-primary" disabled={busy || !['proposed', 'accepted'].includes(value.status) || !selectedMediaPrompt(draft).trim()} onClick={() => { void action(generate) }}>{busy ? 'Saving…' : 'Generate'}</button>
+      <button type="button" className="image-primary" disabled={busy || settings.loading || Boolean(settings.error) || !settings.favorites.some(model => model.alias === draft.alias) || !['proposed', 'accepted'].includes(value.status) || !selectedMediaPrompt(draft).trim()} onClick={() => { void action(generate) }}>{busy ? 'Saving…' : 'Generate'}</button>
     </div>}>
       <div className="image-ui"><ImageGenerationControls bookId={message.bookId} value={draft} onChange={changeDraft} disabled={busy} sourceAssets={sourceAssets} />
       <p className="image-help">Generate approves and queues the shown prompt, model, options, and source images. You can keep editing and queue another generation while earlier requests run.</p>

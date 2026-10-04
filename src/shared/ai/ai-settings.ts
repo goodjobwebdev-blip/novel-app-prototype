@@ -61,6 +61,12 @@ export type AiSettings = {
   supportModel: string
   supportModelContextLength?: number
   chatModel: string
+  characterModel: string
+  characterThinkingEffort: ThinkingEffort
+  characterModelContextLength?: number
+  characterMaxModelRounds: number
+  chatPromptPresetId?: string
+  characterPromptPresetId?: string
   chatMaxModelRounds: number
   chatModelContextLength?: number
   codexModel: string
@@ -319,6 +325,9 @@ export const initialAiSettings: AiSettings = {
   mainEffectiveContextLimit: '',
   supportModel: '',
   chatModel: '',
+  characterModel: '',
+  characterThinkingEffort: 'default',
+  characterMaxModelRounds: 8,
   chatMaxModelRounds: 8,
   codexModel: '',
   codexEffectiveContextLimit: '',
@@ -458,6 +467,12 @@ export function normalizeAiSettings(value?: StoredAiSettings): AiSettings {
     codexThinkingEffort: normalizeThinkingEffort(value?.codexThinkingEffort),
     chatThinkingEffort: normalizeThinkingEffort(value?.chatThinkingEffort),
     chatModel: typeof value?.chatModel === 'string' ? value.chatModel : '',
+    characterModel: typeof value?.characterModel === 'string' ? value.characterModel : (value?.chatModel ?? ''),
+    characterThinkingEffort: normalizeThinkingEffort(value?.characterThinkingEffort ?? value?.chatThinkingEffort),
+    characterMaxModelRounds: normalizeChatRoundLimit(value?.characterMaxModelRounds ?? value?.chatMaxModelRounds),
+    characterModelContextLength: Number.isFinite(value?.characterModelContextLength) ? value?.characterModelContextLength : typeof value?.characterModel !== 'string' && Number.isFinite(value?.chatModelContextLength) ? value?.chatModelContextLength : undefined,
+    chatPromptPresetId: typeof value?.chatPromptPresetId === 'string' ? value.chatPromptPresetId : undefined,
+    characterPromptPresetId: typeof value?.characterPromptPresetId === 'string' ? value.characterPromptPresetId : undefined,
     chatModelContextLength: Number.isFinite(value?.chatModelContextLength) ? value?.chatModelContextLength : undefined,
     mainModelContextLength: Number.isFinite(value?.mainModelContextLength) ? value?.mainModelContextLength : undefined,
     supportModelContextLength: Number.isFinite(value?.supportModelContextLength) ? value?.supportModelContextLength : undefined,
@@ -506,6 +521,7 @@ export function withGlobalFavorites(settings: BookAiSettings, favorites: string[
 }
 
 export function loadAiSettings(): AiSettings {
+  if (typeof localStorage === 'undefined' && typeof window === 'undefined') return copyAiSettings(initialAiSettings)
   const stored = localStorage.getItem(AI_SETTINGS_STORAGE_KEY)
   if (!stored) return copyAiSettings(initialAiSettings)
 

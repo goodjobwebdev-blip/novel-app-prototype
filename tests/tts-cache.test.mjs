@@ -1,3 +1,5 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
 import { registerHooks } from 'node:module'
@@ -69,7 +71,7 @@ test('clear/delete epochs reject late workers, retain shared references correctl
  await cache.deleteTtsCacheOwners([secondOwner.entityId]);assert.equal(await cache.writeTtsCacheChunk(second,0,audio),false)
  const db=await cache.ttsCacheDatabase();assert.equal(await db.table('chunks').count(),0)
  const newOwner={bookId:f.book.id,entityId:f.book.id},fresh=await cache.readTtsCachePlan(newOwner,identity,['backup audio']);await cache.writeTtsCacheChunk(fresh,0,audio)
- const archive=await p.readBookArchive(f.book.id);assert.deepEqual(Object.keys(archive).sort(),['dependencies','entities','galleryImages','illustrations','imageJobs','snapshots']);assert.doesNotMatch(JSON.stringify(archive),/backup audio|valid audio/)
+ const archive=await p.readBookArchive(f.book.id);assert.deepEqual(Object.keys(archive).sort(),['dependencies','entities','galleryImages','illustrations','imageJobs','settingsProfiles','snapshots']);assert.doesNotMatch(JSON.stringify(archive),/backup audio|valid audio/)
  await p.deleteEntityTree(f.book.id);assert.equal(await db.table('chunks').count(),0);assert.equal(await cache.writeTtsCacheChunk(fresh,0,audio),false)
 })
 test('turning caching off bypasses reads and writes while keeping stored chunks',async()=>{

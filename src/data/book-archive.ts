@@ -6,31 +6,63 @@ import { documentBlocks, remapDocumentBlocks } from '../features/editor/document
 import type { GalleryImage, ImageJob } from '../features/images/image-generation-types'
 import type { ArcEntity, BookArchiveData, Illustration } from './persistence'
 import { assertImageFile } from '../features/images/illustration-image'
+import { BOOK_PROFILE_KINDS, sanitizeProfileSettings, sanitizeSettingsProfile, type BookProfileSelections, type SettingsProfile } from '../features/settings/settings-profiles'
 
 const MAGIC = 'ARCBK001'
 const MAX_MANIFEST = 64 * 1024 * 1024
 const MAX_ARCHIVE = 2_000_000_000
 const TYPES = new Set(['book', 'series', 'act', 'chapter', 'scene', 'note', 'codexEntry', 'summary', 'chat', 'chatMessage', 'settings'])
-const REF_KEYS = new Set(['goalId', 'linkedEntityId', 'jobId', 'directUserMessageId', 'sceneId', 'anchorBookId', 'typeId', 'ownerId', 'bookId', 'entryId', 'parentId', 'seriesId', 'sourceEntityId', 'entityId', 'sourceId', 'targetId', 'primaryImageId', 'assetId', 'messageId', 'chatId', 'lastOpenedSceneId', 'sourceParentId', 'targetParentId', 'beforeId'])
+const REF_KEYS = new Set(['chatPromptPresetId', 'characterPromptPresetId', 'goalId', 'linkedEntityId', 'jobId', 'directUserMessageId', 'sceneId', 'anchorBookId', 'typeId', 'ownerId', 'bookId', 'entryId', 'parentId', 'seriesId', 'sourceEntityId', 'entityId', 'sourceId', 'targetId', 'primaryImageId', 'assetId', 'messageId', 'chatId', 'lastOpenedSceneId', 'sourceParentId', 'targetParentId', 'beforeId'])
 const REF_ARRAYS = new Set(['compatibleLoreTypeIds', 'skillNoteIds', 'structuralIds', 'noteIds', 'codexEntryIds', 'sourceIds'])
 
 type StoredGalleryImage = Omit<GalleryImage, 'image' | 'thumbnail'> & { imageSize: number; imageType: string; thumbnailSize: number; thumbnailType: string }
 type StoredImage = Omit<Illustration, 'image' | 'thumbnail'> & { imageSize: number; imageType: string; thumbnailSize: number; thumbnailType: string }
 
-function withoutKeys(value: unknown): any {
-  if (Array.isArray(value)) return value.map(withoutKeys)
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, /(apiKey$|^accessToken$|^refreshToken$|^authorization$)/i.test(key) ? '' : withoutKeys(item)]))
+// Explicit connection schema plus credential aliases from historical adapters. Strip whole
+// connection objects, not just secrets: endpoint/account/fingerprint data is local-only too.
+const CONNECTION_FIELDS = new Set(['apikey', 'openaiapikey', 'baseurl', 'providerprofiles', 'keys', 'connections', 'connection', 'connectionid', 'connectionids', 'connectionconfig', 'endpoint', 'endpoints', 'account', 'accountid', 'accountname', 'accountfingerprint', 'connectionfingerprint', 'localconnectionfingerprint', 'credentialfingerprint', 'credentials', 'accesstoken', 'refreshtoken', 'apitoken', 'authtoken', 'bearertoken', 'sessiontoken', 'privatekey', 'clientid', 'authorization', 'password', 'secret', 'token', 'owner', 'heartbeat', 'providerjobid'])
+function withoutKeys(value: unknown, depth = 0, path: string[] = []): any {
+  if (depth > 80) throw new Error('This backup contains excessively nested data.')
+  if (value instanceof Blob) return value
+  if (Array.isArray(value)) return value.map(item => withoutKeys(item, depth + 1, path))
+  if (value && typeof value === 'object') {
+    // Only the actual Character participant schema owns non-credential speaker tokens.
+    // An unrelated object with entryId/label must not bypass credential stripping.
+    const participant = path.at(-2) === 'character' && path.at(-1) === 'participants' && typeof (value as { entryId?: unknown }).entryId === 'string' && typeof (value as { label?: unknown }).label === 'string'
+    return Object.fromEntries(Object.entries(value).filter(([key]) => (key === 'token' && participant) || (!CONNECTION_FIELDS.has(key.toLowerCase().replace(/[_-]/g, '')) && !/(apikey|credential|connection|endpoint|account|baseurl|secret|password|authorization)/i.test(key))).map(([key, item]) => [key, withoutKeys(item, depth + 1, [...path, key])]))
+  }
   return value
+}
+
+function portableProfiles(entities: ArcEntity[], definitions?: SettingsProfile[]): SettingsProfile[] | undefined {
+  const selections = entities.filter(entity => entity.type === 'settings' && entity.settingsType === 'profiles-book')
+  if (!selections.length) return undefined
+  valid(selections.length === 1)
+  const metadata = selections[0].modelMetadata
+  if (metadata !== undefined) valid(metadata && typeof metadata === 'object' && !Array.isArray(metadata) && Object.entries(metadata).every(([key, length]) => /^(openrouter|nanogpt|openai|litellm|compatible|fake):\S/.test(key) && Number.isSafeInteger(length) && Number(length) > 0))
+  const profiles = definitions ?? selections[0].definitions as SettingsProfile[] | undefined
+  valid(Array.isArray(profiles) && profiles.length <= 1000)
+  const clean = profiles.map(sanitizeSettingsProfile), byId = new Map(clean.map(profile => [profile.id, profile]))
+  valid(byId.size === clean.length)
+  const value = selections[0].value as BookProfileSelections
+  for (const kind of BOOK_PROFILE_KINDS) valid(typeof value?.[kind] === 'string' && byId.get(value[kind])?.kind === kind)
+  for (const profile of clean.filter(profile => profile.kind === 'text')) {
+    valid(byId.get(profile.settings.chatPromptPresetId ?? '')?.kind === 'chat')
+    valid(byId.get(profile.settings.characterPromptPresetId ?? '')?.kind === 'character')
+  }
+  selections[0].definitions = clean
+  return clean
 }
 
 /** A versioned binary archive: JSON metadata followed by image blobs (no base64 overhead). */
 export function encodeBookArchive(data: BookArchiveData): Blob {
   const images: StoredImage[] = data.illustrations.map(({ image, thumbnail, ...rest }) => ({ ...rest, imageSize: image.size, imageType: image.type, thumbnailSize: thumbnail.size, thumbnailType: thumbnail.type }))
   const gallery: StoredGalleryImage[] = (data.galleryImages ?? []).map(({ image, thumbnail, ...rest }) => ({ ...rest, imageSize: image.size, imageType: image.type, thumbnailSize: thumbnail.size, thumbnailType: thumbnail.type }))
-  const entities = data.entities.map((entity) => entity.type === 'settings' ? withoutKeys(entity) : entity.type === 'chatMessage' && Array.isArray(entity.imageGenerations) ? { ...entity, imageGenerations: entity.imageGenerations.map((proposal: any) => ({ ...proposal, ...(proposal.draft ? { draft: { ...proposal.draft, sources: [] } } : {}) })) } : entity)
-  const version = (data.galleryImages ?? []).some((asset) => asset.kind === 'video') ? 3 : 2
+  const entities = data.entities.map((entity) => entity.type === 'settings' ? withoutKeys(entity.settingsType === 'ai' ? { ...entity, value: sanitizeProfileSettings(entity.value as Parameters<typeof sanitizeProfileSettings>[0]) } : entity) : entity.type === 'chatMessage' && Array.isArray(entity.imageGenerations) ? { ...entity, imageGenerations: entity.imageGenerations.map((proposal: any) => ({ ...proposal, ...(proposal.draft ? { draft: { ...proposal.draft, sources: [] } } : {}) })) } : entity)
+  const settingsProfiles = portableProfiles(entities, data.settingsProfiles)
+  const version = settingsProfiles ? 4 : (data.galleryImages ?? []).some((asset) => asset.kind === 'video') ? 3 : 2
   const jobs = (data.imageJobs ?? []).map(({ sources: _sources, providerJobId: _providerJobId, owner: _owner, heartbeat: _heartbeat, ...job }) => job)
-  const manifest = new TextEncoder().encode(JSON.stringify({ format: 'arc-book', version, entities, snapshots: data.snapshots, dependencies: data.dependencies, illustrations: images, galleryImages: gallery, imageJobs: jobs }))
+  const manifest = new TextEncoder().encode(JSON.stringify(withoutKeys({ format: 'arc-book', version, entities, settingsProfiles, snapshots: data.snapshots, dependencies: data.dependencies, illustrations: images, galleryImages: gallery, imageJobs: jobs })))
   if (manifest.length > MAX_MANIFEST) throw new Error('Book metadata is too large for this archive version.')
   const header = new Uint8Array(12)
   header.set(new TextEncoder().encode(MAGIC))
@@ -58,11 +90,15 @@ export async function decodeBookArchive(file: Blob): Promise<BookArchiveData> {
   valid(length > 0 && length <= MAX_MANIFEST && 12 + length <= file.size)
   let manifest: any
   try { manifest = JSON.parse(await file.slice(12, 12 + length).text()) } catch { throw new Error('This book backup could not be read. Nothing was imported.') }
-  valid(manifest?.format === 'arc-book' && [1, 2, 3].includes(manifest.version))
+  valid(manifest?.format === 'arc-book' && [1, 2, 3, 4].includes(manifest.version))
   for (const key of ['entities', 'snapshots', 'dependencies', 'illustrations']) valid(Array.isArray(manifest[key]))
   valid(manifest.entities.length <= 100_000 && manifest.illustrations.length <= 20_000)
+  manifest = withoutKeys(manifest)
   const entities: ArcEntity[] = manifest.entities
-  valid(entities.every((entity) => entity && typeof entity.id === 'string' && entity.id.length > 0 && TYPES.has(entity.type) && Number.isFinite(entity.createdAt) && Number.isFinite(entity.updatedAt)))
+  valid(entities.every(entity => entity && typeof entity === 'object' && typeof entity.id === 'string' && entity.id.length > 0 && TYPES.has(entity.type) && Number.isFinite(entity.createdAt) && Number.isFinite(entity.updatedAt)))
+  for (const entity of entities) if (entity.type === 'settings' && entity.settingsType === 'ai') entity.value = sanitizeProfileSettings(entity.value as Parameters<typeof sanitizeProfileSettings>[0])
+  const settingsProfiles = portableProfiles(entities, manifest.settingsProfiles)
+
   const byId = new Map(entities.map((entity) => [entity.id, entity]))
   valid(byId.size === entities.length)
   const books = entities.filter((entity) => entity.type === 'book')
@@ -75,7 +111,7 @@ export async function decodeBookArchive(file: Blob): Promise<BookArchiveData> {
     if (['act', 'chapter', 'scene', 'note', 'codexEntry', 'summary', 'chat'].includes(entity.type)) valid(typeof entity.title === 'string')
     if (['note', 'codexEntry', 'summary', 'chatMessage'].includes(entity.type)) valid(typeof entity.content === 'string')
     if (entity.type === 'codexEntry') { valid(typeof entity.category === 'string'); if (entity.checkpoints !== undefined) { valid(Array.isArray(entity.checkpoints) && entity.checkpoints.length <= 500); const seen = new Set(); for (const point of entity.checkpoints) { valid(point && typeof point.id === 'string' && !seen.has(point.id) && typeof point.label === 'string' && typeof point.anchorBookId === 'string' && typeof point.sceneId === 'string' && typeof point.content === 'string' && Number.isFinite(point.revision)); seen.add(point.id) } } }
-    if (entity.type === 'settings') valid(['ai', 'context-book'].includes(String(entity.settingsType)) && entity.value && typeof entity.value === 'object')
+    if (entity.type === 'settings') valid(['ai', 'context-book', 'profiles-book'].includes(String(entity.settingsType)) && entity.value && typeof entity.value === 'object')
     valid(entity.bookId === book.id && typeof entity.parentId === 'string' && byId.has(entity.parentId))
     const visited = new Set([entity.id])
     let parent = byId.get(entity.parentId)
@@ -149,12 +185,14 @@ export async function decodeBookArchive(file: Blob): Promise<BookArchiveData> {
   valid(offset === file.size)
   for (const entity of entities) if (entity.primaryImageId) valid(illustrations.some((image) => image.id === entity.primaryImageId && image.entryId === entity.id))
   for (const entity of entities) if (entity.type === 'book' && entity.authorPlanning) validateAuthorPlanning(entity.authorPlanning as AuthorPlanning, entity.id, entities, entity.authorPlanning as AuthorPlanning)
-  return { entities, snapshots: manifest.snapshots, dependencies: manifest.dependencies, illustrations, galleryImages, imageJobs }
+  return { entities, settingsProfiles, snapshots: manifest.snapshots, dependencies: manifest.dependencies, illustrations, galleryImages, imageJobs }
 }
 
 /** Import as a new book; preserve text verbatim while remapping structural references. */
 export function copyBookArchive(data: BookArchiveData, newId = () => crypto.randomUUID()): { data: BookArchiveData; bookId: string } {
   const ids = new Map<string, string>()
+  const settingsProfiles = portableProfiles(data.entities.map(entity => ({ ...entity })), data.settingsProfiles)
+  for (const profile of settingsProfiles ?? []) ids.set(profile.id, `profile-import-${newId()}`)
   const sourceBook = data.entities.find(entity => entity.type === 'book')!
   const sourceSeries = data.entities.find(entity => entity.type === 'series' && entity.id === sourceBook.seriesId)
   const importedTypes = sourceSeries ? [...storedLoreTypes(sourceSeries), ...storedLoreTypes(sourceBook).filter(type => !type.builtin)] : storedLoreTypes(sourceBook)
@@ -193,6 +231,7 @@ export function copyBookArchive(data: BookArchiveData, newId = () => crypto.rand
   }
   const entities = data.entities.map((entity) => {
     const copy = remap(entity) as ArcEntity
+    if (copy.type === 'settings' && copy.settingsType === 'profiles-book') copy.value = Object.fromEntries(BOOK_PROFILE_KINDS.map(kind => [kind, ids.get((entity.value as BookProfileSelections)[kind])]))
     if (copy.type === 'codexEntry') { delete copy.timelineSummaries; if (Array.isArray(copy.checkpoints)) copy.checkpoints = copy.checkpoints.map(point => ({ ...point, sceneId: point.sceneId || 'missing-scene', anchorBookId: point.anchorBookId || 'missing-book' })) }
     if (copy.type === 'chatMessage') { delete copy.continuation; delete copy.continuedAt }
     // Old chat proposals cannot safely apply to a newly imported book.
@@ -206,6 +245,7 @@ export function copyBookArchive(data: BookArchiveData, newId = () => crypto.rand
   book.updatedAt = Date.now()
   return { bookId: book.id, data: {
     entities,
+    settingsProfiles: settingsProfiles?.map(profile => remap(profile)),
     snapshots: data.snapshots.map((row) => ({ ...remap(row), id: `snapshot-${newId()}` })),
     dependencies: data.dependencies.map((row) => ({ ...remap(row), id: `dependency-${newId()}` })),
     illustrations: data.illustrations.map((row) => remap(row)),

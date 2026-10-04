@@ -1,33 +1,39 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import { KeyedAsyncQueue } from '../src/shared/utils/keyed-async-queue.ts'
 
 const appSource = readFileSync(new URL('../src/app/App.tsx', import.meta.url), 'utf8')
+const profilesSource = readFileSync(new URL('../src/features/settings/SettingsProfilesPanel.tsx', import.meta.url), 'utf8')
 
 function block(startText, endText) {
-  const start = appSource.indexOf(startText)
-  const end = appSource.indexOf(endText, start)
+  const start = profilesSource.indexOf(startText)
+  const end = profilesSource.indexOf(endText, start)
   assert.ok(start >= 0 && end > start, `${startText} block exists`)
-  return appSource.slice(start, end)
+  return profilesSource.slice(start, end)
 }
 
-test('AI autosaves and explicit reset share the same per-scope FIFO queue', () => {
-  assert.match(appSource, /const aiSaveQueueRef = useRef\(new KeyedAsyncQueue\(\)\)/)
-  const persist = block('  function persistAiSettings(', '\n  function scheduleAiSettingsSave')
-  const reset = block('  async function resetFromDefaults()', '\n  async function saveContextDefaults')
-  assert.match(persist, /aiSaveQueueRef\.current\.run\(scope/)
-  assert.match(reset, /aiSaveQueueRef\.current\.run\(scope/)
+test('profile writes are explicit and serialized; old AI autosave/reset cannot race a profile edit', () => {
+  assert.doesNotMatch(appSource, /scheduleAiSettingsSave|resetFromDefaults|copyDefaultAiSettingsToBook|saveBookAiSettings/)
+  const run = block('  async function run(', '\n  function notifySaved')
+  assert.match(run, /if \(busyRef\.current\) return/)
+  assert.ok(run.indexOf('busyRef.current = true') < run.indexOf('await action()'))
+  assert.match(run, /finally \{ busyRef\.current = false; setBusy\(false\)/)
+  const save = block('  async function save()', '\n  function discard')
+  assert.match(save, /await run\(async \(\) =>/)
+  assert.match(save, /await saveSettingsProfile\(clean\)/)
+  assert.doesNotMatch(save, /setTimeout|setInterval/)
 })
 
-test('reset cancels pending debounce and reserves its revision before entering the queue', () => {
-  const reset = block('  async function resetFromDefaults()', '\n  async function saveContextDefaults')
-  const clearTimer = reset.indexOf('window.clearTimeout(aiSaveTimerRef.current)')
-  const reserveVersion = reset.indexOf('const version = ++aiSaveVersionRef.current')
-  const optimisticDefaults = reset.indexOf('latestAiSettingsRef.current = defaults')
-  const enqueue = reset.indexOf('aiSaveQueueRef.current.run(scope')
-  assert.ok(clearTimer >= 0 && reserveVersion > clearTimer, 'pending debounce is cancelled before Reset reserves a revision')
-  assert.ok(optimisticDefaults > reserveVersion && enqueue > optimisticDefaults, 'Reset becomes the local latest revision before its durable write queues')
+test('Discard restores the saved profile and does not reserve an optimistic durable write', () => {
+  const discard = block('  function discard()', '\n  function create')
+  assert.match(discard, /if \(busyRef\.current\) return false/)
+  assert.ok(discard.indexOf('loadSettingsProfiles()') < discard.indexOf('setDraft(savedProfile)'))
+  assert.match(discard, /setBaseline\(JSON\.stringify\(savedProfile\)\)/)
+  assert.match(discard, /catch \(failure\) \{ reportError\(failure\); return false/)
+  assert.doesNotMatch(discard, /saveSettingsProfile|saveAiSettings|setDefaultSettingsProfile/)
 })
 
 test('older in-flight autosave cannot overwrite a later queued reset', async () => {

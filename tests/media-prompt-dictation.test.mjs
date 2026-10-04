@@ -1,3 +1,5 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test, { after } from 'node:test'
 import { transpileSourceTree } from './transpile-source-tree.mjs'
 import assert from 'node:assert/strict'
@@ -42,6 +44,7 @@ export function cancelSttSession() { cancels++; target.onCancel(); emit('cancell
 const moduleAt = name => import(pathToFileURL(`${directory}/${name}.mjs`))
 const p = await moduleAt('data/persistence')
 const ai = await moduleAt('shared/ai/ai-settings')
+const profiles = await moduleAt('features/settings/settings-profiles')
 const stt = await moduleAt('features/speech/stt-service')
 const { default: MediaPromptEditor } = await moduleAt('features/images/MediaPromptEditor')
 after(async () => { (await p.database()).close(); dom.window.close(); rmSync(directory, { recursive: true, force: true }) })
@@ -63,11 +66,23 @@ function settings(model) {
   value.speech.transcriptionModel = model
   return value
 }
+async function selectSttProfile(model, bookId) {
+  const profile = profiles.createSettingsProfile('stt', `Dictation ${model}`)
+  profile.settings = settings(model)
+  profiles.saveSettingsProfile(profile)
+  if (bookId) {
+    const selected = await p.getBookProfileSelections(bookId)
+    await p.saveBookProfileSelections(bookId, { ...selected, stt: profile.id })
+  } else profiles.setDefaultSettingsProfile('stt', profile.id)
+}
 
-test('media popup dictation uses book Speech settings, replaces the selection and applies only on Apply', async () => {
-  ai.saveAiSettings(settings('openai:global-model'))
-  const { book } = await p.createBook(settings('openai:book-model'), 'Dictation book')
+test('media popup dictation uses the selected book STT profile, replaces the selection and applies only on Apply', async (t) => {
+  ai.saveAiSettings(settings('openai:ambient-model'))
+  await selectSttProfile('openai:global-model')
+  const { book } = await p.createBook(ai.initialAiSettings, 'Dictation book')
+  await selectSttProfile('openai:book-model', book.id)
   const root = createRoot(document.getElementById('root'))
+  t.after(async () => { await act(async () => root.unmount()) })
   try {
     await act(async () => root.render(h(Harness, { bookId: book.id })))
     await click('Expand Original media prompt')
@@ -96,14 +111,18 @@ test('media popup dictation uses book Speech settings, replaces the selection an
   } finally { await act(async () => root.unmount()) }
 })
 
-test('global media dictation cancels provisional text and closes or unmounts without a live target', async () => {
-  ai.saveAiSettings(settings('openai:global-model'))
+test('global media dictation cancels provisional text and closes or unmounts without a live target', async (t) => {
+  ai.saveAiSettings(settings('openai:ambient-model'))
+  await selectSttProfile('openai:global-model')
   const root = createRoot(document.getElementById('root'))
+  t.after(async () => { await act(async () => root.unmount()) })
   let mounted = true
   try {
     await act(async () => root.render(h(Harness)))
     await click('Expand Original media prompt')
+    const beforeStarts = stt.starts.length
     await click('Dictation')
+    await settle(() => stt.starts.length > beforeStarts)
     assert.equal(stt.starts.at(-1).settings.transcriptionModel, 'openai:global-model')
     await act(async () => stt.provisional('at night'))
     await click('Cancel dictation')
@@ -125,13 +144,16 @@ test('global media dictation cancels provisional text and closes or unmounts wit
   } finally { if (mounted) await act(async () => root.unmount()) }
 })
 
-test('missing Speech configuration shows an error inside the popup and keeps the prompt', async () => {
-  ai.saveAiSettings(settings('not-configured'))
+test('missing Speech configuration shows an error inside the popup and keeps the prompt', async (t) => {
+  ai.saveAiSettings(settings('openai:ambient-model'))
+  await selectSttProfile('not-configured')
   const root = createRoot(document.getElementById('root'))
+  t.after(async () => { await act(async () => root.unmount()) })
   try {
     await act(async () => root.render(h(Harness)))
     await click('Expand Original media prompt')
     await click('Dictation')
+    await settle(() => Boolean(document.querySelector('[role="dialog"] [role="alert"]')))
     assert.match(document.querySelector('[role="dialog"] [role="alert"]').textContent, /Choose a transcription model/)
     assert.equal(expanded().value, 'A red harbor')
     assert.equal(findButton('Apply').disabled, false)

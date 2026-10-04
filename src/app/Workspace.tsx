@@ -15,7 +15,12 @@ import SelectionTools from '../features/editor/SelectionTools'
 import QuickRewriteDialog from '../features/writing/QuickRewriteDialog'
 import type { QuickTool, QuickToolCapture } from '../features/writing/quick-tools'
 import type { EditorSelectionInfo } from '../features/editor/MarkdownEditor'
-import { loadUiSettings, UI_SETTINGS_EVENT } from '../features/settings/ui-settings'
+import { getActiveUiSettings, setActiveUiSettings, UI_SETTINGS_EVENT } from '../features/settings/ui-settings'
+import { SETTINGS_PROFILES_EVENT, defaultBookProfileSelections, resolveProfileSettings, resolveProfileUiSettings } from '../features/settings/settings-profiles'
+import { loadLastBookLocation, rememberLastBookLocation, type LastBookLocation } from './last-book'
+import { getChat } from '../features/chat/chat-service'
+import { loadBookImageSettings } from '../features/images/book-image-settings'
+import { createImageWorkspaceState } from '../features/images/ImageWorkspace'
 import { sceneBeats, prepareAutomaticBeat, beatPassage, bindBeatPassage, passageMarkers, passageMarker } from '../features/writing/scene-beats'
 import { generateSceneBeat } from '../features/writing/scene-beat-generation'
 import ProseRewriteDialog from '../features/writing/ProseRewriteDialog'
@@ -131,6 +136,7 @@ import {
   ensureBookAiSettings,
   getEntity,
   getBookAiSettings,
+  getBookProfileSelections,
   getBookContextSettings,
   getGenerationContextProfile,
   getOrCreateSummary,
@@ -249,7 +255,9 @@ Then the voice on the other side whispered, _Mara Vale_, and every compass in he
 export default function Workspace() {
   const [screen, setScreen] = useState<Screen>('home')
   const [uiKitOpen, setUiKitOpen] = useState(false)
-  const [settingsInitialTab, setSettingsInitialTab] = useState<'ai' | 'images' | 'sync'>('ai')
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'ai' | 'profiles' | 'images' | 'sync'>('ai')
+    const [settingsInitialProfileId, setSettingsInitialProfileId] = useState<string>()
+    const [lastBookLocation, setLastBookLocation] = useState<LastBookLocation | undefined>(loadLastBookLocation)
   useEffect(() => startImageQueue(), [])
   const [returnScreen, setReturnScreen] = useState<Screen>('home')
   const [imageReturnScreen, setImageReturnScreen] = useState<ContentScreen>('home')
@@ -274,13 +282,13 @@ export default function Workspace() {
   const [blockEditRequest, setBlockEditRequest] = useState<BlockEditRequest | null>(null)
   const [selectedProse, setSelectedProse] = useState<{ documentId: string; selection: EditorSelectionInfo } | null>(null)
   const [quickTool, setQuickTool] = useState<{ tool: QuickTool; capture: QuickToolCapture } | null>(null)
-  const [showBeats, setShowBeats] = useState(() => loadUiSettings().sceneBeats !== false)
-  const [highlightDialogue, setHighlightDialogue] = useState(() => loadUiSettings().highlightDialogue === true)
+  const [showBeats, setShowBeats] = useState(() => getActiveUiSettings().sceneBeats !== false)
+  const [highlightDialogue, setHighlightDialogue] = useState(() => getActiveUiSettings().highlightDialogue === true)
   const [characterSetupEntry, setCharacterSetupEntry] = useState<string | null>(null)
   const [timelineView, setTimelineView] = useState<{ entryId: string; nonBaseline: boolean }>()
   const [imageInsertRequest, setImageInsertRequest] = useState<string | null>(null)
   const [beatRewrite, setBeatRewrite] = useState<{ documentId: string; snapshot: EditorSelectionSnapshot; instruction: string } | null>(null)
-  useEffect(() => { const sync = () => { const settings = loadUiSettings(); setShowBeats(settings.sceneBeats !== false); setHighlightDialogue(settings.highlightDialogue === true) }; window.addEventListener(UI_SETTINGS_EVENT, sync); window.addEventListener('storage', sync); return () => { window.removeEventListener(UI_SETTINGS_EVENT, sync); window.removeEventListener('storage', sync) } }, [])
+  useEffect(() => { const sync = () => { const settings = getActiveUiSettings(); setShowBeats(settings.sceneBeats !== false); setHighlightDialogue(settings.highlightDialogue === true) }; window.addEventListener(UI_SETTINGS_EVENT, sync); return () => window.removeEventListener(UI_SETTINGS_EVENT, sync) }, [])
   const [toast, setToast] = useState<ToastMessage | null>(null)
   const [lastGeneratedPassage, setLastGeneratedPassage] = useState('')
   const [sttState, setSttState] = useState<SttState>(() => getSttState())
@@ -335,6 +343,43 @@ export default function Workspace() {
   currentBookIdRef.current = currentBook?.id ?? null
   screenRef.current = screen
   const codexMentionIndex = useMemo(() => buildCodexMentionIndex(codexEntries), [codexEntries])
+  const lastBook = bookList.find(book => book.id === lastBookLocation?.bookId)
+
+  useEffect(() => {
+    if (!currentBook || (screen !== 'editor' && screen !== 'chat')) return
+    if (screen === 'chat' && !activeChatId) return
+    const location: LastBookLocation = { bookId: currentBook.id, screen, ...(activeDocument ? { documentId: activeDocument.id } : {}), ...(screen === 'chat' ? { chatId: activeChatId } : {}) }
+    rememberLastBookLocation(location)
+    setLastBookLocation(previous => JSON.stringify(previous) === JSON.stringify(location) ? previous : location)
+  }, [currentBook?.id, screen, activeDocument?.id, activeChatId])
+
+  useEffect(() => {
+    if (libraryState === 'ready' && lastBookLocation && !lastBook) {
+      rememberLastBookLocation()
+      setLastBookLocation(undefined)
+    }
+  }, [libraryState, lastBook, lastBookLocation])
+
+  useEffect(() => {
+    // Settings controls their own book/global surface, including inline Edit transitions.
+    if (screen === 'settings') return
+    let cancelled = false
+    let revision = 0
+    const refresh = async () => {
+      const version = ++revision
+      try {
+        const bookId = !uiKitOpen && screen !== 'home' && !(screen === 'images' && imageReturnScreen === 'home') ? currentBook?.id : undefined
+        const selections = bookId ? await getBookProfileSelections(bookId) : undefined
+        if (!cancelled && version === revision) setActiveUiSettings(resolveProfileUiSettings(selections))
+      } catch (error) {
+        if (!cancelled && version === revision) showToast(error instanceof Error ? error.message : 'The selected UI profile could not be applied.')
+      }
+    }
+    void refresh()
+    window.addEventListener(SETTINGS_PROFILES_EVENT, refresh)
+    window.addEventListener('storage', refresh)
+    return () => { cancelled = true; window.removeEventListener(SETTINGS_PROFILES_EVENT, refresh); window.removeEventListener('storage', refresh) }
+  }, [screen, currentBook?.id, imageReturnScreen, uiKitOpen])
 
   useEffect(() => {
     const bookId = currentBook?.id
@@ -366,8 +411,14 @@ export default function Workspace() {
   }, [activeDocument?.id])
 
   useEffect(() => {
-    const settings = loadAiSettings()
-    setAiReady(textAiIsConfigured(settings))
+    const refresh = () => {
+      try { setAiReady(textAiIsConfigured(resolveProfileSettings(defaultBookProfileSelections()))) }
+      catch { setAiReady(false) }
+    }
+    refresh()
+    window.addEventListener(SETTINGS_PROFILES_EVENT, refresh)
+    window.addEventListener('storage', refresh)
+    return () => { window.removeEventListener(SETTINGS_PROFILES_EVENT, refresh); window.removeEventListener('storage', refresh) }
   }, [])
 
   useEffect(() => subscribeSttState(setSttState), [])
@@ -1112,10 +1163,18 @@ export default function Workspace() {
       showToast('Stop generation before opening Images.')
       return
     }
+    const expectedBookId = from === 'home' ? undefined : currentBookIdRef.current ?? undefined
+    let emptyDraft: ReturnType<typeof createImageWorkspaceState> | undefined
+    if (!imageWorkspaceState.draft.prompt.trim() && !imageWorkspaceState.draft.sources?.length) {
+      try { emptyDraft = createImageWorkspaceState(await loadBookImageSettings(expectedBookId)) }
+      catch (error) { showToast(error instanceof Error ? error.message : 'Media profiles could not be loaded.'); return }
+    }
+    if (screenRef.current !== from || (from !== 'home' && currentBookIdRef.current !== expectedBookId)) return
     const opened = await navigateAfterRequiredSave(
       from === 'editor' && changedSinceSnapshotRef.current,
       () => flushDocument('navigation', true),
       () => {
+        if (emptyDraft) setImageWorkspaceState({ ...imageWorkspaceState, draft: emptyDraft.draft })
         setImageReturnScreen(from)
         setScreen('images')
         setRightOpen(false)
@@ -1124,19 +1183,67 @@ export default function Workspace() {
     if (!opened) showToast('Could not save the current document. Images was not opened because its book context could be stale.')
   }
 
-  function openSettings(from: Screen, tab: 'ai' | 'images' | 'sync' = 'ai') {
+  async function openSettings(from: Screen, tab?: 'ai' | 'profiles' | 'images' | 'sync', mediaKind?: 'image' | 'video') {
     if (from === 'editor' && !canUnmountEditor(Boolean(generationAbortRef.current))) {
       showToast('Stop generation before opening Settings.')
       return
     }
+    const expectedBookId = currentBookIdRef.current
     settingsGenerationContextRef.current = from === 'editor' && (activeDocument?.type === 'scene' || activeDocument?.type === 'codexEntry')
       ? editorRef.current?.captureGenerationContext() ?? { sceneText: storyRef.current, insertionPosition: storyRef.current.length }
       : null
-    if (from === 'editor' && changedSinceSnapshotRef.current) void flushDocument('navigation', true)
-    setSettingsInitialTab(tab)
-    setReturnScreen(from)
-    setScreen('settings')
-    setRightOpen(false)
+    let profileId: string | undefined
+    if (mediaKind) {
+      try {
+        const selections = from === 'images' && imageReturnScreen !== 'home' && expectedBookId
+          ? await getBookProfileSelections(expectedBookId) : defaultBookProfileSelections()
+        profileId = selections[mediaKind]
+      } catch { /* The global Settings error/retry surface remains accessible. */ }
+    }
+    if (screenRef.current !== from || currentBookIdRef.current !== expectedBookId) return
+    const opened = await navigateAfterRequiredSave(
+      from === 'editor' && changedSinceSnapshotRef.current,
+      () => flushDocument('navigation', true),
+      () => {
+        setSettingsInitialTab(tab ?? (from === 'home' ? 'ai' : 'profiles'))
+        setSettingsInitialProfileId(profileId)
+        setReturnScreen(from)
+        setScreen('settings')
+        setRightOpen(false)
+      },
+    )
+    if (!opened) showToast('Could not save the current document. Settings was not opened.')
+  }
+
+  async function returnToLastBook() {
+    const location = lastBookLocation
+    if (!location) return
+    try {
+      const book = await getEntity<BookEntity>(location.bookId)
+      if (!book || book.type !== 'book') {
+        rememberLastBookLocation(); setLastBookLocation(undefined); setScreen('home')
+        showToast('The last book is no longer available.')
+        return
+      }
+      if (currentBookIdRef.current !== location.bookId) {
+        await openBook(location.bookId, location.documentId)
+        if (currentBookIdRef.current !== location.bookId) return
+      }
+      if (location.screen === 'chat' && location.chatId) {
+        const chat = await getChat(location.chatId)
+        if (currentBookIdRef.current !== location.bookId) return
+        if (chat?.bookId === location.bookId) { setActiveChatId(chat.id); setScreen('chat'); return }
+      }
+      if (location.documentId) {
+        const document = await getEntity<EditableEntity>(location.documentId)
+        if (currentBookIdRef.current !== location.bookId) return
+        if (document && document.bookId === location.bookId && ['scene', 'note', 'codexEntry', 'summary'].includes(document.type)) {
+          await loadDocument(document.id)
+          return
+        }
+      }
+      setScreen('editor')
+    } catch (error) { showToast(error instanceof Error ? error.message : 'The last book could not be opened.') }
   }
 
   async function openChat(chatId: string) {
@@ -1444,7 +1551,7 @@ export default function Workspace() {
     }
 
     const editor = editorRef.current
-    if (!isCodex && mode === 'generate' && loadUiSettings().saveArcAsBeat !== false && arcPrompt.trim() && editor) {
+    if (!isCodex && mode === 'generate' && getActiveUiSettings().saveArcAsBeat !== false && arcPrompt.trim() && editor) {
       const snapshot = editor.captureSelection()
       if (!snapshot) return
       try {
@@ -1507,7 +1614,8 @@ export default function Workspace() {
         const modelContextLength = (isCodex ? settings.codexModelContextLength || settings.mainModelContextLength : settings.mainModelContextLength)
           ?? await fetchTextProviderModelContextLength({ provider: settings.provider, apiKey: settings.apiKey.trim(), baseUrl: settings.baseUrl, model: selectedModel }).catch(() => undefined)
         if (modelContextLength) {
-          settings = await saveBookAiSettings(currentBook.id, isCodex && settings.codexModel.trim()
+          // The metadata writer resolves live profiles; keep this operation's captured settings.
+          await saveBookAiSettings(currentBook.id, isCodex && settings.codexModel.trim()
             ? { ...settings, codexModelContextLength: modelContextLength }
             : { ...settings, mainModelContextLength: modelContextLength })
         }
@@ -1810,7 +1918,7 @@ export default function Workspace() {
 
   async function currentSpeechSettings() {
     const defaults = loadAiSettings()
-    return currentBook ? (await getBookAiSettings(currentBook.id, defaults.favorites)).speech : defaults.speech
+    return currentBook ? (await getBookAiSettings(currentBook.id, defaults.favorites)).speech : resolveProfileSettings(defaultBookProfileSelections()).speech
   }
 
   async function dictateEditor() {
@@ -1922,6 +2030,9 @@ export default function Workspace() {
   const autotitleOverlay = autotitle && <AutotitlePanel state={autotitle} onAccept={() => { void acceptAutotitle() }} onRegenerate={() => { void regenerateAutotitle() }} onStop={stopAutotitle} onCancel={() => { autotitleAbortRef.current?.abort(); setAutotitle(null) }} />
 
   if (screen === 'settings') return <AiSettingsScreen initialTab={settingsInitialTab}
+    initialProfileId={settingsInitialProfileId}
+    onLastBook={lastBook ? () => { void returnToLastBook() } : undefined}
+    lastBookTitle={lastBook?.title}
     book={returnScreen === 'home' || (returnScreen === 'images' && imageReturnScreen === 'home') || !currentBook ? undefined : { id: currentBook.id, title: currentBook.title, contextType, currentDocumentId: activeDocument?.id, currentDocumentText: settingsGenerationContextRef.current?.sceneText ?? storyMarkdown, insertionPosition: settingsGenerationContextRef.current?.insertionPosition, promptValues: toBookPromptValues(currentBook, seriesList), chatId: contextType === 'chat' ? activeChatId || undefined : undefined, ...(activeDocument?.type === 'summary' ? { currentSummary: { id: activeDocument.id, sourceEntityId: activeDocument.sourceEntityId, sourceType: activeDocument.sourceType, content: activeDocument.content } } : {}) }}
     onHome={() => setScreen('home')}
     onBack={() => setScreen(returnScreen)}
@@ -1941,7 +2052,7 @@ export default function Workspace() {
       state={imageWorkspaceState}
       onStateChange={setImageWorkspaceState}
       onBack={() => setScreen(imageReturnScreen)}
-      onSettings={() => openSettings('images', 'images')}
+      onSettings={(kind = 'image') => { void openSettings('images', 'images', kind) }}
     />
   }
 

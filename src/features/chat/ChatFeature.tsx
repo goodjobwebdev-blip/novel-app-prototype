@@ -19,6 +19,10 @@ import { groupChatAnswers, answerProse } from './chat-answer-groups'
 import { chatListPageForIndex, paginateChatList } from './chat-list-pagination'
 import Composer from './Composer'
 import { executeImageProposal } from '../images/image-tools'
+import { loadBookImageSettings } from '../images/book-image-settings'
+import { imageModelInstructions } from '../images/image-settings'
+import type { ImageSettings } from '../images/image-generation-types'
+import { SETTINGS_PROFILES_EVENT } from '../settings/settings-profiles'
 import ImageProposalCard from '../images/ImageProposalCard'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
@@ -205,6 +209,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   const [promptPreviewTypes, setPromptPreviewTypes] = useState<LoreType[]>([])
   const [promptPreviewSkills, setPromptPreviewSkills] = useState<CapturedChatSkill[]>([])
   const [promptPreviewContext, setPromptPreviewContext] = useState<Awaited<ReturnType<typeof buildContextValues>> | null>(null)
+  const [promptPreviewMedia, setPromptPreviewMedia] = useState<{ bookId: string; chatId: string; settings: ImageSettings } | null>(null)
   const [lastNormalizedRequest, setLastNormalizedRequest] = useState<NormalizedAssembledRequest | null>(null)
   const [lastFinalizedRequest, setLastFinalizedRequest] = useState<FinalizedChatProviderRequest | null>(null)
   const [lastCacheUsage, setLastCacheUsage] = useState<ChatCompletionUsage | null>(null)
@@ -348,16 +353,42 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   }, [])
 
   useEffect(() => {
-    let cancelled = false
-    if (!promptOpen || !chat) {
+    let cancelled = false, revision = 0
+    setPromptPreviewContext(null)
+    setPromptPreviewMedia(null)
+    if (!promptOpen || !chat || !isCurrentChat(chat)) return () => { cancelled = true }
+    const reload = () => {
+      const captured = ++revision
       setPromptPreviewContext(null)
-      return () => { cancelled = true }
+      setPromptPreviewMedia(null)
+      setPromptPreviewError('')
+      void Promise.all([
+        loadBookImageSettings(chat.bookId),
+        (async () => {
+          if (chat.character) {
+            const frame = await captureCharacterFrame(chat, messages)
+            return { context: frame.context, skills: [] as CapturedChatSkill[], loreTypes: [] as LoreType[], frame }
+          }
+          return { ...(await prepareChatSkillContext(chat, currentSceneId || undefined)), frame: undefined }
+        })(),
+      ]).then(([mediaSettings, { context, skills, loreTypes, frame }]) => {
+        if (cancelled || captured !== revision || !isCurrentChat(chat)) return
+        setPromptPreviewContext(context)
+        setPromptPreviewMedia({ bookId: chat.bookId, chatId: chat.id, settings: mediaSettings })
+        setPromptPreviewSkills(skills)
+        setPromptPreviewTypes(loreTypes)
+        setPreviewCharacter(frame)
+      }).catch(error => {
+        if (cancelled || captured !== revision || !isCurrentChat(chat)) return
+        setPreviewCharacter(undefined)
+        setPromptPreviewError(error instanceof Error ? error.message : 'Chat context and media profiles could not be loaded.')
+      })
     }
-    setPromptPreviewError('')
-    ;(async () => { if (chat.character) { const frame = await captureCharacterFrame(chat, messages); return { context: frame.context, skills: [] as CapturedChatSkill[], loreTypes: [] as LoreType[], frame } } return { ...(await prepareChatSkillContext(chat, currentSceneId || undefined)), frame: undefined } })().then(({ context, skills, loreTypes, frame }) => { if (!cancelled && isCurrentChat(chat)) { setPromptPreviewContext(context); setPromptPreviewSkills(skills); setPromptPreviewTypes(loreTypes); setPreviewCharacter(frame) } })
-      .catch(error => { if (!cancelled) { setPromptPreviewContext(null); setPreviewCharacter(undefined); setPromptPreviewError(error.message) } })
-    return () => { cancelled = true }
-  }, [promptOpen, chat?.id, chat?.updatedAt, currentSceneId])
+    reload()
+    const events = [SETTINGS_PROFILES_EVENT, 'storage']
+    events.forEach(event => window.addEventListener(event, reload))
+    return () => { cancelled = true; events.forEach(event => window.removeEventListener(event, reload)) }
+  }, [promptOpen, bookId, chatId, chat?.id, chat?.updatedAt, currentSceneId])
 
   async function reloadMessages() {
     if (!chat || !isCurrentChat(chat)) return []
@@ -495,6 +526,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
 
   type PreparedAssistantGeneration = {
     settings: Awaited<ReturnType<typeof getChatBookAiSettings>>
+    mediaSettings: ImageSettings
     context: Awaited<ReturnType<typeof buildContextValues>>
     skills: CapturedChatSkill[]
     character?: CharacterFrame
@@ -560,6 +592,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       composition: activeChat.promptComposition,
       book: bookPromptValues,
       context: prepared.context,
+      mediaSettings: prepared.mediaSettings,
       skills: prepared.skills,
       loreTypes: prepared.loreTypes,
       history,
@@ -576,11 +609,12 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   ): Promise<PreparedAssistantGeneration> {
     assertGenerationOwnerCurrent(owner, activeChat)
     let settings: Awaited<ReturnType<typeof getChatBookAiSettings>>
+    let mediaSettings: ImageSettings
     try {
-      settings = await getChatBookAiSettings(activeChat.bookId)
-    } catch {
+      ;[settings, mediaSettings] = await Promise.all([getChatBookAiSettings(activeChat.bookId), loadBookImageSettings(activeChat.bookId)])
+    } catch (error) {
       assertGenerationOwnerCurrent(owner, activeChat)
-      throw new Error('This book’s AI settings could not be loaded.')
+      throw new Error(error instanceof Error ? error.message : 'This book’s AI and media settings could not be loaded.')
     }
     assertGenerationOwnerCurrent(owner, activeChat)
     if (settings.provider !== 'fake' && !settings.apiKey.trim()) throw new Error('Add an API key in Book AI settings before chatting.')
@@ -605,7 +639,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     }
     assertGenerationOwnerCurrent(owner, activeChat)
 
-    const prepared = { settings, context, skills, loreTypes, character }
+    const prepared = { settings, mediaSettings, context, skills, loreTypes, character }
     const normalizedRequest = requestSnapshot ?? buildNormalizedRequest(activeChat, history, prepared)
     const finalizedRequest = finalizeChatProviderRequest(normalizedRequest)
     const diagnostics = generationContextDiagnostics(activeChat.model, activeChat.modelContextLength, activeChat.effectiveContextLimit, finalizedRequest.diagnosticText)
@@ -764,6 +798,11 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
         runtimeParts.push(normalizeRuntimeMessagePart({ id: `chat-tool-${responseId}-${call.id}`, sourceKind: 'app-managed', ownership: 'app-managed', name: call.function.name, message: { role: 'tool', tool_call_id: call.id, content } }))
       }
       if (continuation) {
+        // Capture current profiles for this new operation without rewriting the cached prefix.
+        if (continuation.baseRequest) runtimeParts.push(normalizeRuntimeMessagePart({
+          id: `chat-media-${responseId}-${roundOffset + 1}`, sourceKind: 'app-managed', ownership: 'app-managed', name: 'Media models for this continuation',
+          message: { role: 'system', content: `For this resumed assistant operation, the following media inventory supersedes earlier media inventories. It does not alter the character knowledge boundary.${imageModelInstructions(prepared.mediaSettings)}` },
+        }))
         const outcomes = history.filter(message => !continuation.baseHistoryIds.includes(message.id)).flatMap(message => (['documentEdits', 'codexCreations', 'outlineActions', 'entityActions', 'imageGenerations'] as const).flatMap(field => (message[field] ?? []).map(item => {
           const { originalDraft: _original, ...outcome } = item as typeof item & { originalDraft?: unknown }
           return { kind: field, ...outcome }
@@ -832,7 +871,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
             if (!enabled) { appendToolResult(call, JSON.stringify({ ok: false, error: 'This tool is unavailable for this request.' })); continue }
             if (call.function.name === 'generate_requested_image') {
               let content: string
-              try { const args = JSON.parse(call.function.arguments || '{}'), user = [...requestHistory].reverse().find(message => message.role === 'user'); if (!user?.id || typeof args.prompt !== 'string') throw new Error('The explicit originating image request is unavailable.'); await ensureSourceHistoryStillCurrent(); const result = await queueRequestedImage({ chat: activeChat, userMessageId: user.id, userText: user.content, responseId, roundNumber, callId: call.id, prompt: args.prompt, boundary: capturedBoundary, signal: controller.signal }); commitVisibleRound((await listChatMessages(sourceBookId, activeChat.id)).find(message => message.id === result.messageId) ?? null, false); content = JSON.stringify({ ok: true, ...result, message: result.reused ? 'This turn already has one image request. No new job was queued.' : 'One image queued; its status and Keep/Discard controls appear in this answer.' }) } catch (error) { content = JSON.stringify({ ok: false, error: (error as Error).message }) }
+              try { const args = JSON.parse(call.function.arguments || '{}'), user = [...requestHistory].reverse().find(message => message.role === 'user'); if (!user?.id || typeof args.prompt !== 'string') throw new Error('The explicit originating image request is unavailable.'); await ensureSourceHistoryStillCurrent(); const result = await queueRequestedImage({ chat: activeChat, userMessageId: user.id, userText: user.content, responseId, roundNumber, callId: call.id, prompt: args.prompt, mediaSettings: prepared.mediaSettings, boundary: capturedBoundary, signal: controller.signal }); commitVisibleRound((await listChatMessages(sourceBookId, activeChat.id)).find(message => message.id === result.messageId) ?? null, false); content = JSON.stringify({ ok: true, ...result, message: result.reused ? 'This turn already has one image request. No new job was queued.' : 'One image queued; its status and Keep/Discard controls appear in this answer.' }) } catch (error) { content = JSON.stringify({ ok: false, error: (error as Error).message }) }
               appendToolResult(call, content); continue
             }
             if (prepared.character && call.function.name !== 'propose_image_generation') { const content = executeCharacterRead(prepared.character, call); appendToolResult(call, content); continue }
@@ -844,7 +883,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
               if (execution.brainstorm) activeRoundExtras.brainstorms = [...(activeRoundExtras.brainstorms ?? []), execution.brainstorm]
               appendToolResult(call, execution.content)
             } else if (call.function.name === 'propose_image_generation') {
-              const execution = executeImageProposal(call)
+              const execution = executeImageProposal(call, prepared.mediaSettings)
               if (execution.imageGeneration) activeRoundExtras.imageGenerations = [...(activeRoundExtras.imageGenerations ?? []), execution.imageGeneration]
               appendToolResult(call, execution.content)
             } else if (chatManagementToolNames.has(call.function.name)) {
@@ -1315,10 +1354,12 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     </article>
   }
 
+  const previewMediaSettings = chat && isCurrentChat(chat) && promptPreviewMedia?.bookId === bookId && promptPreviewMedia.chatId === chatId ? promptPreviewMedia.settings : undefined
+  const previewContext = previewMediaSettings ? promptPreviewContext : null
   const compositionTemplates = [compositionDraft.systemPrompt, ...compositionDraft.predefinedMessages.filter((message) => message.enabled).map((message) => message.template)]
-  const compositionDiagnostics = compositionTemplates.flatMap((template) => promptTemplateDiagnostics(template, 'assistant', promptPreviewContext ? chatRequestValues(chat?.character ? emptyCharacterBook : bookPromptValues, promptPreviewContext, previewCharacter?.instructions) : bookTemplateValues(bookPromptValues)))
-  const draftNormalizedRequest = chat && promptPreviewContext
-    ? assembleChatGenerationRequest({ composition: compositionDraft, book: bookPromptValues, context: promptPreviewContext, skills: promptPreviewSkills, loreTypes: promptPreviewTypes, history: messages, restrictedInstructions: previewCharacter?.instructions, tools: availableChatTools(Boolean(chat.character), messages) })
+  const compositionDiagnostics = compositionTemplates.flatMap((template) => promptTemplateDiagnostics(template, 'assistant', previewContext ? chatRequestValues(chat?.character ? emptyCharacterBook : bookPromptValues, previewContext, previewCharacter?.instructions, previewMediaSettings) : bookTemplateValues(bookPromptValues)))
+  const draftNormalizedRequest = chat && previewContext
+    ? assembleChatGenerationRequest({ composition: compositionDraft, book: bookPromptValues, context: previewContext, mediaSettings: previewMediaSettings, skills: promptPreviewSkills, loreTypes: promptPreviewTypes, history: messages, restrictedInstructions: previewCharacter?.instructions, tools: availableChatTools(Boolean(chat.character), messages) })
     : null
   const previewRequest = promptOpen ? draftNormalizedRequest : lastNormalizedRequest
   const previewFinalizedRequest = previewRequest ? finalizeChatProviderRequest(previewRequest) : null
@@ -1381,7 +1422,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           <PromptPresetControls scope="chat" composition={compositionDraft} arcDefault={defaultChatPromptComposition} onApply={setCompositionDraft} />
           <h3>System prompt</h3>
           <PromptTemplateEditor value={compositionDraft.systemPrompt} diagnostics={promptTemplateDiagnostics(compositionDraft.systemPrompt, 'assistant')} ariaLabel="Chat system prompt template" onChange={(systemPrompt) => setCompositionDraft((current) => ({ ...current, systemPrompt }))} />
-          <ChatPredefinedMessages messages={compositionDraft.predefinedMessages} previewValues={promptPreviewContext ? chatRequestValues(chat?.character ? emptyCharacterBook : bookPromptValues, promptPreviewContext, previewCharacter?.instructions) : undefined} onChange={(predefinedMessages) => setCompositionDraft((current) => ({ ...current, predefinedMessages }))} />
+          <ChatPredefinedMessages messages={compositionDraft.predefinedMessages} previewValues={previewContext ? chatRequestValues(chat?.character ? emptyCharacterBook : bookPromptValues, previewContext, previewCharacter?.instructions, previewMediaSettings) : undefined} onChange={(predefinedMessages) => setCompositionDraft((current) => ({ ...current, predefinedMessages }))} />
           {workspaceWarning && <p className="chat-composition-warning" role="status">{workspaceWarning}</p>}
           <Disclosure className="chat-composition-reference" title="Variables & syntax"><div className="chat-composition-variables">{promptVariables.filter((variable) => variable.scopes.includes('assistant')).map((variable) => <code key={variable.name}>{`{{${variable.name}}}`}</code>)}</div></Disclosure>
           <Disclosure className="chat-request-preview" title="Request preview" open>

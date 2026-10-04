@@ -9,10 +9,12 @@ import ImageGenerationControls, { type ImageDraft } from './ImageGenerationContr
 import ImageJobs, { ImageAssetPreview } from './ImageResults'
 import { useImageQuery, useImageSettings } from './image-hooks'
 import { availableImageCodex, deleteGalleryImage, enqueueImageJob, listGalleryImages, notifyImageStore } from './image-store'
-import { loadImageSettings, resolveImageSpec } from './image-settings'
+import { resolveImageSpec } from './image-settings'
+import { emptyImageSettings } from './book-image-settings'
+import { resolveProfileMediaSettings } from '../settings/settings-profiles'
 import { checkStorageHeadroom, prepareIllustration } from './illustration-image'
 import { getIllustration, removeIllustration, saveIllustration } from '../../data/persistence'
-import { generationTask, type GalleryImage } from './image-generation-types'
+import { generationTask, modelTasks, type GalleryImage, type ImageSettings, type MediaKind } from './image-generation-types'
 import './image-generation.css'
 
 export type ImageWorkspaceTab = 'generate' | 'gallery'
@@ -23,9 +25,13 @@ export type ImageWorkspaceState = {
   gallery: { query: string; scope: ImageGalleryScope; limit: number }
 }
 
-export function createImageWorkspaceState(): ImageWorkspaceState {
-  const settings = loadImageSettings()
-  const favorite = settings.favorites.find((model) => model.alias === settings.defaultAlias) ?? settings.favorites[0]
+export function createImageWorkspaceState(settings?: ImageSettings): ImageWorkspaceState {
+  // A book caller supplies its resolved settings; unscoped workspaces use global profile defaults.
+  if (!settings) {
+    try { settings = resolveProfileMediaSettings() } catch { settings = emptyImageSettings() }
+  }
+  const alias = settings.defaultAliases?.['text-to-image'] ?? settings.defaultAlias
+  const favorite = settings.favorites.find((model) => model.alias === alias && modelTasks(model).includes('text-to-image'))
   return {
     tab: 'generate',
     draft: { prompt: '', alias: favorite?.alias ?? '', size: favorite?.defaultSize ?? '1024x1024', task: 'text-to-image', sources: [] },
@@ -37,11 +43,11 @@ type ImageWorkspaceViewProps = {
   bookId?: string
   state: ImageWorkspaceState
   onStateChange: (state: ImageWorkspaceState) => void
-  onSettings: () => void
+  onSettings?: (mediaKind?: MediaKind) => void
 }
 
 export function ImageGenerateView({ bookId, state, onStateChange, onSettings }: ImageWorkspaceViewProps) {
-  const settings = useImageSettings()
+  const settings = useImageSettings(bookId)
   const [error, setError] = useState('')
   const [status, setStatus] = useState('')
   const [busy, setBusy] = useState(false)
@@ -50,14 +56,14 @@ export function ImageGenerateView({ bookId, state, onStateChange, onSettings }: 
   const validSize = Boolean(favorite?.enabledSizes.includes(state.draft.size) && favorite.sizes.some((size) => size.value === state.draft.size))
   const task = generationTask(state.draft)
   const needsSource = task === 'image-to-image' || task === 'image-to-video'
-  const canGenerate = Boolean(selectedMediaPrompt(state.draft).trim() && favorite && validSize && (!needsSource || state.draft.sources?.length))
+  const canGenerate = Boolean(!settings.loading && !settings.error && selectedMediaPrompt(state.draft).trim() && favorite && modelTasks(favorite).includes(task) && validSize && (!needsSource || state.draft.sources?.length))
   const setDraft = (draft: ImageDraft) => onStateChange({ ...state, draft })
   const generate = async () => {
     setBusy(true)
     setError('')
     setStatus('Queued')
     try {
-      await enqueueImageJob(resolveImageSpec(selectedMediaPrompt(state.draft), state.draft.alias, state.draft.size, undefined, undefined, task, state.draft.sources ?? [], { resolution: state.draft.resolution, duration: state.draft.duration, aspectRatio: state.draft.aspectRatio, fps: state.draft.fps, numFrames: state.draft.numFrames, seed: state.draft.seed, draft: state.draft.draftVideo }), { bookId })
+      await enqueueImageJob(resolveImageSpec(selectedMediaPrompt(state.draft), state.draft.alias, state.draft.size, undefined, settings, task, state.draft.sources ?? [], { resolution: state.draft.resolution, duration: state.draft.duration, aspectRatio: state.draft.aspectRatio, fps: state.draft.fps, numFrames: state.draft.numFrames, seed: state.draft.seed, draft: state.draft.draftVideo }), { bookId })
     } catch (reason) {
       setStatus('')
       setError(reason instanceof Error ? reason.message : 'Could not queue image.')
@@ -68,7 +74,7 @@ export function ImageGenerateView({ bookId, state, onStateChange, onSettings }: 
       <h2 id="image-generate-heading">Create visual media</h2>
       <ImageGenerationControls bookId={bookId} value={state.draft} onChange={setDraft} disabled={busy} sourceAssets={sourceAssets} />
 
-      {!settings.favorites.length && <button type="button" onClick={onSettings}>Set up image models</button>}
+      {(!settings.favorites.length || settings.error) && <button type="button" disabled={!onSettings} onClick={() => onSettings?.(task.endsWith('video') ? 'video' : 'image')}>Set up {task.endsWith('video') ? 'video' : 'image'} models</button>}
       <div className="image-generate-actions">
         <button className="image-primary-action" type="button" disabled={busy || !canGenerate} onClick={() => { void generate() }}>Generate</button>
         <button type="button" disabled={busy || !state.draft.prompt} onClick={() => setDraft({ ...state.draft, prompt: '' })}>Clear prompt</button>
@@ -147,7 +153,7 @@ export type ImageWorkspaceProps = {
   state: ImageWorkspaceState
   onStateChange: (state: ImageWorkspaceState) => void
   onBack: () => void
-  onSettings: () => void
+  onSettings?: (mediaKind?: MediaKind) => void
 }
 
 export default function ImageWorkspace({ bookId, bookTitle, state, onStateChange, onBack, onSettings, storageError }: ImageWorkspaceProps) {
@@ -156,7 +162,7 @@ export default function ImageWorkspace({ bookId, bookTitle, state, onStateChange
     <header className="image-workspace-header">
       <button type="button" onClick={onBack} aria-label="Back"><ArrowLeft aria-hidden="true" /><span>Back</span></button>
       <div><h1 id="page-title">Images</h1>{bookTitle && <p>{bookTitle}</p>}</div>
-      <button type="button" onClick={onSettings} aria-label="Image settings"><Settings aria-hidden="true" /><span>Settings</span></button>
+      <button type="button" disabled={!onSettings} onClick={() => onSettings?.(generationTask(state.draft).endsWith('video') ? 'video' : 'image')} aria-label="Image settings"><Settings aria-hidden="true" /><span>Settings</span></button>
     </header>
     {storageError && <p role="alert">{storageError}</p>}
     <div className="image-tabs-wrap"><Tabs label="Image workspace" value={state.tab} onChange={selectTab} items={[

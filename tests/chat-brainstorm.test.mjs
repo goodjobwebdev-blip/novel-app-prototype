@@ -1,3 +1,5 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { executeBrainstormTool, brainstormSelectionText, updateBrainstormDraft } from '../src/features/chat/chat-brainstorm.ts'

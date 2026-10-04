@@ -1,3 +1,5 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test, { after } from 'node:test'
 import { transpileSourceTree } from './transpile-source-tree.mjs'
 import assert from 'node:assert/strict'
@@ -6,6 +8,7 @@ import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { JSDOM } from 'jsdom'
 import 'fake-indexeddb/auto'
+import { assignBookTestProfiles } from './settings-profile-fixture.mjs'
 
 const dom = new JSDOM('<html><body><div id="root"></div></body></html>', { url: 'https://arc.test/', pretendToBeVisual: true })
 for (const key of ['window', 'document', 'HTMLElement', 'HTMLDialogElement', 'sessionStorage', 'localStorage', 'Event', 'CustomEvent']) globalThis[key] = dom.window[key]
@@ -46,6 +49,7 @@ export async function streamChatCompletion(request, onChunk, signal) {
 `)
 const p = await moduleAt('data/persistence')
 const ai = await moduleAt('shared/ai/ai-settings')
+const profiles = await moduleAt('features/settings/settings-profiles')
 const chatService = await moduleAt('features/chat/chat-service')
 const api = await moduleAt('features/chat/chat-api')
 const { ChatView } = await moduleAt('features/chat/ChatFeature')
@@ -64,7 +68,9 @@ async function send() {
 async function fixture(limit) {
   const settings = ai.copyAiSettings(ai.initialAiSettings)
   settings.provider = 'fake'; settings.mainModel = 'fake/test'; settings.mainModelContextLength = 100000
+  ai.saveAiSettings(settings)
   const { book } = await p.createBook(settings, 'Round test')
+  await assignBookTestProfiles({ persistence: p, ai, profiles }, book.id, settings)
   let chat = await chatService.createChat(book.id)
   chat = await chatService.updateChat(chat.id, { maxModelRounds: limit, modelContextLength: 100000 })
   return { book, chat }
@@ -209,14 +215,18 @@ test('tool rounds remain one stable answer with one toolbar during generation an
   }
 })
 
-test('new chats copy global rounds while saved and legacy chats remain predictable', async () => {
+test('new chats snapshot selected text-role rounds while saved and legacy chats remain predictable', async () => {
   const config = ai.copyAiSettings(ai.initialAiSettings)
   config.chatMaxModelRounds = 3
   ai.saveAiSettings(config)
   const { book } = await p.createBook(config, 'Default limit book')
+  const selections = await assignBookTestProfiles({ persistence: p, ai, profiles }, book.id, config)
+  const selected = profiles.loadSettingsProfiles().profiles.find(profile => profile.id === selections.text)
   const first = await chatService.createChat(book.id)
   assert.equal(first.maxModelRounds, 3)
   config.chatMaxModelRounds = 9; ai.saveAiSettings(config)
+  assert.equal((await chatService.createChat(book.id)).maxModelRounds, 3)
+  profiles.saveSettingsProfile({ ...selected, settings: { ...selected.settings, chatMaxModelRounds: 9 } })
   assert.equal((await chatService.createChat(book.id)).maxModelRounds, 9)
   assert.equal((await chatService.getChat(first.id)).maxModelRounds, 3)
   await p.putEntity({ ...first, maxModelRounds: undefined })

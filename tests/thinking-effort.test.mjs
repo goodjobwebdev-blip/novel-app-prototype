@@ -1,9 +1,12 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
 import { registerHooks } from 'node:module'
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import 'fake-indexeddb/auto'
+import { assignBookTestProfiles } from './settings-profile-fixture.mjs'
 
 const storage = new Map()
 globalThis.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)), removeItem: key => storage.delete(key) }
@@ -16,6 +19,7 @@ registerHooks({ resolve(specifier, context, nextResolve) {
 } })
 const ai = await import('../src/shared/ai/ai-settings.ts')
 const p = await import('../src/data/persistence.ts')
+const profiles = await import('../src/features/settings/settings-profiles.ts')
 const chats = await import('../src/features/chat/chat-service.ts')
 const { streamChatCompletion } = await import('../src/features/chat/chat-api.ts')
 const { streamTextProviderCompletion } = await import('../src/shared/ai/text-provider.ts')
@@ -24,7 +28,7 @@ const { normalizeThinkingEffort } = await import('../src/shared/ai/thinking-effo
 const { switchProviderProfile } = await import('../src/features/settings/provider-profiles.ts')
 after(async () => (await p.database()).close())
 
-test('effort defaults normalize, survive persistence and remain isolated across books and chats', async () => {
+test('effort defaults seed shared profiles; global connection saves do not rewrite roles or existing chat snapshots', async () => {
   for (const value of [undefined, null, '', 'invalid', 3, {}, 'HIGH']) assert.equal(normalizeThinkingEffort(value), 'default')
   const configured = ai.normalizeAiSettings({ ...ai.initialAiSettings, mainModel: 'writer', mainThinkingEffort: 'low', supportThinkingEffort: 'minimal', codexThinkingEffort: 'xhigh', chatThinkingEffort: 'high' })
   ai.saveAiSettings(configured)
@@ -38,6 +42,10 @@ test('effort defaults normalize, survive persistence and remain isolated across 
   ai.saveAiSettings({ ...defaults, chatThinkingEffort: 'low' })
   assert.equal((await chats.createChat(book.id)).thinkingEffort, 'high')
   await p.saveBookAiSettings(book.id, { ...defaults, chatThinkingEffort: 'medium' })
+  assert.equal((await chats.createChat(book.id)).thinkingEffort, 'high')
+  const selections = await p.getBookProfileSelections(book.id)
+  const selected = profiles.loadSettingsProfiles().profiles.find(profile => profile.id === selections.text)
+  profiles.saveSettingsProfile({ ...selected, settings: { ...selected.settings, chatThinkingEffort: 'medium' } })
   assert.equal((await chats.createChat(book.id)).thinkingEffort, 'medium')
   assert.equal((await chats.getChat(chat.id)).thinkingEffort, 'high')
   chat = await chats.updateChat(chat.id, { thinkingEffort: 'low' })
@@ -50,6 +58,7 @@ test('effort defaults normalize, survive persistence and remain isolated across 
 
 test('legacy and malformed chat effort keeps the saved toggle and migrates without changing history', async () => {
   const { book } = await p.createBook(ai.initialAiSettings, 'Legacy effort')
+  await assignBookTestProfiles({ persistence: p, ai, profiles }, book.id, ai.initialAiSettings)
   const chat = await chats.createChat(book.id)
   assert.equal(chat.thinking, false)
   const message = await chats.createChatMessage(chat, 'user', 'Keep this message')

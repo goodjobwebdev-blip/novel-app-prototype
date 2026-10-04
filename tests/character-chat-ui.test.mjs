@@ -1,3 +1,5 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test, { after } from 'node:test'
 import { transpileSourceTree } from './transpile-source-tree.mjs'
 import assert from 'node:assert/strict'
@@ -6,8 +8,10 @@ import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { JSDOM } from 'jsdom'
 import 'fake-indexeddb/auto'
+import { assignBookTestProfiles } from './settings-profile-fixture.mjs'
 
 const dom = new JSDOM('<html><body><div id="root"></div></body></html>', { url: 'https://arc.test/', pretendToBeVisual: true })
+after(() => dom.window.close())
 for (const key of ['window', 'document', 'HTMLElement', 'HTMLDialogElement', 'sessionStorage', 'localStorage', 'Event', 'CustomEvent']) globalThis[key] = dom.window[key]
 dom.window.HTMLElement.prototype.scrollIntoView = function () {}
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
@@ -25,6 +29,7 @@ const React = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { act } = React
 const directory = mkdtempSync(new URL('../node_modules/.arc-generation-ui-test-', import.meta.url))
+after(() => rmSync(directory, { recursive: true, force: true }))
 transpileSourceTree(directory)
 const moduleAt = (name) => import(pathToFileURL(`${directory}/${name}.mjs`))
 writeFileSync(`${directory}/features/chat/chat-api.mjs`, `
@@ -36,7 +41,9 @@ export async function streamChatCompletion(request,onChunk,signal) {
 }
 `)
 const p = await moduleAt('data/persistence')
+after(async () => (await p.database()).close())
 const ai = await moduleAt('shared/ai/ai-settings')
+const profiles = await moduleAt('features/settings/settings-profiles')
 const chatService = await moduleAt('features/chat/chat-service')
 const api = await moduleAt('features/chat/chat-api')
 const { ChatView } = await moduleAt('features/chat/ChatFeature')
@@ -44,7 +51,11 @@ const { default: Settings } = await moduleAt('app/App')
 const character = await moduleAt('features/chat/character-chat')
 const imageSettings = await moduleAt('features/images/image-settings')
 const { characterSpeakerParts } = await moduleAt('features/chat/CharacterMessage')
-after(async () => { (await p.database()).close(); dom.window.close(); rmSync(directory, { recursive: true, force: true }) })
+function createTestRoot(t) {
+  const root = createRoot(document.getElementById('root'))
+  t.after(async () => { await act(async () => root.unmount()) })
+  return root
+}
 const h = React.createElement
 const button = text => [...document.querySelectorAll('button')].find(item => item.textContent.trim() === text)
 async function click(text) { assert.ok(button(text), `Missing ${text}: ${document.body.textContent}`); await act(async () => button(text).click()) }
@@ -58,21 +69,26 @@ async function send() {
 async function fixture(limit) {
   const settings = ai.copyAiSettings(ai.initialAiSettings)
   settings.provider = 'fake'; settings.mainModel = 'fake/test'; settings.mainModelContextLength = 100000
+  ai.saveAiSettings(settings)
   const { book } = await p.createBook(settings, 'Round test')
+  const selections = await assignBookTestProfiles({ persistence: p, ai, profiles }, book.id, settings, ['text', 'image'])
   const chapter = await p.createStructuralEntity('chapter',book.id,book.id,'Chapter')
   const scene = await p.createStructuralEntity('scene',book.id,chapter.id,'FUTURE_SECRET')
   await p.saveDocumentContent(scene.id,'Known prose. FUTURE_SECRET')
   const entry=await p.createCodexEntry(book.id,'Mara'); await (await p.database()).table('entities').update(entry.id,{typeId:'lore-character',content:'Mara is kind.',triggers:['FUTURE_SECRET']})
   let chat = await character.createCharacterChat(book.id,[{entryId:entry.id,label:'Mara'}],{bookId:book.id,sceneId:scene.id,position:12})
   chat = await chatService.updateChat(chat.id, { maxModelRounds: limit, modelContextLength: 100000 })
-  return { book, chat, scene, entry }
+  return { book, chat, scene, entry, selections }
 }
 function view(f) { return h(ChatView, { bookId: f.book.id, chatId: f.chat.id, bookPromptValues: { title: f.book.title }, onChatChange() {}, onToast(message) { throw new Error(message) } }) }
 
 
-test('actual character chat sends a restricted request, queues one direct image, and renders participant labels plus the result card',async()=>{
+test('actual character chat sends a restricted request, queues one direct image, and renders participant labels plus the result card',async t=>{
  const favorite=imageSettings.imageFavorite(imageSettings.documentedImageModels.find(m=>m.id==='gpt-image-1'),[]);favorite.alias='portrait';imageSettings.saveImageSettings({keys:{},favorites:[favorite],defaultAlias:'portrait'})
- const f=await fixture(8),root=createRoot(document.getElementById('root'))
+ const f=await fixture(8)
+ const imageProfile=profiles.loadSettingsProfiles().profiles.find(profile=>profile.id===f.selections.image)
+ profiles.saveSettingsProfile({...imageProfile,media:{favorites:[favorite],defaultAlias:'portrait'}})
+ const root=createTestRoot(t)
  try {
   await act(async()=>root.render(view(f)));await send();await settle(()=>api.calls.length===2 && button('Send') && !button('Send').disabled)
   assert.doesNotMatch(JSON.stringify(api.calls),/FUTURE_SECRET/)
@@ -86,7 +102,7 @@ test('actual character chat sends a restricted request, queues one direct image,
  } finally {await act(async()=>root.unmount())}
 })
 
-test('actual Chat context settings save character references, preview them, and send them after reopening chat', async () => {
+test('actual Chat context settings save character references, preview them, and send them after reopening chat', async t => {
  const f = await fixture(8)
  const note = await p.createNote(f.book.id, 'Compass memory')
  await p.saveDocumentContent(note.id, 'Elena gave Mara the brass compass.')
@@ -95,7 +111,7 @@ test('actual Chat context settings save character references, preview them, and 
  await p.saveDocumentContent(f.entry.id, 'Mara grew up in Coral Bay and her sister is Elena.')
  f.chat = await chatService.updateChat(f.chat.id, { promptComposition: { systemPrompt: 'Answer as Mara.', predefinedMessages: [] } })
  const settingsProps = { initialTab: 'context', book: { id: f.book.id, title: f.book.title, contextType: 'chat', chatId: f.chat.id } }
- let root = createRoot(document.getElementById('root'))
+ let root = createTestRoot(t)
  const selection = title => [...document.querySelectorAll('.context-selection-row')].find(row => row.querySelector('.arc-rich-choice__title')?.textContent.trim() === title)?.querySelector('input')
  try {
    await act(async () => root.render(h(Settings, settingsProps)))
@@ -111,11 +127,11 @@ test('actual Chat context settings save character references, preview them, and 
    assert.deepEqual(saved.contextProfile.noteIds, [note.id])
    assert.deepEqual(saved.contextProfile.codexEntryIds, [codex.id])
    await act(async () => root.unmount())
-   root = createRoot(document.getElementById('root'))
+   root = createTestRoot(t)
    await act(async () => root.render(h(Settings, settingsProps)))
    await settle(() => selection('Compass memory')?.checked && selection('Coral Bay')?.checked)
    await act(async () => root.unmount())
-   root = createRoot(document.getElementById('root'))
+   root = createTestRoot(t)
    const before = api.calls.length
    await act(async () => root.render(view(f)))
    await send()

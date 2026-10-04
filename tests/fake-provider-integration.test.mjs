@@ -1,9 +1,12 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 const aiSettings = readFileSync(new URL('../src/shared/ai/ai-settings.ts', import.meta.url), 'utf8')
 const app = readFileSync(new URL('../src/app/App.tsx', import.meta.url), 'utf8')
+const profiles = readFileSync(new URL('../src/features/settings/SettingsProfilesPanel.tsx', import.meta.url), 'utf8')
 const workspace = readFileSync(new URL('../src/app/Workspace.tsx', import.meta.url), 'utf8')
 const chatApi = readFileSync(new URL('../src/features/chat/chat-api.ts', import.meta.url), 'utf8')
 const chatService = readFileSync(new URL('../src/features/chat/chat-service.ts', import.meta.url), 'utf8')
@@ -20,15 +23,15 @@ test('Fake is a text-only provider and clears text connection credentials in nor
 })
 
 test('AI settings expose one local Fake model without credentials and retain local-only status and trace controls', () => {
-  assert.match(app, /fake: 'Fake \(testing\)'/)
+  assert.match(profiles, /fake: 'Fake \(testing\)'/)
   assert.match(app, /settings\.provider === 'fake' \? \{ models: \[FAKE_PROVIDER_MODEL\] \}/)
   assert.match(app, /if \(requestSettings\.provider === 'fake'\) \{[\s\S]*setModels\(\[FAKE_PROVIDER_MODEL\]\)[\s\S]*No network request was made/)
-  assert.match(app, /\(settings\.provider === 'compatible' \|\| settings\.provider === 'litellm'\) && <Input[\s\S]*'Endpoint URL'/)
-  assert.match(app, /settings\.provider !== 'fake' && <label><span>\{settings\.provider === 'litellm' \? 'LiteLLM API key' : 'API key'\}/)
-  assert.match(app, /settings\.provider === 'fake' && <div className="status success" role="note">[\s\S]*No text-AI network request is sent\./)
-  assert.match(app, /settings\.provider === 'fake' && aiSection === 'connection' && <Disclosure[\s\S]*aria-label="Fake provider request trace"/)
-  assert.match(app, /Session only · last 20 requests\./)
-  assert.match(app, /<Button[\s\S]*onClick=\{clearFakeProviderTrace\}[\s\S]*>Clear trace<\/Button>/)
+  assert.match(profiles, /\(editedProvider === 'compatible' \|\| editedProvider === 'litellm'\) && <Input[\s\S]*'Endpoint URL'/)
+  assert.match(profiles, /editedProvider !== 'fake' && <Input label=\{editedProvider === 'litellm' \? 'LiteLLM API key' : 'API key'\}/)
+  assert.match(profiles, /connection\.provider === 'fake' && <>[\s\S]*<div className="status success" role="note">[\s\S]*No text-AI network request is sent\./)
+  assert.match(profiles, /<Disclosure[^>]*aria-label="Fake provider request trace"/)
+  assert.match(profiles, /Session only · last 20 requests\./)
+  assert.match(profiles, /<Button[\s\S]*disabled=\{!fakeTrace\.length\}[\s\S]*onClick=\{clearFakeProviderTrace\}[\s\S]*>Clear trace<\/Button>/)
 })
 
 test('Story, Codex, and Summary use the shared text provider boundary and diagnostics serialize that same message representation', () => {

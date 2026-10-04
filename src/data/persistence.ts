@@ -11,12 +11,15 @@ import { metadataValues, validateMetadataPatch, type ChatManagementOperation } f
 import {
   copyAiSettings,
   toBookAiSettings,
-  withGlobalFavorites,
+  loadAiSettings,
   type AiSettings,
   type BookAiSettings,
 } from '../shared/ai/ai-settings'
 import { normalizeCodexTriggerList } from '../features/codex/codex-trigger-service'
 import type { ImageDetails, ImagePixels } from '../features/images/illustration-image'
+
+import { defaultBookProfileSelections, importSettingsProfiles, initializeLegacyCharacterRole, loadSettingsProfiles, notifySettingsProfilesChanged, profileConfiguration, resolveProfileSettings, sanitizeSettingsProfile, saveSettingsProfile, settingsProfilesForSelections, validateBookProfileSelections, withProfileReferenceLock, type BookProfileSelections, type ProfileKind, type SettingsProfile } from '../features/settings/settings-profiles'
+import { KeyedAsyncQueue } from '../shared/utils/keyed-async-queue'
 
 import Dexie from 'dexie'
 
@@ -542,7 +545,7 @@ export async function renameSeries(id: string, title: string): Promise<SeriesEnt
   return updated
 }
 
-export async function createBook(defaultAiSettings: AiSettings, title = 'Untitled Book'): Promise<{ book: BookEntity; chapter: StructuralEntity; scene: StructuralEntity }> {
+export async function createBook(_defaultAiSettings: AiSettings, title = 'Untitled Book'): Promise<{ book: BookEntity; chapter: StructuralEntity; scene: StructuralEntity }> {
   const db = await database()
   const now = Date.now()
   const bookId = makeId('book')
@@ -564,71 +567,206 @@ export async function createBook(defaultAiSettings: AiSettings, title = 'Untitle
   }
   const chapter: StructuralEntity = { id: chapterId, type: 'chapter', bookId, parentId: bookId, order: 0, title: 'Chapter 1', createdAt: now, updatedAt: now }
   const scene: StructuralEntity = { id: makeId('scene'), type: 'scene', bookId, parentId: chapterId, order: 0, title: 'Scene 1', content: '', createdAt: now, updatedAt: now }
-  const aiSettings = makeBookAiSettingsEntity(bookId, defaultAiSettings, now)
   const contextSettings = makeBookContextSettingsEntity(bookId, loadDefaultBookContextSettings(), now)
-  await db.table('entities').bulkPut([book, chapter, scene, aiSettings, contextSettings])
+  // Share the same entity-store write lock as reference saves/deletion. Defaults cannot be
+  // deleted between validation and insertion, including by another browser tab.
+  await db.transaction('rw', db.table('entities'), async () => {
+    const profiles = makeBookProfileSelectionsEntity(bookId, defaultBookProfileSelections(), now)
+    await db.table('entities').bulkPut([book, chapter, scene, profiles, contextSettings])
+  })
   return { book, chapter, scene }
 }
 
-export async function ensureBookAiSettings(bookId: string, defaults: AiSettings): Promise<BookAiSettingsEntity> {
-  const db = await database()
-  const existing = await db.table('entities').get(aiSettingsId(bookId)) as BookAiSettingsEntity | undefined
-  if (existing?.type === 'settings' && existing.settingsType === 'ai') return existing
-  const created = makeBookAiSettingsEntity(bookId, defaults)
-  await db.table('entities').put(created)
-  return created
+export async function ensureBookAiSettings(bookId: string, _defaults: AiSettings): Promise<BookAiSettingsEntity> {
+  return makeBookAiSettingsEntity(bookId, await getBookAiSettings(bookId, loadAiSettings().favorites))
 }
 
+type BookProfileSelectionsEntity = ArcEntity & { settingsType: 'profiles-book'; value: BookProfileSelections; definitions?: SettingsProfile[]; modelMetadata?: Record<string, number> }
+const profileMigrationQueue = new KeyedAsyncQueue()
+function validatedBookModelMetadata(value: unknown): Record<string, number> {
+  if (value === undefined) return {}
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !Object.entries(value).every(([key, length]) => /^(openrouter|nanogpt|openai|litellm|compatible|fake):\S/.test(key) && Number.isSafeInteger(length) && Number(length) > 0)) throw new Error('Invalid saved model metadata. Original data was preserved.')
+  return { ...value } as Record<string, number>
+}
+function bookProfilesId(bookId: string) { return `settings-profiles-book-${bookId}` }
+function preservedAiId(bookId: string) { return `legacy-ai-settings-${bookId}` }
+/** Local-only recovery data: never included in readBookArchive, even after a sync replacement. */
+export async function readPreservedBookAiSettings(bookId: string): Promise<BookAiSettings | undefined> {
+  const db = await database()
+  return db.transaction('r', db.table('entities'), db.table('meta'), async () => {
+    if ((await db.table('entities').get(bookId))?.type !== 'book') return undefined
+    const preserved = await db.table('meta').get(preservedAiId(bookId))
+    if (preserved) return preserved.value as BookAiSettings
+    // Recovery must also work before migration succeeds (for example, after quota or
+    // library-validation failure), without trying to migrate or normalizing away data.
+    const legacy = await db.table('entities').get(aiSettingsId(bookId)) as BookAiSettingsEntity | undefined
+    return legacy?.type === 'settings' && legacy.settingsType === 'ai' && legacy.bookId === bookId ? legacy.value : undefined
+  })
+}
+function makeBookProfileSelectionsEntity(bookId: string, value: BookProfileSelections, now = Date.now()): BookProfileSelectionsEntity {
+  return { id: bookProfilesId(bookId), type: 'settings', settingsType: 'profiles-book', bookId, parentId: bookId, value, createdAt: now, updatedAt: now }
+}
+
+async function readBookProfileSelectionsEntity(bookId: string): Promise<BookProfileSelectionsEntity> {
+  return profileMigrationQueue.run(bookId, async () => {
+    const db = await database()
+    let changed = false
+    // Re-read under the same write lock as delete, sync replacement and selection saves.
+    // Installing a stale portable record must never resurrect deleted settings or overwrite
+    // a newer selection/model-metadata record from another tab.
+    const result = await db.transaction('rw', db.table('entities'), db.table('meta'), async () => {
+      const book = await db.table('entities').get(bookId) as BookEntity | undefined
+      if (book?.type !== 'book') throw new Error('This book no longer exists.')
+      const existing = await db.table('entities').get(bookProfilesId(bookId)) as BookProfileSelectionsEntity | undefined
+      if (existing) {
+        if (existing.type !== 'settings' || existing.settingsType !== 'profiles-book' || existing.bookId !== bookId || existing.parentId !== bookId) throw new Error('Invalid book profile selections. Original data was preserved.')
+        validatedBookModelMetadata(existing.modelMetadata)
+        if (existing.definitions !== undefined) {
+          if (!Array.isArray(existing.definitions)) throw new Error('Invalid portable profile definitions. Original data was preserved.')
+          const value = importSettingsProfiles(existing.definitions, existing.value)
+          const { definitions: _portable, ...local } = existing
+          const installed = { ...local, value }
+          await db.table('entities').put(installed)
+          changed = true
+          return installed
+        }
+        return { ...existing, value: validateBookProfileSelections(existing.value) }
+      }
+      const legacy = await db.table('entities').get(aiSettingsId(bookId)) as BookAiSettingsEntity | undefined
+      const value = defaultBookProfileSelections()
+      if (legacy) {
+        if (legacy.type !== 'settings' || legacy.settingsType !== 'ai' || legacy.bookId !== bookId || !legacy.value || typeof legacy.value !== 'object') throw new Error('Invalid legacy book settings. Original data was preserved.')
+        const settings = initializeLegacyCharacterRole(copyAiSettings({ ...legacy.value, favorites: [] } as AiSettings))
+        const choose = (kind: ProfileKind, configured = settings): string => {
+          const library = loadSettingsProfiles(), source = library.profiles.find(profile => profile.id === library.defaults[kind])!
+          const candidate = sanitizeSettingsProfile({ ...source, id: `profile-migrated-${bookId}-${kind}`, name: `Migrated · ${book.title} · ${kind}`, settings: configured })
+          const identical = library.profiles.find(profile => profile.kind === kind && JSON.stringify(profileConfiguration(profile)) === JSON.stringify(profileConfiguration(candidate)))
+          if (identical) return identical.id
+          // Retry IDs are stable unless an intervening explicit edit/import claimed one.
+          // Never overwrite a shared profile just because a migration was interrupted.
+          if (library.profiles.some(profile => profile.id === candidate.id)) candidate.id = `profile-${crypto.randomUUID()}`
+          return saveSettingsProfile(candidate).id
+        }
+        const chatPromptPresetId = choose('chat')
+        const characterPromptPresetId = settings.characterPromptPresetId ?? loadSettingsProfiles().defaults.character
+        for (const kind of ['story', 'codex', 'summary', 'tts', 'stt', 'ui'] as const) value[kind] = choose(kind)
+        value.text = choose('text', { ...settings, chatPromptPresetId, characterPromptPresetId })
+      }
+      validateBookProfileSelections(value)
+      // Recovery data is local-only and commits with references; no legacy key is chosen
+      // to overwrite the global active connection, even after a later sync replacement.
+      if (legacy && !await db.table('meta').get(preservedAiId(bookId))) await db.table('meta').put({ key: preservedAiId(bookId), value: legacy.value, createdAt: Date.now() })
+      const created = makeBookProfileSelectionsEntity(bookId, value)
+      await db.table('entities').put(created)
+      changed = true
+      return created
+    })
+    if (changed) notifySettingsProfilesChanged(bookId)
+    return result
+  })
+}
+
+export async function getBookProfileSelections(bookId: string): Promise<BookProfileSelections> {
+  return { ...(await readBookProfileSelectionsEntity(bookId)).value }
+}
+
+export async function saveBookProfileSelections(bookId: string, value: BookProfileSelections): Promise<BookProfileSelections> {
+  const snapshot = structuredClone(value)
+  return withProfileReferenceLock(async () => {
+    await getBookProfileSelections(bookId)
+    const db = await database()
+    const clean = validateBookProfileSelections(snapshot)
+    await db.transaction('rw', db.table('entities'), async () => {
+      if ((await db.table('entities').get(bookId))?.type !== 'book') throw new Error('This book no longer exists.')
+      validateBookProfileSelections(clean)
+      const existing = await db.table('entities').get(bookProfilesId(bookId)) as BookProfileSelectionsEntity | undefined
+      if (!existing || existing.settingsType !== 'profiles-book') throw new Error('Book profile selections changed. Reopen Settings before saving.')
+      const { definitions: _portable, ...local } = existing
+      await db.table('entities').put({ ...local, value: clean, updatedAt: Date.now() })
+    })
+    notifySettingsProfilesChanged(bookId)
+    return clean
+  })
+}
+
+export async function listSettingsProfileUsage(profileId: string): Promise<Array<{ id: string; title: string }>> {
+  const books = await listBooks(), used: Array<{ id: string; title: string }> = []
+  for (const book of books) {
+    let selections: BookProfileSelections
+    try { selections = await getBookProfileSelections(book.id) } catch (error) {
+      if (!(await getEntity(book.id))) continue
+      throw error
+    }
+    const library = loadSettingsProfiles(), text = library.profiles.find(profile => profile.id === selections.text)!
+    if (!text) throw new Error('The selected text profile is unavailable.')
+    if (Object.values(selections).includes(profileId) || [text.settings.chatPromptPresetId ?? library.defaults.chat, text.settings.characterPromptPresetId ?? library.defaults.character].includes(profileId)) used.push({ id: book.id, title: book.title })
+  }
+  return used
+}
+
+const modelRoles = ['main', 'support', 'codex', 'chat', 'character'] as const
+function withBookModelMetadata(settings: AiSettings, metadata: Record<string, number> = {}): AiSettings {
+  for (const role of modelRoles) {
+    const length = metadata[`${settings.provider}:${settings[`${role}Model`]}`]
+    if (Number.isSafeInteger(length) && length > 0) settings[`${role}ModelContextLength`] = length
+  }
+  return settings
+}
 export async function getBookAiSettings(bookId: string, globalFavorites: string[]): Promise<AiSettings> {
-  const db = await database()
-  const entity = await db.table('entities').get(aiSettingsId(bookId)) as BookAiSettingsEntity | undefined
-  if (!entity || entity.type !== 'settings' || entity.settingsType !== 'ai') {
-    throw new Error(`AI settings for book ${bookId} were not found`)
-  }
-  return withGlobalFavorites(entity.value, globalFavorites)
+  const entity = await readBookProfileSelectionsEntity(bookId)
+  return withBookModelMetadata(resolveProfileSettings(entity.value, globalFavorites), validatedBookModelMetadata(entity.modelMetadata))
 }
 
+/** Compatibility for catalog metadata writers, not a back door to edit a shared profile. */
 export async function saveBookAiSettings(bookId: string, settings: AiSettings): Promise<AiSettings> {
+  const snapshot = copyAiSettings(settings)
+  await getBookProfileSelections(bookId)
   const db = await database()
-  const id = aiSettingsId(bookId)
-  const existing = await db.table('entities').get(id) as BookAiSettingsEntity | undefined
-  const now = Date.now()
-  const entity: BookAiSettingsEntity = {
-    ...makeBookAiSettingsEntity(bookId, settings, existing?.createdAt ?? now),
-    updatedAt: now,
-  }
-  await db.table('entities').put(entity)
-  return withGlobalFavorites(entity.value, settings.favorites)
+  await db.transaction('rw', db.table('entities'), async () => {
+    const entity = await db.table('entities').get(bookProfilesId(bookId)) as BookProfileSelectionsEntity | undefined
+    if (!entity || (await db.table('entities').get(bookId))?.type !== 'book') throw new Error('This book no longer exists.')
+    // Selection changes and portable replacement share this lock. Never compare a late
+    // catalog result with a role snapshot read before a newer selection was committed.
+    const current = resolveProfileSettings(entity.value, snapshot.favorites)
+    const modelMetadata = validatedBookModelMetadata(entity.modelMetadata)
+    for (const role of modelRoles) {
+      const model = snapshot[`${role}Model`], length = snapshot[`${role}ModelContextLength`]
+      if (model.trim() && snapshot.provider === current.provider && model === current[`${role}Model`] && typeof length === 'number' && Number.isSafeInteger(length) && length > 0) modelMetadata[`${snapshot.provider}:${model}`] = length
+    }
+    await db.table('entities').put({ ...entity, modelMetadata })
+  })
+  return getBookAiSettings(bookId, snapshot.favorites)
 }
 
-export async function copyDefaultAiSettingsToBook(bookId: string, defaults: AiSettings): Promise<AiSettings> {
-  await saveBookAiSettings(bookId, copyAiSettings(defaults))
-  return copyAiSettings(defaults)
+export async function copyDefaultAiSettingsToBook(bookId: string, _defaults: AiSettings): Promise<AiSettings> {
+  await saveBookProfileSelections(bookId, defaultBookProfileSelections())
+  return getBookAiSettings(bookId, loadAiSettings().favorites)
 }
 
 export async function getBookContextSettings(bookId: string): Promise<BookContextSettings> {
   const db = await database()
-  const id = bookContextSettingsId(bookId)
-  const existing = await db.table('entities').get(id) as BookContextSettingsEntity | undefined
-  if (existing?.type === 'settings' && existing.settingsType === 'context-book') {
-    return normalizeBookContextSettings(existing.value)
-  }
-  const created = makeBookContextSettingsEntity(bookId)
-  await db.table('entities').put(created)
-  return { ...created.value }
+  return db.transaction('rw', db.table('entities'), async () => {
+    if ((await db.table('entities').get(bookId))?.type !== 'book') throw new Error('This book no longer exists.')
+    const existing = await db.table('entities').get(bookContextSettingsId(bookId)) as BookContextSettingsEntity | undefined
+    if (existing) {
+      if (existing.type !== 'settings' || existing.settingsType !== 'context-book') throw new Error('Invalid book context settings. Original data was preserved.')
+      return normalizeBookContextSettings(existing.value)
+    }
+    const created = makeBookContextSettingsEntity(bookId)
+    await db.table('entities').put(created)
+    return normalizeBookContextSettings(created.value)
+  })
 }
 
 export async function saveBookContextSettings(bookId: string, value: BookContextSettings): Promise<BookContextSettings> {
-  const db = await database()
-  const id = bookContextSettingsId(bookId)
-  const existing = await db.table('entities').get(id) as BookContextSettingsEntity | undefined
-  const now = Date.now()
-  const normalized = normalizeBookContextSettings(value)
-  await db.table('entities').put({
-    ...makeBookContextSettingsEntity(bookId, normalized, existing?.createdAt ?? now),
-    updatedAt: now,
+  const normalized = normalizeBookContextSettings(value), db = await database()
+  return db.transaction('rw', db.table('entities'), async () => {
+    if ((await db.table('entities').get(bookId))?.type !== 'book') throw new Error('This book no longer exists.')
+    const existing = await db.table('entities').get(bookContextSettingsId(bookId)) as BookContextSettingsEntity | undefined
+    const now = Date.now()
+    await db.table('entities').put({ ...makeBookContextSettingsEntity(bookId, normalized, existing?.createdAt ?? now), updatedAt: now })
+    return normalized
   })
-  return normalized
 }
 
 export async function getGenerationContextProfile(bookId: string, type: GenerationContextType): Promise<GenerationContextProfile> {
@@ -964,7 +1102,7 @@ export async function deleteEntityTree(id: string): Promise<string[]> {
   const linked = await db.table('entities').get(id) as ArcEntity | undefined
   if (linked?.type === 'codexEntry' && linked.seriesSourceId) { await db.table('entities').update(id, { hiddenInBook: true }); await deleteTtsCacheOwners([id]).catch(() => undefined); return [id] }
   let deletedIds: string[] = []
-  await db.transaction('rw', db.table('entities'), db.table('snapshots'), db.table('codexDependencies'), db.table('illustrations'), db.table('illustrationUndo'), db.table('imageJobs'), db.table('galleryImages'), db.table('syncLinks'), db.table('syncState'), async () => {
+  await db.transaction('rw', db.table('entities'), db.table('snapshots'), db.table('codexDependencies'), db.table('illustrations'), db.table('illustrationUndo'), db.table('imageJobs'), db.table('galleryImages'), db.table('syncLinks'), db.table('syncState'), db.table('meta'), async () => {
     const { root, ids } = await collectEntityTreeIdsWithDb(db, id)
     await db.table('illustrationUndo').bulkDelete(ids)
     deletedIds = ids
@@ -981,6 +1119,7 @@ export async function deleteEntityTree(id: string): Promise<string[]> {
     if (root?.type === 'book') {
       await db.table('syncLinks').delete(root.id)
       await db.table('syncState').delete(root.id)
+      await db.table('meta').delete(preservedAiId(root.id))
     }
     await touchAncestors(db, root?.parentId, Date.now())
   })
@@ -992,7 +1131,7 @@ export async function deleteEntity(id: string) {
   const db = await database()
   const linked = await db.table('entities').get(id) as ArcEntity | undefined
   if (linked?.type === 'codexEntry' && linked.seriesSourceId) { await db.table('entities').update(id, { hiddenInBook: true }); await deleteTtsCacheOwners([id]).catch(() => undefined); return }
-  await db.transaction('rw', db.table('entities'), db.table('codexDependencies'), db.table('illustrations'), db.table('illustrationUndo'), db.table('imageJobs'), db.table('galleryImages'), db.table('syncLinks'), db.table('syncState'), async () => {
+  await db.transaction('rw', db.table('entities'), db.table('codexDependencies'), db.table('illustrations'), db.table('illustrationUndo'), db.table('imageJobs'), db.table('galleryImages'), db.table('syncLinks'), db.table('syncState'), db.table('meta'), async () => {
     await deleteImageJobsWithDb(db, [id])
     await db.table('illustrations').where('entryId').equals(id).delete()
     await db.table('illustrations').where('bookId').equals(id).delete()
@@ -1002,6 +1141,7 @@ export async function deleteEntity(id: string) {
     if (linked?.type === 'book') {
       await db.table('syncLinks').delete(id)
       await db.table('syncState').delete(id)
+      await db.table('meta').delete(preservedAiId(id))
     }
     const dependencies = await db.table('codexDependencies').toArray() as CodexDependencyEdge[]
     const dependencyIds = dependencies.filter((edge) => edge.sourceId === id || edge.targetId === id).map((edge) => edge.id)
@@ -1256,23 +1396,29 @@ export type BookArchiveData = {
   illustrations: Illustration[]
   galleryImages?: GalleryImage[]
   imageJobs?: ImageJob[]
+  settingsProfiles?: SettingsProfile[]
 }
 
 export async function readBookArchive(bookId: string): Promise<BookArchiveData> {
+  await getBookProfileSelections(bookId)
   const db = await database()
   await synchronizeSeriesCodex(db, bookId)
   return db.transaction('r', db.table('entities'), db.table('snapshots'), db.table('codexDependencies'), db.table('illustrations'), db.table('galleryImages'), db.table('imageJobs'), async () => {
     const book = await db.table('entities').get(bookId) as BookEntity | undefined
     if (book?.type !== 'book') throw new Error('This book no longer exists.')
     const entries = await db.table('entities').where('bookId').equals(bookId).toArray() as ArcEntity[]
+    const selections = entries.find(entry => entry.id === bookProfilesId(bookId)) as BookProfileSelectionsEntity | undefined
+    if (!selections || selections.settingsType !== 'profiles-book') throw new Error('Book profile selections changed. Retry the backup.')
+    const settingsProfiles = selections.definitions !== undefined ? selections.definitions.map(sanitizeSettingsProfile) : settingsProfilesForSelections(selections.value)
     const series = book.seriesId ? await db.table('entities').get(book.seriesId) : undefined
     const ids = [bookId, ...entries.map((entry) => entry.id)]
     const galleryImages = (await db.table('galleryImages').where('bookId').equals(bookId).toArray() as GalleryImage[]).filter((a) => a.kept)
     const keptIds = new Set(galleryImages.map((a) => a.id))
-    const imageJobs = (await db.table('imageJobs').where('bookId').equals(bookId).toArray() as ImageJob[]).filter((j) => j.status === 'completed' && j.assetId && keptIds.has(j.assetId)).map(({ providerJobId: _p, owner: _o, heartbeat: _h, sources: _sources, ...j }) => j)
+    const imageJobs = (await db.table('imageJobs').where('bookId').equals(bookId).toArray() as ImageJob[]).filter((j) => j.status === 'completed' && j.assetId && keptIds.has(j.assetId)).map(({ providerJobId: _p, owner: _o, heartbeat: _h, sources: _sources, localConnectionFingerprint: _identity, ...j }: ImageJob & { localConnectionFingerprint?: string }) => j)
     return {
       galleryImages, imageJobs,
-      entities: [book, ...entries, ...(series ? [series] : [])],
+      settingsProfiles,
+      entities: [book, ...entries.filter(entry => !(entry.type === 'settings' && entry.settingsType === 'ai')).map(entry => entry.settingsType === 'profiles-book' ? { ...entry, definitions: settingsProfiles } : entry), ...(series ? [series] : [])],
       snapshots: await db.table('snapshots').where('entityId').anyOf(ids).toArray(),
       dependencies: await db.table('codexDependencies').where('bookId').equals(bookId).toArray(),
       illustrations: await db.table('illustrations').where('bookId').equals(bookId).toArray(),
@@ -1280,10 +1426,26 @@ export async function readBookArchive(bookId: string): Promise<BookArchiveData> 
   })
 }
 
+/** Also exported for the sync owner: keep entity identities while isolating incoming profiles. */
+export function prepareBookArchiveProfiles(data: BookArchiveData): BookArchiveData {
+  const entities = data.entities.map(entity => {
+    if (entity.type !== 'settings' || entity.settingsType !== 'profiles-book') return entity
+    const definitions = (entity.definitions ?? data.settingsProfiles) as SettingsProfile[] | undefined
+    if (!definitions) throw new Error('This backup is missing its selected profile definitions.')
+    const value = importSettingsProfiles(definitions, entity.value as BookProfileSelections)
+    const { definitions: _definitions, ...local } = entity
+    return { ...local, value }
+  })
+  return { ...data, entities }
+}
+
 /** Import only a validated, remapped archive. All records commit together or none do. */
 export async function writeBookArchive(data: BookArchiveData): Promise<void> {
   const db = await database()
   await db.transaction('rw', db.table('entities'), db.table('snapshots'), db.table('codexDependencies'), db.table('illustrations'), db.table('galleryImages'), db.table('imageJobs'), async () => {
+    // Install definitions under the reference-writer lock, so deletion cannot remove a
+    // newly imported profile before the book that references it has been inserted.
+    data = prepareBookArchiveProfiles(data)
     await db.table('galleryImages').bulkAdd(data.galleryImages ?? [])
     await db.table('imageJobs').bulkAdd(data.imageJobs ?? [])
     await db.table('entities').bulkAdd(data.entities)

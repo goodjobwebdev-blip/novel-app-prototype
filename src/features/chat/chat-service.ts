@@ -15,10 +15,12 @@ import { FAKE_PROVIDER_MODEL } from '../../shared/ai/fake-provider'
 import { KeyedAsyncQueue } from '../../shared/utils/keyed-async-queue'
 import { transitionProposalList } from './chat-proposal-transition'
 import { snapshotProposalListForFork } from './chat-fork-proposals'
+import { resolveCharacterProfileComposition, resolveProfileSettings } from '../settings/settings-profiles'
 import {
   database,
   deleteEntityTree,
   getBookAiSettings,
+  getBookProfileSelections,
   getBookContextSettings,
   getEntity,
   listEntitiesByBook,
@@ -222,12 +224,24 @@ export async function getChat(chatId: string): Promise<ChatEntity | undefined> {
   }))
 }
 
-export async function createChat(bookId: string, title = 'New chat'): Promise<ChatEntity> {
+export async function createChat(bookId: string, title = 'New chat', role: 'chat' | 'character' = 'chat', initial?: { character: CharacterChatConfig; promptComposition?: PromptComposition; contextProfile: GenerationContextProfile }): Promise<ChatEntity> {
+  if (initial && role !== 'character') throw new Error('Character configuration requires the Character role.')
+  const initialSnapshot = initial ? structuredClone(initial) : undefined
   const defaults = loadAiSettings()
-  const [settings, contextSettings] = await Promise.all([
+  const [catalogSettings, contextSettings, selections] = await Promise.all([
     getBookAiSettings(bookId, defaults.favorites),
     getBookContextSettings(bookId),
+    getBookProfileSelections(bookId),
   ])
+  // Resolve role parameters and preset content without an intervening await. Catalog metadata
+  // may be book-local, but a concurrent profile save must not produce a hybrid role snapshot.
+  const settings = resolveProfileSettings(selections, loadAiSettings().favorites)
+  for (const modelRole of ['main', 'chat', 'character'] as const) {
+    if (settings.provider === catalogSettings.provider && settings[`${modelRole}Model`] === catalogSettings[`${modelRole}Model`]) settings[`${modelRole}ModelContextLength`] = catalogSettings[`${modelRole}ModelContextLength`]
+  }
+  const model = role === 'character' ? settings.characterModel : settings.chatModel
+  const effort = role === 'character' ? settings.characterThinkingEffort : settings.chatThinkingEffort
+  const composition = role === 'character' ? resolveCharacterProfileComposition(selections) : settings.promptCompositions.assistant
   const now = Date.now()
   const chat: ChatEntity = {
     id: makeId('chat'),
@@ -235,19 +249,32 @@ export async function createChat(bookId: string, title = 'New chat'): Promise<Ch
     bookId,
     parentId: bookId,
     title,
-    model: settings.chatModel.trim() || settings.mainModel,
-    modelContextLength: settings.chatModel.trim() ? settings.chatModelContextLength : settings.mainModelContextLength,
-    effectiveContextLimit: settings.chatModel.trim() ? '' : settings.mainEffectiveContextLimit,
-    promptComposition: clonePromptComposition(settings.promptCompositions.assistant),
-    thinking: settings.chatThinkingEffort !== 'default',
-    thinkingEffort: settings.chatThinkingEffort,
-    maxModelRounds: normalizeChatRoundLimit(defaults.chatMaxModelRounds),
+    model: model.trim() || settings.mainModel,
+    modelContextLength: model.trim() ? (role === 'character' ? settings.characterModelContextLength : settings.chatModelContextLength) : settings.mainModelContextLength,
+    effectiveContextLimit: model.trim() ? '' : settings.mainEffectiveContextLimit,
+    promptComposition: clonePromptComposition(initialSnapshot?.promptComposition ?? composition),
+    thinking: effort !== 'default',
+    thinkingEffort: effort,
+    maxModelRounds: normalizeChatRoundLimit(role === 'character' ? settings.characterMaxModelRounds : settings.chatMaxModelRounds),
     skillNoteIds: [],
-    contextProfile: profileForNewChat(contextSettings.profiles.chat),
+    contextProfile: initialSnapshot ? copyProfile(initialSnapshot.contextProfile) : profileForNewChat(contextSettings.profiles.chat),
+    ...(initialSnapshot ? { character: initialSnapshot.character } : {}),
     createdAt: now,
     updatedAt: now,
   }
-  await putEntity(chat)
+  const db = await database()
+  await db.transaction('rw', db.table('entities'), async () => {
+    if ((await db.table('entities').get(bookId))?.type !== 'book') throw new Error('This book no longer exists.')
+    if (chat.character) {
+      for (const participant of chat.character.participants) {
+        const entry = await db.table('entities').get(participant.entryId)
+        if (entry?.type !== 'codexEntry' || entry.bookId !== bookId || entry.archivedAt || (entry.typeId !== 'lore-character' && entry.roleplayParticipant !== true)) throw new Error('A selected character is no longer available.')
+      }
+      const cutoff = chat.character.cutoff, scene = await db.table('entities').get(cutoff.sceneId)
+      if (cutoff.bookId !== bookId || scene?.type !== 'scene' || scene.bookId !== bookId || !Number.isInteger(cutoff.position) || cutoff.position! < 0 || cutoff.position! > String(scene.content ?? '').length) throw new Error('The selected character-chat position changed. Choose it again.')
+    }
+    await db.table('entities').add(chat)
+  })
   notifyChatChange(bookId)
   return chat
 }
@@ -283,7 +310,10 @@ export async function saveChatContextProfile(chatId: string, profile: Generation
 export async function resetChatPromptComposition(chatId: string) {
   const chat = await getChat(chatId)
   if (!chat) throw new Error('Chat is no longer available.')
-  if (chat.character) { const { characterPromptComposition } = await import('./character-chat'); return updateChat(chatId, { promptComposition: clonePromptComposition(characterPromptComposition) }) }
+  if (chat.character) {
+    const selections = await getBookProfileSelections(chat.bookId)
+    return updateChat(chatId, { promptComposition: resolveCharacterProfileComposition(selections) })
+  }
   const settings = await getChatBookAiSettings(chat.bookId)
   return updateChat(chatId, { promptComposition: clonePromptComposition(settings.promptCompositions.assistant) })
 }

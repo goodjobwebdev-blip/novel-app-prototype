@@ -1,4 +1,5 @@
 import { loadAiSettings, type AiSettings } from '../../shared/ai/ai-settings'
+import { defaultBookProfileSelections, resolveProfileSettings } from '../settings/settings-profiles'
 import { getBookAiSettings } from '../../data/persistence'
 import { generationContextDiagnostics } from '../../shared/context/context-service'
 import { assembleCompositionRequest, normalizeAppManagedPart } from '../../shared/ai/prompt-composition'
@@ -22,7 +23,7 @@ export function assembleMediaEnhancementRequest(draft: MediaGenerationDraft, cap
 }
 export async function enhanceMediaPrompt(draft: MediaGenerationDraft, capability: string, bookId: string | undefined, signal: AbortSignal, onRequest?: (value: RewriteRequestPreview) => void, suppliedSettings?: AiSettings) {
   const defaults = suppliedSettings ?? loadAiSettings()
-  const settings = suppliedSettings ?? (bookId ? await getBookAiSettings(bookId, defaults.favorites) : defaults)
+  const settings = suppliedSettings ?? (bookId ? await getBookAiSettings(bookId, defaults.favorites) : resolveProfileSettings(defaultBookProfileSelections()))
   signal.throwIfAborted()
   if (!draft.prompt.trim()) throw new Error('Enter an original prompt first.')
   const model = settings.supportModel.trim()
