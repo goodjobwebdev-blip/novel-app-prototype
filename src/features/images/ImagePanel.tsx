@@ -1,5 +1,4 @@
-import { selectedMediaPrompt } from './media-prompt'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Search } from 'lucide-react'
 import Button from '../../shared/ui/Button'
 import Checkbox from '../../shared/ui/Checkbox'
@@ -7,18 +6,15 @@ import Input from '../../shared/ui/Input'
 import Select from '../../shared/ui/Select'
 import Tabs from '../../shared/ui/Tabs'
 import type { AiSettings } from '../../shared/ai/ai-settings'
-import { loadAiSettings } from '../../shared/ai/ai-settings'
 import { ImageAssetPreview } from './ImageResults'
-import ImageJobs from './ImageResults'
-import ImageSettingsPanel from './ImageSettingsPanel'
-import ImageGenerationControls, { type ImageDraft } from './ImageGenerationControls'
+import { createImageWorkspaceState, ImageGenerateView } from './ImageWorkspace'
 import { useImageQuery, useImageSettings } from './image-hooks'
-import { availableImageCodex, deleteGalleryImage, enqueueImageJob, listGalleryImages, notifyImageStore } from './image-store'
-import { loadImageSettings, resolveImageSpec } from './image-settings'
+import { emptyImageSettings } from './book-image-settings'
+import { availableImageCodex, deleteGalleryImage, listGalleryImages, notifyImageStore } from './image-store'
 import { getIllustration, removeIllustration, saveIllustration } from '../../data/persistence'
 import { checkStorageHeadroom, prepareIllustration } from './illustration-image'
 import IllustrationModal from './IllustrationModal'
-import type { GalleryImage } from './image-generation-types'
+import { generationTask, type GalleryImage, type MediaKind } from './image-generation-types'
 import './image-generation.css'
 function Gallery({ bookId }: { bookId?: string }) {
   const [onlyBook, setOnlyBook] = useState(false), [query, setQuery] = useState(''), [limit, setLimit] = useState(40)
@@ -55,24 +51,26 @@ function Gallery({ bookId }: { bookId?: string }) {
     {target && <IllustrationModal title="Use in Codex" onClose={() => setTarget(undefined)}><Select label="Codex entry" value={entryId} onChange={(e) => setEntryId(e.target.value)}><option value="">Choose an entry</option>{entries.map((e) => <option key={e.id} value={e.id}>{e.title}</option>)}</Select>{!entries.length && <p>Create a Codex entry in this book first.</p>}<Button disabled={!entryId || busy} onClick={() => { void action(attach) }}>Use illustration</Button>{message && <p role="alert">{message}</p>}</IllustrationModal>}
   </section>
 }
-function Generate({ bookId, onSettings }: { bookId?: string; onSettings: () => void }) {
-  const settings = useImageSettings()
-  const [draft, setDraft] = useState<ImageDraft>(() => { const s = loadImageSettings(), favorite = s.favorites.find((f) => f.alias === s.defaultAlias); return { prompt: '', alias: favorite?.alias || '', size: favorite?.defaultSize || '1024x1024' } })
-  const [error, setError] = useState(''), [busy, setBusy] = useState(false)
-  const generate = async () => { setBusy(true); setError(''); try { await enqueueImageJob(resolveImageSpec(selectedMediaPrompt(draft), draft.alias, draft.size), { bookId }) } catch (e) { setError(e instanceof Error ? e.message : 'Could not queue image.') } finally { setBusy(false) } }
-  return <section><ImageGenerationControls bookId={bookId} value={draft} onChange={setDraft} disabled={busy} />{!settings.favorites.length && <button type="button" onClick={onSettings}>Set up image models</button>}<button type="button" disabled={busy || !settings.favorites.length} onClick={() => { void generate() }}>Generate</button>{error && <p role="alert">{error}</p>}<p className="image-help">Each tap queues one image. The queue continues while you switch chats or books. Keep the app open while generating; interrupted requests are never automatically resubmitted.</p><h2>Generation queue</h2><ImageJobs /></section>
-}
-export default function ImagePanel({ bookId, ai = loadAiSettings() }: { bookId?: string; ai?: AiSettings }) {
-  const [tab, setTab] = useState<'generate' | 'gallery' | 'settings'>('generate')
+
+export default function ImagePanel({ bookId, onOpenSettings }: { bookId?: string; ai?: AiSettings; onOpenSettings?: (mediaKind?: MediaKind) => void }) {
+  const [tab, setTab] = useState<'generate' | 'gallery'>('generate')
+  const settings = useImageSettings(bookId)
+  const [generation, setGeneration] = useState(() => ({ bookId, initialized: false, state: createImageWorkspaceState(emptyImageSettings()) }))
+  const state = generation.bookId === bookId ? generation.state : createImageWorkspaceState(emptyImageSettings())
+  useEffect(() => {
+    if (settings.loading || settings.error) return
+    setGeneration(previous => previous.bookId === bookId && previous.initialized ? previous : { bookId, initialized: true, state: createImageWorkspaceState(settings) })
+  }, [bookId, settings.loading, settings.error, settings.defaultAlias, settings.defaultAliases?.['text-to-image']])
   return <div className="image-ui image-panel">
     <h1 id="page-title">Images</h1>
+    <Button disabled={!onOpenSettings} onClick={() => onOpenSettings?.(generationTask(state.draft).endsWith('video') ? 'video' : 'image')}>Global Settings</Button>
+    {!onOpenSettings && <p className="image-help">Manage Image and Video profiles and provider credentials in global Settings from Home.</p>}
     <div className="image-tabs-wrap"><Tabs label="Images" value={tab} onChange={setTab} items={[
       { value: 'generate', label: 'Generate', id: 'image-panel-tab-generate', panelId: 'image-panel-content-generate' },
       { value: 'gallery', label: 'Gallery', id: 'image-panel-tab-gallery', panelId: 'image-panel-content-gallery' },
-      { value: 'settings', label: 'Settings', id: 'image-panel-tab-settings', panelId: 'image-panel-content-settings' },
     ]} /></div>
     <div id={`image-panel-content-${tab}`} role="tabpanel" aria-labelledby={`image-panel-tab-${tab}`}>
-      {tab === 'gallery' ? <Gallery bookId={bookId} /> : tab === 'settings' ? <ImageSettingsPanel ai={ai} /> : <Generate bookId={bookId} onSettings={() => setTab('settings')} />}
+      {tab === 'gallery' ? <Gallery bookId={bookId} /> : <ImageGenerateView key={bookId ?? 'global'} bookId={bookId} state={state} onStateChange={next => setGeneration({ bookId, initialized: true, state: next })} onSettings={onOpenSettings} />}
     </div>
   </div>
 }

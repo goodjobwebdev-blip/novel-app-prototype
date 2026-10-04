@@ -1,3 +1,5 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { startSttSession, stopSttSession, cancelSttSession, dismissSttState, getSttState } from '../src/features/speech/stt-service.ts'

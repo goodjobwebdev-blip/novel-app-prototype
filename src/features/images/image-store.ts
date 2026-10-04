@@ -3,7 +3,9 @@ import { KeyedAsyncQueue } from '../../shared/utils/keyed-async-queue'
 import type { MediaGenerationDraft } from './image-generation-types'
 import { database, getEntity, type ArcEntity, type Illustration } from '../../data/persistence'
 import { resolveImageSpec } from './image-settings'
-import { IMAGE_QUEUE_CONCURRENCY, generationTask, outputKind, type ChatImageProposal, type GalleryImage, type ImageGenerationSpec, type ImageJob, type ImageProvider } from './image-generation-types'
+import { loadBookImageSettings } from './book-image-settings'
+import { assertImageJobConnection, captureImageCredentials, imageConnectionFingerprint } from './image-connection'
+import { IMAGE_QUEUE_CONCURRENCY, generationTask, outputKind, type ChatImageProposal, type GalleryImage, type ImageGenerationSpec, type ImageSettings, type ImageJob, type ImageProvider } from './image-generation-types'
 import type { ImageOutput } from './image-providers'
 export const IMAGE_STORE_CHANGED = 'arc-image-store-changed'
 export function notifyImageStore() { if (typeof window !== 'undefined') window.dispatchEvent(new Event(IMAGE_STORE_CHANGED)) }
@@ -20,18 +22,33 @@ export async function listGalleryImages(bookId?: string): Promise<GalleryImage[]
     .filter((a) => !bookId || a.bookId === bookId).sort((a, b) => b.createdAt - a.createdAt)
 }
 export type ImageJobOrigin = { bookId?: string; chatId?: string; messageId?: string; proposalId?: string; submissionId?: string }
+function assertUnchangedMediaModel(displayed: ImageGenerationSpec, current: ImageGenerationSpec) {
+  if (displayed.provider !== current.provider || displayed.model !== current.model) throw new Error('The selected media model changed. Review the model in global Settings before generating.')
+  if (displayed.quality !== current.quality || displayed.moderation !== current.moderation || JSON.stringify(displayed.video) !== JSON.stringify(current.video)) throw new Error('The selected media model options changed. Review the options before generating.')
+}
 export async function enqueueImageJob(spec: ImageGenerationSpec, origin: ImageJobOrigin = {}): Promise<ImageJob> {
-  return queueImageJob(spec, origin)
+  const settings = await loadBookImageSettings(origin.bookId)
+  const clean = resolveImageSpec(spec.prompt, spec.modelAlias, spec.size.value, undefined, settings, generationTask(spec), spec.sources ?? [], spec.video ?? {})
+  assertUnchangedMediaModel(spec, clean)
+  return queueImageJob(clean, origin)
 }
 /** Called by the writer's Generate action: approve the shown draft and queue it atomically. */
-export async function enqueueImageProposal(draft: MediaGenerationDraft, origin: Required<Pick<ImageJobOrigin, 'bookId' | 'chatId' | 'messageId' | 'proposalId'>> & Pick<ImageJobOrigin, 'submissionId'>): Promise<ImageJob> {
+export async function enqueueImageProposal(draft: MediaGenerationDraft, origin: Required<Pick<ImageJobOrigin, 'bookId' | 'chatId' | 'messageId' | 'proposalId'>> & Pick<ImageJobOrigin, 'submissionId'>, displayedSettings?: ImageSettings): Promise<ImageJob> {
   const snapshot = structuredClone(draft)
-  const spec = resolveImageSpec(selectedMediaPrompt(snapshot), snapshot.alias, snapshot.size, undefined, undefined, snapshot.task ?? 'text-to-image', snapshot.sources ?? [], { resolution: snapshot.resolution, duration: snapshot.duration, aspectRatio: snapshot.aspectRatio, fps: snapshot.fps, numFrames: snapshot.numFrames, seed: snapshot.seed, draft: snapshot.draftVideo })
+  const settings = await loadBookImageSettings(origin.bookId)
+  const options = { resolution: snapshot.resolution, duration: snapshot.duration, aspectRatio: snapshot.aspectRatio, fps: snapshot.fps, numFrames: snapshot.numFrames, seed: snapshot.seed, draft: snapshot.draftVideo }
+  const spec = resolveImageSpec(selectedMediaPrompt(snapshot), snapshot.alias, snapshot.size, undefined, settings, snapshot.task ?? 'text-to-image', snapshot.sources ?? [], options)
+  if (displayedSettings) {
+    const displayed = resolveImageSpec(selectedMediaPrompt(snapshot), snapshot.alias, snapshot.size, undefined, displayedSettings, snapshot.task ?? 'text-to-image', snapshot.sources ?? [], options)
+    assertUnchangedMediaModel(displayed, spec)
+  }
   return queueImageJob(spec, origin, snapshot)
 }
 async function queueImageJob(spec: ImageGenerationSpec, origin: ImageJobOrigin, approvedDraft?: MediaGenerationDraft): Promise<ImageJob> {
-  // Revalidate the current favorites on every Generate click, then freeze this request.
-  const clean = resolveImageSpec(spec.prompt, spec.modelAlias, spec.size.value, undefined, undefined, generationTask(spec), spec.sources ?? [], spec.video ?? {})
+  // Copy only request fields: retries must not inherit old job lifecycle metadata or rebind aliases.
+  const clean: ImageGenerationSpec = structuredClone({ prompt: spec.prompt, modelAlias: spec.modelAlias, provider: spec.provider, model: spec.model, size: spec.size, task: generationTask(spec), sources: spec.sources ?? [], ...(spec.video ? { video: spec.video } : {}), ...(spec.quality ? { quality: spec.quality } : {}), ...(spec.moderation ? { moderation: spec.moderation } : {}) })
+  // Digest before opening IndexedDB: Web Crypto must not suspend its transaction.
+  const localConnectionFingerprint = await imageConnectionFingerprint(clean.provider, captureImageCredentials(clean.provider))
   const db = await database()
   const job = await db.transaction('rw', db.table('entities'), db.table('imageJobs'), async () => {
     const book = origin.bookId ? await db.table('entities').get(origin.bookId) : undefined
@@ -52,7 +69,7 @@ async function queueImageJob(spec: ImageGenerationSpec, origin: ImageJobOrigin, 
       if (existing) return existing as ImageJob
     }
     if (approval) await db.table('entities').update(approval.id, { imageGenerations: approval.imageGenerations, updatedAt: Date.now() })
-    const record: ImageJob = { ...clean, ...origin, id: imageId('image-job'), bookTitle: book?.title, status: 'queued', createdAt: Date.now() }
+    const record: ImageJob = { ...clean, ...origin, localConnectionFingerprint, id: imageId('image-job'), bookTitle: book?.title, status: 'queued', createdAt: Date.now() }
     await db.table('imageJobs').add(record)
     return record
   })
@@ -166,13 +183,18 @@ export async function retryImageJob(id: string) {
   const db = await database()
   const job: ImageJob | undefined = await db.table('imageJobs').get(id)
   if (!job || !['failed', 'interrupted', 'cancelled'].includes(job.status)) throw new Error('This job cannot be retried.')
-  if (job.providerJobId && (job.provider === 'pruna' || (job.provider === 'nanogpt' && generationTask(job).endsWith('video')))) {
+  if (job.providerJobId) {
+    const fingerprint = await imageConnectionFingerprint(job.provider, captureImageCredentials(job.provider))
+    assertImageJobConnection(job, fingerprint)
     await db.transaction('rw', db.table('imageJobs'), async () => {
-      const current = await db.table('imageJobs').get(id)
-      if (current && ['failed', 'interrupted', 'cancelled'].includes(current.status)) await db.table('imageJobs').update(id, { status: 'queued', error: undefined, hiddenInQueue: false })
+      const current: ImageJob | undefined = await db.table('imageJobs').get(id)
+      if (current && ['failed', 'interrupted', 'cancelled'].includes(current.status)) {
+        assertImageJobConnection(current, fingerprint)
+        await db.table('imageJobs').update(id, { status: 'queued', error: undefined, hiddenInQueue: false })
+      }
     })
     notifyImageStore()
-  } else await enqueueImageJob(job, { bookId: job.bookId, chatId: job.chatId, messageId: job.messageId, proposalId: job.proposalId })
+  } else await queueImageJob(job, { bookId: job.bookId, chatId: job.chatId, messageId: job.messageId, proposalId: job.proposalId })
 }
 const imageDraftQueue = new KeyedAsyncQueue()
 export async function saveImageProposalDraft(origin: Required<Pick<ImageJobOrigin, 'bookId' | 'chatId' | 'messageId' | 'proposalId'>>, draft: MediaGenerationDraft) {
@@ -192,7 +214,9 @@ export async function saveImageProposalDraft(origin: Required<Pick<ImageJobOrigi
 }
 
 export async function setImageProposal(messageId: string, proposalId: string, status: 'accepted' | 'rejected', input?: MediaGenerationDraft) {
-  const spec = input ? resolveImageSpec(selectedMediaPrompt(input), input.alias, input.size, undefined, undefined, input.task ?? 'text-to-image', input.sources ?? [], { resolution: input.resolution, duration: input.duration, aspectRatio: input.aspectRatio, fps: input.fps, numFrames: input.numFrames, seed: input.seed, draft: input.draftVideo }) : undefined
+  const source = input ? await getEntity(messageId) : undefined
+  if (input && source?.type !== 'chatMessage') throw new Error('This message no longer exists.')
+  const spec = input ? resolveImageSpec(selectedMediaPrompt(input), input.alias, input.size, undefined, await loadBookImageSettings(source?.bookId), input.task ?? 'text-to-image', input.sources ?? [], { resolution: input.resolution, duration: input.duration, aspectRatio: input.aspectRatio, fps: input.fps, numFrames: input.numFrames, seed: input.seed, draft: input.draftVideo }) : undefined
   const db = await database()
   await db.transaction('rw', db.table('entities'), async () => {
     const message = await db.table('entities').get(messageId)

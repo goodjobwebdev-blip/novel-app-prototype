@@ -1,3 +1,5 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { snapshotProposalForFork, snapshotProposalListForFork } from '../src/features/chat/chat-fork-proposals.ts'

@@ -1,3 +1,5 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
 import { registerHooks } from 'node:module'
@@ -36,28 +38,41 @@ const { runImageQueue } = await import('../src/features/images/image-queue.ts')
 const { executeImageProposal } = await import('../src/features/images/image-tools.ts')
 const chat = await import('../src/features/chat/chat-service.ts')
 const archive = await import('../src/data/book-archive.ts')
-const { initialAiSettings } = await import('../src/shared/ai/ai-settings.ts')
+const ai = await import('../src/shared/ai/ai-settings.ts')
+const { initialAiSettings } = ai
+const profiles = await import('../src/features/settings/settings-profiles.ts')
+const { loadBookImageSettings } = await import('../src/features/images/book-image-settings.ts')
+const { captureImageCredentials, imageConnectionFingerprint } = await import('../src/features/images/image-connection.ts')
 after(async () => (await p.database()).close())
 function configure() {
   const favorites = s.documentedImageModels.filter((m) => ['gpt-image-1', 'p-image'].includes(m.id)).map((m) => s.imageFavorite(m, []))
   favorites[0].alias = 'portrait'; favorites[1].alias = 'fast'
-  return s.saveImageSettings({ keys: { nanogpt: '', openai: '', pruna: '' }, favorites, defaultAlias: 'portrait' })
+  ai.saveAiSettings({ ...initialAiSettings, provider: 'litellm', apiKey: 'test-key', baseUrl: 'https://gateway.invalid/v1', providerProfiles: { openai: { apiKey: 'test-key' } } })
+  const configured = s.saveImageSettings({ keys: { nanogpt: '', openai: '', pruna: '' }, favorites, defaultAlias: 'portrait' })
+  saveSelectedMedia(configured)
+  return configured
+}
+function saveSelectedMedia(settings) {
+  const library = profiles.loadSettingsProfiles()
+  const profile = library.profiles.find(item => item.id === library.defaults.image)
+  const { keys: _keys, ...media } = settings
+  profiles.saveSettingsProfile({ ...profile, media })
 }
 configure()
-function propose(args = { prompt: 'Mara beside the gate' }) { return executeImageProposal({ id: 'call', type: 'function', function: { name: 'propose_image_generation', arguments: JSON.stringify(args) } }) }
+function propose(args = { prompt: 'Mara beside the gate' }, settings = profiles.resolveProfileMediaSettings()) { return executeImageProposal({ id: 'call', type: 'function', function: { name: 'propose_image_generation', arguments: JSON.stringify(args) } }, settings) }
 async function fixture() {
   configure()
   const { book } = await p.createBook(initialAiSettings, 'Image test ' + crypto.randomUUID())
   const conversation = await chat.createChat(book.id)
-  const proposal = propose().imageGeneration
+  const proposal = propose(undefined, await loadBookImageSettings(book.id)).imageGeneration
   const message = await chat.createChatMessage(conversation, 'assistant', '', { imageGenerations: [proposal] })
   return { book, conversation, proposal, message, origin: { bookId: book.id, chatId: conversation.id, messageId: message.id, proposalId: proposal.id } }
 }
 async function enqueue(f, prompt = 'Mara', alias = 'portrait') {
-  return store.enqueueImageJob(s.resolveImageSpec(prompt, alias), f?.origin)
+  return store.enqueueImageJob(s.resolveImageSpec(prompt, alias, undefined, undefined, await loadBookImageSettings(f?.book.id)), f?.origin)
 }
 async function clearJobs() { const db = await p.database(); await db.table('imageJobs').clear(); await db.table('galleryImages').clear() }
-const deps = { key: async () => 'test-key', generate: async () => ({ image: png }), prepare: async () => output }
+const deps = { key: async (job) => captureImageCredentials(job.provider), generate: async () => ({ image: png }), prepare: async () => output }
 const response = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } })
 const prunaCredentials = (key = 'key') => ({ key, gatewayUrl: 'https://gateway.invalid/pruna' })
 const job = (provider, extra = {}) => ({ ...s.resolveImageSpec('A gate', provider === 'pruna' ? 'fast' : 'portrait'), provider, id: 'adapter-test', status: 'running', createdAt: 1, ...extra })
@@ -177,7 +192,7 @@ test('restart interrupts unknown requests and resumes only recorded Pruna jobs',
   assert.equal((await store.listImageJobs())[0].status, 'interrupted')
   const queued = await enqueue(undefined, 'gate', 'fast')
   await store.claimImageJob('pruna', 'old-tab')
-  await store.patchOwnedImageJob(queued.id, 'old-tab', { providerJobId: 'prediction-1' })
+  await store.patchOwnedImageJob(queued.id, 'old-tab', { providerJobId: 'prediction-1', localConnectionFingerprint: await imageConnectionFingerprint('pruna', captureImageCredentials('pruna')) })
   await store.recoverImageJobs('pruna')
   await runImageQueue('pruna', { ...deps, generate: async (j) => { assert.equal(j.providerJobId, 'prediction-1'); return { image: png } } })
   assert.equal((await store.listImageJobs()).find((j) => j.id === queued.id).status, 'completed')
@@ -341,11 +356,16 @@ test('v2 backups retain kept originals and chat references, omit active jobs, im
   const data = await p.readBookArchive(f.book.id)
   assert.equal(data.imageJobs.length, 1)
   assert.equal(data.galleryImages.length, 1)
+  assert.match((await store.listImageJobs()).find(job => job.id === q.id).localConnectionFingerprint, /^sha256:[a-f0-9]{64}$/)
+  assert.equal(data.imageJobs[0].localConnectionFingerprint, undefined)
+  assert.doesNotMatch(JSON.stringify(data.imageJobs), /localConnectionFingerprint|test-key/)
   const decoded = await archive.decodeBookArchive(archive.encodeBookArchive(data))
   const copied = archive.copyBookArchive(decoded)
   await p.writeBookArchive(copied.data)
   assert.notEqual(copied.data.galleryImages[0].id, decoded.galleryImages[0].id)
   assert.equal(copied.data.imageJobs[0].assetId, copied.data.galleryImages[0].id)
+  assert.equal(decoded.imageJobs[0].localConnectionFingerprint, undefined)
+  assert.equal(copied.data.imageJobs[0].localConnectionFingerprint, undefined)
   assert.equal(copied.data.entities.find((e) => e.id === copied.data.imageJobs[0].messageId).imageGenerations[0].status, 'stale')
   assert.equal(copied.data.imageJobs[0].proposalId, copied.data.entities.find((e) => e.id === copied.data.imageJobs[0].messageId).imageGenerations[0].id)
   assert.deepEqual(await copied.data.galleryImages[0].image.arrayBuffer(), await png.arrayBuffer())
@@ -429,6 +449,7 @@ test('queued OpenAI requests keep saved choices after favorites change, includin
   settings.favorites[0].quality = 'high'
   settings.favorites[0].moderation = 'auto'
   s.saveImageSettings(settings)
+  saveSelectedMedia(settings)
   const queued = await enqueue(undefined)
   configure() // Later favorite changes must not alter the queued request.
   const [saved] = await store.listImageJobs()
@@ -503,7 +524,7 @@ test('removing a failed job leaves others alone; retrying a cleared Pruna job ma
   assert.equal(jobs.find((j) => j.id === failed.id).hiddenInQueue, true)
   assert.equal(jobs.find((j) => j.id === pruna.id).hiddenInQueue, undefined)
   await store.claimImageJob('pruna', 'pruna-worker')
-  await store.patchOwnedImageJob(pruna.id, 'pruna-worker', { providerJobId: 'existing-prediction' })
+  await store.patchOwnedImageJob(pruna.id, 'pruna-worker', { providerJobId: 'existing-prediction', localConnectionFingerprint: await imageConnectionFingerprint('pruna', captureImageCredentials('pruna')) })
   await store.clearImageQueue([pruna.id])
   await store.retryImageJob(pruna.id)
   jobs = await store.listImageJobs()

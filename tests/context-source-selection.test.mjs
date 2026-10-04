@@ -1,3 +1,5 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { structuralSelectionIds, orderedContextScenes } from '../src/shared/context/context-source-selection.ts'

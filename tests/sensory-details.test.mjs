@@ -1,3 +1,5 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
 import { registerHooks } from 'node:module'
@@ -5,9 +7,13 @@ import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import 'fake-indexeddb/auto'
 registerHooks({ resolve(specifier, context, nextResolve) { if (specifier.startsWith('.') && context.parentURL?.startsWith('file:')) { const url = new URL(specifier + '.ts', context.parentURL); if (existsSync(fileURLToPath(url))) return nextResolve(url.href, context) } return nextResolve(specifier, context) } })
-globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} }
+const storage = new Map()
+globalThis.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)), removeItem: key => storage.delete(key) }
 const p = await import('../src/data/persistence.ts')
-const { initialAiSettings, copyAiSettings } = await import('../src/shared/ai/ai-settings.ts')
+const ai = await import('../src/shared/ai/ai-settings.ts')
+const { initialAiSettings, copyAiSettings } = ai
+const profiles = await import('../src/features/settings/settings-profiles.ts')
+const { assignBookTestProfiles } = await import('./settings-profile-fixture.mjs')
 const { encodeDocumentBlock } = await import('../src/features/editor/document-projection.ts')
 const { sensoryPrompts } = await import('../src/features/writing/prose-transformations.ts')
 const { createSensoryVariantParser, prepareSensoryDetailRequest, validSensoryReplacement } = await import('../src/features/writing/sensory-details.ts')
@@ -61,6 +67,7 @@ test('sensory requests preserve Main settings and prose context with a distinct 
   const settings = copyAiSettings(initialAiSettings)
   Object.assign(settings, { provider: 'fake', mainModel: 'fake/main', supportModel: 'fake/support', mainModelContextLength: 100000, mainThinkingEffort: 'low' })
   const fixture = await p.createBook(settings, 'Sensory test')
+    await assignBookTestProfiles({ persistence: p, ai, profiles }, fixture.book.id, settings)
   const hidden = encodeDocumentBlock({ id: 'hidden', type: 'comment', text: 'PRIVATE_SENTINEL' })
   const source = `Before.\n\n${hidden}\n\n**She paused.**\n\nAfter.`
   const selected = '**She paused.**', from = source.indexOf(selected)

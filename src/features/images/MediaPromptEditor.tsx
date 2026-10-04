@@ -4,6 +4,7 @@ import Button from '../../shared/ui/Button'
 import Disclosure from '../../shared/ui/Disclosure'
 import RadioGroup from '../../shared/ui/RadioGroup'
 import { loadAiSettings } from '../../shared/ai/ai-settings'
+import { defaultBookProfileSelections, resolveProfileSettings } from '../settings/settings-profiles'
 import { getBookAiSettings } from '../../data/persistence'
 import { cancelSttSession, getSttState, normalizeTranscriptForInsertion, startSttSession, stopSttSession, subscribeSttState } from '../speech/stt-service'
 import type { MediaGenerationDraft } from './image-generation-types'
@@ -45,7 +46,7 @@ export default function MediaPromptEditor({ value, onChange, capability, bookId 
     }
     try {
       const defaults = loadAiSettings()
-      const settings = bookId ? await getBookAiSettings(bookId, defaults.favorites) : defaults
+      const settings = bookId ? await getBookAiSettings(bookId, defaults.favorites) : resolveProfileSettings(defaultBookProfileSelections())
       if (!valid()) return false
       if (!['idle', 'completed', 'cancelled', 'failed'].includes(getSttState().status)) throw new Error('Another dictation session is already active.')
       ownsDictation.current = true

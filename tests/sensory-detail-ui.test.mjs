@@ -1,9 +1,10 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test, { after } from 'node:test'
 import { transpileSourceTree } from './transpile-source-tree.mjs'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
-import ts from 'typescript'
 import { JSDOM } from 'jsdom'
 import 'fake-indexeddb/auto'
 const dom = new JSDOM('<html><body><div id="root"></div></body></html>', { url: 'https://arc.test/', pretendToBeVisual: true })
@@ -20,16 +21,20 @@ const ai = await moduleAt('shared/ai/ai-settings')
 const { default: QuickRewriteDialog } = await moduleAt('features/writing/QuickRewriteDialog')
 const { sensoryPrompts } = await moduleAt('features/writing/prose-transformations')
 const { encodeDocumentBlock } = await moduleAt('features/editor/document-projection')
-after(async () => { (await p.database()).close(); dom.window.close(); rmSync(directory, { recursive: true, force: true }) })
+after(async () => {
+  try { (await p.database()).close() }
+  finally { dom.window.close(); rmSync(directory, { recursive: true, force: true }) }
+})
 const h = React.createElement
 const button = text => [...document.querySelectorAll('button')].find(item => item.textContent.trim() === text)
-async function settle(predicate) { for (let i = 0; i < 100 && !predicate(); i++) await act(async () => new Promise(resolve => setTimeout(resolve, 10))); assert.ok(predicate(), document.body.textContent) }
+async function settle(predicate) { for (let i = 0; i < 100 && !predicate(); i++) await act(async () => new Promise(resolve => setTimeout(resolve, 10))); assert.ok(predicate(), document.body.textContent.slice(0, 2000)) }
 async function input(text) { const field = document.querySelector('textarea'); await act(async () => { Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set.call(field, text); field.dispatchEvent(new dom.window.Event('input', { bubbles: true })) }) }
 const idea = (sense, index = 1) => ({ sense, label: `${sense} idea ${index}`, text: `She paused, noticing ${sense} detail ${index}.` })
 
 async function mount(t, { stale = false, toolId = 'sensory-detail' } = {}) {
   const settings = ai.copyAiSettings(ai.initialAiSettings)
   Object.assign(settings, { provider: 'nanogpt', apiKey: 'test-only', baseUrl: 'https://provider.invalid/v1', mainModel: 'test', mainModelContextLength: 100000 })
+  ai.saveAiSettings(settings)
   const { book, scene } = await p.createBook(settings, 'Sensory UI')
   const text = 'She paused.'
   const capture = { bookId: book.id, book: { title: book.title }, document: scene, snapshot: { editorId: 'editor', revision: 1, document: text, from: 0, to: text.length, text } }
@@ -45,6 +50,10 @@ async function mount(t, { stale = false, toolId = 'sensory-detail' } = {}) {
     return open ? h(QuickRewriteDialog, { tool: { id: toolId, label: toolId === 'sensory-detail' ? 'Sensory detail' : 'Show, don’t tell', kind: 'rewrite', examples: [] }, capture, apply(value) { applied.push(value); return !stale }, close() { closed++; setOpen(false) } }) : h('p', null, 'Closed')
   }
   const root = createRoot(document.getElementById('root'))
+  t.after(async () => {
+    await act(async () => root.unmount())
+    for (const source of sources) { try { source.close() } catch { /* Already completed or cancelled. */ } }
+  })
   await act(async () => root.render(h(Host)))
   if (toolId === 'sensory-detail') await settle(() => requests.length === 1)
   const emit = async (items, index = sources.length - 1) => { await act(async () => { for (const item of items) sources[index].enqueue(new TextEncoder().encode('data: ' + JSON.stringify({ choices: [{ delta: { content: JSON.stringify(item) + '\n' } }] }) + '\n\n')); await new Promise(resolve => setImmediate(resolve)) }) }
@@ -55,8 +64,8 @@ test('opening Sensory Detail starts one request and streams two clickable ideas 
   const f = await mount(t)
   try {
     assert.equal(document.querySelectorAll('.sensory-group').length, 7)
-    assert.equal(button('Go'), undefined)
-    assert.equal(document.querySelector('input[type=checkbox]'), null)
+    assert.ok(button('Go') === undefined, 'Sensory detail has no manual Go button')
+    assert.ok(document.querySelector('input[type=checkbox]') === null, 'No obsolete checkbox is rendered')
     await f.emit(sensoryPrompts.flatMap(sense => [idea(sense.id), idea(sense.id, 2)]))
     assert.equal(document.querySelectorAll('.sensory-chip-use').length, 14)
     assert.equal(f.requests.length, 1)
@@ -67,7 +76,7 @@ test('opening Sensory Detail starts one request and streams two clickable ideas 
     assert.equal(f.closed, 1)
     assert.equal(f.requests[0].signal.aborted, true)
     assert.equal(f.cancelled, 1)
-    assert.equal(document.querySelector('[role=dialog]'), null)
+    assert.ok(document.querySelector('[role=dialog]') === null, 'The dialog closed')
   } finally { await act(async () => f.root.unmount()) }
 })
 
@@ -76,7 +85,7 @@ test('editing stays local during streaming and the edited chip applies the exact
   try {
     await f.emit([idea('touch')])
     await act(async () => document.querySelector('button[aria-label="Edit touch idea 1"]').click())
-    assert.equal(document.activeElement, document.querySelector('textarea'))
+    assert.ok(document.activeElement === document.querySelector('textarea'), 'The variant editor receives focus')
     const edited = 'Her fingers ached against the **cold** rail.'
     await input(edited)
     await f.emit([idea('sound')])
@@ -84,7 +93,7 @@ test('editing stays local during streaming and the edited chip applies the exact
     await act(async () => button('Save edit').click())
     assert.deepEqual(f.applied, [])
     assert.equal(f.requests.length, 1)
-    assert.equal(document.querySelector('textarea'), null)
+    assert.ok(document.querySelector('textarea') === null, 'The variant editor closed')
     await act(async () => [...document.querySelectorAll('.sensory-chip-use')].find(item => item.title === edited).click())
     assert.deepEqual(f.applied, [edited])
   } finally { await act(async () => f.root.unmount()) }
@@ -122,7 +131,7 @@ test('stale selections and invalid edits cannot silently replace the passage', a
     await input('')
     assert.equal(button('Use this variant').disabled, true)
     await act(async () => button('Cancel edit').click())
-    assert.equal(document.querySelector('textarea'), null)
+    assert.ok(document.querySelector('textarea') === null, 'The variant editor closed')
     assert.equal(f.applied.length, 1)
   } finally { await act(async () => f.root.unmount()) }
 })
@@ -146,7 +155,7 @@ test('other rewrite tools retain their explicit Generate and Apply preview flow'
   const f = await mount(t, { toolId: 'show-dont-tell' })
   try {
     assert.equal(f.requests.length, 0)
-    assert.equal(document.querySelector('.sensory-groups'), null)
+    assert.ok(document.querySelector('.sensory-groups') === null, 'Other rewrite tools have no sensory groups')
     await act(async () => button('Go').click())
     await settle(() => f.requests.length === 1)
     const request = JSON.parse(f.requests[0].body)

@@ -4,8 +4,9 @@ import { database, type ArcEntity } from '../../data/persistence'
 import type { ChatEntity, ChatMessageEntity } from './chat-service'
 import { proseText } from '../editor/document-projection'
 import { resolveImageSpec } from '../images/image-settings'
+import { captureImageCredentials, imageConnectionFingerprint } from '../images/image-connection'
 import { imageId, listGalleryImages, notifyImageStore } from '../images/image-store'
-import type { GenerationSource, ImageJob } from '../images/image-generation-types'
+import type { GenerationSource, ImageJob, ImageSettings } from '../images/image-generation-types'
 
 export function explicitlyRequestsImage(text: string) {
   const input = proseText(text).replace(/```[\s\S]*?```|`[^`]*`|"[^"]*"|“[^”]*”/g, '').trim().toLocaleLowerCase()
@@ -14,9 +15,11 @@ export function explicitlyRequestsImage(text: string) {
   return /^(?:(?:please|can you|could you|would you|will you|i'd like you to|i’d like you to)\s+)*(?:generate|create|draw|paint|render|make|show|send|give)\b.{0,100}\b(?:image|picture|photo|portrait|illustration|selfie)\b/s.test(input) || /^i (?:want|would like|need) (?:an?|the) (?:image|picture|photo|portrait|illustration|selfie)\b/.test(input)
 }
 export const directImageTools: ChatToolDefinition[] = [{ type: 'function', function: { name: 'generate_requested_image', description: 'Generate one still image for the current explicit user image request, especially a character/roleplay photo. Uses only the configured still-image model/size and the user-selected reference images. Queues directly without a proposal; one job per user turn. Never use for an unsolicited suggestion or invent a model/size. No automatic paid retries.', parameters: { type: 'object', properties: { prompt: { type: 'string', description: 'Visual prompt using only allowed context and the current request.' } }, required: ['prompt'], additionalProperties: false } } }]
-export async function queueRequestedImage(input: { chat: ChatEntity; userMessageId: string; userText: string; responseId: string; roundNumber: number; callId: string; prompt: string; boundary?: CharacterBoundary; signal?: AbortSignal }) {
+export async function queueRequestedImage(input: { chat: ChatEntity; userMessageId: string; userText: string; responseId: string; roundNumber: number; callId: string; prompt: string; mediaSettings: ImageSettings; boundary?: CharacterBoundary; signal?: AbortSignal }) {
   if (!explicitlyRequestsImage(input.userText)) throw new Error('Direct image generation requires an explicit image request in the current user turn.')
   if (!input.prompt.trim() || input.prompt.length > 16000) throw new Error('Provide a visual prompt of at most 16,000 characters.')
+  if (!input.mediaSettings) throw new Error('The captured media settings are unavailable. Send a new request.')
+  const mediaSettings = structuredClone(input.mediaSettings)
   const db = await database()
   // A durable claim survives job clearing/retries so this user turn cannot charge twice.
   const prior = await db.table('entities').get(input.userMessageId) as ChatMessageEntity | undefined
@@ -32,7 +35,8 @@ export async function queueRequestedImage(input: { chat: ChatEntity; userMessage
     if (mime !== 'image/png' && mime !== 'image/jpeg' && mime !== 'image/webp') throw new Error('Use a PNG, JPEG or WebP reference image.')
     return { id: asset.id, mime, data: asset.image, width: asset.width, height: asset.height }
   })
-  const spec = resolveImageSpec(input.prompt, undefined, undefined, undefined, undefined, sources.length ? 'image-to-image' : 'text-to-image', sources)
+  const spec = resolveImageSpec(input.prompt, undefined, undefined, undefined, mediaSettings, sources.length ? 'image-to-image' : 'text-to-image', sources)
+  const localConnectionFingerprint = await imageConnectionFingerprint(spec.provider, captureImageCredentials(spec.provider))
   const result = await db.transaction('rw', db.table('entities'), db.table('imageJobs'), async () => {
     input.signal?.throwIfAborted()
     const chat = await db.table('entities').get(input.chat.id) as ChatEntity | undefined, book = await db.table('entities').get(input.chat.bookId)
@@ -45,7 +49,7 @@ export async function queueRequestedImage(input: { chat: ChatEntity; userMessage
     const now = Date.now(), messageId = imageId('chat-image-message'), jobId = imageId('image-job')
     const claim = { jobId, messageId, callId: input.callId }
     const message: ChatMessageEntity = { id: messageId, type: 'chatMessage', bookId: chat.bookId, parentId: chat.id, order: Math.max(-1, ...messages.map(message => Number(message.order ?? -1))) + 1, role: 'assistant', content: '', status: 'complete', responseId: input.responseId, roundNumber: input.roundNumber, toolActivity: ['generate_requested_image'], directImageRequest: claim, characterBoundary: input.boundary, createdAt: now, updatedAt: now }
-    const job: ImageJob = { ...spec, id: jobId, bookId: chat.bookId, bookTitle: book.title, chatId: chat.id, messageId, directUserMessageId: user.id, submissionId: `direct-${user.id}`, status: 'queued', createdAt: now }
+    const job: ImageJob = { ...spec, localConnectionFingerprint, id: jobId, bookId: chat.bookId, bookTitle: book.title, chatId: chat.id, messageId, directUserMessageId: user.id, submissionId: `direct-${user.id}`, status: 'queued', createdAt: now }
     input.signal?.throwIfAborted()
     await db.table('entities').add(message)
     await db.table('entities').update(user.id, { directImageClaim: claim })

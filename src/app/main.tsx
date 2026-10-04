@@ -16,9 +16,10 @@ import '@fontsource-variable/jetbrains-mono'
 import '@fontsource-variable/roboto-mono'
 import '@fontsource-variable/source-code-pro'
 import Workspace from './Workspace'
-import UiSettingsPortalBridge from '../features/settings/UiSettingsPortal'
+
 import '../features/settings/violet-themes'
-import { applyStoredUiSettings } from '../features/settings/ui-settings'
+import { applyStoredUiSettings, setActiveUiSettings } from '../features/settings/ui-settings'
+import { resolveProfileUiSettings } from '../features/settings/settings-profiles'
 import './styles.css'
 import '../shared/ui/button-interactions.css'
 import '../features/chat/chat-composer-fix.css'
@@ -31,14 +32,16 @@ import '../shared/ui/generation-actions.css'
 import '../features/settings/theme-accents.css'
 import '../features/chat/composer.css'
 
-applyStoredUiSettings()
+try {
+  setActiveUiSettings(resolveProfileUiSettings())
+} catch {
+  // A corrupt profile library must remain recoverable without blocking startup.
+  applyStoredUiSettings()
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <>
-      <Workspace />
-      <UiSettingsPortalBridge />
-    </>
+    <Workspace />
   </StrictMode>,
 )
 

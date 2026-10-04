@@ -3,67 +3,51 @@ import TtsCacheSettings from '../features/speech/TtsCacheSettings'
 import { captureCharacterFrame, type CharacterFrame } from '../features/chat/character-chat'
 import { availableChatTools } from '../features/chat/chat-tool-availability'
 import { sceneWritingValues, resolveSceneWriting } from '../features/writing/scene-writing'
-import ImageSettingsPanel, { type ImageSettingsPanelRef } from '../features/images/ImageSettingsPanel'
 import SettingsSectionTabs from '../features/settings/SettingsSectionTabs'
 import { ContextSourcePicker, ContextSourceInventory, ContextBudget } from '../shared/context/ContextControls'
 import '../shared/context/context-settings-ux.css'
-import { switchProviderProfile } from '../features/settings/provider-profiles'
-import { TextRevealPreview } from '../shared/ui/TextRevealPreview'
 import Input from '../shared/ui/Input'
 import Select from '../shared/ui/Select'
 import Checkbox from '../shared/ui/Checkbox'
 import Button from '../shared/ui/Button'
 import Disclosure from '../shared/ui/Disclosure'
 import SearchableSelect from '../shared/ui/SearchableSelect'
-import SegmentedControl from '../shared/ui/SegmentedControl'
 import RadioGroup from '../shared/ui/RadioGroup'
 import Tabs from '../shared/ui/Tabs'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Bot,
   Check,
   CircleHelp,
   Cloud,
   Home,
-  Image as ImageIcon,
-  MessageCircle,
   Mic,
   Plus,
   RefreshCw,
-  Search,
   SlidersHorizontal,
   Trash2,
   Type,
-  Volume2,
   X,
 } from 'lucide-react'
 import {
   initialAiSettings,
-  defaultPromptCompositions,
   loadAiSettings,
   CODEX_RESPONSE_LENGTH_PRESETS,
   STORY_RESPONSE_LENGTH_PRESETS,
   SUMMARY_RESPONSE_LENGTH_PRESETS,
-  saveAiSettings,
-  saveGlobalFavorites,
   resetPromptComposition,
   withPromptComposition,
   withPromptSystemPrompt,
   type AiPrompts,
-  type AiProvider,
   type AiSettings,
 } from '../shared/ai/ai-settings'
 import {
-  copyDefaultAiSettingsToBook,
-  ensureBookAiSettings,
   getBookContextSettings,
-  getBookAiSettings,
   loadDefaultBookContextSettings,
   isCodexEntryArchived,
   listEntitiesByBook,
   saveBookContextSettings,
   saveDefaultBookContextSettings,
-  saveBookAiSettings,
   defaultBookContextSettings,
   type ArcEntity,
   type BookContextSettings,
@@ -73,7 +57,6 @@ import {
 } from '../data/persistence'
 import { bookTemplateValues, promptTemplateDiagnostics, promptVariables, renderPromptTemplate, type BookPromptValues } from '../shared/ai/prompt-template'
 import PromptTemplateEditor, { type PromptTemplateEditorHandle } from '../features/settings/PromptTemplateEditor'
-import PromptPresetControls from '../features/settings/PromptPresetControls'
 import { makePredefinedMessage, likelyReusablePrefix, normalizedRequestDiagnosticText, type NormalizedAssembledRequest, type PredefinedMessage, type PromptCompositionScope } from '../shared/ai/prompt-composition'
 import { assembleStoryGenerationRequest, STORY_CONTINUE_FALLBACK } from '../features/writing/story-request'
 import { assembleCodexGenerationRequest, CODEX_CONTINUE_FALLBACK } from '../features/codex/codex-request'
@@ -82,9 +65,8 @@ import { buildSummarySource, type SummarySource } from '../features/writing/summ
 import { buildContextValues, contextLimitInputError, generationContextDiagnostics, type PreparedContextValues } from '../shared/context/context-service'
 import { getChat, listChatMessages, saveChatContextProfile, type ChatEntity, type ChatMessageEntity } from '../features/chat/chat-service'
 import { assembleChatGenerationRequest, finalizeChatProviderRequest } from '../features/chat/chat-request'
-import { clearModelCatalog, getCachedModelCatalog, providerModelEndpoint, saveModelCatalog, type ProviderModel } from '../shared/ai/model-catalog'
-import { FAKE_PROVIDER_MODEL, clearFakeProviderTrace, getFakeProviderTrace, subscribeFakeProviderTrace } from '../shared/ai/fake-provider'
-import { KeyedAsyncQueue } from '../shared/utils/keyed-async-queue'
+import { getCachedModelCatalog, providerModelEndpoint, saveModelCatalog, type ProviderModel } from '../shared/ai/model-catalog'
+import { FAKE_PROVIDER_MODEL } from '../shared/ai/fake-provider'
 import { saveRequiredSettingsForLeave } from '../features/settings/settings-leave-policy'
 import { fetchSpeechModels, type SpeechModel } from '../features/speech/tts-service'
 import { fetchTranscriptionModels, type SttModel } from '../features/speech/stt-service'
@@ -96,11 +78,16 @@ import '../features/codex/codex-summary.css'
 import '../features/speech/tts.css'
 import '../features/codex/codex-triggers.css'
 import '../features/settings/settings-save-recovery.css'
-import type { PromptPresetScope } from '../features/settings/prompt-presets'
-type SettingsTab = 'ai' | 'context' | 'appearance' | 'speech' | 'images' | 'sync'
+import SettingsProfilesPanel, { BookProfilesPanel, bookProfileKinds, type SettingsProfilesPanelRef, type ProfileEditorProps, type GlobalSettingsSection } from '../features/settings/SettingsProfilesPanel'
+import { SETTINGS_PROFILES_EVENT, loadSettingsProfiles, resolveProfileSettings, resolveProfileUiSettings, type SettingsProfileLibrary, type BookProfileSelections } from '../features/settings/settings-profiles'
+import { getBookProfileSelections, saveBookProfileSelections } from '../data/persistence'
+import { setActiveUiSettings } from '../features/settings/ui-settings'
+import { loadBookImageSettings } from '../features/images/book-image-settings'
+import type { ImageSettings } from '../features/images/image-generation-types'
+
+type SettingsTab = 'profiles' | 'ai' | 'context' | 'appearance' | 'application' | 'speech' | 'images' | 'sync'
 type ContextSection = Exclude<GenerationContextType, 'note'>
-type SaveState = 'loading' | 'saved' | 'saving' | 'error'
-type ModelRole = 'main' | 'support' | 'codex' | 'chat'
+type ModelRole = 'main' | 'support' | 'codex' | 'chat' | 'character'
 type RequestPreviewMessage = {
   key: string
   role: 'system' | 'user' | 'assistant' | 'tool'
@@ -113,14 +100,14 @@ type RequestPreviewMessage = {
   diagnostics?: string[]
 }
 
-const providerLabels: Record<AiProvider, string> = { openrouter: 'OpenRouter', nanogpt: 'nano-gpt.com', openai: 'OpenAI', litellm: 'LiteLLM', compatible: 'OpenAI-compatible', fake: 'Fake (testing)' }
+
 const modelRoles: ReadonlyArray<{ key: ModelRole; label: string; description: string }> = [
   { key: 'main', label: 'Main · Story writing', description: 'Writes story prose.' },
   { key: 'support', label: 'Support · Summaries & titles', description: 'Creates summaries and titles.' },
   { key: 'codex', label: 'Codex · Worldbuilding', description: 'Builds world and lore entries.' },
   { key: 'chat', label: 'Chat · Assistant', description: 'Sets the default for new chats.' },
+  { key: 'character', label: 'Character chat · Roleplay', description: 'Separate model and thinking for new character chats.' },
 ]
-const promptPresetScope: Record<keyof AiPrompts, PromptPresetScope> = { story: 'story', assistant: 'chat', lore: 'codex', summarize: 'summary' }
 function formatContext(value?: number) {
   if (!value) return 'Context unknown'
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value % 1_000_000 ? 1 : 0)}m context`
@@ -146,33 +133,47 @@ function sttCatalogConnectionKey(settings: AiSettings['speech']) {
 function isAbortError(error: unknown) {
   return error instanceof Error && error.name === 'AbortError'
 }
-
 type AiSettingsProps = {
   initialTab?: SettingsTab
+  onGlobalSettings?: () => void
+  onLastBook?: () => void
+  lastBookTitle?: string
+  initialProfileId?: string
   onHome?: () => void
   onBack?: () => void
   onSaved?: (settings: AiSettings) => void
   book?: { id: string; title: string; contextType?: GenerationContextType; currentDocumentId?: string; currentDocumentText?: string; insertionPosition?: number; promptValues?: BookPromptValues; chatId?: string; currentSummary?: { id: string; sourceEntityId: string; sourceType: SummarySourceType; content: string } }
 }
 
-export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }: AiSettingsProps) {
+function readProfileLibrary(): { library?: SettingsProfileLibrary; error?: string } {
+  try { return { library: loadSettingsProfiles() } }
+  catch (failure) { return { error: failure instanceof Error ? failure.message : 'Settings profiles could not be loaded. Saved data was not changed.' } }
+}
+
+export default function App(props: AiSettingsProps) {
+  const [loaded, setLoaded] = useState(readProfileLibrary)
+  if (!loaded.library) return <main className="app-shell ai-settings-shell"><section className="settings-page"><h1>Settings unavailable</h1><p role="alert">{loaded.error}</p><div className="profile-actions"><Button onClick={() => setLoaded(readProfileLibrary())}>Retry loading</Button>{props.onHome && <Button onClick={props.onHome}>Home</Button>}{props.onBack && <Button onClick={props.onBack}>Close settings</Button>}</div></section></main>
+  return <SettingsApp {...props} initialLibrary={loaded.library} />
+}
+
+function SettingsApp({ onHome, onBack, onSaved, onGlobalSettings, onLastBook, lastBookTitle, initialProfileId, book, initialTab = 'ai', initialLibrary }: AiSettingsProps & { initialLibrary: SettingsProfileLibrary }) {
   const [settings, setSettings] = useState<AiSettings>(initialAiSettings)
-  const [fakeTrace, setFakeTrace] = useState(() => getFakeProviderTrace())
-  const [models, setModels] = useState<ProviderModel[]>([])
-  const [promptTab, setPromptTab] = useState<keyof AiPrompts>('story')
-  const [promptVariableQuery, setPromptVariableQuery] = useState('')
-  const [aiSection, setAiSection] = useState<'connection' | 'models' | 'prompts'>('models')
-  const [connectionExpanded, setConnectionExpanded] = useState(false)
-  const [saveError, setSaveError] = useState('')
-  const [showKey, setShowKey] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [status, setStatus] = useState('Add an API key, then reload the model list.')
-  const [statusKind, setStatusKind] = useState<'quiet' | 'success' | 'error'>('quiet')
-  const [saveState, setSaveState] = useState<SaveState>(book ? 'loading' : 'saved')
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>(initialTab)
-  const [settingsLoading, setSettingsLoading] = useState(Boolean(book))
+  const [library, setLibrary] = useState(initialLibrary)
+  const [selections, setSelections] = useState<BookProfileSelections | null>(null)
+  const [profileError, setProfileError] = useState('')
+  const [profileBusy, setProfileBusy] = useState(false)
+  const [profileLoadVersion, setProfileLoadVersion] = useState(0)
+  const [localGlobal, setLocalGlobal] = useState(Boolean(book && initialProfileId))
+  const [editProfileId, setEditProfileId] = useState(initialProfileId ?? (!book && initialTab === 'images' ? initialLibrary.defaults.image : !book && initialTab === 'speech' ? initialLibrary.defaults.tts : undefined))
+  const profilePanelRef = useRef<SettingsProfilesPanelRef | null>(null)
+  const profileSavingRef = useRef(false)
+  const profileSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const initialKind = initialLibrary.profiles.find(profile => profile.id === initialProfileId)?.kind
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>(book && !initialProfileId ? initialTab === 'context' ? 'context' : 'profiles' : initialKind === 'ui' ? 'appearance' : initialTab === 'context' ? 'application' : initialTab === 'speech' || initialTab === 'images' ? 'ai' : initialTab)
   const [contextSection, setContextSection] = useState<ContextSection>(() => book?.contextType === 'codex' || book?.contextType === 'chat' ? book.contextType : 'scene')
   const [contextSettings, setContextSettings] = useState<BookContextSettings>(defaultBookContextSettings)
+  const [applicationContext, setApplicationContext] = useState(loadDefaultBookContextSettings)
+  const [applicationContextError, setApplicationContextError] = useState('')
   const [chatContextProfile, setChatContextProfile] = useState<GenerationContextProfile | null>(null)
   const [contextSources, setContextSources] = useState<ArcEntity[]>([])
   const [contextSaved, setContextSaved] = useState(true)
@@ -181,106 +182,64 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
   const [contextLoadVersion, setContextLoadVersion] = useState(0)
   const [leaveRecoveryOpen, setLeaveRecoveryOpen] = useState(false)
   const [leaveSaving, setLeaveSaving] = useState(false)
-  const [imageSettingsDirty, setImageSettingsDirty] = useState(false)
-  const [summaryPreviewSource, setSummaryPreviewSource] = useState<SummarySource | null>(null)
-  const [summaryPreviewError, setSummaryPreviewError] = useState('')
-  const aiLoadedScopeRef = useRef<string | null>(null)
-  const aiSavedRef = useRef('')
-  const latestAiSettingsRef = useRef(settings)
-  const aiSaveTimerRef = useRef<number | null>(null)
-  const aiSaveVersionRef = useRef(0)
-  const aiSaveQueueRef = useRef(new KeyedAsyncQueue())
-  const onSavedRef = useRef(onSaved)
   const contextSaveVersionRef = useRef(0)
   const contextSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const pendingLeaveDestinationRef = useRef<(() => void) | null>(null)
   const leaveSavingRef = useRef(false)
-  const modelRefreshSequenceRef = useRef(0)
-  const modelRefreshControllerRef = useRef<AbortController | null>(null)
-  const promptEditorRef = useRef<PromptTemplateEditorHandle | null>(null)
-  const imageSettingsRef = useRef<ImageSettingsPanelRef | null>(null)
-  const isBookSettings = Boolean(book)
+  const onSavedRef = useRef(onSaved)
   onSavedRef.current = onSaved
+  const isBookSettings = Boolean(book) && !localGlobal
 
-  useEffect(() => subscribeFakeProviderTrace(() => setFakeTrace(getFakeProviderTrace())), [])
+  useEffect(() => {
+    try {
+      if (!isBookSettings || selections) setActiveUiSettings(resolveProfileUiSettings(isBookSettings ? selections ?? undefined : undefined))
+    } catch (failure) { setProfileError(failure instanceof Error ? failure.message : 'The selected UI profile could not be applied.') }
+  }, [isBookSettings, selections, library])
+  useEffect(() => {
+    if (!initialProfileId || initialProfileId === editProfileId) return
+    const destination = () => { const nextTab = loadSettingsProfiles().profiles.find(profile => profile.id === initialProfileId)?.kind === 'ui' ? 'appearance' : 'ai'; setEditProfileId(initialProfileId); setLocalGlobal(Boolean(book)); setSettingsTab(nextTab) }
+    if (!isBookSettings) profilePanelRef.current?.requestLeave(destination)
+    else void leaveSettings(destination)
+  }, [initialProfileId])
 
   useEffect(() => {
     let cancelled = false
-    const summary = book?.currentSummary
-    setSummaryPreviewSource(null)
-    setSummaryPreviewError('')
-    if (!summary) return () => { cancelled = true }
-    void buildSummarySource(summary.sourceEntityId).then((source) => {
-      if (!cancelled) setSummaryPreviewSource(source)
-    }).catch(() => {
-      if (!cancelled) setSummaryPreviewError('The current Summary source could not be prepared for preview.')
-    })
-    return () => { cancelled = true }
-  }, [book?.currentSummary?.id, book?.currentSummary?.sourceEntityId, book?.currentSummary?.content])
-
-  useEffect(() => () => {
-    modelRefreshSequenceRef.current += 1
-    modelRefreshControllerRef.current?.abort()
-    modelRefreshControllerRef.current = null
-  }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    modelRefreshSequenceRef.current += 1
-    modelRefreshControllerRef.current?.abort()
-    modelRefreshControllerRef.current = null
-    setLoading(false)
-    const scope = book?.id ?? 'defaults'
-    aiLoadedScopeRef.current = null
-    aiSaveVersionRef.current += 1
-    if (aiSaveTimerRef.current !== null) window.clearTimeout(aiSaveTimerRef.current)
-    aiSaveTimerRef.current = null
-    setSaveState('loading')
-    const defaults = loadAiSettings()
-    if (!book) {
-      latestAiSettingsRef.current = defaults
-      aiSavedRef.current = JSON.stringify(defaults)
-      aiLoadedScopeRef.current = scope
-      setSettings(defaults)
-      setAiSection(defaults.apiKey || defaults.provider === 'fake' ? 'models' : 'connection')
-      const cachedModels = cachedTextModelCatalog(defaults)
-      setModels(cachedModels?.models ?? [])
-      setStatus(cachedModels ? `${cachedModels.models.length} cached models available. Reload the model list to refresh it.` : 'No cached model list yet. Use Reload model list to fetch it from the provider.')
-      setStatusKind(cachedModels?.models.length ? 'success' : 'quiet')
-      setSaveState('saved')
-      setSettingsLoading(false)
-      return () => { cancelled = true }
-    }
-
-    setSettingsLoading(true)
-    ;(async () => {
+    let reloadVersion = 0
+    async function reload() {
+      const version = ++reloadVersion
       try {
-        await ensureBookAiSettings(book.id, defaults)
-        const bookSettings = await getBookAiSettings(book.id, defaults.favorites)
-        if (cancelled) return
-        latestAiSettingsRef.current = bookSettings
-        aiSavedRef.current = JSON.stringify(bookSettings)
-        aiLoadedScopeRef.current = scope
-        setSettings(bookSettings)
-        setAiSection(bookSettings.apiKey || bookSettings.provider === 'fake' ? 'models' : 'connection')
-        const cachedModels = cachedTextModelCatalog(bookSettings)
-        setModels(cachedModels?.models ?? [])
-        setStatus(cachedModels ? `${cachedModels.models.length} cached models available for “${book.title}”. Reload the model list to refresh it.` : 'No cached model list yet. Use Reload model list to fetch it from the provider.')
-        setStatusKind(cachedModels?.models.length ? 'success' : 'quiet')
-        setSaveState('saved')
-      } catch {
-        if (cancelled) return
-        latestAiSettingsRef.current = defaults
-        setSettings(defaults)
-        setStatus('Book settings could not be read. No changes have been saved.')
-        setStatusKind('error')
-        setSaveState('error')
-      } finally {
-        if (!cancelled) setSettingsLoading(false)
+        const nextSelections = book ? await getBookProfileSelections(book.id) : undefined
+        if (cancelled || version !== reloadVersion) return
+        const nextLibrary = loadSettingsProfiles()
+        const defaultSelections = Object.fromEntries(bookProfileKinds.map(kind => [kind, nextLibrary.defaults[kind]])) as BookProfileSelections
+        const effective = resolveProfileSettings(nextSelections ?? defaultSelections, loadAiSettings().favorites)
+        setLibrary(nextLibrary); setSelections(nextSelections ?? null); setSettings(effective); setProfileError('')
+      } catch (error) {
+        if (!cancelled && version === reloadVersion) setProfileError(error instanceof Error ? error.message : 'Profiles could not be loaded. No changes have been saved.')
       }
+    }
+    setSelections(null)
+    void reload()
+    window.addEventListener(SETTINGS_PROFILES_EVENT, reload)
+    window.addEventListener('storage', reload)
+    return () => { cancelled = true; window.removeEventListener(SETTINGS_PROFILES_EVENT, reload); window.removeEventListener('storage', reload) }
+  }, [book?.id, profileLoadVersion])
+
+  async function selectBookProfile(kind: keyof BookProfileSelections, id: string) {
+    if (!book || !selections || profileSavingRef.current) return
+    const next = { ...selections, [kind]: id }
+    profileSavingRef.current = true; setProfileBusy(true); setProfileError('')
+    const pending = (async () => {
+      try {
+        await saveBookProfileSelections(book.id, next)
+        const effective = resolveProfileSettings(next, loadAiSettings().favorites)
+        setSelections(next); setSettings(effective); onSavedRef.current?.(effective)
+      } catch (error) { setProfileError(error instanceof Error ? error.message : 'Profile selection could not be saved. The previous selection is unchanged.') }
+      finally { profileSavingRef.current = false; setProfileBusy(false) }
     })()
-    return () => { cancelled = true }
-  }, [book?.id])
+    profileSaveQueueRef.current = pending
+    await pending
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -307,200 +266,6 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
     }).catch(() => { if (!cancelled) { setContextSaved(false); setContextSaveError('Context settings could not be loaded. Reopen settings to try again.') } })
     return () => { cancelled = true }
   }, [book?.id, book?.chatId, contextLoadVersion])
-
-
-  function persistAiSettings(snapshot: AiSettings, scope: string, version: number): Promise<boolean> {
-    const pending = aiSaveQueueRef.current.run(scope, async () => {
-      const savedSettings = scope === 'defaults'
-        ? saveAiSettings(snapshot)
-        : await saveBookAiSettings(scope, snapshot)
-      if (scope !== 'defaults') saveGlobalFavorites(snapshot.favorites)
-      if (version !== aiSaveVersionRef.current || scope !== aiLoadedScopeRef.current) return false
-      aiSavedRef.current = JSON.stringify(snapshot)
-      setSaveState('saved')
-      setSaveError('')
-      onSavedRef.current?.(savedSettings)
-      return true
-    })
-    return pending.catch(() => {
-      if (version !== aiSaveVersionRef.current || scope !== aiLoadedScopeRef.current) return false
-      setSaveState('error')
-      setSaveError('Settings could not be saved. Your changes are still here.')
-      return false
-    })
-  }
-
-  function scheduleAiSettingsSave(next: AiSettings) {
-    const scope = aiLoadedScopeRef.current
-    latestAiSettingsRef.current = next
-    if (!scope || JSON.stringify(next) === aiSavedRef.current) return
-    setSaveState('saving')
-    const version = ++aiSaveVersionRef.current
-    if (aiSaveTimerRef.current !== null) window.clearTimeout(aiSaveTimerRef.current)
-    aiSaveTimerRef.current = window.setTimeout(() => {
-      aiSaveTimerRef.current = null
-      void persistAiSettings(next, scope, version)
-    }, 500)
-  }
-
-  function changeAiSettings(transform: (current: AiSettings) => AiSettings) {
-    const current = latestAiSettingsRef.current
-    const next = transform(current)
-    if (JSON.stringify(next) === JSON.stringify(current)) return
-    latestAiSettingsRef.current = next
-    setSettings(next)
-    scheduleAiSettingsSave(next)
-  }
-
-  async function flushAiSettings(): Promise<boolean> {
-    const scope = aiLoadedScopeRef.current
-    const snapshot = latestAiSettingsRef.current
-    if (!scope || JSON.stringify(snapshot) === aiSavedRef.current) return true
-    if (aiSaveTimerRef.current !== null) window.clearTimeout(aiSaveTimerRef.current)
-    aiSaveTimerRef.current = null
-    setSaveState('saving')
-    const version = ++aiSaveVersionRef.current
-    const saved = await persistAiSettings(snapshot, scope, version)
-    return saved
-      && scope === aiLoadedScopeRef.current
-      && JSON.stringify(latestAiSettingsRef.current) === aiSavedRef.current
-  }
-
-  function invalidateModelRefresh() {
-    modelRefreshSequenceRef.current += 1
-    modelRefreshControllerRef.current?.abort()
-    modelRefreshControllerRef.current = null
-    setLoading(false)
-  }
-
-  function update<K extends keyof AiSettings>(key: K, value: AiSettings[K]) { changeAiSettings((current) => ({ ...current, [key]: value })) }
-  function updateConnection<K extends 'apiKey' | 'baseUrl'>(key: K, value: AiSettings[K]) {
-    const current = latestAiSettingsRef.current
-    if (current[key] === value) return
-    invalidateModelRefresh()
-    const next = { ...current, [key]: value } as AiSettings
-    clearModelCatalog(current)
-    clearModelCatalog(next)
-    changeAiSettings(() => next)
-    setModels([])
-    setStatus('Connection changed. Reload the model list to refresh the cache.')
-    setStatusKind('quiet')
-  }
-  function selectProvider(provider: AiProvider) {
-    const current = latestAiSettingsRef.current
-    if (current.provider === provider) return
-    invalidateModelRefresh()
-    const next = switchProviderProfile(current, provider)
-    setShowKey(false)
-    clearModelCatalog(current)
-    clearModelCatalog(next)
-    changeAiSettings(() => next)
-    setModels(provider === 'fake' ? [FAKE_PROVIDER_MODEL] : []); setStatus(provider === 'fake' ? 'Fake Test Model is available locally. Reload never contacts a network.' : 'Provider changed. Reload its model list when ready.'); setStatusKind(provider === 'fake' ? 'success' : 'quiet')
-  }
-  function selectModel(kind: ModelRole, id: string) {
-    const contextLength = models.find((model) => model.id === id)?.context_length
-    changeAiSettings((current) => kind === 'main'
-      ? { ...current, mainModel: id, mainModelContextLength: contextLength }
-      : kind === 'support' ? { ...current, supportModel: id, supportModelContextLength: contextLength } : kind === 'chat' ? { ...current, chatModel: id, chatModelContextLength: contextLength } : { ...current, codexModel: id, codexModelContextLength: contextLength })
-  }
-  async function refreshModels() {
-    const requestSettings = latestAiSettingsRef.current
-    if (requestSettings.provider === 'fake') {
-      invalidateModelRefresh()
-      setModels([FAKE_PROVIDER_MODEL])
-      changeAiSettings((current) => ({
-        ...current,
-        mainModelContextLength: current.mainModel === FAKE_PROVIDER_MODEL.id ? FAKE_PROVIDER_MODEL.context_length : undefined,
-        chatModelContextLength: current.chatModel === FAKE_PROVIDER_MODEL.id ? FAKE_PROVIDER_MODEL.context_length : undefined,
-        supportModelContextLength: current.supportModel === FAKE_PROVIDER_MODEL.id ? FAKE_PROVIDER_MODEL.context_length : undefined,
-        codexModelContextLength: current.codexModel === FAKE_PROVIDER_MODEL.id ? FAKE_PROVIDER_MODEL.context_length : undefined,
-      }))
-      setStatus('1 local testing model available. No network request was made.')
-      setStatusKind('success')
-      return
-    }
-    if (!requestSettings.apiKey.trim()) { setStatus('Enter an API key before loading models.'); setStatusKind('error'); return }
-    if ((requestSettings.provider === 'compatible' || requestSettings.provider === 'litellm') && !requestSettings.baseUrl.trim()) { setStatus(`Enter the ${requestSettings.provider === 'litellm' ? 'LiteLLM base URL' : 'compatible provider endpoint'} first.`); setStatusKind('error'); return }
-    modelRefreshControllerRef.current?.abort()
-    const requestId = ++modelRefreshSequenceRef.current
-    const connectionKey = textModelConnectionKey(requestSettings)
-    const controller = new AbortController()
-    modelRefreshControllerRef.current = controller
-    const ownsRequest = () => requestId === modelRefreshSequenceRef.current && textModelConnectionKey(latestAiSettingsRef.current) === connectionKey
-    setLoading(true); setStatus('Contacting the provider…'); setStatusKind('quiet')
-    try {
-      const response = await fetch(providerModelEndpoint(requestSettings), { headers: { Accept: 'application/json', Authorization: `Bearer ${requestSettings.apiKey.trim()}` }, signal: controller.signal })
-      const payload = await response.json().catch(() => ({})) as { data?: ProviderModel[]; message?: string; error?: { message?: string } }
-      if (!response.ok) throw new Error(payload.error?.message || payload.message || `Provider returned ${response.status}.`)
-      const nextModels = Array.isArray(payload.data) ? payload.data.filter((model) => typeof model.id === 'string' && model.id.length > 0) : []
-      if (!ownsRequest()) return
-      changeAiSettings((current) => ({
-        ...current,
-        mainModelContextLength: nextModels.find((model) => model.id === current.mainModel)?.context_length ?? current.mainModelContextLength,
-        chatModelContextLength: nextModels.find((model) => model.id === current.chatModel)?.context_length ?? current.chatModelContextLength,
-        supportModelContextLength: nextModels.find((model) => model.id === current.supportModel)?.context_length ?? current.supportModelContextLength,
-        codexModelContextLength: nextModels.find((model) => model.id === current.codexModel)?.context_length ?? current.codexModelContextLength,
-      }))
-      if (!ownsRequest()) return
-      const cached = saveModelCatalog(requestSettings, nextModels)
-      setModels(nextModels)
-      setStatus(nextModels.length ? (cached.persisted ? `${nextModels.length} models cached.` : `${nextModels.length} models loaded, but the browser could not persist the cache.`) : 'The provider returned no models.')
-      setStatusKind(nextModels.length && cached.persisted ? 'success' : 'error')
-    } catch (error) {
-      if (!ownsRequest() || isAbortError(error)) return
-      const cached = getCachedModelCatalog(requestSettings)
-      if (cached?.models.length) {
-        setModels(cached.models)
-        const reason = error instanceof Error ? error.message : 'Could not refresh the model list.'
-        setStatus(`Refresh failed; keeping ${cached.models.length} cached models. ${reason}`)
-      } else {
-        setModels([])
-        setStatus(error instanceof Error ? error.message : 'Could not load the model list.')
-      }
-      setStatusKind('error')
-    } finally {
-      if (requestId === modelRefreshSequenceRef.current) {
-        if (modelRefreshControllerRef.current === controller) modelRefreshControllerRef.current = null
-        setLoading(false)
-      }
-    }
-  }
-
-  async function resetFromDefaults() {
-    if (!book || !window.confirm(`Replace the AI settings for “${book.title}” with the current defaults?`)) return
-    invalidateModelRefresh()
-    const scope = book.id
-    const defaults = loadAiSettings()
-    if (aiSaveTimerRef.current !== null) window.clearTimeout(aiSaveTimerRef.current)
-    aiSaveTimerRef.current = null
-    const version = ++aiSaveVersionRef.current
-
-    // Reset becomes the newest local revision immediately, so any edit made while the
-    // queued reset is waiting starts from the defaults and is ordered after the reset.
-    latestAiSettingsRef.current = defaults
-    setSettings(defaults)
-    setSaveState('saving')
-    setModels(cachedTextModelCatalog(defaults)?.models ?? [])
-
-    try {
-      await aiSaveQueueRef.current.run(scope, async () => {
-        const copied = await copyDefaultAiSettingsToBook(scope, defaults)
-        if (version !== aiSaveVersionRef.current || scope !== aiLoadedScopeRef.current) return
-        latestAiSettingsRef.current = copied
-        aiSavedRef.current = JSON.stringify(copied)
-        setSettings(copied)
-        setSaveState('saved')
-        setModels(cachedTextModelCatalog(copied)?.models ?? [])
-        setSaveError('')
-        onSavedRef.current?.(copied)
-      })
-    } catch {
-      if (version !== aiSaveVersionRef.current || scope !== aiLoadedScopeRef.current) return
-      setSaveState('error')
-      setSaveError('Defaults could not be copied to this book. Try again.')
-    }
-  }
-
   async function saveContextDefaults(): Promise<boolean> {
     if (!contextReady) return true // No editable Context draft has been loaded.
     const section = contextSection
@@ -585,68 +350,191 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
     })
   }
 
-  async function flushImageSettings(): Promise<boolean> {
-    if (!imageSettingsDirty) return true
-    return imageSettingsRef.current?.save() ?? true
+  function saveApplicationContext(next: BookContextSettings): boolean {
+    setApplicationContext(next)
+    try { setApplicationContext(saveDefaultBookContextSettings(next)); setApplicationContextError(''); return true }
+    catch { setApplicationContextError('Context defaults could not be saved. Your draft is retained for retry.'); return false }
   }
-
-  async function selectSettingsTab(tab: SettingsTab) {
+  function selectSettingsTab(tab: SettingsTab) {
     if (tab === settingsTab) return
-    if (settingsTab === 'images' && !(await flushImageSettings())) return
-    setSettingsTab(tab)
+    const destination = () => setSettingsTab(tab)
+    if (!isBookSettings) profilePanelRef.current?.requestLeave(destination)
+    else destination()
   }
-
   async function leaveSettings(destination?: () => void) {
     if (!destination || leaveSavingRef.current) return
     pendingLeaveDestinationRef.current = destination
-    leaveSavingRef.current = true
-    setLeaveSaving(true)
+    leaveSavingRef.current = true; setLeaveSaving(true)
+    await profileSaveQueueRef.current
     const saved = await saveRequiredSettingsForLeave([
-      () => flushAiSettings(),
-      ...(!contextSaved ? [() => saveContextDefaults()] : []),
-      ...((settingsTab === 'images' && imageSettingsDirty) ? [() => flushImageSettings()] : []),
-    ])
-    leaveSavingRef.current = false
-    setLeaveSaving(false)
-    if (!saved) {
-      setLeaveRecoveryOpen(true)
-      return
-    }
-    setLeaveRecoveryOpen(false)
-    pendingLeaveDestinationRef.current = null
-    destination()
+          ...(!contextSaved ? [() => saveContextDefaults()] : []),
+          ...(applicationContextError ? [async () => saveApplicationContext(applicationContext)] : []),
+        ])
+    leaveSavingRef.current = false; setLeaveSaving(false)
+    if (!saved) { setLeaveRecoveryOpen(true); return }
+    setLeaveRecoveryOpen(false); pendingLeaveDestinationRef.current = null
+    try { destination() } catch (failure) { setProfileError(failure instanceof Error ? failure.message : 'Settings navigation failed. Your draft is still here.') }
   }
-
-  async function retrySettingsLeave() {
-    const destination = pendingLeaveDestinationRef.current
+  function navigate(destination?: () => void) {
     if (!destination) return
-    await leaveSettings(destination)
+    if (!isBookSettings) profilePanelRef.current?.requestLeave(() => { void leaveSettings(destination) })
+    else void leaveSettings(destination)
   }
-
   async function leaveSettingsWithoutSaving() {
     const destination = pendingLeaveDestinationRef.current
-    if (!destination || leaveSavingRef.current) return
-    if (!window.confirm('Leave without saving? Unsaved settings changes will be lost.')) return
-
-    if (aiSaveTimerRef.current !== null) window.clearTimeout(aiSaveTimerRef.current)
-    aiSaveTimerRef.current = null
-    aiSaveVersionRef.current += 1
+    if (!destination || leaveSavingRef.current || !window.confirm('Leave without saving Context? Unsaved changes will be lost.')) return
     contextSaveVersionRef.current += 1
-    leaveSavingRef.current = true
-    setLeaveSaving(true)
-    const scope = aiLoadedScopeRef.current
-    await Promise.allSettled([
-      scope ? aiSaveQueueRef.current.whenIdle(scope) : Promise.resolve(),
-      contextSaveQueueRef.current.catch(() => undefined),
-    ])
-    leaveSavingRef.current = false
-    setLeaveSaving(false)
-    imageSettingsRef.current?.discard()
-    setLeaveRecoveryOpen(false)
-    pendingLeaveDestinationRef.current = null
-    destination()
+    await contextSaveQueueRef.current.catch(() => undefined)
+    setLeaveRecoveryOpen(false); pendingLeaveDestinationRef.current = null
+    try { destination() } catch (failure) { setProfileError(failure instanceof Error ? failure.message : 'Settings navigation failed.') }
+  }
+  function openGlobalProfile(id?: string) {
+    navigate(() => { const nextTab = loadSettingsProfiles().profiles.find(profile => profile.id === id)?.kind === 'ui' ? 'appearance' : 'ai'; setEditProfileId(id); setSettingsTab(nextTab); setLocalGlobal(true) })
+  }
+  const visibleContextSettings = contextSection === 'chat' && chatContextProfile
+    ? { ...contextSettings, profiles: { ...contextSettings.profiles, chat: chatContextProfile } }
+    : contextSettings
+  const globalSection = (settingsTab === 'appearance' || settingsTab === 'application' || settingsTab === 'sync' ? settingsTab : 'ai') as GlobalSettingsSection
+  return <main className="app-shell ai-settings-shell">
+    <aside className="settings-rail" aria-label={`${isBookSettings ? 'Book' : 'Global'} settings navigation`}>
+      <div className="rail-header"><button className="home-button" type="button" onClick={() => navigate(onHome)} disabled={leaveSaving} aria-label="Back to library"><Home aria-hidden="true" /><b>Home</b></button>
+        {isBookSettings && <button className="global-settings-button" type="button" onClick={() => onGlobalSettings ? navigate(onGlobalSettings) : openGlobalProfile()} disabled={leaveSaving}>Global Settings</button>}
+        {onBack && <button className="settings-close" type="button" onClick={() => navigate(onBack)} aria-label="Close settings" disabled={leaveSaving}><X aria-hidden="true" /></button>}</div>
+      <nav>{(isBookSettings ? ([['profiles', Bot, 'Profiles'], ['context', SlidersHorizontal, 'Context']] as const) : ([['ai', Bot, 'AI'], ['appearance', Type, 'UI'], ['application', SlidersHorizontal, 'Application'], ['sync', Cloud, 'Sync']] as const)).map(([key, Icon, label]) => <button key={key} className={settingsTab === key ? 'active' : ''} type="button" aria-current={settingsTab === key ? 'page' : undefined} onClick={() => selectSettingsTab(key)}><Icon aria-hidden="true" /><span>{label}</span></button>)}</nav>
+      <p>{isBookSettings ? 'Choose shared profiles for this book. Context remains local to this book or chat.' : 'Shared profiles update linked books after Save. Connections stay local and never enter backups.'}</p>
+    </aside>
+    <section className="settings-page" aria-labelledby="page-title">
+      {!isBookSettings && profileError && <p className="status error" role="alert">{profileError}</p>}
+      {!isBookSettings && <header className="global-settings-return profile-actions">
+        {localGlobal && book && <Button onClick={() => navigate(() => { setLocalGlobal(false); setSettingsTab('profiles') })}>Back to Profiles · {book.title}</Button>}
+        {(onLastBook || localGlobal && onBack) && <Button onClick={() => navigate(onLastBook ?? onBack)}>Back to last book{lastBookTitle || book?.title ? ` · ${lastBookTitle || book?.title}` : ''}</Button>}
+      </header>}
+      {leaveRecoveryOpen && <section className="settings-save-recovery" role="alert"><div><strong>Settings weren’t saved</strong><span>Your unsaved changes are still here.</span></div><div className="profile-actions"><Button disabled={leaveSaving} onClick={() => { void leaveSettings(pendingLeaveDestinationRef.current ?? undefined) }}>Retry</Button><Button disabled={leaveSaving} onClick={() => { void leaveSettingsWithoutSaving() }}>Leave without saving</Button></div></section>}
+      {isBookSettings ? settingsTab === 'context' ? <>
+        {profileError && selections && <p className="status error" role="alert">{profileError}<Button size="small" onClick={() => setProfileLoadVersion(version => version + 1)}>Retry profiles</Button></p>}
+        {!contextReady || !selections ? <section className="settings-card"><h1 id="page-title">Context</h1><p role="status">{contextSaveError || profileError || 'Loading context and profiles…'}</p>{(contextSaveError || profileError) && <Button onClick={() => { setContextLoadVersion(version => version + 1); setProfileLoadVersion(version => version + 1) }}>Retry loading</Button>}</section> : book && <>
+          <SettingsSectionTabs tabs={contextSections} active={contextSection} onChange={setContextSection} idPrefix="context" label="Context type" />
+          <div role="tabpanel" id={`context-panel-${contextSection}`} aria-labelledby={`context-tab-${contextSection}`}>
+            <ContextSettings bookId={book.id} bookTitle={book.title} bookPromptValues={book.promptValues} type={contextSection} currentDocumentId={(book.contextType ?? 'scene') === contextSection ? book.currentDocumentId : undefined} currentDocumentText={(book.contextType ?? 'scene') === contextSection ? book.currentDocumentText : undefined} insertionPosition={(book.contextType ?? 'scene') === contextSection ? book.insertionPosition : undefined} chatId={contextSection === 'chat' ? book.chatId : undefined} settings={settings} value={visibleContextSettings} sources={contextSources} saved={contextSaved} saveError={contextSaveError} onRetry={() => { void saveContextDefaults() }} onChange={(value) => updateContextDefaults(value, contextSection)} />
+          </div>
+          {book.currentSummary && <BookSummaryPreview book={book} settings={settings} />}
+        </>}
+      </> : <BookProfilesPanel library={library} selections={selections} busy={profileBusy} error={profileError} onRetry={() => setProfileLoadVersion(version => version + 1)} onChange={(kind, id) => { void selectBookProfile(kind, id) }} onEdit={openGlobalProfile} />
+      : <SettingsProfilesPanel key={editProfileId ?? 'global'} ref={profilePanelRef} section={globalSection} initialProfileId={editProfileId} onSaved={() => { const effective = resolveProfileSettings(selections ?? Object.fromEntries(bookProfileKinds.map(kind => [kind, loadSettingsProfiles().defaults[kind]])) as BookProfileSelections, loadAiSettings().favorites); setSettings(effective); onSavedRef.current?.(effective) }} renderEditor={props => <ProfileEditor key={`${props.kind}-${editProfileId ?? ''}`} {...props} book={book} />} application={<><TtsCacheSettings /><GlobalContextDefaults value={applicationContext} saved={!applicationContextError} saveError={applicationContextError} onRetry={() => saveApplicationContext(applicationContext)} onChange={saveApplicationContext} /></>} sync={<SyncSettingsPanel />} />}
+    </section>
+  </main>
+}
+
+function ProfileEditor({ settings, onChange, kind, library, book }: ProfileEditorProps & { book?: AiSettingsProps['book'] }) {
+  const promptTab: keyof AiPrompts = kind === 'codex' ? 'lore' : kind === 'summary' ? 'summarize' : kind === 'chat' || kind === 'character' ? 'assistant' : 'story'
+
+
+  const [models, setModels] = useState<ProviderModel[]>([])
+  const [promptVariableQuery, setPromptVariableQuery] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [status, setStatus] = useState('Add an API key, then reload the model list.')
+  const [statusKind, setStatusKind] = useState<'quiet' | 'success' | 'error'>('quiet')
+  const [summaryPreviewSource, setSummaryPreviewSource] = useState<SummarySource | null>(null)
+  const [summaryPreviewError, setSummaryPreviewError] = useState('')
+  const latestAiSettingsRef = useRef(settings)
+  latestAiSettingsRef.current = settings
+  const modelRefreshSequenceRef = useRef(0)
+  const modelRefreshControllerRef = useRef<AbortController | null>(null)
+  const promptEditorRef = useRef<PromptTemplateEditorHandle | null>(null)
+
+
+  useEffect(() => {
+    let cancelled = false
+    const summary = book?.currentSummary
+    setSummaryPreviewSource(null)
+    setSummaryPreviewError('')
+    if (!summary) return () => { cancelled = true }
+    void buildSummarySource(summary.sourceEntityId).then((source) => {
+      if (!cancelled) setSummaryPreviewSource(source)
+    }).catch(() => {
+      if (!cancelled) setSummaryPreviewError('The current Summary source could not be prepared for preview.')
+    })
+    return () => { cancelled = true }
+  }, [book?.currentSummary?.id, book?.currentSummary?.sourceEntityId, book?.currentSummary?.content])
+
+  useEffect(() => () => {
+    modelRefreshSequenceRef.current += 1
+    modelRefreshControllerRef.current?.abort()
+    modelRefreshControllerRef.current = null
+  }, [])
+
+  useEffect(() => {
+    invalidateModelRefresh()
+    const cached = cachedTextModelCatalog(settings)
+    setModels(cached?.models ?? [])
+    setStatus(cached ? `${cached.models.length} cached models available.` : 'Reload the global connection’s model catalog to choose a model.')
+  }, [settings.provider, settings.apiKey, settings.baseUrl])
+  function changeAiSettings(transform: (current: AiSettings) => AiSettings) {
+    const next = transform(latestAiSettingsRef.current)
+    latestAiSettingsRef.current = next
+    onChange(next)
+  }
+  function invalidateModelRefresh() {
+    modelRefreshSequenceRef.current += 1
+    modelRefreshControllerRef.current?.abort()
+    modelRefreshControllerRef.current = null
+    setLoading(false)
   }
 
+  function update<K extends keyof AiSettings>(key: K, value: AiSettings[K]) { changeAiSettings((current) => ({ ...current, [key]: value })) }
+  function selectModel(kind: ModelRole, id: string) {
+    const contextLength = models.find((model) => model.id === id)?.context_length
+    changeAiSettings((current) => kind === 'main'
+      ? { ...current, mainModel: id, mainModelContextLength: contextLength }
+      : kind === 'support' ? { ...current, supportModel: id, supportModelContextLength: contextLength } : kind === 'chat' ? { ...current, chatModel: id, chatModelContextLength: contextLength } : kind === 'character' ? { ...current, characterModel: id, characterModelContextLength: contextLength } : { ...current, codexModel: id, codexModelContextLength: contextLength })
+  }
+  async function refreshModels() {
+    const requestSettings = latestAiSettingsRef.current
+    if (requestSettings.provider === 'fake') {
+      invalidateModelRefresh()
+      setModels([FAKE_PROVIDER_MODEL])
+      setStatus('1 local testing model available. No network request was made.')
+      setStatusKind('success')
+      return
+    }
+    if (!requestSettings.apiKey.trim()) { setStatus('Enter an API key before loading models.'); setStatusKind('error'); return }
+    if ((requestSettings.provider === 'compatible' || requestSettings.provider === 'litellm') && !requestSettings.baseUrl.trim()) { setStatus(`Enter the ${requestSettings.provider === 'litellm' ? 'LiteLLM base URL' : 'compatible provider endpoint'} first.`); setStatusKind('error'); return }
+    modelRefreshControllerRef.current?.abort()
+    const requestId = ++modelRefreshSequenceRef.current
+    const connectionKey = textModelConnectionKey(requestSettings)
+    const controller = new AbortController()
+    modelRefreshControllerRef.current = controller
+    const ownsRequest = () => requestId === modelRefreshSequenceRef.current && textModelConnectionKey(latestAiSettingsRef.current) === connectionKey
+    setLoading(true); setStatus('Contacting the provider…'); setStatusKind('quiet')
+    try {
+      const response = await fetch(providerModelEndpoint(requestSettings), { headers: { Accept: 'application/json', Authorization: `Bearer ${requestSettings.apiKey.trim()}` }, signal: controller.signal })
+      const payload = await response.json().catch(() => ({})) as { data?: ProviderModel[]; message?: string; error?: { message?: string } }
+      if (!response.ok) throw new Error(payload.error?.message || payload.message || `Provider returned ${response.status}.`)
+      const nextModels = Array.isArray(payload.data) ? payload.data.filter((model) => typeof model.id === 'string' && model.id.length > 0) : []
+      if (!ownsRequest()) return
+      const cached = saveModelCatalog(requestSettings, nextModels)
+      setModels(nextModels)
+      setStatus(nextModels.length ? (cached.persisted ? `${nextModels.length} models cached.` : `${nextModels.length} models loaded, but the browser could not persist the cache.`) : 'The provider returned no models.')
+      setStatusKind(nextModels.length && cached.persisted ? 'success' : 'error')
+    } catch (error) {
+      if (!ownsRequest() || isAbortError(error)) return
+      const cached = getCachedModelCatalog(requestSettings)
+      if (cached?.models.length) {
+        setModels(cached.models)
+        const reason = error instanceof Error ? error.message : 'Could not refresh the model list.'
+        setStatus(`Refresh failed; keeping ${cached.models.length} cached models. ${reason}`)
+      } else {
+        setModels([])
+        setStatus(error instanceof Error ? error.message : 'Could not load the model list.')
+      }
+      setStatusKind('error')
+    } finally {
+      if (requestId === modelRefreshSequenceRef.current) {
+        if (modelRefreshControllerRef.current === controller) modelRefreshControllerRef.current = null
+        setLoading(false)
+      }
+    }
+  }
   const activePrompt = settings.promptCompositions[promptTab].systemPrompt
   const responseLengthScope = promptTab === 'lore' ? 'codex' : promptTab === 'summarize' ? 'summary' : promptTab === 'story' ? 'story' : null
   const activeResponseLength = responseLengthScope ? settings.responseLengths[responseLengthScope] : ''
@@ -684,84 +572,27 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
         sourceDiagnostics: summaryPreviewSource.diagnostics,
       })
     : null
-  const visibleContextSettings = contextSection === 'chat' && chatContextProfile
-    ? { ...contextSettings, profiles: { ...contextSettings.profiles, chat: chatContextProfile } }
-    : contextSettings
-
-  return (
-    <main className="app-shell ai-settings-shell">
-      <aside className="settings-rail" aria-label={`${isBookSettings ? 'Book' : 'Default'} settings navigation`}>
-        <div className="rail-header"><button className="home-button" type="button" aria-label="Back to library" onClick={() => { void leaveSettings(onHome) }} disabled={leaveSaving}><Home aria-hidden="true" /><b>Home</b></button>{onBack && <button className="settings-close" type="button" onClick={() => { void leaveSettings(onBack) }} aria-label="Close settings" title="Close settings" disabled={leaveSaving}><X aria-hidden="true" /></button>}</div>
-        <nav>
-          {(isBookSettings ? ([['ai', Bot, 'AI'], ['context', SlidersHorizontal, 'Context'], ['appearance', Type, 'UI'], ['speech', Volume2, 'Speech'], ['images', ImageIcon, 'Images']] as const) : ([['ai', Bot, 'AI'], ['context', SlidersHorizontal, 'Context'], ['appearance', Type, 'UI'], ['speech', Volume2, 'Speech'], ['images', ImageIcon, 'Images'], ['sync', Cloud, 'Sync']] as const)).map(([key, Icon, label]) => (
-            <button className={settingsTab === key ? 'active' : ''} type="button" onClick={() => { void selectSettingsTab(key) }} aria-current={settingsTab === key ? 'page' : undefined} key={key}><Icon aria-hidden="true" /><span>{label}</span></button>
-          ))}
-        </nav>
-        <p>{settingsTab === 'sync' ? 'Sync credentials and automatic-upload preference apply only to this browser.' : settingsTab === 'images' ? 'Image providers and favorite models apply to all books on this device.' : isBookSettings ? `Changes here affect only “${book?.title}”. Favorite models are shared across books.` : 'Defaults are copied into a new book. After that, each book keeps its own settings.'}</p>
-      </aside>
-
-      <section className="settings-page" aria-labelledby="page-title">
-        {leaveRecoveryOpen && <section className="settings-save-recovery" role="alert" aria-live="assertive">
-          <div><strong>Settings weren’t saved</strong><span>Your unsaved changes are still here. Retry saving, or deliberately leave and discard only the changes that are still unsaved.</span></div>
-          <div className="settings-save-recovery-actions">
-            <button className="primary" type="button" onClick={() => { void retrySettingsLeave() }} disabled={leaveSaving}>{leaveSaving ? 'Retrying…' : 'Retry'}</button>
-            <button type="button" onClick={() => { void leaveSettingsWithoutSaving() }} disabled={leaveSaving}>Leave without saving</button>
-          </div>
-        </section>}
-        {settingsTab === 'ai' ? <>
-        <header className="page-heading"><div><p>{isBookSettings ? 'Book AI' : 'Default AI'}</p><h1 id="page-title">Models & prompts</h1><span>{isBookSettings ? `Configure AI for “${book?.title}”. These settings are independent from the defaults.` : 'Configure the writing and support models used when a book is created.'}</span></div><div className={`save-state ${saveState}`} aria-live="polite"><i />{saveState === 'loading' || settingsLoading ? 'Loading' : saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Save failed' : 'Saved'}</div></header>
-
-        <div className="ai-scope-row"><span>{isBookSettings ? `This book only · ${book?.title}` : 'Defaults for new books'}</span>{book && <details className="ai-settings-menu"><summary>More options</summary><button type="button" onClick={() => { void resetFromDefaults() }} disabled={settingsLoading}>Reset from defaults</button></details>}</div>
-        {saveError && <div className="status error" role="alert">{saveError}<button type="button" onClick={() => { void flushAiSettings() }}>Retry saving</button></div>}
-        <SettingsSectionTabs tabs={aiSections} active={aiSection} onChange={setAiSection} idPrefix="ai" label="AI sections" />
-        <section hidden={aiSection !== 'connection'} className="settings-card provider-card" role="tabpanel" id="ai-panel-connection" aria-labelledby="ai-tab-connection">
-          <div className="card-heading"><div><span>01</span><h2>Provider</h2></div><p>Connection details stay in this browser.</p></div>
-          <p className="connection-summary">{providerLabels[settings.provider]} · {settings.provider === 'fake' ? 'Local testing' : settings.apiKey ? 'Key saved on this device' : 'Setup required'}</p><Disclosure className="provider-connection" title="Edit connection" description="Provider endpoint, credentials, and model catalog." open={connectionExpanded || (!settings.apiKey && settings.provider !== 'fake')} onToggle={event => setConnectionExpanded(event.currentTarget.open)}><div className="provider-grid">{(Object.keys(providerLabels) as AiProvider[]).map((provider) => <button key={provider} className={settings.provider === provider ? 'selected' : ''} type="button" aria-pressed={settings.provider === provider} onClick={() => selectProvider(provider)}><i>{provider === 'fake' ? 'T' : provider === 'nanogpt' ? 'N' : provider === 'openrouter' ? 'O' : provider === 'openai' ? 'AI' : provider === 'litellm' ? 'LLM' : '{ }'}</i><span><strong>{providerLabels[provider]}</strong><small>{provider === 'fake' ? 'Local · no network' : provider === 'compatible' ? 'Custom endpoint' : provider === 'litellm' ? 'Self-hosted gateway' : 'Managed endpoint'}</small></span><b>{settings.provider === provider ? '✓' : ''}</b></button>)}</div>
-          <div className="connection-fields">
-            {(settings.provider === 'compatible' || settings.provider === 'litellm') && <Input label={settings.provider === 'litellm' ? 'LiteLLM base URL' : 'Endpoint URL'} value={settings.baseUrl} onChange={(event) => updateConnection('baseUrl', event.target.value)} placeholder={settings.provider === 'litellm' ? 'https://webdev.serveblog.net:9447/v1' : 'https://provider.example/v1'} />}
-            {settings.provider !== 'fake' && <label><span>{settings.provider === 'litellm' ? 'LiteLLM API key' : 'API key'}</span><div className="input-action"><input
-              type={showKey ? 'text' : 'password'}
-              name="arc-provider-token"
-              value={settings.apiKey}
-              onChange={(event) => updateConnection('apiKey', event.target.value)}
-              placeholder="Enter API key"
-              autoComplete="one-time-code"
-              autoCapitalize="none"
-              data-1p-ignore
-              data-bwignore="true"
-              data-form-type="other"
-              data-lpignore="true"
-              spellCheck={false}
-            /><button type="button" onClick={() => setShowKey((value) => !value)}>{showKey ? 'Hide' : 'Show'}</button></div></label>}
-            {settings.provider === 'fake' && <div className="status success" role="note"><i />Testing provider — responses, errors, reasoning, and tool calls are generated locally and deterministically. No text-AI network request is sent.</div>}
-            <Button className="reload-button" onClick={refreshModels} disabled={loading} leadingIcon={<RefreshCw className={loading ? 'spinning' : ''} aria-hidden="true" />}>{loading ? 'Loading models…' : 'Reload model list'}</Button>
-          </div>
-          </Disclosure><p className={`status ${statusKind}`} role="status"><i />{status}</p>
-        </section>
-
-        {settings.provider === 'fake' && aiSection === 'connection' && <Disclosure className="settings-card provider-trace" bodyClassName="provider-trace-body" eyebrow="Testing provider" title="Request trace" description={fakeTrace.length ? `${fakeTrace.length} request${fakeTrace.length === 1 ? '' : 's'} captured` : 'No Fake requests yet'} aria-label="Fake provider request trace">
-          <p>Session only · last 20 requests. Inspect the exact provider-boundary payload generated by Arc.</p><Button size="small" variant="ghost" onClick={clearFakeProviderTrace} disabled={!fakeTrace.length}>Clear trace</Button><pre>{fakeTrace.length ? JSON.stringify(fakeTrace, null, 2) : 'Generate, summarize, autotitle, or chat with Fake (testing) to capture a request.'}</pre>
-        </Disclosure>}
-
-        <section hidden={aiSection !== 'models'} className="settings-card models-card" role="tabpanel" id="ai-panel-models" aria-labelledby="ai-tab-models">
-          <div className="card-heading"><div><span>02</span><h2>Models</h2></div><p>{isBookSettings ? 'Favorites are shared; model choices belong to this book.' : 'Main writes; Support summarizes; Codex builds your world; Chat assists.'}</p></div>
+  if (kind === 'tts' || kind === 'stt') return <SpeechSettingsPanel kind={kind} settings={settings} onChange={speech => changeAiSettings(current => ({ ...current, speech }))} />
+  return <>
+        {kind === 'text' && <section className="settings-card models-card">
+          <div className="card-heading"><div><span>02</span><h2>Models</h2></div><p>All roles use the active global text connection. Main writes; Support summarizes; Codex builds your world; Chat and Character chat initialize new conversations.</p></div>
           <div className="model-role-settings">{modelRoles.map(({ key: role, label, description }) => {
             const configuredModel = settings[`${role}Model`].trim()
             const mainModel = settings.mainModel.trim()
-            const emptyTitle = role === 'codex' || role === 'chat' ? `Use Main · ${mainModel || 'not selected'}` : `No ${label.split(' · ')[0]} model`
+            const emptyTitle = role === 'codex' || role === 'chat' || role === 'character' ? `Use Main · ${mainModel || 'not selected'}` : `No ${label.split(' · ')[0]} model`
             const emptySubtitle = role === 'main'
               ? 'Story generation will be unavailable'
               : role === 'support'
                 ? 'Summaries and prompt enhancement will be unavailable'
                 : 'No separate model for this role'
-            const effectiveModel = role === 'codex' || role === 'chat' ? configuredModel || mainModel : configuredModel
+            const effectiveModel = role === 'codex' || role === 'chat' || role === 'character' ? configuredModel || mainModel : configuredModel
             const priority = role === 'main'
               ? effectiveModel ? `Effective model: ${effectiveModel}. Main has no fallback.` : 'Effective model: none. Main has no fallback, so story generation is unavailable.'
               : role === 'support'
                 ? effectiveModel ? `Effective model: ${effectiveModel}. Support has priority for summaries, prompt enhancement, and automatic titles.` : mainModel ? `Effective model: none for summaries or prompt enhancement. Automatic titles alone fall back to Main: ${mainModel}.` : 'Effective model: none. Summaries, prompt enhancement, and automatic titles are unavailable.'
                 : role === 'codex'
                   ? effectiveModel ? `Effective model: ${effectiveModel}. Priority: Codex, then Main.` : 'Effective model: none. Priority: Codex, then Main; Codex generation is unavailable when both are empty.'
-                  : effectiveModel ? `Effective model for new chats: ${effectiveModel}. Priority: Chat, then Main. Existing chats keep their own model.` : 'Effective model for new chats: none. Priority: Chat, then Main. Existing chats keep their own model.'
+                  : effectiveModel ? `Effective model for new ${role === 'character' ? 'character ' : ''}chats: ${effectiveModel}. Priority: ${role === 'character' ? 'Character chat' : 'Chat'}, then Main. Existing chats keep their own model.` : `Effective model for new chats: none. Priority: ${role === 'character' ? 'Character chat' : 'Chat'}, then Main. Existing chats keep their own model.`
             return <section className="model-role-setting" key={role} aria-labelledby={`${role}-model-heading`}>
               <header><h3 id={`${role}-model-heading`}>{label}</h3><p>{description}</p></header>
               <SearchableSelect
@@ -777,36 +608,22 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
                 ]}
                 onChange={modelId => selectModel(role, modelId)}
               />
-              <Input label="Exact model ID" description="This edits the same model selection as the catalog picker. Use it only when the provider supports a model that is missing from the loaded catalog." value={settings[`${role}Model`]} onChange={event => selectModel(role, event.target.value)} placeholder={(role === 'codex' || role === 'chat') ? 'Leave empty to use Main' : 'Enter an unlisted model ID'} />
-              <Select label="Thinking effort" description={role === 'chat' ? 'Copied to new chats; each chat can change it.' : 'Used whenever this role runs, including when its model falls back to Main.'} value={settings[`${role}ThinkingEffort`]} onChange={event => update(`${role}ThinkingEffort`, normalizeThinkingEffort(event.target.value))}>{THINKING_EFFORT_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</Select>
+              <Input label="Exact model ID" description="This edits the same model selection as the catalog picker. Use it only when the provider supports a model that is missing from the loaded catalog." value={settings[`${role}Model`]} onChange={event => selectModel(role, event.target.value)} placeholder={(role === 'codex' || role === 'chat' || role === 'character') ? 'Leave empty to use Main' : 'Enter an unlisted model ID'} />
+              <Select label="Thinking effort" description={role === 'chat' || role === 'character' ? 'Copied to new chats; each chat can change it.' : 'Used whenever this role runs, including when its model falls back to Main.'} value={settings[`${role}ThinkingEffort`]} onChange={event => update(`${role}ThinkingEffort`, normalizeThinkingEffort(event.target.value))}>{THINKING_EFFORT_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</Select>
+              {(role === 'main' || role === 'codex') && <Input label={role === 'main' ? 'Story / Main context cap' : 'Codex model context cap'} value={role === 'main' ? settings.mainEffectiveContextLimit : settings.codexEffectiveContextLimit} onChange={event => update(role === 'main' ? 'mainEffectiveContextLimit' : 'codexEffectiveContextLimit', event.target.value)} placeholder="Model maximum" error={contextLimitInputError(role === 'main' ? settings.mainEffectiveContextLimit : settings.codexEffectiveContextLimit) || undefined} description={`${formatContext(settings[`${role}ModelContextLength`])}. The model hard maximum still wins. ${role === 'codex' && !settings.codexModel.trim() ? 'Codex falls back to Main, so the Main cap applies.' : 'Empty means no additional cap.'}`} />}
+              {(role === 'chat' || role === 'character') && <Select label={role === 'chat' ? 'Chat prompt preset' : 'Character chat prompt preset'} description="Copied from the selected book text profile into new chats; existing chat overrides are unchanged." value={(role === 'chat' ? settings.chatPromptPresetId : settings.characterPromptPresetId) || library.defaults[role]} onChange={event => update(role === 'chat' ? 'chatPromptPresetId' : 'characterPromptPresetId', event.target.value)}>{library.profiles.filter(profile => profile.kind === role).map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</Select>}
               <p className="effective-model-note">{priority}</p>
-              {role === 'chat' && !isBookSettings && <Select label="Max model rounds per response" description="Default for new chats. One assistant model request is one round; several tools in that request still count as one. Existing chats keep their own limit." value={settings.chatMaxModelRounds} onChange={event => update('chatMaxModelRounds', Number(event.target.value))}>{Array.from({ length: 32 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</Select>}
+              {(role === 'chat' || role === 'character') && <Select label="Max model rounds per response" description="Default for new chats. One assistant model request is one round; several tools in that request still count as one. Existing chats keep their own limit." value={role === 'chat' ? settings.chatMaxModelRounds : settings.characterMaxModelRounds} onChange={event => update(role === 'chat' ? 'chatMaxModelRounds' : 'characterMaxModelRounds', Number(event.target.value))}>{Array.from({ length: 32 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</Select>}
             </section>
           })}</div>
-          <div className="reveal-setting"><h3>Text reveal speed</h3><p>Controls how quickly generated words appear.</p><SegmentedControl className="reveal-speed-control" label="Text reveal speed" value={settings.generationWordDelayMs} onChange={delay => update('generationWordDelayMs', delay)} fullWidth options={[{ value: '120', label: 'Slow' }, { value: '40', label: 'Normal' }, { value: '10', label: 'Fast' }]} /><TextRevealPreview delay={Number(settings.generationWordDelayMs)} /></div>
-          <Disclosure className="ai-advanced" title="Advanced" description="Speed and context limits">
-          <label className="generation-speed-setting">
-            <span><strong>Custom reveal speed</strong><em>Milliseconds per word</em></span>
-            <input type="text" inputMode="numeric" pattern="[0-9]*" value={settings.generationWordDelayMs} onChange={(event) => update('generationWordDelayMs', event.target.value)} aria-describedby="generation-speed-help" spellCheck={false} />
-            <small id="generation-speed-help">40 ms is the default. Use a lower value for faster writing or a higher value for slower writing (1–2000).</small>
-          </label>
-          <div className="context-limit-grid">
-            <label className={contextLimitInputError(settings.mainEffectiveContextLimit) ? 'invalid' : ''}><span><strong>Story / Main context cap</strong><em>Effective input window</em></span><input type="text" value={settings.mainEffectiveContextLimit} onChange={(event) => update('mainEffectiveContextLimit', event.target.value)} placeholder="Model maximum" spellCheck={false} /><small>{contextLimitInputError(settings.mainEffectiveContextLimit) || 'Optional. Accepts tokens such as 32000, 32k, or 1m. The model hard maximum still wins.'}</small></label>
-            <label className={contextLimitInputError(settings.codexEffectiveContextLimit) ? 'invalid' : ''}><span><strong>Codex model context cap</strong><em>Used when a Codex model is set</em></span><input type="text" value={settings.codexEffectiveContextLimit} onChange={(event) => update('codexEffectiveContextLimit', event.target.value)} placeholder="Model maximum" spellCheck={false} /><small>{contextLimitInputError(settings.codexEffectiveContextLimit) || (settings.codexModel.trim() ? 'Optional cap for the selected Codex model.' : 'Codex currently falls back to Main, so the Story / Main cap applies.')}</small></label>
-          </div>
-          </Disclosure>
-        </section>
+          <Button onClick={() => { void refreshModels() }} disabled={loading} leadingIcon={<RefreshCw aria-hidden="true" />}>{loading ? 'Loading models…' : 'Reload model list'}</Button>
+          <p className={`status ${statusKind}`} role="status">{status}</p>
+        </section>}
 
-        <section hidden={aiSection !== 'prompts'} className="settings-card prompts-card" role="tabpanel" id="ai-panel-prompts" aria-labelledby="ai-tab-prompts">
+        {kind !== 'text' && <section className="settings-card prompts-card">
           <div className="card-heading"><div><span>03</span><h2>Prompts</h2></div><p>System prompt, ordered predefined messages, then Arc’s current instruction.</p></div>
-          <Tabs className="prompt-tabs" label="Prompt purpose" value={promptTab} onChange={setPromptTab} items={([['story', 'Story'], ['assistant', 'Chat'], ['lore', 'Codex'], ['summarize', 'Summary']] as const).map(([value, label]) => ({ value, label, id: `prompt-tab-${value}`, panelId: 'prompt-panel' }))} />
-          <div role="tabpanel" id="prompt-panel" aria-labelledby={`prompt-tab-${promptTab}`} key={promptTab}>
-          <PromptPresetControls
-            scope={promptPresetScope[promptTab]}
-            composition={settings.promptCompositions[promptTab]}
-            arcDefault={defaultPromptCompositions[promptTab]}
-            onApply={(composition) => changeAiSettings((current) => withPromptComposition(current, promptTab, composition))}
-          />
+          <div key={promptTab}>
+          {kind === 'character' && <p className="profile-help">Character chat presets preserve roleplay context. Character participants, story cutoff, and knowledge restrictions stay local to each chat and are enforced separately from this prompt.</p>}
           {responseLengthScope && <div className="response-length-setting">
             <label htmlFor={`${responseLengthScope}-response-length`}><span><strong>Response length</strong><em>{promptTab === 'story' ? 'Story' : promptTab === 'lore' ? 'Codex' : 'Summary'}</em></span><textarea id={`${responseLengthScope}-response-length`} value={activeResponseLength} onChange={(event) => changeAiSettings((current) => ({ ...current, responseLengths: { ...current.responseLengths, [responseLengthScope]: event.target.value } }))} placeholder="Leave empty to let the model decide." /></label>
             <div className="response-length-presets" aria-label={`${responseLengthScope} response length presets`}>{activeResponseLengthPresets.map((preset) => <button type="button" key={preset.label} onClick={() => changeAiSettings((current) => ({ ...current, responseLengths: { ...current.responseLengths, [responseLengthScope]: preset.value } }))}>{preset.label}</button>)}</div>
@@ -865,24 +682,24 @@ export default function App({ onHome, onBack, onSaved, book, initialTab = 'ai' }
             })}{!availablePromptVariables.length && <p>No variables match that search.</p>}</div>
           </details>
           <div className="prompt-footer"><button type="button" onClick={() => { if (window.confirm('Reset this prompt and all predefined messages to the Arc default?')) changeAiSettings((current) => resetPromptComposition(current, promptTab)) }}>Reset prompt composition</button></div></div>
-        </section>
-
-        </> : settingsTab === 'context' ? (!contextReady ? <section className="settings-card"><h1 id="page-title">Context</h1><p role="status">{contextSaveError || 'Loading context settings…'}</p>{contextSaveError && <Button onClick={() => setContextLoadVersion(version => version + 1)}>Retry loading</Button>}</section> : book ? <>
-          <SettingsSectionTabs tabs={contextSections} active={contextSection} onChange={setContextSection} idPrefix="context" label="Context type" />
-          <div role="tabpanel" id={`context-panel-${contextSection}`} aria-labelledby={`context-tab-${contextSection}`}>
-            <ContextSettings bookId={book.id} bookTitle={book.title} bookPromptValues={book.promptValues} type={contextSection} currentDocumentId={(book.contextType ?? 'scene') === contextSection ? book.currentDocumentId : undefined} currentDocumentText={(book.contextType ?? 'scene') === contextSection ? book.currentDocumentText : undefined} insertionPosition={(book.contextType ?? 'scene') === contextSection ? book.insertionPosition : undefined} chatId={contextSection === 'chat' ? book.chatId : undefined} settings={settings} value={visibleContextSettings} sources={contextSources} saved={contextSaved} saveError={contextSaveError} onRetry={() => { void saveContextDefaults() }} onChange={(value) => updateContextDefaults(value, contextSection)} />
-          </div>
-        </> : <GlobalContextDefaults value={contextSettings} saved={contextSaved} saveError={contextSaveError} onRetry={() => { void saveContextDefaults() }} onChange={updateContextDefaults} />)
-          : settingsTab === 'images' ? <ImageSettingsPanel ref={imageSettingsRef} ai={settings} onDirtyChange={setImageSettingsDirty} />
-          : settingsTab === 'speech' ? <SpeechSettingsPanel bookId={book?.id} settings={settings} scope={isBookSettings ? 'book' : 'defaults'} onChange={(speech) => update('speech', speech)} />
-          : settingsTab === 'sync' ? <SyncSettingsPanel />
-          : <SettingsPlaceholder tab={settingsTab} scope={isBookSettings ? 'book' : 'defaults'} />}
-      </section>
-    </main>
-  )
+        </section>}
+  </>
 }
 
-const aiSections = [['connection', 'Connection'], ['models', 'Models'], ['prompts', 'Prompts']] as const
+function BookSummaryPreview({ book, settings }: { book: NonNullable<AiSettingsProps['book']>; settings: AiSettings }) {
+  const [source, setSource] = useState<SummarySource | null>(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let cancelled = false
+    setSource(null); setError('')
+    if (book.currentSummary) void buildSummarySource(book.currentSummary.sourceEntityId).then(value => { if (!cancelled) setSource(value) }).catch(() => { if (!cancelled) setError('The current Summary source could not be prepared for preview.') })
+    return () => { cancelled = true }
+  }, [book.currentSummary?.id, book.currentSummary?.sourceEntityId])
+  const composition = settings.promptCompositions.summarize
+  const templateError = [composition.systemPrompt, ...composition.predefinedMessages.filter(message => message.enabled).map(message => message.template)].flatMap(template => promptTemplateDiagnostics(template, 'summarize')).find(diagnostic => diagnostic.severity === 'error')
+  const request = source && book.currentSummary && book.promptValues && !templateError ? assembleSummaryGenerationRequest({ composition: settings.promptCompositions.summarize, book: { ...book.promptValues, responseLength: settings.responseLengths.summary }, responseLength: settings.responseLengths.summary, summary: { id: book.currentSummary.id, content: source.previousSummary ?? '' }, target: { id: source.source.id, type: source.source.type, title: source.source.title, source: source.content }, sourceDiagnostics: source.diagnostics }) : null
+  return <SummaryRequestPreview request={request} source={source} error={error || templateError?.message || ''} hasCurrentSummary={Boolean(book.currentSummary)} model={settings.supportModel} modelContextLength={settings.supportModelContextLength} />
+}
 
 const contextSections: ReadonlyArray<readonly [ContextSection, string]> = [
   ['scene', 'Story'],
@@ -952,9 +769,10 @@ function ContextSaveStatus({ saved, error, onRetry }: { saved: boolean; error: s
 }
 
 
+
 function GlobalContextDefaults({ value, saved, saveError, onRetry, onChange }: { value: BookContextSettings; saved: boolean; saveError: string; onRetry: () => void; onChange: (value: BookContextSettings) => void }) {
   return <section className="context-defaults-settings">
-    <header className="page-heading"><div><p>Default Context</p><h1 id="page-title">Context defaults</h1><span>Copied into new books. Existing books keep their own Context settings.</span></div><ContextSaveStatus saved={saved} error={saveError} onRetry={onRetry} /></header>
+    <header className="page-heading"><div><p>Default Context</p><h2>Context defaults</h2><span>Copied into new books. Existing books keep their own Context settings.</span></div><ContextSaveStatus saved={saved} error={saveError} onRetry={onRetry} /></header>
     <section className="settings-card context-defaults-card"><div className="card-heading"><div><span>01</span><h2>Automatic Codex</h2></div></div>
       <Input className="context-trigger-window" label="Previous Scenes to scan for Codex triggers" description="The current Scene is included in addition to this many immediately previous Scenes. 0 means current Scene only." type="number" min="0" step="1" value={value.previousScenesForCodexTriggers} onChange={(event) => onChange({ ...value, previousScenesForCodexTriggers: Math.max(0, Math.floor(Number(event.target.value) || 0)) })} />
     </section>
@@ -969,6 +787,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
   const [previewChat, setPreviewChat] = useState<ChatEntity | null>(null)
   const [previewCharacter, setPreviewCharacter] = useState<CharacterFrame>()
   const [previewHistory, setPreviewHistory] = useState<ChatMessageEntity[]>([])
+  const [previewMediaSettings, setPreviewMediaSettings] = useState<ImageSettings>()
   const profile = value.profiles[type]
   const updateProfile = (next: typeof profile) => onChange({ ...value, profiles: { ...value.profiles, [type]: next } })
   const toggle = (key: 'structuralIds' | 'noteIds' | 'codexEntryIds', id: string) => updateProfile({ ...profile, [key]: profile[key].includes(id) ? profile[key].filter((item) => item !== id) : [...profile[key], id] })
@@ -979,9 +798,11 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
     setPreviewPending(true)
     setPreview(null)
     setPreviewError('')
+    setPreviewChat(null); setPreviewHistory([]); setPreviewCharacter(undefined); setPreviewMediaSettings(undefined)
     const currentSceneId = type === 'scene' ? currentDocumentId : value.lastOpenedSceneId || undefined
     ;(async () => {
       try {
+        const mediaSettings = type === 'chat' ? await loadBookImageSettings(bookId) : undefined
         let chat: ChatEntity | null = null
         let history: ChatMessageEntity[] = []
         if (type === 'chat' && chatId) {
@@ -998,6 +819,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
           setPreview(prepared)
           setPreviewChat(chat)
           setPreviewHistory(history)
+          setPreviewMediaSettings(mediaSettings)
           setPreviewError(type === 'chat' && !chatId ? 'Open a chat to preview its request.' : '')
         }
       } catch (error) {
@@ -1011,7 +833,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
       }
     })()
     return () => { cancelled = true }
-  }, [bookId, chatId, currentDocumentId, currentDocumentText, profile, sources, type, value.lastOpenedSceneId, value.previousScenesForCodexTriggers])
+  }, [bookId, chatId, currentDocumentId, currentDocumentText, profile, sources, type, value.lastOpenedSceneId, value.previousScenesForCodexTriggers, settings])
 
   const currentDocument = sources.find((item) => item.id === currentDocumentId)
   const anchor = sources.find(item => item.id === (type === 'scene' ? currentDocumentId : previewChat?.character?.cutoff.sceneId ?? value.lastOpenedSceneId) && item.type === 'scene')
@@ -1032,7 +854,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
   let codexNormalizedRequest: NormalizedAssembledRequest | null = null
   let chatNormalizedRequest: NormalizedAssembledRequest | null = null
 
-  if (preview && type === 'scene') {
+  if (preview && type === 'scene' && !previewPromptErrors.length) {
     storyNormalizedRequest = assembleStoryGenerationRequest({
       composition: settings.promptCompositions.story,
       book: metadata,
@@ -1055,7 +877,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
     }))
   }
 
-  if (preview && type === 'codex') {
+  if (preview && type === 'codex' && !previewPromptErrors.length) {
     const entryContent = currentDocumentText ?? String(currentDocument?.content ?? '')
     codexNormalizedRequest = assembleCodexGenerationRequest({
       composition: settings.promptCompositions.lore,
@@ -1084,8 +906,8 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
     }))
   }
 
-  if (preview && type === 'chat' && previewChat) {
-    chatNormalizedRequest = assembleChatGenerationRequest({ composition: previewChat.promptComposition, book: metadata, context: preview, history: previewHistory, restrictedInstructions: previewCharacter?.instructions, tools: availableChatTools(Boolean(previewChat.character), previewHistory) })
+  if (preview && type === 'chat' && previewChat && !previewPromptErrors.length) {
+    chatNormalizedRequest = assembleChatGenerationRequest({ mediaSettings: previewMediaSettings, composition: previewChat.promptComposition, book: metadata, context: preview, history: previewHistory, restrictedInstructions: previewCharacter?.instructions, tools: availableChatTools(Boolean(previewChat.character), previewHistory) })
     chatNormalizedRequest.parts.forEach((part, index) => requestMessages.push({
       key: part.id,
       role: part.role ?? 'user',
@@ -1155,8 +977,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
     </Disclosure>
   </section>
 }
-
-function SpeechSettingsPanel({ bookId, settings, scope, onChange }: { bookId?: string; settings: AiSettings; scope: 'book' | 'defaults'; onChange: (speech: AiSettings['speech']) => void }) {
+function SpeechSettingsPanel({ kind, settings, onChange }: { kind: 'tts' | 'stt'; settings: AiSettings; onChange: (speech: AiSettings['speech']) => void }) {
   const [models, setModels] = useState<SpeechModel[]>([])
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
@@ -1242,8 +1063,8 @@ function SpeechSettingsPanel({ bookId, settings, scope, onChange }: { bookId?: s
   }
 
   useEffect(() => {
-    void loadModels()
-    void loadSttModels()
+    if (kind === 'tts') void loadModels()
+    else void loadSttModels()
     return () => {
       ttsLoadSequenceRef.current += 1
       ttsLoadControllerRef.current?.abort()
@@ -1252,7 +1073,7 @@ function SpeechSettingsPanel({ bookId, settings, scope, onChange }: { bookId?: s
       sttLoadControllerRef.current?.abort()
       sttLoadControllerRef.current = null
     }
-  }, [])
+  }, [kind, settings.speech.apiKey, settings.speech.openaiApiKey])
 
   function updateSpeech(patch: Partial<AiSettings['speech']>) {
     const current = latestSpeechRef.current
@@ -1281,16 +1102,7 @@ function SpeechSettingsPanel({ bookId, settings, scope, onChange }: { bookId?: s
   const liveSupported = selectedStt?.supportsLive === true
 
   return <section className="speech-settings">
-    <header className="page-heading"><div><p>{scope === 'book' ? 'Book Speech' : 'Default Speech'}</p><h1 id="page-title">Speech</h1><span>{scope === 'book' ? 'Independent TTS and dictation settings for this book.' : 'Copied into each new book, then edited independently.'}</span></div></header>
-    <TtsCacheSettings bookId={bookId} />
-    <section className="settings-card">
-      <div className="card-heading"><div><span>01</span><h2>Speech credentials</h2></div><p>Speech credentials are separate from text AI.</p></div>
-      <div className="speech-settings-grid">
-        <label><span>NanoGPT Speech API key</span><div className="speech-key-row"><input type="password" value={settings.speech.apiKey} onChange={(event) => updateSpeech({ apiKey: event.target.value })} autoComplete="off" spellCheck={false} />{settings.provider === 'nanogpt' && settings.apiKey.trim() && <button type="button" onClick={() => updateSpeech({ apiKey: settings.apiKey })}>Copy NanoGPT key from AI settings</button>}</div><small className="speech-help">Used by NanoGPT TTS and NanoGPT transcription models.</small></label>
-        <Input label="OpenAI Speech API key" description="Used only for OpenAI transcription. Stored with this Speech configuration on this device." type="password" value={settings.speech.openaiApiKey} onChange={(event) => updateSpeech({ openaiApiKey: event.target.value })} autoComplete="off" spellCheck={false} />
-      </div>
-    </section>
-    <section className="settings-card">
+    {kind === 'tts' && <section className="settings-card">
       <div className="card-heading"><div><span>02</span><h2>Text to speech</h2></div><Button size="small" variant="ghost" onClick={() => { void loadModels() }} disabled={loading} leadingIcon={<RefreshCw className={loading ? 'spinning' : ''} aria-hidden="true" />}>{loading ? 'Loading…' : 'Reload'}</Button></div>
       {message && <p className="speech-help">{message}</p>}
       {unavailableModel && <p className="speech-model-unavailable" role="alert">Saved model “{settings.speech.model}” is unavailable. Arc will not silently switch paid models.</p>}
@@ -1300,8 +1112,8 @@ function SpeechSettingsPanel({ bookId, settings, scope, onChange }: { bookId?: s
         <Input label="Maximum parallel TTS requests" description="Default 1. Audio may generate concurrently but always plays in prose order." type="number" min="1" max="8" value={settings.speech.maxParallelRequests} onChange={(event) => updateSpeech({ maxParallelRequests: event.target.value })} />
       </div>
       <Checkbox className="speech-toggle" label="Read aloud after generation" description="Story reads only the latest generated passage; Codex reads the resulting entry; Chat reads the new visible assistant answer." checked={settings.speech.readAloudAfterGeneration} onChange={(event) => updateSpeech({ readAloudAfterGeneration: event.target.checked })} />
-    </section>
-    <section className="settings-card stt-settings-card">
+    </section>}
+    {kind === 'stt' && <section className="settings-card stt-settings-card">
       <div className="card-heading"><div><span>03</span><h2>Speech to text</h2></div><Button size="small" variant="ghost" onClick={() => { void loadSttModels() }} disabled={sttLoading} leadingIcon={<RefreshCw className={sttLoading ? 'spinning' : ''} aria-hidden="true" />}>{sttLoading ? 'Loading…' : 'Reload'}</Button></div>
       <p className="speech-help">Dictation sends microphone audio only to the provider named by the selected transcription model. Raw recordings are not stored by Arc.</p>
       {sttMessage && <p className="speech-help">{sttMessage}</p>}
@@ -1312,40 +1124,6 @@ function SpeechSettingsPanel({ bookId, settings, scope, onChange }: { bookId?: s
         <Checkbox className="speech-toggle stt-live-toggle" label="Stream text while speaking" description={liveSupported ? 'Supported by this model. Partial text stays provisional until Stop/finalization.' : selectedStt ? 'This selected model does not expose live partial transcription.' : 'Load/select a model to check live-transcription capability.'} checked={settings.speech.streamTranscription && liveSupported} disabled={!liveSupported} onChange={(event) => updateSpeech({ streamTranscription: event.target.checked })} />
       </div>
       {settings.speech.transcriptionModel.startsWith('openai:') && <p className="speech-help speech-provider-note"><Mic aria-hidden="true" /><span>OpenAI live-capable models use a direct browser Realtime connection; ordinary models record locally and upload once after Stop.</span></p>}
-    </section>
-  </section>
-}
-
-function SettingsPlaceholder({ tab, scope }: { tab: Exclude<SettingsTab, 'ai'>; scope: 'book' | 'defaults' }) {
-  if (tab === 'appearance') return <AppearanceSettings scope={scope} />
-
-  const content = tab === 'context'
-    ? { Icon: SlidersHorizontal, title: 'Context defaults' }
-    : tab === 'speech'
-      ? { Icon: Volume2, title: 'Speech defaults' }
-      : { Icon: ImageIcon, title: 'Image defaults' }
-  const Icon = content.Icon
-  return <section className="compact-settings-empty" aria-labelledby="page-title">
-    <Icon aria-hidden="true" />
-    <h1 id="page-title">{content.title}</h1>
-    <p>{scope === 'book' ? 'Book-level controls will live here.' : 'Saved as the starting point for new books.'}</p>
-  </section>
-}
-
-function AppearanceSettings({ scope }: { scope: 'book' | 'defaults' }) {
-  const [textSize, setTextSize] = useState(21)
-  const [theme, setTheme] = useState<'night' | 'paper'>('night')
-
-  return <section className="appearance-settings">
-    <div className="page-heading"><div><p>{scope === 'book' ? 'Book UI' : 'Default UI'}</p><h1 id="page-title">Reading surface</h1><span>{scope === 'book' ? 'These values will apply only to this book.' : 'These values are copied when a new book is created.'}</span></div><Type aria-hidden="true" /></div>
-    <div className="settings-card appearance-card">
-      <Select className="appearance-field" label="Editor font" defaultValue="Iowan Old Style"><option>Iowan Old Style</option><option>Literata</option><option>Source Serif</option></Select>
-      <label className="appearance-field"><span>Text size <b>{textSize} px</b></span><input type="range" min="16" max="30" value={textSize} onChange={(event) => setTextSize(Number(event.target.value))} /></label>
-      <div className="theme-grid" aria-label="Default theme">
-        <button className={`theme-card ${theme === 'night' ? 'selected' : ''}`} type="button" onClick={() => setTheme('night')}><i className="theme-night" /><span>Ink at Night</span>{theme === 'night' && <Check aria-hidden="true" />}</button>
-        <button className={`theme-card ${theme === 'paper' ? 'selected' : ''}`} type="button" onClick={() => setTheme('paper')}><i className="theme-paper" /><span>Paper</span>{theme === 'paper' && <Check aria-hidden="true" />}</button>
-      </div>
-      <button className="create-theme" type="button"><Plus aria-hidden="true" /> Create theme</button>
-    </div>
+    </section>}
   </section>
 }

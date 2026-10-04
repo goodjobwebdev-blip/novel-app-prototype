@@ -1,6 +1,10 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
+import { registerHooks } from 'node:module'
+import { fileURLToPath } from 'node:url'
 import {
   CODEX_RESPONSE_LENGTH_PRESETS,
   EMPTY_RESPONSE_LENGTHS,
@@ -27,7 +31,7 @@ test('legacy shared response length migrates to Story only and is removed from n
   assert.match(settings, /const \{ responseLength: _legacyResponseLength, \.\.\.storedValue \}/)
 })
 
-test('defaults and copied Book settings own independent response-length objects', () => {
+test('normalized runtime response-length objects are independent snapshots', () => {
   const defaults = normalizeResponseLengths({ story: 'Story guidance', codex: 'Codex guidance', summary: 'Summary guidance' })
   const bookSettings = normalizeResponseLengths(defaults)
   assert.notEqual(bookSettings, defaults)
@@ -35,6 +39,32 @@ test('defaults and copied Book settings own independent response-length objects'
   bookSettings.summary = 'Changed book'
   assert.equal(bookSettings.story, 'Story guidance')
   assert.equal(defaults.summary, 'Summary guidance')
+})
+
+test('books resolve response lengths through live scope presets; Duplicate isolates one book and legacy AI saves cannot override selections', async () => {
+  await import('fake-indexeddb/auto')
+  const storage = new Map()
+  globalThis.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)) }
+  registerHooks({ resolve(specifier, context, next) { if (specifier.startsWith('.') && context.parentURL?.startsWith('file:')) { const url = new URL(specifier + '.ts', context.parentURL); if (existsSync(fileURLToPath(url))) return next(url.href, context) } return next(specifier, context) } })
+  const ai = await import('../src/shared/ai/ai-settings.ts'), p = await import('../src/data/persistence.ts'), profiles = await import('../src/features/settings/settings-profiles.ts')
+  try {
+    ai.saveAiSettings({ ...ai.initialAiSettings, responseLengths: { story: 'Initial Story', codex: 'Initial Codex', summary: 'Initial Summary' } })
+    const first = await p.createBook(ai.initialAiSettings, 'Length A'), second = await p.createBook(ai.initialAiSettings, 'Length B')
+    const selection = await p.getBookProfileSelections(first.book.id)
+    const preset = profiles.loadSettingsProfiles().profiles.find(profile => profile.id === selection.story)
+    const snapshot = await p.getBookAiSettings(first.book.id, [])
+    profiles.saveSettingsProfile({ ...preset, settings: { ...preset.settings, responseLengths: { ...preset.settings.responseLengths, story: 'Live Story' } } })
+    for (const item of [first, second]) assert.deepEqual((await p.getBookAiSettings(item.book.id, [])).responseLengths, { story: 'Live Story', codex: 'Initial Codex', summary: 'Initial Summary' })
+    assert.equal(snapshot.responseLengths.story, 'Initial Story')
+    const duplicate = profiles.createSettingsProfile('story', 'Length B only', preset.id)
+    await p.saveBookProfileSelections(second.book.id, { ...selection, story: duplicate.id })
+    profiles.saveSettingsProfile({ ...preset, settings: { ...preset.settings, responseLengths: { ...preset.settings.responseLengths, story: 'Edited again' } } })
+    assert.equal((await p.getBookAiSettings(first.book.id, [])).responseLengths.story, 'Edited again')
+    assert.equal((await p.getBookAiSettings(second.book.id, [])).responseLengths.story, 'Live Story')
+    await p.saveBookAiSettings(second.book.id, { ...snapshot, responseLengths: { story: 'Ignored book override', codex: 'Ignored', summary: 'Ignored' } })
+    assert.equal((await p.getBookAiSettings(second.book.id, [])).responseLengths.story, 'Live Story')
+    assert.equal((await p.readBookArchive(first.book.id)).settingsProfiles.find(profile => profile.id === preset.id).settings.responseLengths.story, 'Edited again')
+  } finally { (await p.database()).close() }
 })
 
 test('all three supported scopes default empty and expose their required preset families', () => {

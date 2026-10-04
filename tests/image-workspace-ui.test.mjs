@@ -1,3 +1,5 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test, { after } from 'node:test'
 import { transpileSourceTree } from './transpile-source-tree.mjs'
 import assert from 'node:assert/strict'
@@ -63,18 +65,26 @@ function configure() {
   favorite.alias = 'Portrait'
   settings.saveImageSettings({ favorites: [favorite], keys: { openai: '', nanogpt: '', pruna: '' }, defaultAlias: 'Portrait' })
 }
-function ControlledWorkspace({ revision = 0, bookId = 'controlled-book', bookTitle = 'The Controlled Novel', onBack = () => {}, onSettings = () => {} }) {
+function ControlledWorkspace({ revision = 0, bookId, bookTitle, onBack = () => {}, onSettings = () => {} }) {
   const [state, setState] = React.useState(createImageWorkspaceState)
   return h(ImageWorkspace, { key: revision, bookId, bookTitle, state, onStateChange: setState, onBack, onSettings })
 }
 
+const unmountedRoots = new WeakSet()
+async function unmountRoot(root) {
+  if (unmountedRoots.has(root)) return
+  unmountedRoots.add(root)
+  await act(async () => root.unmount())
+}
+
 const png = new Blob([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6AAAAAElFTkSuQmCC', 'base64')], { type: 'image/png' })
 
-test('standalone workspace has Generate/Gallery tabs and wires its header', async () => {
+test('standalone workspace has Generate/Gallery tabs and wires its header', async (t) => {
   configure()
   const state = createImageWorkspaceState()
   let backCalls = 0, settingsCalls = 0, changed
   const root = createRoot(document.getElementById('root'))
+  t.after(() => unmountRoot(root))
   try {
     await act(async () => root.render(h(ImageWorkspace, {
       bookTitle: 'A Book of Images', state, onStateChange: (next) => { changed = next },
@@ -90,21 +100,23 @@ test('standalone workspace has Generate/Gallery tabs and wires its header', asyn
     assert.equal(backCalls, 1)
     assert.equal(settingsCalls, 1)
     assert.equal(changed.tab, 'gallery')
-  } finally { await act(async () => root.unmount()) }
+  } finally { await unmountRoot(root) }
 })
 
-test('parent-owned workspace state preserves prompt, tab, and gallery filters across rerender and workspace remount', async () => {
+test('parent-owned workspace state preserves prompt, tab, and gallery filters across rerender and workspace remount', async (t) => {
   configure()
   await clearImageData()
+  const { book } = await p.createBook(initialAiSettings, 'The Controlled Novel')
   const root = createRoot(document.getElementById('root'))
+  t.after(() => unmountRoot(root))
   try {
-    await act(async () => root.render(h(ControlledWorkspace, { revision: 0 })))
+    await act(async () => root.render(h(ControlledWorkspace, { revision: 0, bookId: book.id, bookTitle: book.title })))
     await input(document.querySelector('textarea'), 'Moonlit harbor concept')
     await click('Gallery')
     await click('This book')
     await input(document.querySelector('input[type=search]'), 'harbor')
 
-    await act(async () => root.render(h(ControlledWorkspace, { revision: 1, bookTitle: 'Retitled Parent' })))
+    await act(async () => root.render(h(ControlledWorkspace, { revision: 1, bookId: book.id, bookTitle: 'Retitled Parent' })))
     assert.equal(document.querySelector('[role=tab][aria-selected=true]').textContent.trim(), 'Gallery')
     assert.equal(document.querySelector('input[type=search]').value, 'harbor')
     assert.equal(button('This book').getAttribute('aria-pressed'), 'true')
@@ -112,15 +124,16 @@ test('parent-owned workspace state preserves prompt, tab, and gallery filters ac
 
     await click('Generate')
     assert.equal(document.querySelector('textarea').value, 'Moonlit harbor concept')
-  } finally { await act(async () => root.unmount()) }
+  } finally { await unmountRoot(root) }
 })
 
-test('Generate is disabled for an empty prompt and queues a valid configured draft', async () => {
+test('Generate is disabled for an empty prompt and queues a valid configured draft', async (t) => {
   configure()
   await clearImageData()
   const root = createRoot(document.getElementById('root'))
+  t.after(() => unmountRoot(root))
   try {
-    await act(async () => root.render(h(ControlledWorkspace, { bookId: '', bookTitle: undefined })))
+    await act(async () => root.render(h(ControlledWorkspace)))
     const generate = document.querySelector('.image-primary-action')
     assert.equal(generate.disabled, true)
     await input(document.querySelector('textarea'), '  ')
@@ -136,10 +149,10 @@ test('Generate is disabled for an empty prompt and queues a valid configured dra
     assert.equal(jobs.length, 1)
     assert.equal(jobs[0].prompt, 'A lighthouse above a storm')
     assert.equal(jobs[0].modelAlias, 'Portrait')
-  } finally { await act(async () => root.unmount()) }
+  } finally { await unmountRoot(root) }
 })
 
-test('generation queue renders focused status groups with counts', async () => {
+test('generation queue renders focused status groups with counts', async (t) => {
   configure()
   await clearImageData()
   const db = await p.database()
@@ -151,14 +164,15 @@ test('generation queue renders focused status groups with counts', async () => {
     { ...spec, id: 'earlier', status: 'completed', decision: 'kept', createdAt: 4 },
   ])
   const root = createRoot(document.getElementById('root'))
+  t.after(() => unmountRoot(root))
   try {
     await act(async () => root.render(h(ControlledWorkspace)))
     await settle(() => document.querySelectorAll('.image-job-group').length === 4)
     assert.deepEqual([...document.querySelectorAll('.image-job-group h3')].map((heading) => heading.textContent), ['Active1', 'Needs review1', 'Attention1', 'Earlier1'])
-  } finally { await act(async () => root.unmount()) }
+  } finally { await unmountRoot(root) }
 })
 
-test('gallery card actions appear only after opening the image viewer', async () => {
+test('gallery card actions appear only after opening the image viewer', async (t) => {
   configure()
   await clearImageData()
   const { book } = await p.createBook(initialAiSettings, 'Viewer Actions Book')
@@ -170,6 +184,7 @@ test('gallery card actions appear only after opening the image viewer', async ()
   })
   const state = { ...createImageWorkspaceState(), tab: 'gallery' }
   const root = createRoot(document.getElementById('root'))
+  t.after(() => unmountRoot(root))
   try {
     await act(async () => root.render(h(ImageWorkspace, {
       bookId: book.id, bookTitle: book.title, state, onStateChange: () => {}, onBack: () => {}, onSettings: () => {},
@@ -184,7 +199,7 @@ test('gallery card actions appear only after opening the image viewer', async ()
     assert.ok(button('Delete image'))
     assert.ok(button('Use in Codex'))
     assert.ok(document.querySelector('dialog[open] .image-download'))
-  } finally { await act(async () => root.unmount()) }
+  } finally { await unmountRoot(root) }
 })
 
 test('Workspace routes Images as a top-level screen and the Library image control does not open Settings', () => {
@@ -196,7 +211,7 @@ test('Workspace routes Images as a top-level screen and the Library image contro
   assert.ok(imagesStart >= 0 && homeStart > imagesStart, 'top-level images screen branch exists')
   const imagesBranch = source.slice(imagesStart, homeStart)
   assert.match(imagesBranch, /return <ImageWorkspace/)
-  assert.match(imagesBranch, /onSettings=\{\(\) => openSettings\('images', 'images'\)\}/)
+  assert.match(imagesBranch, /onSettings=\{\(kind = 'image'\) => \{\s*void openSettings\('images', 'images', kind\)\s*\}\}/)
 
   const libraryStart = source.indexOf('<header className="library-top">', homeStart)
   const libraryEnd = source.indexOf('</header>', libraryStart)

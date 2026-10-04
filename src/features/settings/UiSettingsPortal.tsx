@@ -148,55 +148,80 @@ function ThemeEditor({ theme, onChange, onApply, onCancel }: { theme: CustomUiTh
 
 const appearanceSections = [['theme', 'Theme'], ['typography', 'Typography'], ['editor', 'Editor']] as const
 
-function UiSettingsPanel() {
-  const [settings, setSettings] = useState<UiSettings>(() => pendingSettings ?? loadUiSettings())
+export function UiSettingsPanel({ value, onChange }: { value?: UiSettings; onChange?: (settings: UiSettings) => void } = {}) {
+  const controlled = value !== undefined && onChange !== undefined
+  const [localSettings, setSettings] = useState<UiSettings>(() => pendingSettings ?? loadUiSettings())
+  const settings = controlled ? value : localSettings
   const [section, setSection] = useState<'theme' | 'typography' | 'editor'>('theme')
   const [saveError, setSaveError] = useState(Boolean(pendingSettings))
-  const [draft, setDraft] = useState<CustomUiTheme | null>(pendingTheme)
+  const [draft, setDraft] = useState<CustomUiTheme | null>(controlled ? null : pendingTheme)
   const [deleted, setDeleted] = useState<{ theme: CustomUiTheme; wasActive: boolean } | null>(null)
   const lastBuiltIn = useRef(builtInThemes.some(theme => theme.id === settings.activeThemeId) ? settings.activeThemeId : 'very-dark')
-  const editDraft = (theme: CustomUiTheme | null) => { pendingTheme = theme; setDraft(theme) }
+  const themeOriginalRef = useRef<UiSettings | null>(null)
+  const editDraft = (theme: CustomUiTheme | null, source = settings) => {
+    if (!controlled) pendingTheme = theme
+    setDraft(theme)
+    // Palette edits are part of the outer profile draft and its navigation guard.
+    if (controlled && theme) onChange({ ...source, customThemes: [...source.customThemes.filter(item => item.id !== theme.id), theme], activeThemeId: theme.id })
+  }
+  function cancelThemeDraft() {
+    if (controlled && themeOriginalRef.current) onChange({ ...settings, activeThemeId: themeOriginalRef.current.activeThemeId, customThemes: themeOriginalRef.current.customThemes })
+    themeOriginalRef.current = null
+    editDraft(null)
+  }
   const activeTheme = resolveTheme(settings)
   const activeCustom = settings.customThemes.find((theme) => theme.id === settings.activeThemeId)
 
   useEffect(() => {
+    if (controlled) return
     const sync = (event: Event) => { if (!pendingSettings) setSettings((event as CustomEvent<UiSettings>).detail ?? loadUiSettings()) }
     window.addEventListener(UI_SETTINGS_EVENT, sync)
     return () => window.removeEventListener(UI_SETTINGS_EVENT, sync)
-  }, [])
+  }, [controlled])
 
   function persist(next: UiSettings) {
+    if (controlled) { onChange(next); return }
     pendingSettings = next
     setSettings(next)
     try { const saved = saveUiSettings(next); pendingSettings = null; setSettings(saved); setSaveError(false) } catch { setSaveError(true) }
   }
-  function commit(transform: (current: UiSettings) => UiSettings) { persist(transform(pendingSettings ?? settings)) }
+  function commit(transform: (current: UiSettings) => UiSettings) { persist(transform(controlled ? settings : pendingSettings ?? settings)) }
   function duplicate(themeId: string) {
     if (draft && !window.confirm('Discard the current theme draft and create another?')) return
-    const next = createCustomTheme(settings, themeId)
-    editDraft(next.customThemes[next.customThemes.length - 1])
+    const source = controlled && themeOriginalRef.current ? { ...settings, activeThemeId: themeOriginalRef.current.activeThemeId, customThemes: themeOriginalRef.current.customThemes } : settings
+    if (controlled) themeOriginalRef.current = source
+    const next = createCustomTheme(source, themeId)
+    editDraft(next.customThemes[next.customThemes.length - 1], source)
     setSection('theme')
   }
   function beginEdit(theme: CustomUiTheme) {
     if (draft && draft.id !== theme.id && !window.confirm('Discard the current theme draft?')) return
-    editDraft({ ...theme, palette: { ...theme.palette } })
+    const source = controlled && themeOriginalRef.current && draft?.id !== theme.id ? { ...settings, activeThemeId: themeOriginalRef.current.activeThemeId, customThemes: themeOriginalRef.current.customThemes } : settings
+    if (controlled && (!themeOriginalRef.current || draft?.id !== theme.id)) themeOriginalRef.current = source
+    const original = source.customThemes.find(item => item.id === theme.id) ?? theme
+    editDraft({ ...original, palette: { ...original.palette } }, source)
     setSection('theme')
   }
   function applyDraft() {
     if (!draft) return
     commit(current => ({ ...current, activeThemeId: draft.id, customThemes: [...current.customThemes.filter(theme => theme.id !== draft.id), { ...draft, name: draft.name.trim() }] }))
+    themeOriginalRef.current = null
     editDraft(null)
   }
   function selectTheme(id: string) {
     if (builtInThemes.some(theme => theme.id === id)) lastBuiltIn.current = id
     commit(current => ({ ...current, activeThemeId: id }))
   }
-  function resetTheme() { editDraft(null); selectTheme('very-dark'); applyUiSettings({ ...(pendingSettings ?? settings), activeThemeId: 'very-dark' }) }
+  function resetTheme() { themeOriginalRef.current = null; editDraft(null); selectTheme('very-dark'); if (!controlled) applyUiSettings({ ...(pendingSettings ?? settings), activeThemeId: 'very-dark' }) }
 
   function removeCustomTheme(theme: CustomUiTheme) {
     if (!window.confirm(`Delete “${theme.name}”?`)) return
     setDeleted({ theme, wasActive: settings.activeThemeId === theme.id })
-    if (draft?.id === theme.id) editDraft(null)
+    if (draft?.id === theme.id) { themeOriginalRef.current = null; editDraft(null) }
+    else if (themeOriginalRef.current) {
+      const original = themeOriginalRef.current
+      themeOriginalRef.current = { ...original, customThemes: original.customThemes.filter(item => item.id !== theme.id), activeThemeId: original.activeThemeId === theme.id ? lastBuiltIn.current : original.activeThemeId }
+    }
     commit((current) => ({
       ...current,
       activeThemeId: current.activeThemeId === theme.id ? lastBuiltIn.current : current.activeThemeId,
@@ -205,15 +230,15 @@ function UiSettingsPanel() {
   }
 
   return <section className="ui-settings-panel" aria-labelledby="page-title">
-    <header className="page-heading"><div><p>Global UI</p><h1 id="page-title">Appearance</h1><span>Applies to every book on this device. UI settings are global and cannot be overridden by a book.</span></div><div className={`save-state ${saveError ? 'error' : 'saved'}`} role="status" aria-live="polite"><i />{saveError ? 'Not saved' : 'Saved'}{saveError && <Button size="small" onClick={() => persist(pendingSettings ?? settings)}>Retry</Button>}</div></header>
+    <header className="page-heading"><div><p>{controlled ? 'UI profile draft' : 'Global UI'}</p><h1 id="page-title">Appearance</h1><span>{controlled ? 'Preview changes here, then Save profile to update linked books. Drafts do not change the application appearance.' : 'Applies to every book on this device.'}</span></div>{!controlled && <div className={`save-state ${saveError ? 'error' : 'saved'}`} role="status" aria-live="polite"><i />{saveError ? 'Not saved' : 'Saved'}{saveError && <Button size="small" onClick={() => persist(pendingSettings ?? settings)}>Retry</Button>}</div>}</header>
 
-    {saveError && <p className="ui-save-error" role="alert">Changes could not be saved on this device. They are kept here for retry; a reload will use the last saved appearance.</p>}
-    <div className="ui-appearance-tools"><span className="ui-scope-summary">All books on this device · {saveError ? 'Not saved' : 'Saved automatically'}</span><Button className="ui-safe-reset" onClick={resetTheme}>Reset to readable theme</Button></div>
+    {!controlled && saveError && <p className="ui-save-error" role="alert">Changes could not be saved on this device. They are kept here for retry; a reload will use the last saved appearance.</p>}
+    <div className="ui-appearance-tools"><span className="ui-scope-summary">{controlled ? 'Local preview · Save profile to apply' : `All books on this device · ${saveError ? 'Not saved' : 'Saved automatically'}`}</span><Button className="ui-safe-reset" onClick={resetTheme}>Reset to readable theme</Button></div>
     <SettingsSectionTabs tabs={appearanceSections} active={section} onChange={setSection} idPrefix="appearance" label="Appearance sections" />
     <section hidden={section !== 'editor'} role="tabpanel" id="appearance-panel-editor" aria-labelledby="appearance-tab-editor" className="settings-card ui-editor-settings"><h2>Editor</h2>
       <Checkbox label="Highlight dialogue" description="Use the theme’s accent color for text inside quotation marks in story scenes." checked={settings.highlightDialogue === true} onChange={event => commit(current => ({ ...current, highlightDialogue: event.target.checked }))} />
-      <div className="ui-dialogue-preview" aria-label="Dialogue styling preview">She paused. “<span className={settings.highlightDialogue ? 'cm-dialogue' : undefined}>Tell me what happened.</span>” The room fell silent.</div>
-      <div className="ui-editor-toggles" role="group" aria-label="Scene beat settings"><Checkbox label="Show scene beats" checked={settings.sceneBeats !== false} onChange={(event) => commit((current) => ({ ...current, sceneBeats: event.target.checked }))} /><Checkbox label="Save ARC as a beat" checked={settings.saveArcAsBeat !== false} onChange={(event) => commit((current) => ({ ...current, saveArcAsBeat: event.target.checked }))} /></div><p>Save nonempty drawer instructions above their generated prose. Visibility is independent; hiding beats keeps them in the book. Write private comments directly as <code>{'<!-- Your comment -->'}</code>; comments stay out of AI context and read aloud.</p></section>
+      <div className="ui-dialogue-preview" style={controlled ? { color: activeTheme.palette.text, background: activeTheme.palette.editor } : undefined} aria-label="Dialogue styling preview">She paused. “<span style={controlled && settings.highlightDialogue ? { color: activeTheme.palette.accent } : undefined} className={settings.highlightDialogue ? 'cm-dialogue' : undefined}>Tell me what happened.</span>” The room fell silent.</div>
+      <div className="ui-editor-toggles" role="group" aria-label="Scene beat settings"><Checkbox label="Show scene beats" checked={settings.sceneBeats !== false} onChange={(event) => commit((current) => ({ ...current, sceneBeats: event.target.checked }))} /><Checkbox label="Save ARC as a beat" description="Affects content: stores generation instructions as scene beats, not just their appearance." checked={settings.saveArcAsBeat !== false} onChange={(event) => commit((current) => ({ ...current, saveArcAsBeat: event.target.checked }))} /></div><p>Save nonempty drawer instructions above their generated prose. Visibility is independent; hiding beats keeps them in the book. Write private comments directly as <code>{'<!-- Your comment -->'}</code>; comments stay out of AI context and read aloud.</p></section>
     <div hidden={section !== 'typography'} role="tabpanel" id="appearance-panel-typography" aria-labelledby="appearance-tab-typography">
     <TypographySection onReset={() => commit(current => ({ ...current, editor: { ...defaultUiSettings.editor } }))} number="01" title="Main editor" description="Typography for Scenes, Notes, Codex entries, and summaries." value={settings.editor} onChange={(editor) => commit((current) => ({ ...current, editor }))} />
     <TypographySection onReset={() => commit(current => ({ ...current, inputs: { ...defaultUiSettings.inputs } }))} number="02" title="Expandable inputs" description="Typography for scalable drawer and chat/context text inputs." value={settings.inputs} onChange={(inputs) => commit((current) => ({ ...current, inputs }))} />
@@ -227,9 +252,9 @@ function UiSettingsPanel() {
       <div className="ui-theme-group ui-custom-themes"><header><h3>Custom</h3><div className="ui-custom-theme-actions">{activeCustom && <Button size="small" variant="ghost" onClick={() => beginEdit(activeCustom)}>Edit active</Button>}<Button className="ui-create-theme" size="small" leadingIcon={<Plus />} onClick={() => duplicate(activeTheme.id)}>Create theme</Button></div></header>
         {settings.customThemes.length ? <div className="ui-theme-grid">{settings.customThemes.map((theme) => <ThemeOption key={theme.id} name={theme.name} palette={theme.palette} active={settings.activeThemeId === theme.id} custom onSelect={() => selectTheme(theme.id)} onDuplicate={() => duplicate(theme.id)} onDelete={() => removeCustomTheme(theme)} />)}</div> : <p className="ui-custom-empty">Create a theme from the active palette, or copy any built-in theme to customize it.</p>}
       </div>
-      {draft && <ThemeEditor key={draft.id} theme={draft} onChange={editDraft} onApply={applyDraft} onCancel={() => editDraft(null)} />}
+      {draft && <ThemeEditor key={draft.id} theme={draft} onChange={editDraft} onApply={applyDraft} onCancel={cancelThemeDraft} />}
     </section>
-    {deleted && <Toast fixed variant="success" title={`Deleted “${deleted.theme.name}”`} onDismiss={() => setDeleted(null)} action={{ label: 'Undo', onClick: () => { commit(current => ({ ...current, customThemes: [...current.customThemes.filter(theme => theme.id !== deleted.theme.id), deleted.theme], activeThemeId: deleted.wasActive ? deleted.theme.id : current.activeThemeId })); setDeleted(null) } }}>The custom theme was removed from this device.</Toast>}
+    {deleted && <Toast fixed variant="success" title={`Deleted “${deleted.theme.name}”`} onDismiss={() => setDeleted(null)} action={{ label: 'Undo', onClick: () => { if (themeOriginalRef.current) { const original = themeOriginalRef.current; themeOriginalRef.current = { ...original, customThemes: [...original.customThemes.filter(theme => theme.id !== deleted.theme.id), deleted.theme], activeThemeId: deleted.wasActive ? deleted.theme.id : original.activeThemeId } } commit(current => ({ ...current, customThemes: [...current.customThemes.filter(theme => theme.id !== deleted.theme.id), deleted.theme], activeThemeId: deleted.wasActive ? deleted.theme.id : current.activeThemeId })); setDeleted(null) } }}>The custom theme was removed from this device.</Toast>}
   </section>
 }
 

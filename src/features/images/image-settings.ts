@@ -107,12 +107,11 @@ export function resolveImageKey(provider: ImageProvider, settings = loadImageSet
   const profileProvider = provider === 'pruna' ? 'litellm' : provider
   const key = providerProfile(ai, profileProvider)?.apiKey
   if (key?.trim()) return key.trim()
-  return providerProfile(loadAiSettings(), profileProvider)?.apiKey?.trim() || ''
+  return ''
 }
 
 export function resolvePrunaGatewayUrl(ai: AiSettings = loadAiSettings()) {
-  const local = providerProfile(ai, 'litellm')?.baseUrl?.trim()
-  const baseUrl = local || providerProfile(loadAiSettings(), 'litellm')?.baseUrl?.trim() || ''
+  const baseUrl = providerProfile(ai, 'litellm')?.baseUrl?.trim() || ''
   if (!baseUrl) return ''
   try {
     const url = new URL(baseUrl)
@@ -124,7 +123,7 @@ export function resolveImageSpec(prompt: string, alias?: string, size?: string, 
   if (!prompt?.trim() || prompt.length > 32000) throw new Error('Enter a generation prompt of 1–32,000 characters.')
   const selected = alias || settings.defaultAliases?.[task] || settings.defaultAlias
   const model = settings.favorites.find((favorite) => favorite.alias.toLowerCase() === selected.toLowerCase())
-  if (!model) throw new Error('Choose a favorite generation model in Images settings first.')
+  if (!model) throw new Error('Choose a favorite generation model in global Settings → Image or Video profiles first.')
   if (!modelTasks(model).includes(task)) throw new Error(`${model.alias} does not support ${generationTaskNames[task].toLowerCase()}.`)
   const needsSource = task === 'image-to-image' || task === 'image-to-video'
   if (needsSource && !sources.length) throw new Error(`${generationTaskNames[task]} requires a source image.`)
@@ -154,8 +153,7 @@ export function imageFavorite(model: ImageModel, used: FavoriteImageModel[]): Fa
   const defaultSize = model.sizes.find((size) => size.value === '1024x1024')?.value ?? model.sizes[0]?.value ?? ''
   return { ...model, tasks: normalizedTasks(model), alias, enabledSizes: model.sizes.map((size) => size.value), defaultSize, ...(model.provider === 'openai' ? { quality: /^gpt-image-2\.5-/.test(model.id) ? 'auto' : 'low', moderation: 'low' } : {}) }
 }
-export function imageModelInstructions() {
-  const settings = loadImageSettings()
-  return `\n\nVisual generation proposals never contact a provider or incur a charge. The user must press Generate to approve the shown draft and queue a request. Use only configured favorite aliases and supported tasks. If none exist, ask the user to configure Images settings. Favorites: ${JSON.stringify(settings.favorites.map((favorite) => ({ alias: favorite.alias, tasks: modelTasks(favorite), maxSourceImages: favorite.maxSourceImages ?? 0, sizes: favorite.sizes.filter((size) => favorite.enabledSizes.includes(size.value)).map((size) => ({ size: size.value, ratio: imageRatio(size) })), defaultSize: favorite.defaultSize })))} `
+export function imageModelInstructions(settings: ImageSettings = loadImageSettings()) {
+  return `\n\nVisual generation proposals never contact a provider or incur a charge. The user must press Generate to approve the shown draft and queue a request. Use only configured favorite aliases and supported tasks. If none exist, ask the user to configure Image and Video profiles in global Settings. Favorites: ${JSON.stringify(settings.favorites.map((favorite) => ({ alias: favorite.alias, tasks: modelTasks(favorite), maxSourceImages: favorite.maxSourceImages ?? 0, sizes: favorite.sizes.filter((size) => favorite.enabledSizes.includes(size.value)).map((size) => ({ size: size.value, ratio: imageRatio(size) })), defaultSize: favorite.defaultSize })))} `
 }
 export { generationTask }

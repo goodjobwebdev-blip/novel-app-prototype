@@ -1,3 +1,5 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -99,12 +101,18 @@ test('fatal stored template or message errors block application', () => {
   assert.throws(() => applyPromptCompositionPreset(stored), /cannot be applied/)
 })
 
-test('preset controls are present for Book/default scopes and individual Chat without touching generation settings', () => {
+test('books select live presets while individual Chat keeps explicit composition-copy controls', () => {
   const app = readFileSync(new URL('../src/app/App.tsx', import.meta.url), 'utf8')
   const chat = readFileSync(new URL('../src/features/chat/ChatFeature.tsx', import.meta.url), 'utf8')
   const controls = readFileSync(new URL('../src/features/settings/PromptPresetControls.tsx', import.meta.url), 'utf8')
-  assert.match(app, /\[\['story', 'Story'\], \['assistant', 'Chat'\], \['lore', 'Codex'\], \['summarize', 'Summary'\]\]/)
-  assert.match(app, /<PromptPresetControls[\s\S]*withPromptComposition/)
+  const profiles = readFileSync(new URL('../src/features/settings/SettingsProfilesPanel.tsx', import.meta.url), 'utf8')
+  assert.match(profiles, /const promptKinds = \['story', 'codex', 'summary', 'chat', 'character'\]/)
+  assert.match(profiles, /bookProfileKinds = \['text', 'story', 'codex', 'summary', 'tts', 'stt', 'image', 'video', 'ui'\]/)
+  assert.match(app, /saveBookProfileSelections\(book\.id, next\)/)
+  assert.match(app, /resolveProfileSettings\(next, loadAiSettings\(\)\.favorites\)/)
+  assert.match(app, /withPromptComposition\(current, promptTab/)
+  assert.match(profiles, /await saveSettingsProfile\(clean\)/)
+  assert.doesNotMatch(app, /<PromptPresetControls|onApply=/)
   assert.match(chat, /<PromptPresetControls scope="chat"[\s\S]*onApply=\{setCompositionDraft\}/)
   assert.match(controls, /Selecting a preset does not change the composition/)
   assert.match(controls, /Replace the complete/)

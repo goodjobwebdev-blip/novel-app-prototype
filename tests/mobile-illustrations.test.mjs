@@ -1,3 +1,5 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test, { after } from 'node:test'
 import { transpileSourceTree } from './transpile-source-tree.mjs'
 import assert from 'node:assert/strict'
@@ -8,7 +10,7 @@ import { JSDOM } from 'jsdom'
 import 'fake-indexeddb/auto'
 
 const dom = new JSDOM('<html><body><div id="root"></div></body></html>', { url: 'https://arc.test/' })
-for (const key of ['window', 'document', 'HTMLElement', 'HTMLDialogElement', 'sessionStorage', 'Event', 'CustomEvent']) globalThis[key] = dom.window[key]
+for (const key of ['window', 'document', 'HTMLElement', 'HTMLDialogElement', 'sessionStorage', 'localStorage', 'Event', 'CustomEvent']) globalThis[key] = dom.window[key]
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 const visualViewport = new dom.window.EventTarget()
 visualViewport.height = 700
@@ -32,9 +34,14 @@ const { default: Modal } = await moduleAt('features/images/IllustrationModal')
 const { default: Illustration } = await moduleAt('features/codex/CodexIllustration')
 const p = await moduleAt('data/persistence')
 const { initialAiSettings } = await moduleAt('shared/ai/ai-settings')
-after(() => { dom.window.close(); rmSync(directory, { recursive: true, force: true }) })
+after(async () => { (await p.database()).close(); dom.window.close(); rmSync(directory, { recursive: true, force: true }) })
 const h = React.createElement
-async function mount(element) { const root = createRoot(document.getElementById('root')); await act(async () => root.render(element)); return root }
+async function mount(t, element) {
+  const root = createRoot(document.getElementById('root'))
+  t.after(async () => { await unmount(root) })
+  await act(async () => root.render(element))
+  return root
+}
 async function unmount(root) { await act(async () => root.unmount()) }
 const buttons = () => [...document.querySelectorAll('button')]
 const button = (text) => buttons().find((b) => b.textContent.trim() === text || b.getAttribute('aria-label') === text)
@@ -57,10 +64,10 @@ test('gesture geometry keeps the pinch anchor stable, clamps edges, and fits the
   assert.equal(fit.height, 150)
 })
 
-test('pointer drag, two-finger pinch, cancellation, keyboard zoom and reset update the crop', async () => {
+test('pointer drag, two-finger pinch, cancellation, keyboard zoom and reset update the crop', async (t) => {
   let state
   function Demo() { const [value, setValue] = React.useState({ ...geometry.centeredImageView }); state = value; return h(Gestures, { src: 'blob:fixture', alt: 'Fixture', image: { width: 800, height: 400 }, value, onChange: setValue, crop: true }) }
-  const root = await mount(h(Demo))
+  const root = await mount(t, h(Demo))
   try {
     const surface = document.querySelector('.image-gesture-surface')
     await act(async () => { pointer(surface, 'pointerdown', 1, 150, 150); pointer(surface, 'pointermove', 1, 180, 150); pointer(surface, 'pointerup', 1, 180, 150) })
@@ -77,10 +84,11 @@ test('pointer drag, two-finger pinch, cancellation, keyboard zoom and reset upda
   } finally { await unmount(root) }
 })
 
-test('modal follows keyboard viewport, keeps footer outside scrolling content, and restores focus', async () => {
+test('modal follows keyboard viewport, keeps footer outside scrolling content, and restores focus', async (t) => {
   const trigger = document.createElement('button'); document.body.append(trigger); trigger.focus()
+  t.after(() => trigger.remove())
   let closed = false
-  const root = await mount(h(Modal, { title: 'Test sheet', onClose: () => { closed = true }, footer: h('button', null, 'Save') }, h('textarea')))
+  const root = await mount(t, h(Modal, { title: 'Test sheet', onClose: () => { closed = true }, footer: h('button', null, 'Save') }, h('textarea')))
   try {
     const modal = document.querySelector('dialog')
     assert.equal(document.documentElement.style.overflow, 'hidden')
@@ -94,16 +102,16 @@ test('modal follows keyboard viewport, keeps footer outside scrolling content, a
     assert.equal(closed, true)
   } finally { await unmount(root) }
   assert.equal(document.documentElement.style.overflow, '')
-  assert.equal(document.activeElement, trigger)
+  assert.ok(document.activeElement === trigger, 'The modal restores focus to its trigger')
   trigger.remove()
 })
 
-test('dismissed description draft returns without saving; removal exposes Undo and restores the image', async () => {
+test('dismissed description draft returns without saving; removal exposes Undo and restores the image', async (t) => {
   const { book } = await p.createBook(initialAiSettings, 'Mobile test')
   const entry = await p.createCodexEntry(book.id, 'Keeper', 'Character')
   const image = new Blob(['test pixels'], { type: 'image/png' })
   await p.saveIllustration(entry.id, { image, thumbnail: image, width: 800, height: 400 }, { caption: 'Original caption', alt: '', cropX: 50, cropY: 50 })
-  const root = await mount(h(Illustration, { entry, readOnly: false }, h('h1', null, entry.title)))
+  const root = await mount(t, h(Illustration, { entry, readOnly: false }, h('h1', null, entry.title)))
   try {
     await settle(() => Boolean(button('Image actions for Keeper')))
     await click('Image actions for Keeper'); await click('Edit description')

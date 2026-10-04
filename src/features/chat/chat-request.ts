@@ -6,6 +6,7 @@ import { projectProse } from '../editor/document-projection'
 import type { ProposalDraft } from './chat-proposal-draft'
 import { chatImageTools } from '../images/image-tools'
 import { imageModelInstructions } from '../images/image-settings'
+import type { ImageSettings } from '../images/image-generation-types'
 import type { ChatToolDefinition } from './chat-api'
 import { chatWorkspaceTools } from './chat-tools'
 import { chatEntityTools } from './chat-entity-tools'
@@ -86,7 +87,7 @@ function source(sourceId: string, title: string, content: string, reason: string
 }
 
 export const emptyCharacterBook: BookPromptValues = { title: '', series: '', seriesOrder: '', overview: '', genre: '', style: '', pov: '', tense: '', language: '' }
-export function chatRequestValues(book: BookPromptValues, context: PreparedContextValues, restrictedInstructions?: string) {
+export function chatRequestValues(book: BookPromptValues, context: PreparedContextValues, restrictedInstructions?: string, mediaSettings?: ImageSettings) {
   const bookValues = bookTemplateValues(book)
   delete bookValues['response.length']
   const storySoFar = context.summaryContext.trim()
@@ -107,12 +108,13 @@ export function chatRequestValues(book: BookPromptValues, context: PreparedConte
     'context.automatic_codex': automaticCodex,
     'context.automatic': automatic,
     'context.additional': '',
-    'chat.workspace_instructions': restrictedInstructions ?? CHAT_WORKSPACE_INSTRUCTIONS + imageModelInstructions(),
+    'chat.workspace_instructions': restrictedInstructions ?? CHAT_WORKSPACE_INSTRUCTIONS + imageModelInstructions(mediaSettings),
   }
 }
 
 export function assembleChatGenerationRequest(input: {
   restrictedInstructions?: string
+  mediaSettings?: ImageSettings
   composition: PromptComposition
   book: BookPromptValues
   context: PreparedContextValues
@@ -121,7 +123,7 @@ export function assembleChatGenerationRequest(input: {
   skills?: CapturedChatSkill[]
   tools?: ChatToolDefinition[]
 }): NormalizedAssembledRequest {
-  const values = chatRequestValues(input.restrictedInstructions ? emptyCharacterBook : input.book, input.context, input.restrictedInstructions)
+  const values = chatRequestValues(input.restrictedInstructions ? emptyCharacterBook : input.book, input.context, input.restrictedInstructions, input.mediaSettings)
   if (input.restrictedInstructions) values['chat.workspace_instructions'] = input.restrictedInstructions
   const storySources = input.context.storySoFarSources ?? []
   const sceneSources = input.context.currentSceneText.trim()
@@ -157,6 +159,7 @@ export function assembleChatGenerationRequest(input: {
     },
     after: [
       ...(input.restrictedInstructions ? [normalizeAppManagedPart({ id: 'character-boundary', role: 'system', sourceKind: 'app-managed', sourceId: 'character-boundary', name: 'Character context boundary', ownership: 'app-managed', content: input.restrictedInstructions })] : []),
+      ...(input.restrictedInstructions && input.mediaSettings ? [normalizeAppManagedPart({ id: 'character-media-models', role: 'system', sourceKind: 'app-managed', name: 'Available media models', ownership: 'app-managed', content: imageModelInstructions(input.mediaSettings) })] : []),
       ...chatSkillParts(input.restrictedInstructions ? [] : input.skills),
       ...(!input.restrictedInstructions && input.context.sceneBeats?.length ? [normalizeAppManagedPart({ id: 'scene-planning-beats', role: 'system', sourceKind: 'app-managed', sourceId: input.context.currentSceneId, name: 'Scene planning beats', ownership: 'app-managed', content: `Planning only, distinct from manuscript facts. Use propose_scene_beat to suggest changes; approval is required.\n${JSON.stringify(input.context.sceneBeats)}` })] : []),
       ...historyParts,

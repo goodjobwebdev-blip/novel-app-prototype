@@ -1,3 +1,5 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { findDialogueRanges } from '../src/features/editor/dialogue-highlighting.ts'

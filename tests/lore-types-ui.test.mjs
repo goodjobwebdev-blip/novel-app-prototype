@@ -1,3 +1,5 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test, { after } from 'node:test'
 import { transpileSourceTree } from './transpile-source-tree.mjs'
 import assert from 'node:assert/strict'

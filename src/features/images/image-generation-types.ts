@@ -87,6 +87,8 @@ export type ImageJob = ImageGenerationSpec & {
   status: 'queued' | 'running' | 'completed' | 'failed' | 'interrupted' | 'cancelled'
   createdAt: number; startedAt?: number; completedAt?: number; error?: string
   assetId?: string; decision?: 'kept' | 'discarded'; hiddenInChat?: boolean; hiddenInQueue?: boolean
+  // Device-local digest of the endpoint/account approved at enqueue and retained by durable tickets; never export.
+  localConnectionFingerprint?: string
   providerJobId?: string; owner?: string; heartbeat?: number
 }
 export type GalleryImage = {

@@ -1,3 +1,5 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test, { after } from 'node:test'
 import { transpileSourceTree } from './transpile-source-tree.mjs'
 import assert from 'node:assert/strict'
@@ -6,8 +8,10 @@ import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { JSDOM } from 'jsdom'
 import 'fake-indexeddb/auto'
+import { assignBookTestProfiles } from './settings-profile-fixture.mjs'
 
 const dom = new JSDOM('<div id="root"></div>', { url: 'https://arc.test/', pretendToBeVisual: true })
+after(() => dom.window.close())
 for (const key of ['window', 'document', 'HTMLElement', 'CustomEvent', 'localStorage', 'sessionStorage', 'Element', 'Node', 'MutationObserver', 'Window', 'DOMRect', 'Range']) globalThis[key] = dom.window[key]
 globalThis.getComputedStyle = dom.window.getComputedStyle
 Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.window.navigator })
@@ -21,12 +25,15 @@ const React = await import('react')
 const { act } = React
 const { createRoot } = await import('react-dom/client')
 const directory = mkdtempSync(new URL('../node_modules/.workspace-generation-test-', import.meta.url))
+after(() => rmSync(directory, { recursive: true, force: true }))
 transpileSourceTree(directory)
 const moduleAt = name => import(pathToFileURL(`${directory}/${name}.mjs`))
 const p = await moduleAt('data/persistence')
-const { initialAiSettings } = await moduleAt('shared/ai/ai-settings')
+after(async () => (await p.database()).close())
+const ai = await moduleAt('shared/ai/ai-settings')
+const { initialAiSettings } = ai
+const profiles = await moduleAt('features/settings/settings-profiles')
 const { default: Workspace } = await moduleAt('app/Workspace')
-after(async () => { (await p.database()).close(); dom.window.close(); rmSync(directory, { recursive: true, force: true }) })
 
 async function settle(predicate) {
   for (let i = 0; i < 200 && !predicate(); i++) await act(async () => new Promise(resolve => setTimeout(resolve, 10)))
@@ -41,10 +48,13 @@ const generateButton = () => button('Generate')
 const stopButton = () => button('Stop generation')
 const { EditorView } = await import('@codemirror/view')
 const view = () => EditorView.findFromDOM(document.querySelector('.cm-editor'))
-async function openWorkspace(settings) {
+async function openWorkspace(t, settings) {
+  ai.saveAiSettings(settings)
   const { book, scene } = await p.createBook(settings, `Generation test ${crypto.randomUUID()}`)
+  await assignBookTestProfiles({ persistence: p, ai, profiles }, book.id, settings, ['text', 'story', 'ui'])
   await p.saveDocumentContent(scene.id, 'Original scene.')
   const root = createRoot(document.getElementById('root'))
+  t.after(async () => { await act(async () => root.unmount()) })
   await act(async () => root.render(React.createElement(React.StrictMode, null, React.createElement(Workspace))))
   const bookButton = () => [...document.querySelectorAll('.library-book')].find(item => item.textContent.includes(book.title))
   await settle(bookButton)
@@ -68,7 +78,7 @@ function settings() {
 
 test('Generate streams into the real scene editor and becomes ready again', async t => {
   t.mock.method(globalThis, 'fetch', async () => new Response(event({ content: 'New paragraph.\r\n\r\nAnother paragraph.' }) + 'data: [DONE]\n\n'))
-  const { root, scene } = await openWorkspace(settings())
+  const { root, scene } = await openWorkspace(t, settings())
   try {
     const input = document.querySelector('textarea[aria-label="generation prompt"]')
     await act(async () => {
@@ -83,12 +93,111 @@ test('Generate streams into the real scene editor and becomes ready again', asyn
   } finally { await act(async () => root.unmount()) }
 })
 
+test('Story retains its request snapshot when profiles and the global connection change during catalog lookup', async t => {
+  const original = ai.withPromptSystemPrompt({
+    ...settings(), mainModel: 'original-story-model', mainModelContextLength: undefined,
+    mainThinkingEffort: 'high', mainEffectiveContextLimit: '32k', generationWordDelayMs: '1',
+    responseLengths: { ...initialAiSettings.responseLengths, story: 'Original story response length.' },
+  }, 'story', 'Original Story snapshot prompt.')
+  let resolveCatalog, resolveCompletion, catalogRequest, completionRequest
+  let catalogCalls = 0, completionCalls = 0, catalogReleased = false, completionReleased = false
+  const catalog = new Promise(resolve => { resolveCatalog = resolve })
+  const completion = new Promise(resolve => { resolveCompletion = resolve })
+  function releaseCatalog() {
+    if (catalogReleased) return
+    catalogReleased = true
+    resolveCatalog(Response.json({ data: [
+      { id: 'unrelated-model', context_length: 777000 },
+      { id: original.mainModel, context_length: 96000 },
+      { id: 'edited-story-model', context_length: 120000 },
+    ] }))
+  }
+  function finish() {
+    if (completionReleased) return
+    completionReleased = true
+    resolveCompletion(new Response(event({ content: 'Snapshot passage.' }) + 'data: [DONE]\n\n'))
+  }
+  t.after(async () => { await act(async () => {
+    releaseCatalog()
+    finish()
+    await new Promise(resolve => setImmediate(resolve))
+  }) })
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    if (String(url).includes('/models?')) {
+      catalogCalls++
+      catalogRequest = { url: String(url), authorization: new Headers(init.headers).get('Authorization') }
+      return catalog
+    }
+    completionCalls++
+    completionRequest = { url: String(url), method: init.method, authorization: new Headers(init.headers).get('Authorization'), body: JSON.parse(init.body) }
+    return completion
+  })
+  const { scene, book } = await openWorkspace(t, original)
+  const selections = await p.getBookProfileSelections(book.id)
+  const byId = id => profiles.loadSettingsProfiles().profiles.find(profile => profile.id === id)
+  await click(generateButton())
+  await settle(() => catalogCalls === 1)
+  assert.equal(completionCalls, 0, 'The profile edits happen before the Story request is sent')
+  assert.equal(catalogRequest.url, `${original.baseUrl}/models?detailed=true&sort=favorites`)
+  assert.equal(catalogRequest.authorization, `Bearer ${original.apiKey}`)
+  await act(async () => {
+    const text = byId(selections.text), story = byId(selections.story)
+    profiles.saveSettingsProfile({ ...text, settings: { ...text.settings, mainModel: 'edited-story-model', mainModelContextLength: 120000, mainThinkingEffort: 'low', mainEffectiveContextLimit: '128k' } })
+    profiles.saveSettingsProfile({ ...story, settings: {
+      ...ai.withPromptSystemPrompt(story.settings, 'story', 'Edited Story snapshot prompt.'),
+      responseLengths: { ...story.settings.responseLengths, story: 'Edited story response length.' },
+    } })
+    ai.saveAiSettings({ ...ai.loadAiSettings(), provider: 'litellm', baseUrl: 'https://edited-provider.invalid/v1', apiKey: 'edited-story-key' })
+  })
+  await act(async () => releaseCatalog())
+  await settle(() => completionCalls === 1 && stopButton())
+  assert.equal(completionRequest.url, `${original.baseUrl}/chat/completions`)
+  assert.equal(completionRequest.method, 'POST')
+  assert.equal(completionRequest.authorization, `Bearer ${original.apiKey}`)
+  assert.equal(completionRequest.body.model, original.mainModel)
+  assert.equal(completionRequest.body.stream, true)
+  assert.equal(completionRequest.body.reasoning?.enabled, true)
+  assert.equal(completionRequest.body.reasoning?.effort, 'high')
+  assert.equal(completionRequest.body.reasoning?.delta_field, 'reasoning_content', 'The original NanoGPT provider formats the request')
+  assert.equal(completionRequest.body.reasoning_effort, undefined)
+  const requestText = completionRequest.body.messages.map(message => message.content).join('\n')
+  assert.equal(completionRequest.body.messages[0].content, 'Original Story snapshot prompt.')
+  assert.match(requestText, /Original scene\./)
+  assert.match(requestText, /Original story response length\./)
+  assert.doesNotMatch(requestText, /Edited Story snapshot prompt|Edited story response length/)
+  await click(document.querySelector('.chat-config-strip summary'))
+    await click([...document.querySelectorAll('.composer-status-body button')].find(item => item.textContent === 'Request details'))
+  const detail = label => [...document.querySelectorAll('.generation-metadata dt')].find(item => item.textContent === label)?.nextElementSibling?.textContent
+  assert.equal(detail('Provider'), 'NanoGPT')
+  assert.equal(detail('Requested model'), original.mainModel)
+  assert.equal(detail('Context window'), `${(96000).toLocaleString()} tokens`)
+  await click(button('Close generation details'))
+  await act(async () => finish())
+  await settle(() => !stopButton() && view().state.doc.toString().includes('Snapshot passage.'))
+  await waitSaved(scene.id, 'Original scene.\n\nSnapshot passage.')
+  const live = await p.getBookAiSettings(book.id, [])
+  assert.equal(live.mainModel, 'edited-story-model')
+  assert.equal(live.mainModelContextLength, 120000)
+  assert.equal(live.mainThinkingEffort, 'low')
+  assert.equal(live.mainEffectiveContextLimit, '128k')
+  assert.equal(live.provider, 'litellm')
+  assert.equal(live.baseUrl, 'https://edited-provider.invalid/v1')
+  assert.equal(live.apiKey, 'edited-story-key')
+  assert.equal(live.promptCompositions.story.systemPrompt, 'Edited Story snapshot prompt.')
+  assert.equal(live.responseLengths.story, 'Edited story response length.')
+  const metadata = (await (await p.database()).table('entities').get(`settings-profiles-book-${book.id}`)).modelMetadata
+  assert.equal(Object.keys(metadata ?? {}).length, 0, 'Late metadata for the original provider/model is not cached against the edited profile')
+  assert.equal(catalogCalls, 1)
+  assert.equal(completionCalls, 1)
+})
+
 for (const phase of ['sending', 'thinking', 'writing', 'buffered']) {
   test(`Scene Stop during ${phase} releases a stalled provider, preserves text and allows Generate again`, async t => {
-    let requests = 0, cancelled = 0, releaseHeaders
+    let requests = 0, cancelled = 0, releaseHeaders, source, finishCancellation
     const pendingHeaders = new Promise(resolve => { releaseHeaders = resolve })
     const response = new Response(new ReadableStream({
       start(controller) {
+        source = controller
         if (phase === 'thinking') controller.enqueue(encoder.encode(event({ reasoning_content: 'Partial thought' })))
         if (phase === 'writing') controller.enqueue(encoder.encode(event({ content: 'Partial.\r\n' })))
         if (phase === 'buffered') {
@@ -96,8 +205,14 @@ for (const phase of ['sending', 'thinking', 'writing', 'buffered']) {
           controller.close()
         }
       },
-      cancel() { cancelled++; return new Promise(() => {}) },
+      // Cancellation stays stalled until teardown; Stop must not await the provider.
+      cancel() { cancelled++; return new Promise(resolve => { finishCancellation = resolve }) },
     }))
+    t.after(async () => { await act(async () => {
+      releaseHeaders(response)
+      source.error(new Error('Test stream cleanup'))
+      finishCancellation?.()
+    }) })
     t.mock.method(globalThis, 'fetch', async (url, init) => {
       assert.equal(url, 'https://provider.invalid/v1/chat/completions')
       assert.equal(init.method, 'POST')
@@ -105,7 +220,7 @@ for (const phase of ['sending', 'thinking', 'writing', 'buffered']) {
       if (requests === 1) return phase === 'sending' ? pendingHeaders : response
       return new Response(event({ content: 'Next passage.' }) + 'data: [DONE]\n\n')
     })
-    const { root, scene } = await openWorkspace({ ...settings(), generationWordDelayMs: phase === 'buffered' ? '50' : '0' })
+    const { root, scene } = await openWorkspace(t, { ...settings(), generationWordDelayMs: phase === 'buffered' ? '50' : '0' })
     try {
       await click(generateButton())
       await settle(() => requests === 1 && stopButton() && (!['writing', 'buffered'].includes(phase) || view().state.doc.toString().includes('Partial.')))
@@ -134,10 +249,11 @@ for (const phase of ['sending', 'thinking', 'writing', 'buffered']) {
 
 test('scrolling and moving the cursor during streaming preserve generation and its original insertion point', async t => {
   let source
+  t.after(async () => { await act(async () => source?.error(new Error('Test stream cleanup'))) })
   t.mock.method(globalThis, 'fetch', async () => new Response(new ReadableStream({
     start(controller) { source = controller; controller.enqueue(encoder.encode(event({ content: 'First passage. ' }))) },
   })))
-  const { root, scene } = await openWorkspace(settings())
+  const { root, scene } = await openWorkspace(t, settings())
   try {
     await click(generateButton())
     await settle(() => view().state.doc.toString().includes('First passage.'))
@@ -163,16 +279,17 @@ test('scrolling and moving the cursor during streaming preserve generation and i
 })
 
 test('a real edit during streaming stops the old run without losing the edit or leaving Stop stuck', async t => {
-  let source, requests = 0
+  let source, requests = 0, finishCancellation
+  t.after(async () => { await act(async () => { source?.error(new Error('Test stream cleanup')); finishCancellation?.() }) })
   t.mock.method(globalThis, 'fetch', async () => {
     requests++
     if (requests > 1) return new Response(event({ content: 'Fresh passage.' }) + 'data: [DONE]\n\n')
     return new Response(new ReadableStream({
       start(controller) { source = controller; controller.enqueue(encoder.encode(event({ content: 'Old generated passage. ' }))) },
-      cancel() { return new Promise(() => {}) },
+      cancel() { return new Promise(resolve => { finishCancellation = resolve }) },
     }))
   })
-  const { root, scene } = await openWorkspace(settings())
+  const { root, scene } = await openWorkspace(t, settings())
   try {
     await click(generateButton())
     await settle(() => view().state.doc.toString().includes('Old generated passage.'))
@@ -191,16 +308,17 @@ test('a real edit during streaming stops the old run without losing the edit or 
 })
 
 test('Stop releases the UI even if the final editor transaction throws', async t => {
-  let requests = 0
+  let requests = 0, source, finishCancellation
+  t.after(async () => { await act(async () => { source?.error(new Error('Test stream cleanup')); finishCancellation?.() }) })
   t.mock.method(globalThis, 'fetch', async () => {
     requests++
     if (requests > 1) return new Response(event({ content: 'Retry.' }) + 'data: [DONE]\n\n')
     return new Response(new ReadableStream({
-      start(controller) { controller.enqueue(encoder.encode(event({ content: 'Partial. ' }))) },
-      cancel() { return new Promise(() => {}) },
+      start(controller) { source = controller; controller.enqueue(encoder.encode(event({ content: 'Partial. ' }))) },
+      cancel() { return new Promise(resolve => { finishCancellation = resolve }) },
     }))
   })
-  const { root, scene } = await openWorkspace(settings())
+  const { root, scene } = await openWorkspace(t, settings())
   try {
     await click(generateButton())
     await settle(() => view().state.doc.toString().includes('Partial.'))

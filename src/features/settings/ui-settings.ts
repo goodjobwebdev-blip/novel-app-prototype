@@ -248,6 +248,22 @@ export function loadUiSettings(): UiSettings {
   }
 }
 
+let activeUiSettings: UiSettings | undefined
+
+/** Effective UI for the current surface, separate from the legacy migration source. */
+export function getActiveUiSettings(): UiSettings {
+  return activeUiSettings ?? loadUiSettings()
+}
+
+export function setActiveUiSettings(settings: UiSettings) {
+  const next = structuredClone(settings)
+  const changed = JSON.stringify(next) !== JSON.stringify(activeUiSettings)
+  activeUiSettings = next
+  applyUiSettings(next)
+  if (changed && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent<UiSettings>(UI_SETTINGS_EVENT, { detail: next }))
+  return next
+}
+
 export function saveUiSettings(settings: UiSettings) {
   const next: UiSettings = {
     highlightDialogue: settings.highlightDialogue === true,
@@ -259,9 +275,7 @@ export function saveUiSettings(settings: UiSettings) {
     customThemes: settings.customThemes.map((theme) => ({ ...theme, name: theme.name.slice(0, 80), palette: sanitizePalette(theme.palette, builtInThemes[0].palette) })),
   }
   window.localStorage.setItem(UI_SETTINGS_STORAGE_KEY, JSON.stringify(next))
-  applyUiSettings(next)
-  window.dispatchEvent(new CustomEvent<UiSettings>(UI_SETTINGS_EVENT, { detail: next }))
-  return next
+  return setActiveUiSettings(next)
 }
 
 export function applyUiSettings(settings: UiSettings) {
@@ -301,9 +315,7 @@ export function applyUiSettings(settings: UiSettings) {
 }
 
 export function applyStoredUiSettings() {
-  const settings = loadUiSettings()
-  applyUiSettings(settings)
-  return settings
+  return setActiveUiSettings(loadUiSettings())
 }
 
 export function createCustomTheme(settings: UiSettings, sourceThemeId = settings.activeThemeId): UiSettings {

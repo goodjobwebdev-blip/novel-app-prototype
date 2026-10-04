@@ -1,7 +1,6 @@
 import { checkStorageHeadroom } from './illustration-image'
-import { loadAiSettings } from '../../shared/ai/ai-settings'
-import { getBookAiSettings } from '../../data/persistence'
-import { IMAGE_PROVIDERS, resolveImageKey, resolvePrunaGatewayUrl } from './image-settings'
+import { IMAGE_PROVIDERS } from './image-settings'
+import { assertImageJobConnection, captureImageCredentials, imageConnectionFingerprint } from './image-connection'
 import { claimImageJob, completeImageJob, getEntity, IMAGE_STORE_CHANGED, listImageJobs, notifyImageStore, patchOwnedImageJob, recoverImageJobs } from './image-store'
 import { generateProviderImage, prepareGeneratedImage, safeImageError } from './image-providers'
 import { IMAGE_QUEUE_CONCURRENCY, generationTask, type ImageJob, type ImageProvider } from './image-generation-types'
@@ -11,11 +10,7 @@ let stopQueue: (() => void) | undefined
 export type ImageQueueDependencies = { generate: typeof generateProviderImage; prepare: typeof prepareGeneratedImage; key: (job: ImageJob) => Promise<string | { key: string; gatewayUrl: string }> }
 const dependencies: ImageQueueDependencies = {
   generate: generateProviderImage, prepare: prepareGeneratedImage,
-  key: async (job) => {
-    const ai = job.bookId ? await getBookAiSettings(job.bookId, loadAiSettings().favorites) : loadAiSettings()
-    const key = resolveImageKey(job.provider, undefined, ai)
-    return job.provider === 'pruna' ? { key, gatewayUrl: resolvePrunaGatewayUrl(ai) } : key
-  },
+  key: async (job) => captureImageCredentials(job.provider),
 }
 async function runClaimedImageJob(job: ImageJob, owner: string, deps: ImageQueueDependencies) {
   const controller = new AbortController()
@@ -27,10 +22,15 @@ async function runClaimedImageJob(job: ImageJob, owner: string, deps: ImageQueue
     if (job.messageId && !await getEntity(job.messageId)) throw new Error('The source chat message was deleted.')
     const video = generationTask(job).endsWith('video')
     await checkStorageHeadroom((video ? 200 : 20) * 1024 * 1024)
-    const credentials = await deps.key(job)
+    const resolved = await deps.key(job)
+    // Copy once so edits to connections cannot change submission, polling or delivery mid-operation.
+    const credentials = typeof resolved === 'string' ? resolved : { ...resolved }
     key = typeof credentials === 'string' ? credentials : credentials.key
+    const fingerprint = await imageConnectionFingerprint(job.provider, credentials)
+    assertImageJobConnection(job, fingerprint)
+    if (!await patchOwnedImageJob(job.id, owner, { localConnectionFingerprint: fingerprint })) throw new Error('The job was cancelled before generation started.')
     const output = await deps.generate(job, credentials, AbortSignal.any([controller.signal, AbortSignal.timeout((video ? 20 : 10) * 60_000)]), async (id) => {
-      if (!await patchOwnedImageJob(job.id, owner, { providerJobId: id })) throw new Error('The job was cancelled before its provider ID could be saved.')
+      if (!await patchOwnedImageJob(job.id, owner, { providerJobId: id, localConnectionFingerprint: fingerprint })) throw new Error('The job was cancelled before its provider ID could be saved.')
     })
     controller.signal.throwIfAborted()
     await completeImageJob(job, await deps.prepare(output))

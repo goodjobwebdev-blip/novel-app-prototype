@@ -1,4 +1,4 @@
-.PHONY: up down build logs backend-test backend-check backend-smoke check prod-build prod prod-down prod-logs prod-status backup deploy
+.PHONY: up down build logs test backend-test backend-check backend-smoke check prod-build prod prod-down prod-logs prod-status backup deploy
 
 DEPLOY_HOST ?= myvps
 DEPLOY_PATH ?= /srv/novel-app-prototype
@@ -16,6 +16,9 @@ build:
 
 logs:
 	docker compose logs -f backend
+
+test:
+	npm test
 
 backend-test:
 	cd backend && go test ./...

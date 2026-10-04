@@ -1,3 +1,5 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { registerHooks } from 'node:module'
@@ -11,10 +13,14 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   }
   return nextResolve(specifier, context)
 } })
-globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} }
+const storage = new Map()
+globalThis.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)), removeItem: key => storage.delete(key) }
 const { encodeDocumentBlock, documentBlocks, projectProse, proseText, rangeTouchesProtected } = await import('../src/features/editor/document-projection.ts')
 const db = await import('../src/data/persistence.ts')
-const { initialAiSettings, copyAiSettings } = await import('../src/shared/ai/ai-settings.ts')
+const ai = await import('../src/shared/ai/ai-settings.ts')
+const { initialAiSettings, copyAiSettings } = ai
+const profiles = await import('../src/features/settings/settings-profiles.ts')
+const { assignBookTestProfiles } = await import('./settings-profile-fixture.mjs')
 const { buildContextValues } = await import('../src/shared/context/context-service.ts')
 const { buildSummarySource } = await import('../src/features/writing/summary-service.ts')
 const { prepareSummaryGeneration } = await import('../src/features/writing/summary-generation.ts')
@@ -45,6 +51,7 @@ test('context, story, summary, autotitle, Chat reads/search and TTS share the pr
   const settings = copyAiSettings(initialAiSettings)
   settings.provider = 'fake'; settings.mainModel = 'fake/test'; settings.supportModel = 'fake/test'; settings.mainModelContextLength = settings.supportModelContextLength = 100000
   const f = await db.createBook(settings, 'Projection test')
+    await assignBookTestProfiles({ persistence: db, ai, profiles }, f.book.id, settings)
   await db.saveDocumentContent(f.scene.id, body)
   const source = await db.getEntity(f.scene.id)
   const summary = await db.getOrCreateSummary(source)
