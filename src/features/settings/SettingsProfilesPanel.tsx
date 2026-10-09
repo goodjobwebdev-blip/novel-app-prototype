@@ -124,6 +124,17 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
   latest.current = { anyDirty, busy, defaultsDirty }
   const editedConnection = editedProvider === connection.provider ? connection : switchProviderProfile(connection, editedProvider)
 
+  function selectProviderConnection(provider: AiProvider) {
+    if (busyRef.current) return
+    setEditedProvider(provider)
+    setConnection(current => {
+      if (provider === current.provider || current.providerProfiles?.[provider]) return current
+      // Persist the displayed default endpoint on Save, even when only a media key is edited.
+      const edited = switchProviderProfile(current, provider)
+      return { ...current, providerProfiles: switchProviderProfile(edited, current.provider).providerProfiles }
+    })
+  }
+
   function updateProviderConnection(key: 'apiKey' | 'baseUrl', value: string) {
     if (busyRef.current) return
     setConnection(current => {
@@ -334,7 +345,7 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
         setConnection({ ...connection, provider: switched.provider, apiKey: switched.apiKey, baseUrl: switched.baseUrl, providerProfiles: switched.providerProfiles })
         setEditedProvider(switched.provider)
       }}>{Object.entries(providers).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</Select>
-      <Select label="Connection provider" description="Edit this provider’s global credentials without changing the active text provider or any profile models." value={editedProvider} disabled={busy} onChange={event => setEditedProvider(event.target.value as AiProvider)}>{Object.entries(providers).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</Select>
+      <Select label="Connection provider" description="Edit this provider’s global credentials without changing the active text provider or any profile models." value={editedProvider} disabled={busy} onChange={event => selectProviderConnection(event.target.value as AiProvider)}>{Object.entries(providers).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</Select>
       {editedProvider !== 'fake' && <Input label={editedProvider === 'litellm' ? 'LiteLLM API key' : 'API key'} aria-label="Text API key" type="password" autoComplete="off" value={editedConnection.apiKey} onChange={event => updateProviderConnection('apiKey', event.target.value)} />}
       {(editedProvider === 'compatible' || editedProvider === 'litellm') && <Input label={editedProvider === 'litellm' ? 'LiteLLM base URL' : 'Endpoint URL'} value={editedConnection.baseUrl} onChange={event => updateProviderConnection('baseUrl', event.target.value)} />}
       <div className="profile-connections-grid"><Input label="NanoGPT Speech API key" description="Optional speech override; otherwise uses the global NanoGPT connection." type="password" autoComplete="off" value={connection.speech.apiKey} onChange={event => setConnection({ ...connection, speech: { ...connection.speech, apiKey: event.target.value } })} />
