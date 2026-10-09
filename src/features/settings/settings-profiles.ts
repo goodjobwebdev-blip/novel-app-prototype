@@ -1,4 +1,4 @@
-import { initialAiSettings, loadAiSettings, normalizeAiSettings, type AiSettings, type SpeechSettings } from '../../shared/ai/ai-settings'
+import { initialAiSettings, loadAiSettings, normalizeAiSettings, normalizeAutocompleteSettings, autocompleteDelayInputError, type AiSettings, type SpeechSettings } from '../../shared/ai/ai-settings'
 import { clonePromptComposition, legacyPromptMirror, type PromptComposition, type PromptCompositionScope } from '../../shared/ai/prompt-composition'
 import { builtInThemes, fontOptions, loadUiSettings, type UiSettings } from './ui-settings'
 import { loadImageSettings, validateImageSettings } from '../images/image-settings'
@@ -12,6 +12,7 @@ export type BookProfileSelections = Record<'text'|'tts'|'stt'|'image'|'video'|'u
 export type SettingsProfileLibrary = { version: 1; profiles: SettingsProfile[]; defaults: Record<ProfileKind, string> }
 export const SETTINGS_PROFILES_EVENT = 'arc-settings-profiles-changed'
 export const SETTINGS_PROFILES_STORAGE_KEY = 'arc.settings.profiles.v1'
+export const BOOK_PROFILE_SELECTIONS_STORAGE_KEY = 'arc.settings.book-profiles.changed'
 export const PROFILE_KINDS: ProfileKind[] = ['text', 'tts', 'stt', 'image', 'video', 'ui', 'story', 'codex', 'summary', 'chat', 'character']
 export const BOOK_PROFILE_KINDS: Array<keyof BookProfileSelections> = ['text', 'tts', 'stt', 'image', 'video', 'ui', 'story', 'codex', 'summary']
 export const PROFILE_PROMPT_SCOPES: Partial<Record<ProfileKind, PromptCompositionScope>> = { story: 'story', codex: 'lore', summary: 'summarize', chat: 'assistant', character: 'assistant' }
@@ -73,6 +74,14 @@ function sanitizeUi(ui: UiSettings): UiSettings {
 export function sanitizeSettingsProfile(profile: SettingsProfile): SettingsProfile {
   if (!profile || typeof profile.id !== 'string' || !profile.id.trim() || typeof profile.name !== 'string' || !profile.name.trim() || !PROFILE_KINDS.includes(profile.kind) || !profile.settings || typeof profile.settings !== 'object') throw new Error('Invalid settings profile.')
   const raw = profile.settings
+  if (raw.autocomplete !== undefined) {
+    const autocomplete = raw.autocomplete
+    if (!autocomplete || typeof autocomplete !== 'object' || Array.isArray(autocomplete)) throw new Error('Invalid autocomplete settings.')
+    if (autocomplete.enabled !== undefined && typeof autocomplete.enabled !== 'boolean') throw new Error('Invalid autocomplete enabled flag.')
+    if (autocomplete.model !== undefined && typeof autocomplete.model !== 'string') throw new Error('Invalid autocomplete model identifier.')
+    if (autocomplete.delayMs !== undefined && autocompleteDelayInputError(autocomplete.delayMs)) throw new Error(autocompleteDelayInputError(autocomplete.delayMs))
+    if (autocomplete.length !== undefined && autocomplete.length !== 'phrase' && autocomplete.length !== 'sentence') throw new Error('Invalid autocomplete length. Choose phrase or sentence.')
+  }
   if (!['openrouter', 'nanogpt', 'openai', 'litellm', 'compatible', 'fake'].includes(raw.provider)) throw new Error('Invalid profile provider identity.')
   for (const key of ['chatMaxModelRounds', 'characterMaxModelRounds'] as const) if (!Number.isInteger(raw[key]) || raw[key] < 1 || raw[key] > 32) throw new Error('Profile model rounds must be an integer from 1 to 32.')
   for (const key of ['mainModel', 'supportModel', 'codexModel', 'chatModel', 'characterModel', 'mainEffectiveContextLimit', 'codexEffectiveContextLimit', 'generationWordDelayMs'] as const) if (typeof raw[key] !== 'string') throw new Error(`Invalid profile field: ${key}.`)
@@ -127,7 +136,14 @@ function validateLibrary(library: SettingsProfileLibrary): SettingsProfileLibrar
   return clean
 }
 function emit(detail?: unknown) { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(SETTINGS_PROFILES_EVENT, { detail })) }
-export function notifySettingsProfilesChanged(bookId: string) { emit({ bookId }) }
+export function notifySettingsProfilesChanged(bookId: string) {
+  emit({ bookId })
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(BOOK_PROFILE_SELECTIONS_STORAGE_KEY, JSON.stringify({ bookId, nonce: crypto.randomUUID() }))
+  } catch {
+    // Cross-window notification is best-effort; the IndexedDB save already committed.
+  }
+}
 function writeLibrary(library: SettingsProfileLibrary): SettingsProfileLibrary {
   const clean = validateLibrary(library)
   storeLibrary(JSON.stringify(clean))
@@ -283,7 +299,7 @@ export function profileConfiguration(profile: SettingsProfile): unknown {
   if (profile.kind === 'stt') return { transcriptionModel: s.speech.transcriptionModel, transcriptionLanguage: s.speech.transcriptionLanguage, streamTranscription: s.speech.streamTranscription }
   if (profile.kind === 'ui') return { ui: profile.ui, generationWordDelayMs: s.generationWordDelayMs }
   if (profile.kind === 'image' || profile.kind === 'video') return profile.media
-  return Object.fromEntries(['mainModel', 'supportModel', 'codexModel', 'chatModel', 'characterModel', 'mainThinkingEffort', 'supportThinkingEffort', 'codexThinkingEffort', 'chatThinkingEffort', 'characterThinkingEffort', 'mainModelContextLength', 'supportModelContextLength', 'codexModelContextLength', 'chatModelContextLength', 'characterModelContextLength', 'mainEffectiveContextLimit', 'codexEffectiveContextLimit', 'chatMaxModelRounds', 'characterMaxModelRounds', 'chatPromptPresetId', 'characterPromptPresetId'].map(key => [key, s[key as keyof AiSettings]]))
+  return { autocomplete: normalizeAutocompleteSettings(s.autocomplete), ...Object.fromEntries(['mainModel', 'supportModel', 'codexModel', 'chatModel', 'characterModel', 'mainThinkingEffort', 'supportThinkingEffort', 'codexThinkingEffort', 'chatThinkingEffort', 'characterThinkingEffort', 'mainModelContextLength', 'supportModelContextLength', 'codexModelContextLength', 'chatModelContextLength', 'characterModelContextLength', 'mainEffectiveContextLimit', 'codexEffectiveContextLimit', 'chatMaxModelRounds', 'characterMaxModelRounds', 'chatPromptPresetId', 'characterPromptPresetId'].map(key => [key, s[key as keyof AiSettings]])) }
 }
 
 export function settingsProfilesForSelections(selections: BookProfileSelections): SettingsProfile[] {

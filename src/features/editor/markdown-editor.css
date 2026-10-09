@@ -68,6 +68,15 @@
 .markdown-editor .cm-live-list-marker { display: inline-block; min-width: 1.35em; color: var(--accent); }
 .markdown-editor .cm-live-rule { display: inline-block; width: 100%; height: 1px; margin: .7em 0 .35em; vertical-align: middle; background: var(--line); }
 
+.markdown-editor .cm-autocomplete-ghost {
+  color: var(--soft);
+  opacity: .7;
+  white-space: pre-wrap;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 .markdown-editor .cm-generation-active {
   border-radius: .18em;
   background: rgba(198, 168, 107, .11);

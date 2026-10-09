@@ -13,10 +13,13 @@ export type StoryPromptValues = {
 }
 
 export type NanoGPTGenerationRequest = {
+  thinking?: boolean
   thinkingEffort?: ThinkingEffort
   apiKey: string
   baseUrl: string
   model: string
+  maxTokens?: number
+  requireComplete?: boolean
   systemPrompt: string
   contextMessage?: string
   userMessage?: string
@@ -212,7 +215,8 @@ export async function streamNanoGPTCompletion(
       model: request.model,
       messages,
       stream: true,
-      ...thinkingRequestParameters('nanogpt', true, request.thinkingEffort),
+      ...(request.maxTokens !== undefined ? { max_tokens: request.maxTokens } : {}),
+      ...thinkingRequestParameters('nanogpt', request.thinking !== false, request.thinkingEffort),
       stream_options: { include_usage: true },
     }),
   }, signal)
@@ -223,15 +227,25 @@ export async function streamNanoGPTCompletion(
   }
   if (!response.body) throw new Error('NanoGPT returned an empty streaming response.')
   let receivedText = false
+  let done = false
+  const metadata: NanoGPTStreamMetadata = {}
 
   const consumeLine = (line: string) => {
     const trimmed = line.trim()
+    if (request.requireComplete && /^event:\s*error$/i.test(trimmed)) throw new Error('The provider returned a streaming error.')
     if (!trimmed.startsWith('data:')) return false
     const data = trimmed.slice(5).trim()
-    if (!data || data === '[DONE]') return data === '[DONE]'
+    if (!data) return false
+    if (data === '[DONE]') { done = true; return true }
     const payload = JSON.parse(data) as unknown
-    const metadata = streamMetadata(payload)
-    if (hasMetadata(metadata)) lifecycle.onMetadata?.(metadata)
+    if (request.requireComplete && payload && typeof payload === 'object') {
+      const value = payload as Record<string, unknown>
+      if (value.error != null || value.type === 'error' || value.object === 'error') throw new Error('The provider returned a streaming error.')
+    }
+    const nextMetadata = streamMetadata(payload)
+    if (request.requireComplete && nextMetadata.finishReason !== undefined && nextMetadata.finishReason !== 'stop') throw new Error('The provider returned an incomplete response.')
+    Object.assign(metadata, Object.fromEntries(Object.entries(nextMetadata).filter(([, value]) => value !== undefined)))
+    if (hasMetadata(nextMetadata)) lifecycle.onMetadata?.(nextMetadata)
     signal.throwIfAborted()
     const delta = (payload as { choices?: Array<{ delta?: Record<string, unknown> }> }).choices?.[0]?.delta
     const thoughts = delta ? reasoningText(delta) : ''
@@ -247,5 +261,7 @@ export async function streamNanoGPTCompletion(
 
   await consumeCompletionStream(response.body, signal, consumeLine, lifecycle.onResponse)
 
+  if (request.requireComplete && !done && metadata.finishReason !== 'stop') throw new Error('The provider did not complete the response.')
   if (!receivedText) throw new Error('NanoGPT completed without returning generated text.')
+  return metadata
 }

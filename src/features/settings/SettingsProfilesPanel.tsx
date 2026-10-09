@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from 'react'
-import { loadAiSettings, saveAiSettings, type AiSettings, type AiProvider } from '../../shared/ai/ai-settings'
+import { loadAiSettings, saveAiSettings, normalizeAutocompleteSettings, autocompleteDelayInputError, type AiSettings, type AiProvider } from '../../shared/ai/ai-settings'
 import { loadImageSettings, saveImageSettings } from '../images/image-settings'
 import type { ImageSettings } from '../images/image-generation-types'
 import ImageSettingsPanel from '../images/ImageSettingsPanel'
@@ -55,7 +55,10 @@ export function withoutProfileCredentials(settings: AiSettings): AiSettings {
 function profileSummary(profile?: SettingsProfile) {
   if (!profile) return 'Setup required — select an available profile.'
   const { settings } = profile
-  if (profile.kind === 'text') return `Main: ${settings.mainModel || 'not selected'} · Support: ${settings.supportModel || 'not selected'} · Codex: ${settings.codexModel || 'Main'} · Chat: ${settings.chatModel || 'Main'} · Character: ${settings.characterModel || 'Main'}`
+  if (profile.kind === 'text') {
+    const autocomplete = normalizeAutocompleteSettings(settings.autocomplete)
+    return `Main: ${settings.mainModel || 'not selected'} · Support: ${settings.supportModel || 'not selected'} · Codex: ${settings.codexModel || 'Main'} · Chat: ${settings.chatModel || 'Main'} · Character: ${settings.characterModel || 'Main'} · Autocomplete: ${autocomplete.enabled ? 'On' : 'Off'} · ${autocomplete.model || 'model not selected'}`
+  }
   if (profile.kind === 'tts') return `${settings.speech.model} · ${settings.speech.voice}`
   if (profile.kind === 'stt') return settings.speech.transcriptionModel
   if (profile.kind === 'image' || profile.kind === 'video') return `${profile.media?.favorites.length ?? 0} favorite models`
@@ -253,6 +256,8 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
         if (draft.kind === 'text') {
           const capError = contextLimitInputError(draft.settings.mainEffectiveContextLimit) || contextLimitInputError(draft.settings.codexEffectiveContextLimit)
           if (capError) throw new Error(capError)
+          const delayError = autocompleteDelayInputError(draft.settings.autocomplete.delayMs)
+          if (delayError) throw new Error(delayError)
         }
         if (draft.kind === 'ui' && draft.ui?.customThemes.some(theme => !theme.name.trim())) throw new Error('Give every custom theme a name before saving the UI profile.')
         if (draft.kind === 'ui' && (!/^\d+$/.test(draft.settings.generationWordDelayMs) || Number(draft.settings.generationWordDelayMs) < 1 || Number(draft.settings.generationWordDelayMs) > 2000)) throw new Error('Reveal speed must be between 1 and 2000 milliseconds per word.')
@@ -264,7 +269,8 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
         }
         const linked = await listSettingsProfileUsage(draft.id)
         setUsage(linked)
-        if (linked.length && !window.confirm(`Save “${draft.name}”? This updates ${linked.length} linked book(s): ${linked.map(book => book.title).join(', ')}. Existing chats keep their snapshots.`)) return
+        const autocompleteWarning = draft.kind === 'text' && draft.settings.autocomplete.enabled ? ' Autocomplete will automatically send manuscript excerpts from all linked books to the active global text connection while typing and may incur costs. Saving does not send a request itself.' : ''
+        if (linked.length && !window.confirm(`Save “${draft.name}”? This updates ${linked.length} linked book(s): ${linked.map(book => book.title).join(', ')}. Existing chats keep their snapshots.${autocompleteWarning}`)) return
       }
       if (connectionDirty) {
         // Never replace media favorites with the Connections form's older snapshot.

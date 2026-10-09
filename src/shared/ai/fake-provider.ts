@@ -5,7 +5,7 @@ export const FAKE_PROVIDER_MODEL = {
   context_length: 32_768,
 } as const
 
-export type FakeProviderTask = 'story' | 'codex' | 'summary' | 'autotitle' | 'chat' | 'unknown'
+export type FakeProviderTask = 'story' | 'codex' | 'summary' | 'autotitle' | 'autocomplete' | 'chat' | 'unknown'
 
 export type FakeProviderToolCall = {
   id: string
@@ -33,6 +33,7 @@ export type FakeProviderMessage = {
 export type FakeProviderRequest = {
   task?: FakeProviderTask
   model: string
+  maxTokens?: number
   messages: FakeProviderMessage[]
   tools?: FakeProviderToolDefinition[]
   thinking?: boolean
@@ -55,6 +56,7 @@ export type FakeProviderTraceEntry = {
   id: number
   task: FakeProviderTask
   model: string
+  maxTokens?: number
   messages: FakeProviderMessage[]
   toolNames: string[]
   thinking: boolean
@@ -169,6 +171,7 @@ function defaultOutput(task: FakeProviderTask) {
   if (task === 'codex') return 'FAKE TEST OUTPUT — Codex generation.'
   if (task === 'summary') return 'FAKE TEST OUTPUT — Summary generation.'
   if (task === 'autotitle') return 'Fake Test Title'
+  if (task === 'autocomplete') return ' and the story continued.'
   if (task === 'chat') return 'FAKE TEST RESPONSE'
   return 'FAKE TEST OUTPUT'
 }
@@ -293,7 +296,7 @@ function parseScript(messages: FakeProviderMessage[]): ParsedScript {
 }
 
 function chunksFor(text: string) {
-  return text.match(/\S+\s*/g) ?? (text ? [text] : [])
+  return text.match(/^\s+|\S+\s*/g) ?? (text ? [text] : [])
 }
 
 async function emitText(text: string, delayMs: number, signal: AbortSignal, emit: (chunk: string) => void) {
@@ -325,6 +328,7 @@ export async function streamFakeProvider(
     id: ++traceSequence,
     task,
     model: request.model,
+    ...(request.maxTokens !== undefined ? { maxTokens: request.maxTokens } : {}),
     messages: request.messages.map(cloneMessage),
     toolNames: (request.tools ?? []).map((tool) => tool.function.name),
     thinking: request.thinking === true,

@@ -32,6 +32,10 @@ import {
 import {
   initialAiSettings,
   loadAiSettings,
+  autocompleteDelayInputError,
+  MIN_AUTOCOMPLETE_DELAY_MS,
+  MAX_AUTOCOMPLETE_DELAY_MS,
+  type AutocompleteSettings,
   CODEX_RESPONSE_LENGTH_PRESETS,
   STORY_RESPONSE_LENGTH_PRESETS,
   SUMMARY_RESPONSE_LENGTH_PRESETS,
@@ -482,6 +486,9 @@ function ProfileEditor({ settings, onChange, kind, library, book }: ProfileEdito
   }
 
   function update<K extends keyof AiSettings>(key: K, value: AiSettings[K]) { changeAiSettings((current) => ({ ...current, [key]: value })) }
+  function updateAutocomplete<K extends keyof AutocompleteSettings>(key: K, value: AutocompleteSettings[K]) {
+    changeAiSettings(current => ({ ...current, autocomplete: { ...current.autocomplete, [key]: value } }))
+  }
   function selectModel(kind: ModelRole, id: string) {
     const contextLength = models.find((model) => model.id === id)?.context_length
     changeAiSettings((current) => kind === 'main'
@@ -615,7 +622,30 @@ function ProfileEditor({ settings, onChange, kind, library, book }: ProfileEdito
               <p className="effective-model-note">{priority}</p>
               {(role === 'chat' || role === 'character') && <Select label="Max model rounds per response" description="Default for new chats. One assistant model request is one round; several tools in that request still count as one. Existing chats keep their own limit." value={role === 'chat' ? settings.chatMaxModelRounds : settings.characterMaxModelRounds} onChange={event => update(role === 'chat' ? 'chatMaxModelRounds' : 'characterMaxModelRounds', Number(event.target.value))}>{Array.from({ length: 32 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</Select>}
             </section>
-          })}</div>
+          })}
+            <section className="model-role-setting" aria-labelledby="autocomplete-model-heading">
+              <header><h3 id="autocomplete-model-heading">Autocomplete</h3><p>Suggest a short continuation after a pause while writing a scene.</p></header>
+              <Checkbox label="Enable autocomplete" checked={settings.autocomplete.enabled} onChange={event => updateAutocomplete('enabled', event.target.checked)} />
+              <p className="profile-linked-warning" role="note">Opt in only if you agree to automatically send manuscript excerpts while typing to the active global text connection. After Save, this applies to every book linked to this Text profile and may incur provider costs. Cancellation may still be billed. Unsaved changes send nothing; Save itself does not start a request.</p>
+              <SearchableSelect
+                label="Catalog model"
+                value={settings.autocomplete.model}
+                searchPlaceholder="Search Autocomplete models"
+                emptyText={models.length ? 'No models match that search.' : 'Reload the provider model list first.'}
+                description="Choose an explicit autocomplete model from the active global text connection. No fallback to Main or any other role."
+                options={[
+                  { value: '', title: 'No Autocomplete model', subtitle: 'Choose a model before autocomplete can run' },
+                  ...(!models.some(model => model.id === settings.autocomplete.model) && settings.autocomplete.model ? [{ value: settings.autocomplete.model, title: settings.autocomplete.model, subtitle: 'Unlisted provider model', badges: ['Custom ID'] }] : []),
+                  ...[...models].sort((a, b) => Number(settings.favorites.includes(b.id)) - Number(settings.favorites.includes(a.id))).map(model => ({ value: model.id, title: model.name || model.id, subtitle: model.name && model.name !== model.id ? model.id : undefined, meta: formatContext(model.context_length), badges: [settings.favorites.includes(model.id) ? 'Favorite' : '', model.architecture?.modality || 'Text'].filter(Boolean) })),
+                ]}
+                onChange={modelId => updateAutocomplete('model', modelId)}
+              />
+              <Input label="Exact model ID" description="Edits the same autocomplete selection. An unlisted ID is preserved when the global provider changes; verify its compatibility or explicitly select another model." value={settings.autocomplete.model} onChange={event => updateAutocomplete('model', event.target.value)} placeholder="Choose an explicit autocomplete model" />
+              <p className="effective-model-note">{settings.autocomplete.model.trim() ? `Autocomplete model: ${settings.autocomplete.model.trim()}. No role fallback.` : 'Autocomplete is unavailable until you explicitly choose a model. Main is never substituted.'}</p>
+              <Input label="Autocomplete delay (ms)" description="Pause before requesting a suggestion, 100–10000 milliseconds. Independent of Text reveal speed." type="number" min={MIN_AUTOCOMPLETE_DELAY_MS} max={MAX_AUTOCOMPLETE_DELAY_MS} step="1" value={Number.isFinite(settings.autocomplete.delayMs) ? settings.autocomplete.delayMs : ''} onChange={event => updateAutocomplete('delayMs', event.target.value === '' ? NaN : Number(event.target.value))} error={autocompleteDelayInputError(settings.autocomplete.delayMs) || undefined} />
+              <Select label="Autocomplete length" description="Independent of Story, Codex, and Summary response length presets." value={settings.autocomplete.length} onChange={event => updateAutocomplete('length', event.target.value === 'sentence' ? 'sentence' : 'phrase')}><option value="phrase">Short phrase</option><option value="sentence">One sentence</option></Select>
+            </section>
+          </div>
           <Button onClick={() => { void refreshModels() }} disabled={loading} leadingIcon={<RefreshCw aria-hidden="true" />}>{loading ? 'Loading models…' : 'Reload model list'}</Button>
           <p className={`status ${statusKind}`} role="status">{status}</p>
         </section>}
