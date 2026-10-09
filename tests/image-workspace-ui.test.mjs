@@ -34,6 +34,7 @@ const settings = await moduleAt('features/images/image-settings')
 const store = await moduleAt('features/images/image-store')
 const { initialAiSettings } = await moduleAt('shared/ai/ai-settings')
 const { default: ImageWorkspace, createImageWorkspaceState } = await moduleAt('features/images/ImageWorkspace')
+const { ImageAssetPreview } = await moduleAt('features/images/ImageResults')
 after(async () => { (await p.database()).close(); dom.window.close(); rmSync(directory, { recursive: true, force: true }) })
 
 const h = React.createElement
@@ -152,7 +153,11 @@ test('Generate is disabled for an empty prompt and queues a valid configured dra
   } finally { await unmountRoot(root) }
 })
 
-test('generation queue renders focused status groups with counts', async (t) => {
+test('generation queue renders focused status groups with counts and compact toggles', async (t) => {
+  const style = document.createElement('style')
+  style.textContent = readFileSync(new URL('../src/features/images/image-generation.css', import.meta.url), 'utf8')
+  document.head.appendChild(style)
+  t.after(() => style.remove())
   configure()
   await clearImageData()
   const db = await p.database()
@@ -169,6 +174,12 @@ test('generation queue renders focused status groups with counts', async (t) => 
     await act(async () => root.render(h(ControlledWorkspace)))
     await settle(() => document.querySelectorAll('.image-job-group').length === 4)
     assert.deepEqual([...document.querySelectorAll('.image-job-group h3')].map((heading) => heading.textContent), ['Active1', 'Needs review1', 'Attention1', 'Earlier1'])
+    for (const toggle of document.querySelectorAll('.image-job-toggle')) {
+      assert.equal(toggle.getAttribute('aria-expanded'), 'false')
+      const geometry = window.getComputedStyle(toggle)
+      assert.equal(geometry.borderTopWidth, '0px', 'Compact toggles do not inherit the generic button border')
+      assert.equal(geometry.minHeight, '48px', 'Compact headers retain a touch-friendly target')
+    }
   } finally { await unmountRoot(root) }
 })
 
@@ -200,6 +211,40 @@ test('gallery card actions appear only after opening the image viewer', async (t
     assert.ok(button('Use in Codex'))
     assert.ok(document.querySelector('dialog[open] .image-download'))
   } finally { await unmountRoot(root) }
+})
+
+test('image previews use the full-quality image, video previews use the poster, and URLs are released', async (t) => {
+  const root = createRoot(document.getElementById('root'))
+  t.after(() => unmountRoot(root))
+  const originalCreate = URL.createObjectURL, originalRevoke = URL.revokeObjectURL
+  const blobs = new Map(), revoked = new Set()
+  URL.createObjectURL = blob => { const url = originalCreate(blob); blobs.set(url, blob); return url }
+  URL.revokeObjectURL = url => { revoked.add(url); originalRevoke(url) }
+  t.after(() => { URL.createObjectURL = originalCreate; URL.revokeObjectURL = originalRevoke })
+  const thumbnail = new Blob(['small poster'], { type: 'image/webp' })
+  const asset = { id: 'quality-preview', prompt: 'Detailed landscape', width: 1024, height: 1024, image: png, thumbnail, createdAt: 1, kept: true }
+  try {
+    await act(async () => root.render(h(ImageAssetPreview, { asset })))
+    const imageUrl = document.querySelector('.image-result-preview img').getAttribute('src')
+    assert.ok(blobs.get(imageUrl) === png, 'Image preview uses original pixels, not the low-resolution thumbnail')
+    assert.equal(document.querySelector('.image-result-preview img').getAttribute('loading'), 'lazy')
+    await click('View image and prompt')
+    const viewerUrl = document.querySelector('dialog[open] .image-gesture img').getAttribute('src')
+    assert.ok(blobs.get(viewerUrl) === png, 'The viewer uses the same full-quality asset')
+    await click('Close image')
+    assert.ok(revoked.has(viewerUrl), 'Closing the viewer releases its URL')
+
+    await act(async () => root.render(h(ImageAssetPreview, { asset: { ...asset, kind: 'video', image: new Blob(['video'], { type: 'video/mp4' }) } })))
+    const posterUrl = document.querySelector('.image-result-preview img').getAttribute('src')
+    assert.ok(blobs.get(posterUrl) === thumbnail, 'Videos still display their image poster')
+    assert.equal(document.querySelector('.image-video-badge').textContent, 'Video')
+    assert.ok(revoked.has(imageUrl), 'Changing the preview releases the previous URL')
+    await unmountRoot(root)
+    assert.ok(revoked.has(posterUrl), 'Unmounting releases the poster URL')
+  } finally {
+    await unmountRoot(root)
+    URL.createObjectURL = originalCreate; URL.revokeObjectURL = originalRevoke
+  }
 })
 
 test('Workspace routes Images as a top-level screen and the Library image control does not open Settings', () => {

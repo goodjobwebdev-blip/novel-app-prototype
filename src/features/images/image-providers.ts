@@ -73,7 +73,7 @@ export async function fetchImageModels(provider: ImageProvider, key: string, fet
 function prunaRequestUrl(value: string, gatewayUrl: string) {
   const upstream = new URL(value, PRUNA)
   if (upstream.origin !== PRUNA) throw new Error('Pruna returned an unexpected API URL.')
-  if (!gatewayUrl) throw new Error('Configure the LiteLLM base URL in AI settings before using Pruna.')
+  if (!gatewayUrl) throw new Error('Configure the LiteLLM base URL in Global Settings → AI → Connections (Connection provider: LiteLLM), then save connections before using Pruna.')
   const gateway = new URL(gatewayUrl)
   if (gateway.protocol !== 'https:' || gateway.username || gateway.password) throw new Error('The configured LiteLLM URL must use HTTPS and contain no credentials.')
   return `${gateway.href.replace(/\/$/, '')}${upstream.pathname}${upstream.search}`

@@ -37,7 +37,11 @@ const { initialAiSettings } = await moduleAt('shared/ai/ai-settings')
 const { createChat, createChatMessage } = await moduleAt('features/chat/chat-service')
 const { default: Card } = await moduleAt('features/images/ImageProposalCard')
 const { default: Panel } = await moduleAt('features/images/ImagePanel')
+const { default: ImageJobs } = await moduleAt('features/images/ImageResults')
 const { default: SettingsPanel } = await moduleAt('features/images/ImageSettingsPanel')
+const { default: ConnectionsPanel } = await moduleAt('features/settings/SettingsProfilesPanel')
+const { DEFAULT_LITELLM_BASE_URL } = await moduleAt('features/settings/provider-profiles')
+const aiSettings = await moduleAt('shared/ai/ai-settings')
 const profiles = await moduleAt('features/settings/settings-profiles')
 const { loadBookImageSettings } = await moduleAt('features/images/book-image-settings')
 const { captureImageCredentials } = await moduleAt('features/images/image-connection')
@@ -68,6 +72,24 @@ function ProfileEditor() {
 const button = (text) => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === text || b.getAttribute('aria-label') === text)
 async function click(text) { const target = button(text); assert.ok(target, `Button ${text} exists: ${document.body.textContent}`); await act(async () => target.click()) }
 async function settle(predicate) { for (let i = 0; i < 100 && !predicate(); i++) await act(async () => new Promise((resolve) => setTimeout(resolve, 10))); assert.ok(predicate(), document.body.textContent) }
+async function expandImageJob(card) {
+  const toggle = card.querySelector('header button.image-job-toggle')
+  assert.ok(toggle, 'Each job has a header toggle')
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false')
+  const bodyId = toggle.getAttribute('aria-controls')
+  assert.ok(bodyId, 'The toggle identifies its job body')
+  assert.ok(!card.querySelector('.image-job-body'), 'Collapsed bodies are not mounted')
+  await act(async () => toggle.click())
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true')
+  const body = card.querySelector('div.image-job-body')
+  assert.ok(body, 'Expanding mounts the job body')
+  assert.equal(body.id, bodyId)
+}
+async function expandImageJobs(scope = document) {
+  const cards = [...scope.querySelectorAll('article.image-job')]
+  assert.ok(cards.length, 'Jobs have arrived before expanding')
+  for (const card of cards) await expandImageJob(card)
+}
 async function input(element, value) {
   await act(async () => {
     const proto = element instanceof dom.window.HTMLTextAreaElement ? dom.window.HTMLTextAreaElement.prototype : dom.window.HTMLInputElement.prototype
@@ -126,6 +148,8 @@ test('editable chat proposal → repeated generation → navigate → keep → c
     await runImageQueue('pruna', deps)
     root = testRoot(t)
     await act(async () => root.render(h(Card, { message: await p.getEntity(message.id), proposal })))
+    await settle(() => document.querySelectorAll('article.image-job').length === 2)
+    await expandImageJobs()
     await settle(() => Boolean(button('Keep image')))
     assert.ok(button('Open generation tool'))
     await click('Keep image')
@@ -157,6 +181,42 @@ test('gallery includes other books and current uploads; Only this book filters t
     await act(async () => document.querySelector('.image-gallery-tools input[type=checkbox]').click())
     await settle(() => document.querySelectorAll('.image-gallery-grid article').length === 1)
     assert.match(document.querySelector('.image-gallery-grid').textContent, /Uploaded image/)
+  } finally { await act(async () => root.unmount()) }
+})
+
+test('saving a displayed LiteLLM default endpoint with only a Pruna media key configures generation', async (t) => {
+  configure()
+  const originalAi = aiSettings.loadAiSettings(), originalMedia = settings.loadImageSettings()
+  t.after(() => { aiSettings.saveAiSettings(originalAi); settings.saveImageSettings(originalMedia) })
+  aiSettings.saveAiSettings({ ...initialAiSettings, provider: 'nanogpt', apiKey: 'text-only-key', providerProfiles: {} })
+  settings.saveImageSettings({ ...originalMedia, keys: { ...originalMedia.keys, pruna: '' } })
+  const root = testRoot(t)
+  const field = label => [...document.querySelectorAll('label')].find(item => item.textContent.includes(label))?.querySelector('input, select')
+  try {
+    await act(async () => root.render(h(ConnectionsPanel, { section: 'ai', renderEditor: () => null, application: null, sync: null })))
+    await click('Connections')
+    await act(async () => { const select = field('Connection provider'); select.value = 'litellm'; select.dispatchEvent(new dom.window.Event('change', { bubbles: true })) })
+    assert.equal(field('LiteLLM base URL').value, DEFAULT_LITELLM_BASE_URL)
+    assert.equal(button('Save connections').disabled, false, 'The displayed new connection can be saved without editing its URL')
+    assert.equal(document.querySelector('[aria-label="Text API key"]').value, '')
+    assert.equal(settings.resolvePrunaGatewayUrl(aiSettings.loadAiSettings()), '', 'Choosing a connection does not autosave it')
+    await input(field('Pruna / LiteLLM media API key'), 'media-only-key')
+    await click('Save connections')
+    await settle(() => button('Save connections').disabled)
+    const credentials = captureImageCredentials('pruna')
+    assert.equal(credentials.key, 'media-only-key')
+    assert.equal(credentials.gatewayUrl, `${new URL(DEFAULT_LITELLM_BASE_URL).origin}/pruna`, 'Save persists the endpoint displayed in the form, even if the URL was not edited')
+    const saved = aiSettings.loadAiSettings()
+    assert.equal(saved.provider, 'nanogpt', 'Editing the media gateway does not switch the text provider')
+    assert.equal(saved.apiKey, 'text-only-key')
+    assert.equal(saved.providerProfiles.litellm.apiKey, '', 'The general LiteLLM key is optional when a media key is provided')
+    assert.equal(saved.providerProfiles.litellm.baseUrl, DEFAULT_LITELLM_BASE_URL)
+
+    await input(field('LiteLLM base URL'), 'https://gateway.example:9447/v1')
+    await click('Save connections')
+    await settle(() => button('Save connections').disabled)
+    assert.equal(captureImageCredentials('pruna').gatewayUrl, 'https://gateway.example:9447/pruna', 'The custom port is retained and the text API v1 path is replaced')
+    assert.equal(captureImageCredentials('pruna').key, 'media-only-key')
   } finally { await act(async () => root.unmount()) }
 })
 
@@ -270,6 +330,7 @@ test('remove and clear queue cover earlier history and stay cleared after reopen
   try {
     await act(async () => root.render(h(Panel, { ai: initialAiSettings })))
     await settle(() => document.querySelectorAll('.image-job').length === 30)
+    await expandImageJob(document.querySelector('article.image-job'))
     await click('Remove from queue')
     await settle(() => document.querySelector('.image-queue-actions').textContent.includes('32 generations'))
     await click('Clear queue')
@@ -326,10 +387,91 @@ test('discard removes an unwanted result from the generation queue immediately',
   const root = testRoot(t)
   try {
     await act(async () => root.render(h(Panel, { ai: initialAiSettings })))
+    await settle(() => document.querySelectorAll('article.image-job').length === 1)
+    await expandImageJobs()
     await settle(() => Boolean(button('Discard')))
     await click('Discard')
     await settle(() => document.body.textContent.includes('Your generation queue is empty.'))
     assert.equal(await db.table('galleryImages').count(), 0)
+  } finally { await act(async () => root.unmount()) }
+})
+
+test('image jobs collapse independently and retain expansion across completion and status groups', async (t) => {
+  configure()
+  const db = await p.database()
+  await db.table('imageJobs').clear()
+  await db.table('galleryImages').clear()
+  const portrait = await store.enqueueImageJob(settings.resolveImageSpec('Expanded portrait prompt', 'Portrait'))
+  const fast = await store.enqueueImageJob(settings.resolveImageSpec('Collapsed fast prompt', 'Fast'))
+  const root = testRoot(t)
+  const cardFor = alias => [...document.querySelectorAll('article.image-job')].find(card => card.querySelector('button.image-job-toggle')?.textContent.includes(alias))
+  const toggleFor = alias => cardFor(alias)?.querySelector('header button.image-job-toggle')
+  const assertCollapsed = alias => {
+    const card = cardFor(alias)
+    assert.ok(card, `${alias} card exists`)
+    assert.equal(toggleFor(alias).getAttribute('aria-expanded'), 'false')
+    assert.ok(!card.querySelector('.image-job-body'), 'Collapsing unmounts the body')
+    assert.ok(!card.querySelector('.image-prompt-preview'), 'Collapsed prompts are not mounted')
+    assert.ok(!card.querySelector('.image-job-result'), 'Collapsed results are not mounted')
+    assert.ok(!card.querySelector('.image-actions'), 'Collapsed actions are not mounted')
+  }
+  const assertExpanded = job => {
+    const card = cardFor(job.modelAlias)
+    const toggle = toggleFor(job.modelAlias)
+    assert.equal(toggle.getAttribute('aria-expanded'), 'true')
+    assert.equal(card.querySelector('div.image-job-body')?.id, toggle.getAttribute('aria-controls'))
+    assert.equal(card.querySelector('.image-prompt-preview')?.textContent, job.prompt)
+  }
+  try {
+    await act(async () => root.render(h(ImageJobs, { showPrompt: true })))
+    await settle(() => document.querySelectorAll('article.image-job').length === 2)
+    for (const job of [portrait, fast]) {
+      assertCollapsed(job.modelAlias)
+      assert.match(toggleFor(job.modelAlias).textContent, /Queued/)
+      const dimensions = `${job.size.width} × ${job.size.height}`
+      assert.ok(cardFor(job.modelAlias).querySelector('small').textContent.includes(dimensions))
+
+    }
+    assert.notEqual(toggleFor('Portrait').getAttribute('aria-controls'), toggleFor('Fast').getAttribute('aria-controls'))
+    await expandImageJob(cardFor('Portrait'))
+    assertExpanded(portrait)
+    assertCollapsed('Fast')
+    await expandImageJob(cardFor('Fast'))
+    assertExpanded(portrait)
+    assertExpanded(fast)
+    await act(async () => toggleFor('Portrait').click())
+    assertCollapsed('Portrait')
+    assertExpanded(fast)
+    await expandImageJob(cardFor('Portrait'))
+    assertExpanded(portrait)
+    await act(async () => toggleFor('Fast').click())
+    assertCollapsed('Fast')
+
+    await act(async () => runImageQueue('openai', deps))
+    await act(async () => runImageQueue('pruna', deps))
+    await settle(() => ['Portrait', 'Fast'].every(alias => toggleFor(alias)?.textContent.includes('completed')))
+    assertExpanded(portrait)
+    assertCollapsed('Fast')
+    assert.match(cardFor('Portrait').closest('.image-job-group').querySelector('h3').textContent, /Needs review/)
+    assert.match(cardFor('Fast').closest('.image-job-group').querySelector('h3').textContent, /Needs review/)
+    await settle(() => Boolean(cardFor('Portrait').querySelector('button[aria-label="View image and prompt"]')))
+    assert.ok([...cardFor('Portrait').querySelectorAll('button')].some(item => item.textContent.trim() === 'Keep image'))
+
+    await act(async () => store.decideImageJob(portrait.id, true))
+    await settle(() => cardFor('Portrait').closest('.image-job-group').querySelector('h3').textContent.includes('Earlier'))
+    assertExpanded(portrait)
+    assertCollapsed('Fast')
+    await settle(() => cardFor('Portrait').textContent.includes('Saved to gallery'))
+    await act(async () => toggleFor('Portrait').click())
+    assertCollapsed('Portrait')
+    assert.ok(!cardFor('Portrait').textContent.includes('Saved to gallery'))
+    await expandImageJob(cardFor('Portrait'))
+    assertExpanded(portrait)
+    await settle(() => cardFor('Portrait').textContent.includes('Saved to gallery'))
+    await expandImageJob(cardFor('Fast'))
+    assertExpanded(fast)
+    assertExpanded(portrait)
+    await settle(() => [...cardFor('Fast').querySelectorAll('button')].some(item => item.textContent.trim() === 'Keep image'))
   } finally { await act(async () => root.unmount()) }
 })
 
@@ -409,6 +551,7 @@ test('Generate approves once and keeps the popup open for parallel jobs, edited 
     await settle(() => started.length === 2 && Boolean(button('Generate')) && !button('Generate').disabled)
     assert.deepEqual(started.map(job => job.prompt), ['First version', 'Second version'])
     await settle(() => popup().querySelectorAll('.image-job').length === 2)
+    await expandImageJobs(popup())
     assert.ok([...popup().querySelectorAll('.image-job')].every(card => card.textContent.includes('Generating')))
     assert.match(popup().textContent, /First version/)
     assert.match(popup().textContent, /Second version/)
@@ -425,10 +568,13 @@ test('Generate approves once and keeps the popup open for parallel jobs, edited 
     await settle(() => popup().textContent.includes('Image discarded'))
     await click('Close tool')
     await settle(() => !popup())
+    await settle(() => document.querySelectorAll('article.image-job').length === 2)
+    await expandImageJobs()
     await settle(() => document.body.textContent.includes('Saved to gallery'))
     await click('Open generation tool')
-    await settle(() => Boolean(popup()))
+    await settle(() => Boolean(popup()) && popup().querySelectorAll('article.image-job').length === 2)
     assert.equal(popup().querySelector('textarea').value, 'Second version')
+    await expandImageJobs(popup())
     await settle(() => popup().textContent.includes('Saved to gallery'))
   } finally {
     releases.forEach(resolve => resolve())

@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import { Download, Expand, Trash2 } from 'lucide-react'
+import { useEffect, useId, useState, type ReactNode } from 'react'
+import { ChevronDown, ChevronRight, Download, Expand, Trash2 } from 'lucide-react'
 import IllustrationModal from './IllustrationModal'
 import IllustrationGestures from './IllustrationGestures'
 import { centeredImageView } from './image-gestures'
@@ -22,11 +22,11 @@ export function GeneratedImageViewer({ asset, onClose, actions }: { asset: Galle
   </IllustrationModal>
 }
 export function ImageAssetPreview({ asset, renderViewerActions, onOpen }: { asset: GalleryImage; renderViewerActions?: (close: () => void) => ReactNode; onOpen?: () => void }) {
-  const thumb = useImageUrl(asset.thumbnail)
+  const kind = asset.kind ?? 'image'
+  const preview = useImageUrl(kind === 'video' ? asset.thumbnail : asset.image)
   const [open, setOpen] = useState(false)
   const close = () => setOpen(false)
-  const kind = asset.kind ?? 'image'
-  return <><button type="button" className="image-result-preview" onClick={() => { onOpen?.(); setOpen(true) }} aria-label={`View ${kind} and prompt`}>{thumb && <img loading="lazy" src={thumb} alt={asset.prompt || (kind === 'video' ? 'Generated video' : 'Book illustration')} />}{kind === 'video' && <span className="image-video-badge">Video</span>}<Expand aria-hidden="true" size={20} /></button>{open && <GeneratedImageViewer asset={asset} onClose={close} actions={renderViewerActions?.(close)} />}</>
+  return <><button type="button" className="image-result-preview" onClick={() => { onOpen?.(); setOpen(true) }} aria-label={`View ${kind} and prompt`}>{preview && <img loading="lazy" src={preview} alt={asset.prompt || (kind === 'video' ? 'Generated video' : 'Book illustration')} />}{kind === 'video' && <span className="image-video-badge">Video</span>}<Expand aria-hidden="true" size={20} /></button>{open && <GeneratedImageViewer asset={asset} onClose={close} actions={renderViewerActions?.(close)} />}</>
 }
 function JobResult({ job, chat }: { job: ImageJob; chat: boolean }) {
   const { data: asset, error: loadError } = useImageQuery(() => job.assetId ? getGalleryImage(job.assetId) : Promise.resolve(undefined), [job.assetId], undefined)
@@ -39,6 +39,14 @@ function JobResult({ job, chat }: { job: ImageJob; chat: boolean }) {
 export default function ImageJobs({ proposalId, messageId, direct = false, showPrompt = false }: { proposalId?: string; messageId?: string; direct?: boolean; showPrompt?: boolean }) {
   const { data: jobs, error } = useImageQuery(listImageJobs, [], [])
   const [limit, setLimit] = useState(30), [clearing, setClearing] = useState(false)
+  const [expandedJobs, setExpandedJobs] = useState<Set<string>>(() => new Set())
+  const idPrefix = useId()
+  const toggleJob = (id: string) => setExpandedJobs(previous => {
+    const next = new Set(previous)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    return next
+  })
   const [now, setNow] = useState(Date.now()), [actionError, setActionError] = useState('')
   const active = jobs.some((j) => ['queued', 'running'].includes(j.status))
   useEffect(() => { if (!active) return; const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer) }, [active])
@@ -67,19 +75,28 @@ export default function ImageJobs({ proposalId, messageId, direct = false, showP
     { title: 'Attention', jobs: visible.filter((job) => ['failed', 'interrupted', 'cancelled'].includes(job.status)) },
     { title: 'Earlier', jobs: visible.filter((job) => job.status === 'completed' && (!job.assetId || Boolean(job.decision))) },
   ].filter((group) => group.jobs.length)
-  const jobCard = (job: ImageJob) => <article className="image-job" key={job.id}>
-    <header><strong>{job.modelAlias}</strong><span>{job.status === 'running' ? `Generating · ${Math.max(0, Math.floor((now - (job.startedAt ?? now)) / 1000))} s` : job.status === 'queued' ? `Queued · #${jobs.filter((item) => item.provider === job.provider && item.status === 'queued').findIndex((item) => item.id === job.id) + 1}` : job.status}</span></header>
-    <small>{job.task?.endsWith('video') ? `${job.video?.resolution ?? `${job.size.width} × ${job.size.height}`}${job.video?.duration ? ` · ${job.video.duration} s` : ''}` : `${job.size.width} × ${job.size.height}`}{!proposalId && !direct && job.bookTitle ? ` · ${job.bookTitle}` : ''}</small>
-    {(showPrompt || (!proposalId && !direct)) && <p className="image-prompt-preview">{job.prompt}</p>}
-    {job.error && <p role="alert">{job.error}</p>}
-    {job.status === 'completed' && <JobResult job={job} chat={Boolean(proposalId || direct)} />}
-    <div className="image-actions">
-      {['queued', 'running'].includes(job.status) && <button type="button" onClick={() => action(() => cancelImageJob(job.id))}>{job.status === 'running' ? 'Stop waiting' : 'Cancel queued image'}</button>}
-      {['failed', 'interrupted', 'cancelled'].includes(job.status) && <button type="button" onClick={() => action(() => retryImageJob(job.id))}>{job.providerJobId ? 'Check existing result' : 'Retry as new generation'}</button>}
-      {!proposalId && !direct && !['queued', 'running'].includes(job.status) && (job.status !== 'completed' || job.decision || !job.assetId) && <button type="button" disabled={clearing} onClick={() => action(() => clearImageQueue([job.id]))}>Remove from queue</button>}
-    </div>
-    {job.status === 'running' && <small>Stopping does not guarantee the provider cancels its charge.</small>}
-  </article>
+  const jobCard = (job: ImageJob) => {
+    const expanded = expandedJobs.has(job.id)
+    const bodyId = `${idPrefix}-${job.id}`
+    return <article className="image-job" key={job.id}>
+      <header><button type="button" className="image-job-toggle" aria-expanded={expanded} aria-controls={bodyId} onClick={() => toggleJob(job.id)}>
+        {expanded ? <ChevronDown aria-hidden="true" size={18} /> : <ChevronRight aria-hidden="true" size={18} />}
+        <span className="image-job-heading"><strong>{job.modelAlias}</strong><small>{job.task?.endsWith('video') ? `${job.video?.resolution ?? `${job.size.width} × ${job.size.height}`}${job.video?.duration ? ` · ${job.video.duration} s` : ''}` : `${job.size.width} × ${job.size.height}`}{!proposalId && !direct && job.bookTitle ? ` · ${job.bookTitle}` : ''}</small></span>
+        <span className="image-job-status">{job.status === 'running' ? `Generating · ${Math.max(0, Math.floor((now - (job.startedAt ?? now)) / 1000))} s` : job.status === 'queued' ? `Queued · #${jobs.filter((item) => item.provider === job.provider && item.status === 'queued').findIndex((item) => item.id === job.id) + 1}` : job.status}</span>
+      </button></header>
+      {expanded && <div id={bodyId} className="image-job-body">
+        {(showPrompt || (!proposalId && !direct)) && <p className="image-prompt-preview">{job.prompt}</p>}
+        {job.error && <p role="alert">{job.error}</p>}
+        {job.status === 'completed' && <JobResult job={job} chat={Boolean(proposalId || direct)} />}
+        <div className="image-actions">
+          {['queued', 'running'].includes(job.status) && <button type="button" onClick={() => action(() => cancelImageJob(job.id))}>{job.status === 'running' ? 'Stop waiting' : 'Cancel queued image'}</button>}
+          {['failed', 'interrupted', 'cancelled'].includes(job.status) && <button type="button" onClick={() => action(() => retryImageJob(job.id))}>{job.providerJobId ? 'Check existing result' : 'Retry as new generation'}</button>}
+          {!proposalId && !direct && !['queued', 'running'].includes(job.status) && (job.status !== 'completed' || job.decision || !job.assetId) && <button type="button" disabled={clearing} onClick={() => action(() => clearImageQueue([job.id]))}>Remove from queue</button>}
+        </div>
+        {job.status === 'running' && <small>Stopping does not guarantee the provider cancels its charge.</small>}
+      </div>}
+    </article>
+  }
   return <div className="image-jobs">
     {!proposalId && !direct && matching.length > 0 && <div className="image-queue-actions">
       <span>{matching.length} {matching.length === 1 ? 'generation' : 'generations'}</span>
