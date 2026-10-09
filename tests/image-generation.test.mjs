@@ -265,7 +265,7 @@ test('Pruna image editing uploads sources and uses each model-specific source fi
       assert.match(url, /^https:\/\/gateway\.invalid\/pruna\/v1\//)
       assert.equal(init.headers.Authorization, 'Bearer key')
       if (url.endsWith('/v1/files')) { assert.equal(init.body.getAll('content').length, 1); return response({ urls: { get: '/v1/files/uploaded' } }) }
-      if (url.endsWith('/v1/predictions')) { const input = JSON.parse(init.body).input; assert.deepEqual(input[field], ['https://api.pruna.ai/v1/files/uploaded']); return response({ status: 'complete', generation_url: '/v1/predictions/delivery/edit' }) }
+      if (url.endsWith('/v1/predictions')) { assert.equal(init.headers['x-pass-model'], model); const input = JSON.parse(init.body).input; assert.deepEqual(input[field], ['https://api.pruna.ai/v1/files/uploaded']); return response({ status: 'complete', generation_url: '/v1/predictions/delivery/edit' }) }
       return new Response(png)
     })
     assert.equal(calls.length, 3)
@@ -295,7 +295,7 @@ test('Pruna submits an aspect ratio, persists async predictions, and decodes out
       assert.match(url, /^https:\/\/gateway\.invalid\/pruna\/v1\//)
       assert.equal(init.headers.Authorization, 'Bearer pruna-key')
       if (init.method === 'POST') {
-        assert.equal(init.headers.Model, 'p-image'); assert.equal(Object.keys(init.headers).some((name) => name.toLowerCase() === 'try-sync'), false)
+        assert.equal(init.headers['x-pass-model'], 'p-image'); assert.equal(Object.keys(init.headers).some((name) => name.toLowerCase() === 'try-sync'), false)
         assert.deepEqual(JSON.parse(init.body), { input: { prompt: 'A gate', aspect_ratio: '1:1' } })
         return response({ id: 'existing-id' })
       }
@@ -323,6 +323,31 @@ test('Pruna submits dimensions for Z-Image Turbo and decodes synchronous generat
   })
   assert.equal(calls.length, 2)
   assert.equal(result.cost, 0.005)
+})
+
+test('Pruna uses the model pass-through header while the gateway keeps virtual credentials out of upstream requests', async () => {
+  const requests = [], submitted = []
+  const result = await providers.generateProviderImage(job('pruna'), prunaCredentials('sk-gateway-fixture'), new AbortController().signal, async id => submitted.push(id), async (url, init) => {
+    const incoming = new Headers(init.headers)
+    assert.equal(incoming.get('authorization'), 'Bearer sk-gateway-fixture', 'The browser authenticates to LiteLLM')
+    assert.equal(incoming.has('apikey'), false, 'The provider key is never sent by the browser')
+    assert.equal(incoming.has('model'), false, 'The model does not depend on forwarding ordinary browser headers')
+    // Model LiteLLM forward_headers:false: only server headers and stripped x-pass-* headers go upstream.
+    const upstream = new Headers({ apikey: 'pru-server-fixture' })
+    for (const [name, value] of incoming) if (name.startsWith('x-pass-')) upstream.set(name.slice(7), value)
+    assert.equal(upstream.has('authorization'), false, 'Pruna never receives the LiteLLM bearer token')
+    requests.push(url)
+    if (init.method === 'POST') {
+      assert.equal(upstream.get('model'), 'p-image', 'LiteLLM forwards x-pass-model as the Pruna model header')
+      return response({ id: 'header-test-prediction' })
+    }
+    assert.equal(upstream.has('model'), false, 'Polling and delivery do not require a model header')
+    if (url.includes('/status/')) return response({ status: 'complete', output: ['/v1/predictions/delivery/header-test-prediction'] })
+    return new Response(png)
+  })
+  assert.deepEqual(submitted, ['header-test-prediction'])
+  assert.equal(requests.length, 3)
+  assert.equal(result.image.size, png.size)
 })
 
 test('Pruna requires a configured LiteLLM gateway URL', async () => {

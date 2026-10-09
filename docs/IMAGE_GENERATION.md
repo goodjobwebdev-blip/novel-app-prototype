@@ -37,15 +37,16 @@ NanoGPT and OpenAI requests go directly from the browser to the selected provide
 
 Pruna submissions use asynchronous mode (without `Try-Sync`) and save the prediction ID before polling. Upload, prediction, status, and authenticated delivery requests all use a LiteLLM pass-through route, while Pruna file URLs embedded in prediction bodies remain upstream Pruna URLs.
 
-In **Settings > AI > Provider**:
+In **Global Settings > AI > Connections**:
 
-1. Select **LiteLLM**.
+1. Select **LiteLLM** under **Connection provider**, without changing the active text provider.
 2. Set **LiteLLM base URL** to `https://webdev.serveblog.net:9447/v1`.
-3. Enter a restricted LiteLLM virtual key under **LiteLLM API key**.
+3. Enter a restricted LiteLLM virtual key under **Pruna / LiteLLM media API key**, or leave that override empty to use **LiteLLM API key**.
+4. Click **Save connections**.
 
 The app derives the Pruna gateway from the URL origin, so that text base URL becomes `https://webdev.serveblog.net:9447/pruna`. This is runtime configuration stored in the browser; no Vite variable or deployment secret is required.
 
-In **Settings > Images > Provider API keys**, **Optional LiteLLM API key for images** may contain a separate restricted virtual key. Leave it empty to use the LiteLLM key saved in AI settings.
+The browser key authenticates to LiteLLM, not directly to Pruna. The actual Pruna provider key belongs only in the gateway's `PRUNA_API_KEY` environment variable.
 
 A matching LiteLLM configuration is:
 
@@ -55,11 +56,15 @@ general_settings:
     - path: "/pruna"
       target: "https://api.pruna.ai"
       include_subpath: true
-      forward_headers: true
+      forward_headers: false
       auth: true
       headers:
         apikey: "os.environ/PRUNA_API_KEY"
 ```
+
+Keep `forward_headers: false`: forwarding the browser's `Authorization: Bearer <LiteLLM virtual key>` makes Pruna use that token instead of the valid server-side `apikey`, returning `401 Unauthenticated`. Sending an empty Authorization header or replacing its bearer value with the Pruna API key also fails. `auth: true` still authenticates the incoming browser request before forwarding.
+
+The app submits the model using `x-pass-model`. LiteLLM strips the `x-pass-` prefix and forwards it as `model` even with general header forwarding disabled. JSON content types are set by the gateway's HTTP client, and multipart uploads are rebuilt with their own boundaries. Upload, polling, and delivery requests need only the server-side `apikey` upstream. Deploy this client header change and the gateway configuration together; an older client sending only `Model` requires updating.
 
 Set these variables only in the LiteLLM process environment on the VPS; do not expose them to Vite or this repository:
 
@@ -68,7 +73,7 @@ PRUNA_API_KEY=<Pruna provider secret>
 LITELLM_CORS_ORIGINS=https://webdev.serveblog.net:9446,https://goodjobwebdev-blip.github.io
 ```
 
-CORS origins contain only scheme, hostname, and port—not the GitHub Pages `/novel-app-prototype/` path. The gateway must be available over HTTPS. Confirm that an unauthenticated request to the pass-through route returns `401`; custom pass-through authentication can depend on the installed LiteLLM version or edition. Never use the LiteLLM master key in the browser. Use restricted virtual keys with small budgets and rate limits.
+For local development, also allow `http://localhost:5173` and, if used, `http://127.0.0.1:5173`. CORS origins contain only scheme, hostname, and port—not the GitHub Pages `/novel-app-prototype/` path. The gateway must be available over HTTPS. Confirm that an unauthenticated request to the pass-through route returns `401`; custom pass-through authentication can depend on the installed LiteLLM version or edition. Never use the LiteLLM master key in the browser. Use restricted virtual keys with small budgets and rate limits.
 
 A browser network error can still represent gateway CORS, connectivity, TLS, or a rejected redirect. Check Pruna's prediction history before starting a new generation to avoid duplicate charges; a recorded prediction ID can resume the existing job. Do not use a public CORS proxy or `no-cors`: source images are private and opaque responses cannot be read by the app.
 
@@ -102,4 +107,4 @@ Image-only `.arcbook` backups remain version 2. Backups containing kept videos u
 
 ## Verification
 
-`node --test tests/*.test.mjs` covers schema upgrades and book creation, provider key fallback, favorite validation, no generation before explicit action, concurrent claims, cancellation/late writes, interruption recovery, provider request fixtures, gallery ownership, backups, and the rendered proposal → queue → keep → viewer flow. Existing mobile gesture tests continue to exercise the shared zoom/modal components. `npm run build` runs TypeScript and the production Vite build.
+`npm test` (the mandatory resource-limited runner) covers schema upgrades and book creation, provider key fallback, favorite validation, no generation before explicit action, concurrent claims, cancellation/late writes, interruption recovery, provider request fixtures, gallery ownership, backups, and the rendered proposal → queue → keep → viewer flow. Existing mobile gesture tests continue to exercise the shared zoom/modal components. `npm run build` runs TypeScript and the production Vite build.
