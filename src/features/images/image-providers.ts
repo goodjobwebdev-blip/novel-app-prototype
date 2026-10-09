@@ -215,7 +215,7 @@ async function pruna(job: ImageJob, key: string, gatewayUrl: string, signal: Abo
   let id = job.providerJobId
   if (!id) {
     const uploaded = await Promise.all((job.sources ?? []).map((source) => uploadPrunaSource(source, key, gatewayUrl, signal, fetcher)))
-    const data = await jsonResponse(await fetcher(prunaRequestUrl('/v1/predictions', gatewayUrl), { method: 'POST', headers: prunaHeaders(key, { Model: model.id, 'Content-Type': 'application/json' }), credentials: 'omit', redirect: 'error', signal, body: JSON.stringify({ input: prunaInput(job, uploaded) }) }), key)
+    const data = await jsonResponse(await fetcher(prunaRequestUrl('/v1/predictions', gatewayUrl), { method: 'POST', headers: prunaHeaders(key, { 'x-pass-model': model.id, 'Content-Type': 'application/json' }), credentials: 'omit', redirect: 'error', signal, body: JSON.stringify({ input: prunaInput(job, uploaded) }) }), key)
     const state = status(data)
     if (SUCCESS.includes(state)) return data
     if (FAILURE.includes(state)) throw new Error(safeImageError(new Error(providerError(data, 'Pruna generation failed.')), key))
