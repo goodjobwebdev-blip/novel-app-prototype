@@ -24,7 +24,14 @@ transpileSourceTree(directory)
 writeFileSync(`${directory}/features/editor/MarkdownEditor.mjs`, `
 import React, { forwardRef, useImperativeHandle } from 'react';
 export default forwardRef(function Editor({ value, ariaLabel }, ref) {
-  useImperativeHandle(ref, () => ({ getMarkdown: () => value }));
+  useImperativeHandle(ref, () => ({
+    getMarkdown: () => value,
+    captureAutocompleteSnapshot: () => null,
+    isAutocompleteSnapshotCurrent: () => false,
+    setAutocompleteSuggestion: () => false,
+    clearAutocompleteSuggestion() {},
+    acceptAutocompleteSuggestion: () => false,
+  }));
   return React.createElement('div', { role: 'textbox', 'aria-label': ariaLabel }, value);
 });
 `)
@@ -41,11 +48,12 @@ async function settle(predicate) {
 async function click(element) { assert.ok(element, 'The navigation control exists'); await act(async () => element.click()) }
 const button = label => document.querySelector(`button[aria-label="${label}"]`)
 
-test('switching notes and returning to a scene never leaves duplicate note controls behind', async () => {
+test('switching notes and returning to a scene never leaves duplicate note controls behind', async t => {
   const { book } = await p.createBook(initialAiSettings, 'Switching test book')
   await p.createNote(book.id, 'First note')
   await p.createNote(book.id, 'Second note')
   const root = createRoot(document.getElementById('root'))
+  t.after(async () => { await act(async () => root.unmount()) })
   const errors = [], originalError = console.error
   console.error = (...args) => { errors.push(args.join(' ')); originalError(...args) }
   try {
@@ -69,6 +77,5 @@ test('switching notes and returning to a scene never leaves duplicate note contr
     assert.ok(!errors.some(message => /same key/.test(message)), 'Sibling components have distinct identities')
   } finally {
     console.error = originalError
-    await act(async () => root.unmount())
   }
 })

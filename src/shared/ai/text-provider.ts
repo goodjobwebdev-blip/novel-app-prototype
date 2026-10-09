@@ -9,7 +9,7 @@ import {
   type NanoGPTStreamLifecycle,
 } from './nanogpt'
 
-export type TextProviderTask = 'story' | 'codex' | 'summary' | 'autotitle'
+export type TextProviderTask = 'story' | 'codex' | 'summary' | 'autotitle' | 'autocomplete'
 export type TextProviderGenerationRequest = NanoGPTGenerationRequest & {
   provider: AiProvider
   task: TextProviderTask
@@ -50,25 +50,29 @@ export async function streamTextProviderCompletion(
       messages: textProviderMessages(request),
       thinking: request.thinking === true || (request.thinkingEffort !== undefined && request.thinkingEffort !== 'default'),
       thinkingEffort: request.thinkingEffort,
+      maxTokens: request.maxTokens,
     }, {
       onResponse: lifecycle.onResponse,
       onContent: onChunk,
       onThoughts: lifecycle.onThoughts,
     }, signal)
   }
+  const requireComplete = request.task === 'autocomplete'
   if (request.provider === 'nanogpt') {
-    await streamNanoGPTCompletion(request, onChunk, signal, lifecycle)
-    return { toolCalls: [], finishReason: 'stop' as const }
+    const metadata = await streamNanoGPTCompletion({ ...request, requireComplete }, onChunk, signal, lifecycle)
+    return { toolCalls: [], finishReason: requireComplete ? metadata.finishReason : 'stop' }
   }
   if (request.provider === 'litellm') {
     return streamChatCompletion({
       apiKey: request.apiKey,
       baseUrl: request.baseUrl,
       provider: request.provider,
+      requireComplete,
       model: request.model,
       messages: textProviderMessages(request) as ChatCompletionMessage[],
       thinking: request.thinking === true || (request.thinkingEffort !== undefined && request.thinkingEffort !== 'default'),
       thinkingEffort: request.thinkingEffort,
+      maxTokens: request.maxTokens,
     }, (chunk) => {
       if (chunk.thoughts) lifecycle.onThoughts?.(chunk.thoughts)
       if (chunk.content) onChunk(chunk.content)

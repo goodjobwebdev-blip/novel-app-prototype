@@ -46,6 +46,36 @@ export type AiPrompts = {
   assistant: string
 }
 
+export type AutocompleteSettings = {
+  enabled: boolean
+  model: string
+  delayMs: number
+  length: 'phrase' | 'sentence'
+}
+
+export const DEFAULT_AUTOCOMPLETE_DELAY_MS = 800
+export const MIN_AUTOCOMPLETE_DELAY_MS = 100
+export const MAX_AUTOCOMPLETE_DELAY_MS = 10000
+
+export function defaultAutocompleteSettings(): AutocompleteSettings {
+  return { enabled: false, model: '', delayMs: DEFAULT_AUTOCOMPLETE_DELAY_MS, length: 'phrase' }
+}
+
+export function autocompleteDelayInputError(value: unknown): string {
+  return typeof value === 'number' && Number.isInteger(value) && value >= MIN_AUTOCOMPLETE_DELAY_MS && value <= MAX_AUTOCOMPLETE_DELAY_MS
+    ? '' : 'Autocomplete delay must be an integer from 100 to 10000 milliseconds.'
+}
+
+export function normalizeAutocompleteSettings(value: unknown): AutocompleteSettings {
+  const settings = value && typeof value === 'object' && !Array.isArray(value) ? value as Partial<AutocompleteSettings> : {}
+  return {
+    enabled: settings.enabled === true,
+    model: typeof settings.model === 'string' ? settings.model.trim() : '',
+    delayMs: autocompleteDelayInputError(settings.delayMs) ? DEFAULT_AUTOCOMPLETE_DELAY_MS : settings.delayMs!,
+    length: settings.length === 'sentence' ? 'sentence' : 'phrase',
+  }
+}
+
 export type AiSettings = {
   providerProfiles?: Partial<Record<AiProvider, ProviderProfile>>
   provider: AiProvider
@@ -73,6 +103,7 @@ export type AiSettings = {
   codexModelContextLength?: number
   codexEffectiveContextLimit: string
   generationWordDelayMs: string
+  autocomplete: AutocompleteSettings
   responseLengths: ResponseLengthSettings
   speech: SpeechSettings
   favorites: string[]
@@ -85,6 +116,7 @@ export type AiSettings = {
 export type BookAiSettings = Omit<AiSettings, 'favorites' | 'prompts'> & { prompts?: AiPrompts }
 
 export const AI_SETTINGS_STORAGE_KEY = 'arc-ai-defaults-v1'
+export const AI_SETTINGS_EVENT = 'arc-ai-settings-changed'
 export const DEFAULT_GENERATION_WORD_DELAY_MS = 40
 export const MAX_GENERATION_WORD_DELAY_MS = 2000
 
@@ -332,6 +364,7 @@ export const initialAiSettings: AiSettings = {
   codexModel: '',
   codexEffectiveContextLimit: '',
   generationWordDelayMs: String(DEFAULT_GENERATION_WORD_DELAY_MS),
+  autocomplete: defaultAutocompleteSettings(),
   responseLengths: { ...EMPTY_RESPONSE_LENGTHS },
   speech: initialSpeechSettings,
   favorites: [],
@@ -461,6 +494,7 @@ export function normalizeAiSettings(value?: StoredAiSettings): AiSettings {
     codexEffectiveContextLimit: typeof value?.codexEffectiveContextLimit === 'string' ? value.codexEffectiveContextLimit : '',
     favorites: Array.isArray(value?.favorites) ? [...value.favorites] : [],
     generationWordDelayMs: normalizeGenerationWordDelay(value?.generationWordDelayMs),
+    autocomplete: normalizeAutocompleteSettings(value?.autocomplete),
     chatMaxModelRounds: normalizeChatRoundLimit(value?.chatMaxModelRounds),
     mainThinkingEffort: normalizeThinkingEffort(value?.mainThinkingEffort),
     supportThinkingEffort: normalizeThinkingEffort(value?.supportThinkingEffort),
@@ -537,6 +571,7 @@ export function saveAiSettings(settings: AiSettings) {
   const normalized = copyAiSettings(settings)
   const { prompts: _legacyPromptMirror, ...persisted } = normalized
   localStorage.setItem(AI_SETTINGS_STORAGE_KEY, JSON.stringify(persisted))
+  if (typeof window !== 'undefined') window.dispatchEvent(new (window.Event ?? Event)(AI_SETTINGS_EVENT))
   return normalized
 }
 

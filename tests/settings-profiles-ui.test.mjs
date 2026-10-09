@@ -91,14 +91,15 @@ test('global App navigation, last-book return, and prompt deep links select the 
   await mounted.close()
 })
 
-test('text editor includes five roles, role-local caps and prompt selections, but no reveal speed or credentials', async () => {
+test('text editor includes six roles, role-local caps and prompt selections, but no reveal speed controls or credentials', async () => {
   const mounted = await mount(App)
-  assert.equal(mounted.host.querySelectorAll('.model-role-setting').length, 5)
+  assert.equal(mounted.host.querySelectorAll('.model-role-setting').length, 6)
   assert.ok(mounted.host.querySelector('#main-model-heading').closest('section').textContent.includes('Story / Main context cap'))
   assert.ok(mounted.host.querySelector('#codex-model-heading').closest('section').textContent.includes('Codex model context cap'))
   assert.ok(field(mounted.host, 'Chat prompt preset'))
   assert.ok(field(mounted.host, 'Character chat prompt preset'))
-  assert.doesNotMatch(mounted.host.textContent, /Custom reveal speed|Text reveal speed/)
+  assert.equal(mounted.host.querySelector('[aria-label="Text reveal speed"]'), null)
+  assert.ok(![...mounted.host.querySelectorAll('label')].some(label => label.textContent.includes('Custom reveal speed')), 'Reveal speed controls belong to the UI profile')
   assert.equal(mounted.host.querySelector('input[type="password"]'), null)
   await mounted.close()
 })

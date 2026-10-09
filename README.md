@@ -14,6 +14,7 @@ Current implementation includes the following. Settings/profile entries were rec
 - global **AI > Connections** for OpenRouter, nano-gpt.com, OpenAI, LiteLLM, OpenAI-compatible endpoints, and Fake (testing): **one active text connection serves every text profile and role**; speech/media can use global credential overrides, never book-local keys;
 - one Text profile containing **Main, Support, Codex, Chat, and Character chat**, with per-role thinking and Main/Codex context caps in their model cards; Codex/Chat/Character model selection can fall back to Main;
 - shared profile/preset drafts with explicit **Save**, linked-book warnings and confirmation, Duplicate, and protected defaults; Story/Codex/Summary response length belongs to the preset, while text reveal speed belongs to the UI profile;
+- opt-in scene-end autocomplete in the shared Text profile, with ghost text, Tab/button acceptance, isolated Undo/Redo, configurable delay, explicit model selection without Main fallback, and cancellation of stale requests;
 - Scene continuation, summary generation, and whole-body Codex generation;
 - generation-type-specific Context Management with automatic context, explicit additional context, model-budget checks, and a rendered request preview for Story, Codex, and Chat;
 - per-role thinking-effort defaults (Provider default, Minimal, Low, Medium, High, Extra high) and per-chat overrides under Generation settings; higher effort may take longer and use more tokens, and supported levels depend on the model;
@@ -46,6 +47,12 @@ For illustration storage, supported image sizes, and the backup format, see [doc
 Structured content is stored in IndexedDB through Dexie. The entity model includes books, series, Acts, Chapters, Scenes, Notes, Codex entries, summaries, Chats, Chat messages, book profile-selection records, and book-local Context settings. Document snapshots are stored separately for local recovery/history. Codex image Blobs and thumbnails are stored in a separate illustrations table, linked to their entries. Legacy book AI configuration is retained as device-local recovery data, not exported as a connection.
 
 The shared profile/preset library, default selections, global Connections, model favorites, and last-book location use device-local `localStorage`. UI profiles contain theme/typography/editor settings and custom themes. Shared profile edits are live after Save; the library is not automatically synchronized as a whole. A book archive carries only its selected definitions and dependencies.
+
+### Autocomplete
+
+Open **Global Settings > AI > Models > Text models > your profile > Autocomplete**, explicitly choose a model, enable autocomplete, and **Save profile**. Books using that shared profile receive the saved configuration; use **Duplicate** and select the copy under book **Profiles** for independent settings. Enabling it automatically sends manuscript excerpts while typing and can incur provider charges.
+
+Suggestions appear only after manual typing at the end of an editable scene. Accept with **Tab** or **Accept continuation · Tab** above Generate (also when collapsed); **Esc** dismisses. Nothing enters the manuscript, autosave, or exports until accepted. Default delay is **800 ms**, editable from **100 to 10,000 ms**; choose a short phrase or one sentence. Requests send at most the last **500 prose words** plus effective scene writing settings, time out after **10 seconds**, and never retry automatically. NanoGPT and LiteLLM are supported; **Fake** runs locally without network or cost. See [docs/AUTOCOMPLETE_SPEC.md](docs/AUTOCOMPLETE_SPEC.md) for the contract and remaining live-model/mobile checks.
 
 ### Thinking effort
 

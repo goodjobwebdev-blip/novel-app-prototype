@@ -6,6 +6,7 @@ import { defaultKeymap, history, historyKeymap, isolateHistory, redo, redoDepth,
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { markdownTablePreview } from './MarkdownTablePreview'
 import { dialogueHighlight } from './DialogueHighlight'
+import { autocompleteDecorationField, autocompletePositionBlocked, sameAutocompleteSnapshot, setAutocompleteDecoration } from './autocomplete-decoration'
 import { markdownTableRanges } from './markdown-tables'
 import { syntaxTree } from '@codemirror/language'
 import { Annotation, Compartment, EditorState, StateEffect, StateField, Transaction, type Text } from '@codemirror/state'
@@ -28,11 +29,14 @@ export type CodexMentionClick = {
   rect: { left: number; top: number; right: number; bottom: number; width: number; height: number }
 }
 
-export type EditorSelectionSnapshot = { editorId: string; revision: number; document: string; from: number; to: number; text: string }
+export type EditorSelectionSnapshot = { editorId: string; revision: number; document: string; from: number; to: number; text: string; autocompleteEpoch?: number }
 
 export type EditorSelectionInfo = { snapshot: EditorSelectionSnapshot; rect: { left: number; top: number; bottom: number }; protected: boolean }
 
 type MarkdownEditorProps = {
+  onAutocompleteInput?: (snapshot: EditorSelectionSnapshot) => void
+  onAutocompleteInvalidate?: () => void
+  onAutocompleteAccept?: () => boolean
   onSelectionChange?: (selection: EditorSelectionInfo | null) => void
   bookId?: string
   showBeats?: boolean
@@ -51,6 +55,11 @@ type MarkdownEditorProps = {
 }
 
 export type MarkdownEditorHandle = {
+  captureAutocompleteSnapshot: () => EditorSelectionSnapshot | null
+  isAutocompleteSnapshotCurrent: (snapshot: EditorSelectionSnapshot, requireFocus?: boolean) => boolean
+  setAutocompleteSuggestion: (snapshot: EditorSelectionSnapshot, text: string) => boolean
+  clearAutocompleteSuggestion: () => void
+  acceptAutocompleteSuggestion: (snapshot: EditorSelectionSnapshot, text: string) => boolean
   placeCursor: (position: number) => boolean
   captureSelection: (from?: number, to?: number) => EditorSelectionSnapshot | null
   replaceRange: (snapshot: EditorSelectionSnapshot, insert: string, allowProtected?: boolean) => boolean
@@ -476,7 +485,7 @@ function runHistoryCommand(view: EditorView | null, command: (target: EditorView
 }
 
 const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor(
-  { value, onChange, historyKey, bookId = '', onEditBlock, showBeats = true, highlightDialogue = false, onBeatAction, onSelectionChange, ariaLabel = 'Markdown editor', className = '', readOnly = false, mentionTerms = [], onMentionClick, onHistoryChange },
+  { value, onChange, historyKey, bookId = '', onEditBlock, showBeats = true, highlightDialogue = false, onBeatAction, onSelectionChange, ariaLabel = 'Markdown editor', className = '', readOnly = false, mentionTerms = [], onMentionClick, onHistoryChange, onAutocompleteInput, onAutocompleteInvalidate, onAutocompleteAccept },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null)
@@ -500,6 +509,65 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
   const latestGenerationRef = useRef<GenerationRecord | null>(null)
   const activeDictationRef = useRef<ActiveDictation | null>(null)
   const editableCompartmentRef = useRef(new Compartment())
+  const autocompleteCallbacksRef = useRef({ onAutocompleteInput, onAutocompleteInvalidate, onAutocompleteAccept })
+  autocompleteCallbacksRef.current = { onAutocompleteInput, onAutocompleteInvalidate, onAutocompleteAccept }
+  const updatingRef = useRef(false)
+  const composingRef = useRef(false)
+  const compositionInputRef = useRef(false)
+  const compositionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const autocompleteEpochRef = useRef(0)
+
+
+  function clearAutocompleteSuggestion() {
+    const view = viewRef.current
+    const suggestion = view?.state.field(autocompleteDecorationField)
+    if (!view || !suggestion) return
+    if (updatingRef.current) {
+      // A parent invalidation callback can call this during a CM update. Never
+      // dispatch recursively, and do not clear a newer suggestion afterwards.
+      queueMicrotask(() => {
+        if (viewRef.current === view && view.state.field(autocompleteDecorationField) === suggestion) {
+          view.dispatch({ effects: setAutocompleteDecoration.of(null) })
+        }
+      })
+    } else view.dispatch({ effects: setAutocompleteDecoration.of(null) })
+  }
+
+  function cancelCompositionInput() {
+    if (compositionTimerRef.current !== null) clearTimeout(compositionTimerRef.current)
+    compositionTimerRef.current = null
+    compositionInputRef.current = false
+  }
+
+  function invalidateAutocomplete() {
+    autocompleteEpochRef.current += 1
+    clearAutocompleteSuggestion()
+    autocompleteCallbacksRef.current.onAutocompleteInvalidate?.()
+  }
+
+  function autocompleteEligible(view: EditorView, requireFocus: boolean) {
+    const selection = view.state.selection
+    return (!requireFocus || view.hasFocus) && !view.state.readOnly && view.state.facet(EditorView.editable)
+      && !activeGenerationRef.current && !activeDictationRef.current && !composingRef.current && !view.composing
+      && selection.ranges.length === 1 && selection.main.empty && selection.main.head === view.state.doc.length
+      && !autocompletePositionBlocked(view.state)
+  }
+
+  function captureAutocompleteSnapshot(): EditorSelectionSnapshot | null {
+    const view = viewRef.current
+    if (!view || !autocompleteEligible(view, true)) return null
+    const position = view.state.selection.main.head
+    return { editorId: editorIdRef.current, revision: documentRevisionRef.current, document: view.state.doc.toString(), from: position, to: position, text: '', autocompleteEpoch: autocompleteEpochRef.current }
+  }
+
+  function isAutocompleteSnapshotCurrent(snapshot: EditorSelectionSnapshot, requireFocus = true) {
+    const view = viewRef.current
+    return Boolean(view && autocompleteEligible(view, requireFocus)
+      && snapshot.autocompleteEpoch === autocompleteEpochRef.current
+      && snapshot.editorId === editorIdRef.current && snapshot.revision === documentRevisionRef.current
+      && snapshot.document === view.state.doc.toString() && snapshot.from === view.state.doc.length
+      && snapshot.to === snapshot.from && snapshot.text === '')
+  }
 
   function reportSelection(view: EditorView) {
     view.requestMeasure({ key: onSelectionChangeRef, read: () => {
@@ -524,6 +592,33 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
 
   useEffect(() => { viewRef.current?.dispatch({ effects: blockCompartmentRef.current.reconfigure(editorBlockPreview(bookId, (item) => onEditBlockRef.current?.(item), readOnly, showBeats, (item, action) => onBeatActionRef.current?.(item, action))) }) }, [bookId, readOnly, showBeats])
   useImperativeHandle(ref, () => ({
+    captureAutocompleteSnapshot,
+    isAutocompleteSnapshotCurrent,
+    setAutocompleteSuggestion: (snapshot, text) => {
+      const view = viewRef.current
+      if (!view || updatingRef.current || !text || !isAutocompleteSnapshotCurrent(snapshot)) return false
+      const suggestionSnapshot = { ...snapshot }
+      view.dispatch({ effects: setAutocompleteDecoration.of({ snapshot: suggestionSnapshot, text }) })
+      return true
+    },
+    clearAutocompleteSuggestion,
+    acceptAutocompleteSuggestion: (snapshot, text) => {
+      const view = viewRef.current
+      const suggestion = view?.state.field(autocompleteDecorationField)
+      if (!view || updatingRef.current || !text || !isAutocompleteSnapshotCurrent(snapshot, false)
+        || !suggestion || suggestion.text !== text || !sameAutocompleteSnapshot(suggestion.snapshot, snapshot)) {
+        clearAutocompleteSuggestion()
+        return false
+      }
+      view.focus()
+      if (!isAutocompleteSnapshotCurrent(snapshot) || view.state.field(autocompleteDecorationField) !== suggestion) return false
+      view.dispatch({
+        changes: { from: snapshot.from, insert: text },
+        selection: { anchor: snapshot.from + view.state.toText(text).length },
+        annotations: [Transaction.userEvent.of('input.autocomplete'), isolateHistory.of('full')],
+      })
+      return true
+    },
     placeCursor: (position) => {
       const view = viewRef.current
       if (!view || activeGenerationRef.current || activeDictationRef.current || position < 0 || position > view.state.doc.length) return false
@@ -550,6 +645,8 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       return view ? { sceneText: view.state.doc.toString(), insertionPosition: view.state.selection.main.head } : null
     },
     beginGeneration: (mode = 'generate', placement = 'append') => {
+      cancelCompositionInput()
+      invalidateAutocomplete()
       const view = viewRef.current
       if (!view || activeGenerationRef.current || activeDictationRef.current || view.state.readOnly || rangeTouchesProtected(view.state.doc.toString(), view.state.selection.main.head)) return null
       const session = beginGeneration(view, mode, latestGenerationRef.current, placement)
@@ -610,6 +707,8 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       return result
     },
     beginDictation: () => {
+      cancelCompositionInput()
+      invalidateAutocomplete()
       const view = viewRef.current
       if (!view || activeGenerationRef.current || activeDictationRef.current || readOnly) return null
       const selection = view.state.selection.main
@@ -688,11 +787,47 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
         EditorState.readOnly.of(readOnly),
         editableCompartmentRef.current.of(EditorView.editable.of(!readOnly)),
         history(),
+        keymap.of([
+          { key: 'Tab', run: view => {
+            const suggestion = view.state.field(autocompleteDecorationField)
+            if (!suggestion || !view.hasFocus || !isAutocompleteSnapshotCurrent(suggestion.snapshot)) return false
+            return autocompleteCallbacksRef.current.onAutocompleteAccept?.() ?? false
+          } },
+
+        ]),
         keymap.of([{ key: 'Shift-F10', run: (view) => { if (view.state.selection.main.empty) return false; reportSelection(view); requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('.selection-tools button')?.focus()); return true } }, ...formattingKeymap(), ...defaultKeymap, ...historyKeymap]),
         livePreview,
         generationHighlightField,
+        autocompleteDecorationField,
         mentionField,
         EditorView.domEventHandlers({
+          compositionstart: () => {
+            cancelCompositionInput()
+            composingRef.current = true
+            invalidateAutocomplete()
+            return false
+          },
+          compositionend: (_event, view) => {
+            composingRef.current = false
+            // CM flushes the final DOM composition change asynchronously (and
+            // batches it on Android). Emit once after that flush, not per chunk.
+            if (compositionTimerRef.current !== null) clearTimeout(compositionTimerRef.current)
+            compositionTimerRef.current = setTimeout(() => {
+              compositionTimerRef.current = null
+              const hadInput = compositionInputRef.current
+              compositionInputRef.current = false
+              if (viewRef.current !== view || !hadInput) return
+              const snapshot = captureAutocompleteSnapshot()
+              if (snapshot) autocompleteCallbacksRef.current.onAutocompleteInput?.(snapshot)
+            }, 60)
+            return false
+          },
+          blur: event => {
+            if (event.relatedTarget instanceof Element && event.relatedTarget.closest('.autocomplete-accept')) return false
+            cancelCompositionInput()
+            invalidateAutocomplete()
+            return false
+          },
           click: (event, view) => {
             if (event.button !== 0 || !view.state.selection.main.empty) return false
             const element = event.target instanceof Element ? event.target.closest<HTMLElement>('.cm-codex-mention') : null
@@ -707,15 +842,36 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
         EditorView.lineWrapping,
         EditorView.contentAttributes.of({ 'aria-label': ariaLabel, spellcheck: 'true' }),
         EditorView.updateListener.of(update => {
-          if (update.docChanged) documentRevisionRef.current += 1
-          if (update.selectionSet || update.docChanged || update.viewportChanged) reportSelection(update.view)
-          if (update.docChanged && !update.transactions.some((transaction) => transaction.annotation(dictationProvisional))) {
-            if (!update.transactions.some((transaction) => transaction.annotation(externalValueUpdate))) pendingLocalDocumentsRef.current.push(update.state.doc)
-            onChangeRef.current(update.state.doc.toString())
-          }
-          if (update.docChanged || update.transactions.length) {
-            onHistoryChangeRef.current?.({ canUndo: undoDepth(update.state) > 0, canRedo: redoDepth(update.state) > 0 })
-          }
+          updatingRef.current = true
+          try {
+            if (update.docChanged) documentRevisionRef.current += 1
+            const userInput = update.docChanged && update.transactions.some(transaction => {
+              if (!transaction.docChanged || transaction.annotation(dictationProvisional) || transaction.annotation(externalValueUpdate)) return false
+              const event = transaction.annotation(Transaction.userEvent) ?? ''
+              return event === 'input.type' || /^input\.type\.compose(?:\.start)?$/.test(event) || /^delete(?:\.|$)/.test(event)
+            })
+            // Invalidate before onChange/input: otherwise the newly scheduled
+            // debounce could be cancelled by the previous edit's invalidation.
+            if (update.docChanged || update.selectionSet) {
+              if (!userInput) cancelCompositionInput()
+              invalidateAutocomplete()
+            }
+            if (update.selectionSet || update.docChanged || update.viewportChanged) reportSelection(update.view)
+            if (update.docChanged && !update.transactions.some((transaction) => transaction.annotation(dictationProvisional))) {
+              if (!update.transactions.some((transaction) => transaction.annotation(externalValueUpdate))) pendingLocalDocumentsRef.current.push(update.state.doc)
+              onChangeRef.current(update.state.doc.toString())
+            }
+            if (update.docChanged || update.transactions.length) {
+              onHistoryChangeRef.current?.({ canUndo: undoDepth(update.state) > 0, canRedo: redoDepth(update.state) > 0 })
+            }
+            if (userInput) {
+              if (composingRef.current || update.view.composing || compositionTimerRef.current !== null) compositionInputRef.current = true
+              else {
+                const snapshot = captureAutocompleteSnapshot()
+                if (snapshot) autocompleteCallbacksRef.current.onAutocompleteInput?.(snapshot)
+              }
+            }
+          } finally { updatingRef.current = false }
         }),
         EditorView.theme({
           '&': { backgroundColor: 'transparent', width: '100%', maxWidth: '100%' },
@@ -731,13 +887,24 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     editorIdRef.current = crypto.randomUUID()
     const view = new EditorView({ state, parent: hostRef.current })
     viewRef.current = view
+    // CodeMirror skips keymaps during IME. Escape must still cancel pending
+    // autocomplete, without preventing the IME/browser's own Escape behavior.
+    const escapeAutocomplete = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { cancelCompositionInput(); invalidateAutocomplete() }
+    }
+    view.contentDOM.addEventListener('keydown', escapeAutocomplete, true)
     const repositionSelection = () => reportSelection(view)
     window.addEventListener('scroll', repositionSelection, true)
     onHistoryChangeRef.current?.({ canUndo: undoDepth(view.state) > 0, canRedo: redoDepth(view.state) > 0 })
     if (mentionTermsRef.current.length) view.dispatch({ effects: setMentionTerms.of(mentionTermsRef.current) })
 
     return () => {
+      cancelCompositionInput()
+      composingRef.current = false
+      autocompleteEpochRef.current += 1
+      autocompleteCallbacksRef.current.onAutocompleteInvalidate?.()
       window.removeEventListener('scroll', repositionSelection, true)
+      view.contentDOM.removeEventListener('keydown', escapeAutocomplete, true)
       onSelectionChangeRef.current?.(null)
       activeGenerationRef.current = null
       activeDictationRef.current = null

@@ -31,6 +31,8 @@ export type ChatCompletionRequest = {
   baseUrl: string
   provider: AiProvider
   model: string
+  maxTokens?: number
+  requireComplete?: boolean
   messages: ChatCompletionMessage[]
   thinking: boolean
   thinkingEffort?: ThinkingEffort
@@ -156,6 +158,7 @@ export async function streamChatCompletion(
       tools: request.tools,
       thinking: request.thinking,
       thinkingEffort: request.thinkingEffort,
+      maxTokens: request.maxTokens,
     }, {
       onResponse,
       onContent: (content) => onChunk({ content }),
@@ -169,6 +172,7 @@ export async function streamChatCompletion(
     messages: providerMessages,
     stream: true,
   }
+  if (request.maxTokens !== undefined) body.max_tokens = request.maxTokens
   if (request.provider !== 'compatible') body.stream_options = { include_usage: true }
   if (request.tools?.length) {
     body.tools = request.tools
@@ -192,6 +196,7 @@ export async function streamChatCompletion(
   }
   if (!response.body) throw new Error('The provider returned an empty streaming response.')
   let received = false
+  let done = false
   let finishReason: string | undefined
   let usage: ChatCompletionUsage = {}
   const accumulated = new Map<number, ChatToolCall>()
@@ -212,16 +217,23 @@ export async function streamChatCompletion(
 
   const consumeLine = (line: string) => {
     const trimmed = line.trim()
+    if (request.requireComplete && /^event:\s*error$/i.test(trimmed)) throw new Error('The provider returned a streaming error.')
     if (!trimmed.startsWith('data:')) return false
     const data = trimmed.slice(5).trim()
-    if (!data || data === '[DONE]') return data === '[DONE]'
+    if (!data) return false
+    if (data === '[DONE]') { done = true; return true }
     const payload = JSON.parse(data) as unknown
+    if (request.requireComplete && payload && typeof payload === 'object') {
+      const value = payload as Record<string, unknown>
+      if (value.error != null || value.type === 'error' || value.object === 'error') throw new Error('The provider returned a streaming error.')
+    }
     const nextUsage = parseUsage(payload)
     if (hasUsage(nextUsage)) {
       const definedUsage = Object.fromEntries(Object.entries(nextUsage).filter(([, value]) => value !== undefined)) as Partial<ChatCompletionUsage>
       usage = { ...usage, ...definedUsage }
     }
     const parsed = parseChunk(payload)
+    if (request.requireComplete && parsed.finishReason !== undefined && parsed.finishReason !== 'stop') throw new Error('The provider returned an incomplete response.')
     if (parsed.finishReason) finishReason = parsed.finishReason
     parsed.toolFragments.forEach((fragment, index) => appendToolFragment(fragment, index))
     if (parsed.chunk.content || parsed.chunk.thoughts) {
@@ -233,6 +245,7 @@ export async function streamChatCompletion(
 
   await consumeCompletionStream(response.body, signal, consumeLine, onResponse)
 
+  if (request.requireComplete && !done && finishReason !== 'stop') throw new Error('The provider did not complete the response.')
   if (!received) throw new Error('The provider completed without returning a response.')
   const toolCalls = [...accumulated.entries()]
     .sort(([a], [b]) => a - b)
