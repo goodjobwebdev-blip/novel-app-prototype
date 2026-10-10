@@ -293,7 +293,7 @@ button:focus-visible { outline:3px solid rgba(198,168,107,.3); outline-offset:2p
 .outline-children > li::before { content:''; position:absolute; z-index:0; left:-29px; top:31px; width:43px; border-top:1px solid var(--outline-tree-line); }
 .outline-children > li:last-child::after { content:''; position:absolute; z-index:0; left:-29px; top:32px; bottom:0; width:2px; background:var(--deep); }
 .outline-row { position:relative; z-index:1; min-width:0; min-height:64px; border-bottom:1px solid var(--outline-tree-line); display:grid; grid-template-columns:28px minmax(0,1fr) 44px 44px; align-items:center; gap:4px; }
-.outline-row.selected { border-bottom-color:var(--outline-tree-line); background:linear-gradient(to right,transparent 0 28px,color-mix(in srgb,var(--accent) 8%,transparent) 28px); }
+.outline-row.selected { border-bottom-color:var(--outline-tree-line); background:linear-gradient(to right,transparent 0 28px,color-mix(in srgb,var(--accent) 8%,transparent) 28px,transparent 100%); }
 .outline-row.selected::after { content:''; position:absolute; left:28px; top:5px; bottom:5px; width:3px; background:var(--accent); }
 .tree-toggle,.tree-leaf-node { width:28px; height:44px; padding:0; border:0; background:transparent; display:grid; place-items:center; }
 .tree-toggle { color:var(--soft); cursor:pointer; }
@@ -304,7 +304,7 @@ button:focus-visible { outline:3px solid rgba(198,168,107,.3); outline-offset:2p
 .tree-label small,.tree-label strong { min-width:0; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .tree-label small { color:var(--faint); font-size:9px; font-weight:500; text-transform:uppercase; }
 .tree-label strong { margin-top:2px; font:500 15px/1.2 var(--serif); }
-.outline-row > .summary-status { width:44px; height:44px; }
+.outline-row > .summary-status { width:44px; height:44px; border:1.5px solid color-mix(in srgb,var(--ink) 28%,var(--line)); background:color-mix(in srgb,var(--surface-2) 82%,transparent); }
 .outline-row > .summary-status,.outline-row > .arc-action-menu__trigger { justify-self:end; }
 .outline-row > .arc-action-menu__trigger { border-color:color-mix(in srgb,var(--ink) 22%,var(--line)); background:color-mix(in srgb,var(--surface-2) 82%,transparent); color:var(--soft); }
 .tree-empty { min-height:46px; margin:0; padding:9px 8px 9px 33px; color:var(--faint); font-size:10px; font-style:italic; display:flex; align-items:center; }

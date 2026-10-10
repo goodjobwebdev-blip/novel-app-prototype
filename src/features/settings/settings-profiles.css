@@ -52,7 +52,8 @@
 .profile-connections-panel > h2, .profile-connections-panel > p { margin: 0; }
 .profile-connection-fields { min-width: 0; display: grid; gap: 16px; padding-top: 18px; border-top: 1px solid var(--line); }
 .profile-connection-fields > h3 { margin: 0; font-size: 16px; }
-.ai-settings-shell .rail-header { gap: 6px; flex-wrap: wrap; }
+.ai-settings-shell .rail-header { justify-content: flex-start; gap: 8px; flex-wrap: wrap; }
+.ai-settings-shell .settings-close { margin-inline-start: auto; }
 .global-settings-return { padding-bottom: 20px; }
 .profile-leave-dialog { position: fixed; z-index: 1000; top: 20%; left: 50%; transform: translateX(-50%); width: min(620px, calc(100vw - 32px)); padding: 24px; display: grid; gap: 20px; background: var(--surface); border: 1px solid var(--accent); border-radius: 14px; box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--canvas) 80%, transparent); }
 .profile-leave-dialog .profile-actions { justify-content: flex-end; }

@@ -1419,7 +1419,7 @@ export default function Workspace() {
           if (refreshed) setActiveDocument(refreshed)
         }
       }
-      showToast(`Renamed “${autotitle.request.targetTitle}” to “${autotitle.suggestion}”.`)
+      showToast(`Renamed “${autotitle.request.targetTitle}” to “${autotitle.suggestion}”.`, 'success')
       setAutotitle(null)
     } catch (error) {
       setAutotitle((state) => state ? { ...state, status: 'error', error: error instanceof Error ? error.message : 'Could not apply the title.' } : state)
