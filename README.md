@@ -130,3 +130,5 @@ Pushes to `main` trigger `.github/workflows/deploy.yml`:
 GitHub Pages must be configured once with **GitHub Actions** as the Pages source.
 
 Hello world
+
+Hello world
