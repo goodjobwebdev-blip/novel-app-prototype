@@ -127,6 +127,11 @@ async function openInlineProfile(label, id, picker = 'Profile / preset') {
   await click(ariaButton(`Edit ${label} profile`))
   await settle(() => field(picker)?.value === id && document.querySelector('.profile-usage'))
 }
+async function renameProfile() {
+  await click(ariaButton('Actions for profile'))
+  await click(textButton('Rename', document.querySelector('[role="menu"][aria-label="Actions for profile"]')))
+  await settle(() => field('Profile name'))
+}
 async function homeFromBook() {
   await openBookSettings()
   await click(ariaButton('Back to library'))
@@ -179,6 +184,7 @@ test('inline Story Edit guards Back to Profiles, retains failed Save drafts, and
   await openInlineProfile('Story prompt', selections.story)
   assert.equal(field('Prompt preset type').value, 'story')
   const originalName = profile(selections.story).name
+  await renameProfile()
   await change(field('Profile name'), 'Unsaved story name')
   assert.equal(profile(selections.story).name, originalName)
   await click(textButton(`Back to Profiles · ${fixture.book.title}`))
@@ -202,6 +208,7 @@ test('inline Story Edit guards Back to Profiles, retains failed Save drafts, and
   assert.equal(profile(selections.story).name, originalName)
   failSave = false
   await openInlineProfile('Story prompt', selections.story)
+  await renameProfile()
   await change(field('Profile name'), 'Saved navigation story')
   await click(textButton(`Back to Profiles · ${fixture.book.title}`))
   await click(textButton('Save and continue'))

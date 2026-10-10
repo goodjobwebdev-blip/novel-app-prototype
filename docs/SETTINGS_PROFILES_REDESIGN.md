@@ -278,6 +278,13 @@ Images workspace, открытый из Home без книги, использу
 
 Пример: книги A и B выбирают `Writing · balanced`. Изменение Main model в этом профиле применяется к обеим. Если B нужна другая модель, создаём `Writing · B` и назначаем её книге B.
 
+### Компактный хедер и явная область действия — контракт интеграции
+
+- `.profile-library-controls` остаётся компактным блоком: `.profile-header-main` содержит selector, primary **Duplicate** и существующий shared `ActionMenu`. Rename/Create/Set as default/Delete переходят в это меню; `.profile-management-fields` с полем и Done либо Create/Cancel раскрывается только после выбора Rename/Create. На ширине ≤700px selector занимает отдельную полную строку; интерактивные цели — не менее 44px. `.profile-save-bar` не меняется.
+- `.profile-header-meta` показывает **Shared profile**, при необходимости **Default** и `details.profile-usage` с **Used in N books**. Раскрытый список остаётся в потоке, не floating popover. При loading/error показывается соответствующее состояние без недостоверного счётчика. `.profile-linked-warning` явно объясняет глобальную область и время применения: параметры генерации — со следующей операции, Chat/Character presets — для новых чатов, UI — сразу на активных поверхностях с этим профилем. Существующие чаты сохраняют снимки моделей и промптов; источник книги виден также в `.profile-origin-note`, если переход был из книги.
+- Duplicate копирует **сохранённую конфигурацию** после существующего save/discard guard; не назначает копию книге и не меняет defaults. `p.profile-copy-notice[role="status"]` сообщает о создании самостоятельной копии и предлагает явно назначить её: для обычных профилей — в Book Profiles, для Chat/Character presets — в соответствующей роли Text models profile (для независимости книги нужно также скопировать и назначить Text models profile). После Create/Duplicate фокус возвращается в постоянный selector. `details.profile-about` (**About shared profiles**) содержит пояснения о defaults, защищённом default и отсутствии скрытых книжных overrides.
+- `nav.settings-breadcrumbs[aria-label="Settings location"]` содержит `ol > li` с простым текстом, последний уровень — `aria-current="page"`; все уровни, включая длинные имена, переносятся, а разделительные chevrons рисуются только CSS. Breadcrumbs и книжный источник остаются видимыми. Над книжными Profiles/Context расположен `.settings-book-scope`: breadcrumb и `p.profile-help`. Для Profiles: **Profile assignments apply only to this book. Editing a shared profile can affect other books.** Для Context — явное пояснение локальной области книги.
+
 ## 7. Навигация и возврат
 
 ### Входы
