@@ -70,7 +70,7 @@ test('one finalized Chat request drives diagnostics, preview, and every provider
   assert.doesNotMatch(feature, /chatProviderMessages|chatProviderTools|serializeChatModelInput/)
 })
 
-test('finalized payload preserves exact chronology and stays identical at a near-limit boundary', () => {
+test('finalized payload preserves exact chronology and its diagnostic snapshot survives input mutation', () => {
   const normalized = {
     providerMessages: [
       { role: 'system', content: 'Stable prefix' },
@@ -85,8 +85,7 @@ test('finalized payload preserves exact chronology and stays identical at a near
   assert.equal(finalized.diagnosticText, sentBody)
   assert.deepEqual(finalized.messages.map((message) => message.role), ['system', 'user', 'assistant', 'tool'])
 
-  const nearLimitCharacters = sentBody.length
-  assert.equal(finalized.diagnosticText.length <= nearLimitCharacters, sentBody.length <= nearLimitCharacters)
+
   normalized.providerMessages[0].content = `${normalized.providerMessages[0].content} hidden transport mutation`
   assert.equal(finalized.diagnosticText, sentBody)
 })

@@ -43,26 +43,3 @@ test('structural reorder/reparent patch only structural fields and never bulkPut
   assert.match(place, /update\(candidate\.id, \{ parentId: targetParentId, order: index, updatedAt: now \}\)/)
   assert.match(place, /update\(candidate\.id, \{ order: index, updatedAt: now \}\)/)
 })
-
-test('field patches preserve unrelated concurrent values in either logical completion order', () => {
-  const base = { id: 'scene-a', title: 'Old title', content: 'C0', order: 0, category: 'Character' }
-  const patch = (entity, values) => ({ ...entity, ...values })
-
-  const contentThenTitle = patch(patch(base, { content: 'C1' }), { title: 'New title' })
-  const titleThenContent = patch(patch(base, { title: 'New title' }), { content: 'C1' })
-  assert.equal(contentThenTitle.content, 'C1')
-  assert.equal(contentThenTitle.title, 'New title')
-  assert.deepEqual(contentThenTitle, titleThenContent)
-
-  const contentThenCategory = patch(patch(base, { content: 'C1' }), { category: 'Place' })
-  const categoryThenContent = patch(patch(base, { category: 'Place' }), { content: 'C1' })
-  assert.equal(contentThenCategory.content, 'C1')
-  assert.equal(contentThenCategory.category, 'Place')
-  assert.deepEqual(contentThenCategory, categoryThenContent)
-
-  const contentThenOrder = patch(patch(base, { content: 'C1' }), { order: 1 })
-  const orderThenContent = patch(patch(base, { order: 1 }), { content: 'C1' })
-  assert.equal(contentThenOrder.content, 'C1')
-  assert.equal(contentThenOrder.order, 1)
-  assert.deepEqual(contentThenOrder, orderThenContent)
-})

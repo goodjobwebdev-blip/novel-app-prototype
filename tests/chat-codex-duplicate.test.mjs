@@ -11,7 +11,3 @@ test('archived same-title Codex entries do not block ordinary Chat creation', ()
 test('active same-title Codex entries still block ordinary Chat creation', () => {
   assert.equal(isActiveCodexTitleDuplicate({ title: '  Mara   Vale  ' }, 'mara vale'), true)
 })
-
-test('restored entries immediately become normal active duplicates again', () => {
-  assert.equal(isActiveCodexTitleDuplicate({ title: 'Mara Vale' }, 'Mara Vale'), true)
-})

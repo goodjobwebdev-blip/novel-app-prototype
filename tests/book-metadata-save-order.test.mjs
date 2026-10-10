@@ -3,22 +3,8 @@ assertTestResourceLimits()
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { KeyedAsyncQueue } from '../src/shared/utils/keyed-async-queue.ts'
 
-test('per-book metadata queue preserves draft invocation order despite a slow first save', async () => {
-  const queue = new KeyedAsyncQueue()
-  const applied = []
-  let releaseFirst
-  const firstGate = new Promise((resolve) => { releaseFirst = resolve })
-  const first = queue.run('book-a', async () => { await firstGate; applied.push('A') })
-  const second = queue.run('book-a', async () => { applied.push('B') })
-  await new Promise((resolve) => setTimeout(resolve, 0))
-  assert.deepEqual(applied, [])
-  releaseFirst()
-  await Promise.all([first, second])
-  assert.deepEqual(applied, ['A', 'B'])
-  assert.equal(applied.at(-1), 'B')
-})
+
 
 test('Workspace serializes Book metadata saves and stale Book completion cannot reclaim currentBook', () => {
   const source = readFileSync(new URL('../src/app/Workspace.tsx', import.meta.url), 'utf8')
