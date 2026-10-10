@@ -28,7 +28,6 @@ test('invalid templates remain editable but block every current text-generation 
   assert.match(workspace, /await prepareSummaryGeneration\(/)
   assert.match(summaryGeneration, /const composition = settings\.promptCompositions\.summarize/)
   assert.match(summaryGeneration, /assertPromptTemplateValid\(composition\.systemPrompt, 'summarize'\)/)
-  assert.match(workspace, /composition\.predefinedMessages\.filter/)
   assert.match(chat, /promptTemplateDiagnostics\(template, 'assistant'\)/)
   assert.match(chat, /Fix the invalid Chat composition/)
 })

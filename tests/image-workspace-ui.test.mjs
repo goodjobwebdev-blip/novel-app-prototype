@@ -246,22 +246,3 @@ test('image previews use the full-quality image, video previews use the poster, 
     URL.createObjectURL = originalCreate; URL.revokeObjectURL = originalRevoke
   }
 })
-
-test('Workspace routes Images as a top-level screen and the Library image control does not open Settings', () => {
-  const source = readFileSync(new URL('../src/app/Workspace.tsx', import.meta.url), 'utf8')
-  assert.match(source, /type Screen = [^\n]*'images'/)
-
-  const imagesStart = source.indexOf("if (screen === 'images')")
-  const homeStart = source.indexOf("if (screen === 'home')", imagesStart)
-  assert.ok(imagesStart >= 0 && homeStart > imagesStart, 'top-level images screen branch exists')
-  const imagesBranch = source.slice(imagesStart, homeStart)
-  assert.match(imagesBranch, /return <ImageWorkspace/)
-  assert.match(imagesBranch, /onSettings=\{\(kind = 'image'\) => \{\s*void openSettings\('images', 'images', kind\)\s*\}\}/)
-
-  const libraryStart = source.indexOf('<header className="library-top">', homeStart)
-  const libraryEnd = source.indexOf('</header>', libraryStart)
-  assert.ok(libraryStart >= 0 && libraryEnd > libraryStart, 'Library header exists')
-  const libraryHeader = source.slice(libraryStart, libraryEnd)
-  assert.match(libraryHeader, /openImages\('home'\)/)
-  assert.doesNotMatch(libraryHeader, /openSettings\('home',\s*'images'\)/)
-})

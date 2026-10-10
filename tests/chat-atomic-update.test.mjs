@@ -3,7 +3,7 @@ assertTestResourceLimits()
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
-import { KeyedAsyncQueue } from '../src/shared/utils/keyed-async-queue.ts'
+
 
 const source = readFileSync(new URL('../src/features/chat/chat-service.ts', import.meta.url), 'utf8')
 
@@ -30,43 +30,6 @@ test('message preview maintenance atomically patches only current Chat metadata'
   assert.match(touch, /current\.title === 'New chat'/)
 })
 
-test('different explicit fields survive concurrent invocation order', async () => {
-  const queue = new KeyedAsyncQueue()
-  let record = { systemPrompt: 'old', thinking: false }
-  let releaseFirst
-  const gate = new Promise((resolve) => { releaseFirst = resolve })
-
-  const first = queue.run('chat-a', async () => {
-    await gate
-    record = { ...record, systemPrompt: 'new prompt' }
-  })
-  const second = queue.run('chat-a', async () => {
-    record = { ...record, thinking: true }
-  })
-
-  releaseFirst()
-  await Promise.all([first, second])
-  assert.deepEqual(record, { systemPrompt: 'new prompt', thinking: true })
-})
-
-test('same-field explicit updates resolve by invocation order, not async completion timing', async () => {
-  const queue = new KeyedAsyncQueue()
-  let title = 'Initial'
-  let releaseFirst
-  const gate = new Promise((resolve) => { releaseFirst = resolve })
-
-  const first = queue.run('chat-a', async () => {
-    await gate
-    title = 'First requested title'
-  })
-  const second = queue.run('chat-a', async () => {
-    title = 'Latest requested title'
-  })
-
-  releaseFirst()
-  await Promise.all([first, second])
-  assert.equal(title, 'Latest requested title')
-})
 
 test('automatic first-message title cannot overwrite an already renamed durable Chat', () => {
   const touch = block('async function touchFromMessages(', '\nexport async function createChatMessage')

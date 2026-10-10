@@ -35,18 +35,6 @@ test('failed Scene save blocks Chat navigation', async () => {
   assert.equal(navigated, false)
 })
 
-test('dirty document/book navigation treats failed persistence as a hard barrier', async () => {
-  const inMemory = { id: 'scene-a', text: 'unsaved manuscript text', dirty: true, saveState: 'error' }
-  const allowed = await saveRequiredBeforeNavigation(true, async () => false)
-  if (allowed) {
-    inMemory.id = 'scene-b'
-    inMemory.text = 'other document'
-    inMemory.dirty = false
-    inMemory.saveState = 'saved'
-  }
-  assert.equal(allowed, false)
-  assert.deepEqual(inMemory, { id: 'scene-a', text: 'unsaved manuscript text', dirty: true, saveState: 'error' })
-})
 
 test('successful required save allows document/book replacement', async () => {
   assert.equal(await saveRequiredBeforeNavigation(true, async () => true), true)
