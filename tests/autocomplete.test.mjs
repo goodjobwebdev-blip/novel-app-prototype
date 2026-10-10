@@ -32,15 +32,16 @@ function input(document, overrides = {}) {
 }
 function harness(t, options = {}) {
   t.mock.timers.enable({ apis: ['setTimeout'] })
-  const calls = [], suggestions = [], errors = []
+  const calls = [], suggestions = [], errors = [], requestStates = []
   const controller = createAutocompleteController({
     onSuggestion: value => suggestions.push(value),
     onError: (...args) => errors.push(args.length),
+    onRequestStateChange: value => requestStates.push(value),
     isCurrent: options.isCurrent ?? (() => true),
     request: options.request ?? ((request, signal) => new Promise((resolve, reject) => calls.push({ request, signal, resolve, reject }))),
   })
   t.after(() => { controller.dispose(); for (const call of calls) call.resolve('') })
-  return { controller, calls, suggestions, errors, tick: ms => t.mock.timers.tick(ms), shown: () => suggestions.filter(Boolean) }
+  return { controller, calls, suggestions, errors, requestStates, tick: ms => t.mock.timers.tick(ms), shown: () => suggestions.filter(Boolean) }
 }
 
 test('context caps the last 500 prose words after private blocks, images and code are excluded', () => {
@@ -241,9 +242,11 @@ test('timeout covers the entire response, aborts once with a generic callback, a
   h.controller.schedule(input('Before'))
   h.tick(800)
   h.tick(9_999)
+  assert.deepEqual(h.requestStates, [true])
   assert.equal(h.calls[0].signal.aborted, false)
   assert.equal(h.errors.length, 0)
   h.tick(1)
+  assert.deepEqual(h.requestStates, [true, false], 'Timeout clears the status even before the provider settles')
   assert.equal(h.calls[0].signal.aborted, true)
   assert.equal(h.errors.length, 1)
   assert.equal(h.errors[0], 0)
@@ -332,3 +335,58 @@ test('scheduled requests capture settings and snapshot rather than observing lat
   await nextTurn()
   assert.equal(h.shown()[0].snapshot.document, 'Original')
 })
+
+test('request status excludes debounce and clears on complete, empty, rejected output and provider errors', async t => {
+  const h = harness(t)
+  for (const [index, response] of [' continuation', '', '<!-- private -->', new Error('private provider error')].entries()) {
+    h.controller.schedule(input(`Manuscript ${index}`))
+    const before = [...h.requestStates]
+    h.tick(799)
+    assert.deepEqual(h.requestStates, before, 'Debounce does not report an active request')
+    h.tick(1)
+    assert.deepEqual(h.requestStates, [...before, true])
+    if (response instanceof Error) h.calls.at(-1).reject(response)
+    else h.calls.at(-1).resolve(response)
+    await nextTurn()
+    assert.deepEqual(h.requestStates, [...before, true, false])
+  }
+  assert.equal(h.shown().length, 1)
+  assert.equal(h.errors.length, 1)
+})
+
+test('late results and errors from cancelled requests cannot hide a newer active request', async t => {
+  const h = harness(t)
+  for (const [index, reject] of [false, true].entries()) {
+    h.controller.schedule(input(`Old ${index}`))
+    h.tick(800)
+    const old = h.calls.at(-1)
+    h.controller.schedule(input(`New ${index}`))
+    assert.equal(h.requestStates.at(-1), false, 'Replacement clears the status during its debounce')
+    h.tick(800)
+    const newer = h.calls.at(-1)
+    const before = [...h.requestStates]
+    if (reject) old.reject(new Error('stale provider error'))
+    else old.resolve(' stale result')
+    await nextTurn()
+    assert.deepEqual(h.requestStates, before, 'Old cleanup leaves the newer request status untouched')
+    assert.equal(h.requestStates.at(-1), true)
+    newer.resolve(' current result')
+    await nextTurn()
+    assert.equal(h.requestStates.at(-1), false)
+  }
+  assert.equal(h.errors.length, 0)
+})
+
+for (const action of ['cancel', 'dispose']) {
+  test(`${action} clears active request status immediately even if the provider has not settled`, async t => {
+    const h = harness(t)
+    h.controller.schedule(input('Before'))
+    h.tick(800)
+    assert.deepEqual(h.requestStates, [true])
+    h.controller[action]()
+    assert.deepEqual(h.requestStates, [true, false])
+    h.calls[0].resolve(' too late')
+    await nextTurn()
+    assert.deepEqual(h.requestStates, [true, false])
+  })
+}

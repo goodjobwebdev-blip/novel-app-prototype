@@ -1,4 +1,4 @@
-.composer-shell { background: var(--panel); }
+.composer-shell { background: transparent; }
 .workspace-screen .story-editor, .workspace-screen .conversation { padding-bottom: calc(var(--composer-height, 160px) + 48px); }
 .composer-shell .composer-status-body { padding: .75rem; max-height: min(30dvh, 18rem); overflow: auto; color: var(--soft); font-size: .8rem; }
 .composer-status-body pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; }
@@ -75,8 +75,8 @@ body:has([role="dialog"]) .selection-tools { display: none; }
 .sensory-edit-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .sensory-detail-dialog .sensory-empty, .sensory-detail-dialog .sensory-status { color: var(--soft); font-size: .8rem; }
 
-/* Shared docked drawer geometry; only accordion contents and action menus vary. */
-.chat-composer:is(.workspace-composer,.chat-message-composer) { gap: 10px; padding: 10px max(14px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left)); border-top: 1px solid color-mix(in srgb,var(--accent) 22%,var(--line)); background: color-mix(in srgb,var(--surface) 18%,transparent); -webkit-backdrop-filter: blur(16px) saturate(112%); backdrop-filter: blur(16px) saturate(112%); box-shadow: 0 -8px 26px rgba(0,0,0,.14); }
+/* Shared floating controls; the editor remains visible between individual surfaces. */
+.chat-composer:is(.workspace-composer,.chat-message-composer) { gap: 10px; padding: 10px max(14px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left)); border: 0; background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
 :is(.workspace-composer,.chat-message-composer) .chat-config-strip { border-color: var(--line); border-radius: var(--radius); background: color-mix(in srgb,var(--surface-2) 72%,transparent); }
 :is(.workspace-composer,.chat-message-composer) .chat-config-strip[open] { border-radius: var(--radius); background: color-mix(in srgb,var(--surface-2) 88%,transparent); }
 :is(.workspace-composer,.chat-message-composer) .chat-config-strip > summary { min-height: 44px; padding: 0 12px; }
@@ -103,10 +103,11 @@ body:has([role="dialog"]) .selection-tools { display: none; }
 .workspace-composer .workspace-composer-header { width: min(100%,760px); margin: 0 auto; display: flex; align-items: center; gap: 8px; }
 .workspace-composer-header > details { flex: 1; min-width: 0; }
 .workspace-composer .chat-config-strip { overflow: hidden; }
+.workspace-composer .autocomplete-request-status { color: var(--faint); font-weight: 400; opacity: .7; white-space: nowrap; }
 .workspace-composer .composer-status-body button { border-radius: var(--radius); }
 .workspace-composer .arc-prompt-field { padding-bottom: 0; }
 .workspace-composer [hidden] { display: none; }
-.workspace-composer.is-collapsed { left: auto; right: max(12px,env(safe-area-inset-right)); bottom: max(12px,env(safe-area-inset-bottom)); width: auto; padding: 7px; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb,var(--surface) 22%,transparent); -webkit-backdrop-filter: blur(16px) saturate(112%); backdrop-filter: blur(16px) saturate(112%); box-shadow: 0 8px 24px rgba(0,0,0,.2); display: flex; align-items: center; gap: 7px; pointer-events: auto; }
+.workspace-composer.is-collapsed { left: auto; right: max(12px,env(safe-area-inset-right)); bottom: max(12px,env(safe-area-inset-bottom)); width: auto; padding: 7px; display: flex; align-items: center; gap: 7px; pointer-events: auto; }
 .workspace-composer.is-collapsed > .chat-compose-row { width: auto; margin: 0; display: flex; justify-content: flex-end; }
 .workspace-composer.is-collapsed .generate-control-shell { pointer-events: auto; }
 .workspace-composer .generate-control-shell:not(.mode) { height: 56px; min-height: 56px; }

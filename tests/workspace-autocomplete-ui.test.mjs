@@ -134,11 +134,14 @@ async function mount(t, collapsed = false) {
   await act(async () => { ui.view.dispatch({ selection: { anchor: ui.view.state.doc.length } }); ui.view.focus() })
   return ui
 }
-async function suggest(ui) {
+async function type(ui, insert = ' Typed.') {
   await act(async () => {
     const view = ui.view, from = view.state.doc.length
-    view.dispatch({ changes: { from, insert: ' Typed.' }, selection: { anchor: from + 7 }, annotations: Transaction.userEvent.of('input.type') })
+    view.dispatch({ changes: { from, insert }, selection: { anchor: from + insert.length }, annotations: Transaction.userEvent.of('input.type') })
   })
+}
+async function suggest(ui) {
+  await type(ui)
   await waitFor(() => ui.ghost && ui.button, 'Actual Workspace displays Fake ghost and accept control')
   assert.equal(ui.ghost.textContent, continuation)
   assert.equal(ui.button.getAttribute('aria-keyshortcuts'), 'Tab')
@@ -149,6 +152,36 @@ async function suggest(ui) {
   assert.equal(ui.view.state.doc.toString(), initial + ' Typed.')
   assert.equal(ui.host.querySelectorAll('.arc-toast[role="alert"]').length, 0)
 }
+for (const outcome of ['complete', 'aborted', 'failed']) {
+  test(`drawer adds request status only while auto completing and clears it when ${outcome}`, async t => {
+    const ui = await mount(t)
+    const status = () => ui.host.querySelector('.workspace-composer summary [role="status"]')
+    const activity = () => status()?.querySelector('.autocomplete-request-status')
+    assert.equal(status().textContent, 'Ready to generate')
+    assert.ok(activity() === null, 'Idle drawer has no autocomplete activity')
+    const directive = outcome === 'aborted' ? '[DELAY_MS:5000]' : '[DELAY_MS:150]'
+    await type(ui, ` ${directive}${outcome === 'failed' ? ' [STREAM_FAIL]' : ''} Typed.`)
+    assert.ok(activity() === null, 'Debounce does not show request activity')
+    await waitFor(() => activity(), 'Drawer shows active autocomplete request')
+    assert.equal(activity().textContent, ' / Auto completing…')
+    assert.equal(status().textContent, 'Ready to generate / Auto completing…', 'Main status is preserved')
+    noSuggestion(ui)
+    if (outcome === 'aborted') {
+      const event = new dom.window.KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true, cancelable: true })
+      await act(async () => ui.view.contentDOM.dispatchEvent(event))
+      assert.ok(activity() === null, 'Escape clears activity immediately')
+    }
+    await waitFor(() => fake.getFakeProviderTrace().length === 1 && activity() === null, 'Request settles and drawer activity clears')
+    assert.equal(fake.getFakeProviderTrace()[0].outcome, outcome)
+    assert.equal(status().textContent, 'Ready to generate')
+    if (outcome === 'complete') {
+      assert.ok(ui.ghost?.textContent, 'Completed request leaves a visible suggestion')
+      assert.equal(ui.ghost.textContent, fake.getFakeProviderTrace()[0].emittedContent)
+      assert.ok(ui.button !== null, 'Ready suggestion is offered without a request indicator')
+    } else noSuggestion(ui)
+  })
+}
+
 function noSuggestion(ui) {
   assert.ok(ui.ghost === null, 'Workspace editor ghost is cleared')
   assert.ok(ui.button === null, 'Workspace accept control is removed')
