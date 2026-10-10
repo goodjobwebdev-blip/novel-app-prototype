@@ -1,0 +1,41 @@
+.worlds-home-section { min-width: 0; margin-top: 28px; }
+.worlds-home-section .arc-panel-header { margin-bottom: 12px; }
+.world-help, .world-empty { color: var(--faint); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.world-error { color: var(--danger); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.world-new-action { min-width: 0; }
+.world-new-action p { max-width: 32ch; color: var(--danger); font-size: 12px; }
+.world-building { min-height: 100dvh; background: var(--surface); color: var(--ink); }
+.world-building-header { display: flex; align-items: center; gap: 18px; padding: 20px 28px; border-bottom: 1px solid var(--line); }
+.world-building-header h1 { margin: 0; font: 500 28px/1.2 var(--serif); }
+.world-building-layout { display: grid; grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); min-height: calc(100dvh - 83px); }
+.world-library { min-width: 0; padding: 24px 18px; border-right: 1px solid var(--line); background: color-mix(in srgb, var(--surface-2) 35%, var(--surface)); }
+.world-detail { min-width: 0; padding: 28px; }
+.world-detail > .arc-panel-header { margin-bottom: 12px; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+.world-detail > .arc-field { max-width: 640px; margin: 20px 0 12px; }
+.world-entry-list { max-width: 800px; }
+.world-entry { min-width: 0; padding: 12px 4px; border-bottom: 1px solid var(--line); }
+.world-entry-identity { min-width: 0; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 9px; }
+.world-entry-identity > svg { width: 16px; height: 16px; color: var(--faint); }
+.world-entry-identity > div { min-width: 0; }
+.world-entry-identity strong { display: block; font: 500 16px/1.3 var(--serif); overflow-wrap: anywhere; }
+.world-entry-identity small { display: block; margin-top: 4px; color: var(--faint); font-size: 11px; }
+.world-entry-controls { margin: 8px 0 0 29px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.world-entry-controls .arc-button { min-height: 36px; height: auto; padding: 8px 0; white-space: normal; text-align: left; justify-content: flex-start; }
+.world-entry-controls > small { font-size: 11px; }
+.world-trigger-conflicts { padding-left: 22px; }
+.world-trigger-conflicts li { margin: 16px 0; overflow-wrap: anywhere; }
+.world-trigger-conflicts strong, .world-trigger-conflicts span { display: block; }
+.world-trigger-conflicts span { color: var(--soft); font-size: 14px; }
+
+.world-title-suggestion { display: grid; gap: 8px; padding: 18px; margin: 16px 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
+.world-title-suggestion small { color: var(--faint); }
+.world-title-suggestion strong { font: 500 26px/1.3 var(--serif); overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+  .world-building-header { padding: 16px; gap: 12px; }
+  .world-building-header h1 { font-size: 23px; }
+  .world-building-layout { grid-template-columns: minmax(0, 1fr); }
+  .world-library { padding: 20px 16px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .world-detail { padding: 24px 16px; }
+  .world-entry-controls { margin-left: 0; }
+  .world-entry-controls .arc-button { min-height: 44px; }
+}

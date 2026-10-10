@@ -1,6 +1,6 @@
 import { assertTestResourceLimits } from './test-resource-policy.mjs'
 assertTestResourceLimits()
-import test from 'node:test'
+import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
 import { registerHooks } from 'node:module'
 import { existsSync } from 'node:fs'
@@ -10,7 +10,8 @@ const storage = new Map()
 globalThis.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)), removeItem: key => storage.delete(key) }
 registerHooks({ resolve(specifier, context, nextResolve) { if (specifier.startsWith('.') && context.parentURL?.startsWith('file:')) { const url = new URL(specifier + '.ts', context.parentURL); if (existsSync(fileURLToPath(url))) return nextResolve(url.href, context) } return nextResolve(specifier, context) } })
 const p = await import('../src/data/persistence.ts'), service = await import('../src/features/codex/codex-timeline-service.ts'), timeline = await import('../src/features/codex/codex-timeline.ts')
-const seriesService = await import('../src/features/codex/series-codex-service.ts')
+const worldService = await import('../src/features/worlds/world-service.ts')
+after(async () => (await p.database()).close())
 const { initialAiSettings } = await import('../src/shared/ai/ai-settings.ts')
 const { metadataValues } = await import('../src/features/chat/chat-management-schema.ts')
 const { copyBookArchive, encodeBookArchive, decodeBookArchive } = await import('../src/data/book-archive.ts')
@@ -68,21 +69,43 @@ test('state summary reuse requires the exact body, story order, and cutoff mode'
   entry.checkpoints = entry.checkpoints.map(point => point.id === state.checkpointId ? { ...point, content: 'Changed' } : point)
   assert.equal(timeline.resolveCodexState(entry, cutoff, world).summary, undefined)
 })
-test('series timelines require explicit order; overrides retain independent checkpoint copies', async () => {
-  const f = await fixture(), { book: second } = await p.createBook(initialAiSettings, 'Second'), series = await p.createSeries('Timeline series')
-  await p.updateBookMetadata(f.book.id, { ...metadataValues(f.book), seriesId: series.id })
-  await p.updateBookMetadata(second.id, { ...metadataValues(second), seriesId: series.id })
+test('World cross-Book timelines require Series order but use canonical edits and independent local checkpoint copies', async () => {
+  const f = await fixture(), { book: second } = await p.createBook(initialAiSettings, 'Second'), series = await p.createSeries('Timeline organization')
+  const world = await worldService.createWorld('Timeline World')
+  for (const book of [f.book, second]) {
+    await worldService.setBookWorld(book.id, world.id)
+    await p.updateBookMetadata(book.id, { ...metadataValues(book), seriesId: series.id })
+  }
   const chapter = await p.createStructuralEntity('chapter', second.id, second.id), scene = await p.createStructuralEntity('scene', second.id, chapter.id)
-  const source = await seriesService.promoteCodexToSeries(f.book.id, f.entry.id)
-  let proxy = (await p.listEntitiesByBook(second.id, 'codexEntry')).find(e => e.seriesSourceId === source.id)
-  await assert.rejects(() => service.resolveEntryAt(proxy.id, { bookId: second.id, sceneId: scene.id }), /distinct numeric series order/)
-  for (const [book, order] of [[f.book, '1'], [second, '2']]) await p.updateBookMetadata(book.id, { ...metadataValues(book), seriesId: series.id, seriesOrder: order })
-  assert.equal((await service.resolveEntryAt(proxy.id, { bookId: second.id, sceneId: scene.id })).content, 'FUTURE_SECRET')
-  await seriesService.editCodexForBook(second.id, proxy.id)
-  proxy = await p.getEntity(proxy.id)
-  await service.saveCodexCheckpoints(second.id, proxy.id, proxy.checkpoints, proxy.checkpoints.map(point => ({ ...point, content: 'Local state' })))
+  const source = await worldService.moveEntryToWorld(f.book.id, f.entry.id)
+  const canonical = (await p.listEntitiesByBook(second.id, 'codexEntry'))[0]
+  assert.equal(canonical.id, source.id); assert.equal(source.id, f.entry.id)
+  assert.deepEqual(source.checkpoints.map(point => point.id), f.points.map(point => point.id))
+  await assert.rejects(() => service.resolveEntryAt(canonical.id, { bookId: second.id, sceneId: scene.id }), /distinct numeric series order/)
+  for (const [book, order] of [[f.book, '1'], [second, '2']]) await p.updateBookMetadata(book.id, { ...metadataValues(await p.getEntity(book.id)), seriesId: series.id, seriesOrder: order })
+  assert.equal((await service.resolveEntryAt(canonical.id, { bookId: second.id, sceneId: scene.id })).content, 'FUTURE_SECRET')
+  const copy = await worldService.copyWorldEntryToBook(second.id, source.id)
+  assert.notEqual(copy.id, source.id)
+  assert.ok(copy.checkpoints.every(point => !source.checkpoints.some(original => original.id === point.id)))
+  assert.deepEqual(copy.checkpoints.map(point => point.content), source.checkpoints.map(point => point.content))
+  assert.match((await service.resolveEntryAt(copy.id, { bookId: second.id, sceneId: scene.id })).content, /Baseline alive/, 'Local copies do not borrow another Book’s anchors')
+  const localPoint = { ...copy.checkpoints[0], anchorBookId: second.id, sceneId: scene.id, content: 'Local state' }
+  await service.saveCodexCheckpoints(second.id, copy.id, copy.checkpoints, [localPoint])
   assert.equal((await p.getEntity(source.id)).checkpoints[1].content, 'FUTURE_SECRET')
-  assert.equal((await service.resolveEntryAt(proxy.id, { bookId: second.id, sceneId: scene.id })).content, 'Local state')
+  assert.equal((await service.resolveEntryAt(copy.id, { bookId: second.id, sceneId: scene.id })).content, 'Local state')
+  const points = (await p.getEntity(source.id)).checkpoints
+  await service.saveCodexCheckpoints(second.id, source.id, points, points.map(point => ({ ...point, content: 'Shared state' })))
+  assert.equal((await service.resolveEntryAt(source.id, { bookId: f.book.id, sceneId: f.scenes[3].id })).content, 'Shared state')
+  assert.equal((await service.resolveEntryAt(source.id, { bookId: second.id, sceneId: scene.id })).content, 'Shared state')
+  assert.equal((await service.resolveEntryAt(copy.id, { bookId: second.id, sceneId: scene.id })).content, 'Local state')
+  await worldService.setWorldEntryHidden(f.book.id, source.id, true)
+  assert.match((await service.resolveEntryAt(source.id, { bookId: second.id, sceneId: scene.id })).content, /Baseline alive/, 'Hidden anchor Books cannot leak checkpoint states')
+  await worldService.setWorldEntryHidden(f.book.id, source.id, false)
+  await p.updateBookMetadata(second.id, { ...metadataValues(await p.getEntity(second.id)), seriesId: '' }, 'remove')
+  assert.equal((await p.getEntity(second.id)).worldId, world.id)
+  assert.ok((await p.listEntitiesByBook(second.id, 'codexEntry')).some(entry => entry.id === source.id), 'Series changes never change lore ownership or availability')
+  assert.match((await service.resolveEntryAt(source.id, { bookId: second.id, sceneId: scene.id })).content, /Baseline alive/)
+  assert.equal((await service.resolveEntryAt(copy.id, { bookId: second.id, sceneId: scene.id })).content, 'Local state')
 })
 test('backup/import remaps local checkpoint anchors and preserves unresolved snapshots', async () => {
   const f = await fixture()

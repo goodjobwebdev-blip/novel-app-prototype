@@ -49,6 +49,7 @@ async function click(element) { assert.ok(element, 'The navigation control exist
 const button = label => document.querySelector(`button[aria-label="${label}"]`)
 
 test('switching notes and returning to a scene never leaves duplicate note controls behind', async t => {
+  await p.ensurePrototypeSeed('demo')
   const { book } = await p.createBook(initialAiSettings, 'Switching test book')
   await p.createNote(book.id, 'First note')
   await p.createNote(book.id, 'Second note')

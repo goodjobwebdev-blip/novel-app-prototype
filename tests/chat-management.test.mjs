@@ -172,10 +172,11 @@ test('stale dependencies and rejected trigger proposals do not mutate; trigger n
   await rejectChatEntityAction(message.id, triggers.proposal.id)
   await assert.rejects(applyChatEntityAction(message.id, triggers.proposal.id))
   assert.deepEqual((await db.getEntity(a.id)).autoIncludeTriggers, ['A'])
+  const revisionBeforeTriggers = (await db.getEntity(a.id)).sourceRevision
   const accepted = await execute(f.book.id, 'propose_codex_triggers', { entity_id: a.id, triggers: ['  Alias  ', 'alias', 'Other'] })
   await approve(f, accepted.proposal)
   assert.deepEqual((await db.getEntity(a.id)).autoIncludeTriggers, ['Alias', 'Other'])
-  assert.equal((await db.getEntity(a.id)).sourceRevision, a.sourceRevision)
+  assert.equal((await db.getEntity(a.id)).sourceRevision, revisionBeforeTriggers)
 })
 
 test('summary reading has no writes and limits sources to the existing supported entity types', async () => {

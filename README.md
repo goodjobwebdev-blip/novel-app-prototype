@@ -2,13 +2,15 @@
 
 A browser-first, local-first novel-writing prototype inspired by NovelCrafter. The app is focused on a single writer working with books, outlines, scenes, notes, Codex entries, summaries, and book-aware AI assistance from desktop or mobile browsers.
 
-For the product direction and implementation boundary, see [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md). The confirmed settings/profile contract and remaining integration checks are in [docs/SETTINGS_PROFILES_REDESIGN.md](docs/SETTINGS_PROFILES_REDESIGN.md). Codex generation/context behavior is documented separately in [docs/CODEX_GENERATION_SPEC.md](docs/CODEX_GENERATION_SPEC.md).
+For the product direction and implementation boundary, see [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md). The confirmed settings/profile contract and remaining integration checks are in [docs/SETTINGS_PROFILES_REDESIGN.md](docs/SETTINGS_PROFILES_REDESIGN.md). Codex generation/context behavior is documented separately in [docs/CODEX_GENERATION_SPEC.md](docs/CODEX_GENERATION_SPEC.md). The current World Building contract, authorized one-time data reset, and archive boundary are in [docs/WORLD_BUILDING.md](docs/WORLD_BUILDING.md) (Russian).
 
 ## Current prototype
 
 Current implementation includes the following. Settings/profile entries were reconciled by reading the working tree on 2026-10-04; this documentation-only review ran no tests, builds, or browser checks and does not mark the full redesign complete or validated:
 
-- local books, shared series, Acts, Chapters, Scenes, Notes, Codex entries, summaries, Chats, and Chat messages persisted in IndexedDB;
+- local Books, organizational Series, shared Worlds, Acts, Chapters, Scenes, Notes, Codex entries, summaries, Chats, and Chat messages persisted in IndexedDB;
+- **World ≠ Series**: one optional World per Book, many Books per World; Book Codex merges local and canonical World entries, directly editable without overrides, with draft/active/archive states and per-Book hiding. Owner-unique normalized triggers remain reserved by draft/archived entries; active local collisions suppress the whole World entry in automatic context and dependency cascades;
+- a separate World Building surface for create/rename/autotitle/delete empty World and a read-only entry list; each entry can be copied into all linked Books and removed from World. Conflicts gate the menu action and have a separate popup; no linked Books blocks removal. Book Codex also offers conflict-gated Link to World / Copy to Book actions;
 - Markdown editing with autosave, local document snapshots, and editor undo/redo integration;
 - book **Profiles + Context** settings: books select shared Text, TTS, STT, Image, Video, and UI profiles plus live Story/Codex/Summary prompt presets; detailed editors and credentials live in global Settings;
 - global **AI > Connections** for OpenRouter, nano-gpt.com, OpenAI, LiteLLM, OpenAI-compatible endpoints, and Fake (testing): **one active text connection serves every text profile and role**; speech/media can use global credential overrides, never book-local keys;
@@ -19,7 +21,7 @@ Current implementation includes the following. Settings/profile entries were rec
 - generation-type-specific Context Management with automatic context, explicit additional context, model-budget checks, and a rendered request preview for Story, Codex, and Chat;
 - per-role thinking-effort defaults (Provider default, Minimal, Low, Medium, High, Extra high) and per-chat overrides under Generation settings; higher effort may take longer and use more tokens, and supported levels depend on the model;
 - persisted book Chat with streaming responses, Stop, edit, Save & regenerate, assistant regenerate/delete/fork/read-aloud actions, per-chat model/system prompt/context settings, and approval-based workspace edit proposals;
-- Chat request composition with per-Chat System and ordered Predefined messages, explicit context variables, exact normalized request previews, and structured workspace-tool rounds. The prototype database v3 migration removes legacy Chat and ChatMessage entities together; books, manuscript, notes, Codex, summaries, and Book settings are preserved;
+- Chat request composition with per-Chat System and ordered Predefined messages, explicit context variables, exact normalized request previews, and structured workspace-tool rounds. The historical database v3 migration removed legacy Chat/ChatMessage entities only; its preservation behavior does not apply to the later World-model hard reset described below;
 - a standalone Images workspace opened from the Library, editor, or Chat, with text-to-image, image-to-image, text-to-video, and image-to-video generation, a mixed-media Gallery, a durable device-wide queue, activity badges, and book-aware gallery actions;
 - separate global Image and Video profile editors under **Settings > AI > Models**, using credentials from Connections; Images settings links open the relevant profile, while Workspace retains the Images tab, generation draft, and gallery filters;
 - responsive Outline, Notes, Codex, Chat, Images, Book, Profiles, Context, and global settings surfaces;
@@ -29,7 +31,9 @@ Current implementation includes the following. Settings/profile entries were rec
 - opt-in, per-book roaming through the self-hosted Go/PostgreSQL archive-sync backend, with manual sync, remote-change checks, optional idle uploads, and explicit conflict recovery;
 - an installable PWA shell and GitHub Pages deployment workflow.
 
-The writing client remains local-first: IndexedDB is used while writing, and cloud sync is optional per book. Sync transfers complete versioned `.arcbook` archives rather than merging individual records. AI requests require network access and a provider API key. See [docs/SYNC_BACKEND.md](docs/SYNC_BACKEND.md) for browser setup, sync behavior, the backend API, and VPS deployment.
+**World-model data transition:** on first initialization without `world-model-reset-v1`, the current source performs an authorized, irreversible one-time hard reset of all book IndexedDB tables: old Books/content/settings, snapshots, dependencies, illustrations/undo, gallery/jobs, sync links/state, and metadata. It then creates one demo Book. Global profiles/presets and Connections in `localStorage` are preserved. This is not a preserving Series Codex migration; no additional warning or confirmation is required for the already-authorized reset.
+
+The writing client remains local-first: IndexedDB is used while writing, and cloud sync is optional per book. Sync transfers complete versioned `.arcbook` archives rather than merging individual records. Available World entries travel as detached local Book snapshots with stable per-Book IDs; overlapping World-copy triggers are suppressed against local reservations for import uniqueness. Live World links do not roam, and independent World archives/sync are not implemented. AI requests require network access and a provider API key. See [docs/SYNC_BACKEND.md](docs/SYNC_BACKEND.md) for browser setup, sync behavior, the backend API, and VPS deployment.
 
 ### Known gaps
 
@@ -44,7 +48,7 @@ For illustration storage, supported image sizes, and the backup format, see [doc
 
 ## Data model
 
-Structured content is stored in IndexedDB through Dexie. The entity model includes books, series, Acts, Chapters, Scenes, Notes, Codex entries, summaries, Chats, Chat messages, book profile-selection records, and book-local Context settings. Document snapshots are stored separately for local recovery/history. Codex image Blobs and thumbnails are stored in a separate illustrations table, linked to their entries. Legacy book AI configuration is retained as device-local recovery data, not exported as a connection.
+Structured content is stored in IndexedDB through Dexie. The entity model includes Books, Worlds, organizational Series, Acts, Chapters, Scenes, Notes, Codex entries, summaries, Chats, Chat messages, book profile-selection records, and book-local Context settings. Codex entries have one canonical Book or World owner; Series may still supply chronology order but does not own shared Codex. Document snapshots are stored separately for local recovery/history. Codex image Blobs and thumbnails are stored in a separate illustrations table, linked to their entries. Legacy book AI configuration is retained as device-local recovery data, not exported as a connection.
 
 The shared profile/preset library, default selections, global Connections, model favorites, and last-book location use device-local `localStorage`. UI profiles contain theme/typography/editor settings and custom themes. Shared profile edits are live after Save; the library is not automatically synchronized as a whole. A book archive carries only its selected definitions and dependencies.
 

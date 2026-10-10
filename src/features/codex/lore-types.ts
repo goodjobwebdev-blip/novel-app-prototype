@@ -15,28 +15,28 @@ export function storedLoreTypes(owner: ArcEntity): LoreType[] {
 /** Runs inside a system write transaction; category is a display-name mirror of typeId. */
 export async function ensureLoreTypesWithDb(db: Dexie, ownerId: string): Promise<LoreType[]> {
   const owner = await db.table('entities').get(ownerId) as ArcEntity | undefined
-  if (!owner || !['book', 'series'].includes(owner.type)) return []
-  const inherited = owner.type === 'book' && typeof owner.seriesId === 'string' && owner.seriesId ? await ensureLoreTypesWithDb(db, owner.seriesId) : []
+  if (!owner || !['book', 'world', 'series'].includes(owner.type)) return []
+  const inherited = owner.type === 'book' && owner.worldId ? await ensureLoreTypesWithDb(db, owner.worldId) : []
   let own = storedLoreTypes(owner)
   let changed = !Array.isArray(owner.loreTypes)
   const names = new Set((inherited.length ? inherited : own.filter(type => type.builtin)).map(type => loreTypeNameKey(type.name)))
   own = own.map(type => {
-    if (type.builtin) return type
+    if (type.builtin || inherited.some(item => item.id === type.id)) return type
     let name = type.name, suffix = 2
     while (names.has(loreTypeNameKey(name))) name = `${type.name} (${suffix++})`
     names.add(loreTypeNameKey(name))
     if (name !== type.name) { changed = true; return { ...type, name } }
     return type
   })
-  let effective = inherited.length ? [...inherited, ...own.filter(type => !type.builtin)] : own
-  const entries = (await db.table('entities').where('bookId').equals(ownerId).toArray() as CodexEntryEntity[]).filter(entry => entry.type === 'codexEntry' && entry.codexScope !== 'inherited')
+  let effective = inherited.length ? [...inherited, ...own.filter(type => !type.builtin && !inherited.some(item => item.id === type.id))] : own
+  const entries = (await db.table('entities').where('bookId').equals(ownerId).toArray() as CodexEntryEntity[]).filter(entry => entry.type === 'codexEntry')
   for (const entry of entries) {
     let type = effective.find(item => item.id === entry.typeId) ?? resolveLoreType(effective, entry.category?.trim() || 'Other')
     if (!type) {
       type = { id: `lore-${crypto.randomUUID()}`, name: entry.category.trim(), order: own.length, ownerId }
-      own.push(type); effective = inherited.length ? [...inherited, ...own.filter(item => !item.builtin)] : own; changed = true
+      own.push(type); effective = inherited.length ? [...inherited, ...own.filter(item => !item.builtin && !inherited.some(inheritedType => inheritedType.id === item.id))] : own; changed = true
     }
-    if (entry.typeId !== type.id || entry.category !== type.name) await db.table('entities').update(entry.id, { typeId: type.id, category: type.name, codexScope: entry.codexScope })
+    if (entry.typeId !== type.id || entry.category !== type.name) await db.table('entities').update(entry.id, { typeId: type.id, category: type.name })
   }
   if (changed) await db.table('entities').update(ownerId, { loreTypes: own })
   return effective

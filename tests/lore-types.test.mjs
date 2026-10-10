@@ -1,6 +1,6 @@
 import { assertTestResourceLimits } from './test-resource-policy.mjs'
 assertTestResourceLimits()
-import test from 'node:test'
+import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
 import { registerHooks } from 'node:module'
 import { existsSync } from 'node:fs'
@@ -18,7 +18,8 @@ registerHooks({ resolve(specifier, context, nextResolve) {
 
 const p = await import('../src/data/persistence.ts')
 const t = await import('../src/features/codex/lore-types-service.ts')
-const s = await import('../src/features/codex/series-codex-service.ts')
+const w = await import('../src/features/worlds/world-service.ts')
+after(async () => (await p.database()).close())
 const c = await import('../src/features/chat/chat-service.ts')
 const { initialAiSettings } = await import('../src/shared/ai/ai-settings.ts')
 const { metadataValues } = await import('../src/features/chat/chat-management-schema.ts')
@@ -29,10 +30,10 @@ const { prepareChatSkillContext } = await import('../src/features/chat/chat-skil
 const { assembleChatGenerationRequest, defaultChatPromptComposition } = await import('../src/features/chat/chat-request.ts')
 const call = (name, args) => ({ id: crypto.randomUUID(), type: 'function', function: { name, arguments: JSON.stringify(args) } })
 async function book() { return (await p.createBook(initialAiSettings, 'Types '+crypto.randomUUID())).book }
-async function seriesFixture() {
-  const series = await p.createSeries('Types series '+crypto.randomUUID()), first = await book(), second = await book()
-  for (const b of [first, second]) await p.updateBookMetadata(b.id, { ...metadataValues(b), seriesId: series.id })
-  return { series, first, second }
+async function worldFixture() {
+  const world = await w.createWorld('Types World '+crypto.randomUUID()), first = await book(), second = await book()
+  for (const b of [first, second]) await w.setBookWorld(b.id, world.id)
+  return { world, first, second }
 }
 test('custom type assignment, rename and order keep stable identity; normalized duplicate names are rejected', async () => {
   const b = await book(), type = await t.createLoreType(b.id, 'Magic system')
@@ -63,18 +64,27 @@ test('unknown legacy categories migrate without data loss and archive types and 
   assert.deepEqual(template.compatibleLoreTypeIds, [copy.typeId]); assert.equal(template.useAsCodexTemplate, true)
   assert.ok((await t.getEffectiveLoreTypes(copied.bookId)).some(type => type.id === copy.typeId))
 })
-test('series types propagate labels without making overrides; book types cannot be assigned to shared sources', async () => {
-  const f = await seriesFixture(), shared = await t.createLoreType(f.series.id, 'Religion'), local = await t.createLoreType(f.first.id, 'Local mystery')
-  const entry = await p.createCodexEntry(f.first.id, 'Faith', shared.id)
-  const source = await s.promoteCodexToSeries(f.first.id, entry.id)
-  const inherited = (await p.listEntitiesByBook(f.second.id, 'codexEntry'))[0]
-  await t.renameLoreType(f.series.id, shared.id, 'Belief system')
-  const fresh = await p.getEntity(inherited.id)
-  assert.equal(fresh.typeId, shared.id); assert.equal(fresh.category, 'Belief system'); assert.equal(fresh.codexScope, 'inherited')
+test('World types propagate labels to canonical and local entries; moves transfer Book-only types without sharing unrelated types', async () => {
+  const f = await worldFixture(), shared = await t.createLoreType(f.world.id, 'Religion'), local = await t.createLoreType(f.first.id, 'Local mystery')
+  const source = await p.createCodexEntry(f.world.id, 'Faith', shared.id)
+  const bookEntry = await p.createCodexEntry(f.first.id, 'Local faith', shared.id)
+  const canonical = (await p.listEntitiesByBook(f.second.id, 'codexEntry'))[0]
+  assert.equal(canonical.id, source.id)
+  await t.renameLoreType(f.world.id, shared.id, 'Belief system')
+  for (const id of [source.id, bookEntry.id]) {
+    const fresh = await p.getEntity(id)
+    assert.equal(fresh.typeId, shared.id); assert.equal(fresh.category, 'Belief system'); assert.equal(fresh.codexScope, undefined)
+  }
+  assert.equal((await p.listEntitiesByBook(f.second.id, 'codexEntry'))[0].category, 'Belief system')
   await assert.rejects(() => p.updateCodexCategory(source.id, local.id), /unavailable/)
-  const only = await p.createCodexEntry(f.first.id, 'Secret', local.id)
-  await assert.rejects(() => s.promoteCodexToSeries(f.first.id, only.id), /book-only lore type/)
   assert.ok(!(await t.getEffectiveLoreTypes(f.second.id)).some(type => type.id === local.id))
+  const only = await p.createCodexEntry(f.first.id, 'Secret', local.id)
+  await p.saveDocumentContent(only.id, 'Transferred mystery')
+  const moved = await w.moveEntryToWorld(f.first.id, only.id)
+  assert.equal(moved.id, only.id); assert.equal(moved.worldId, f.world.id); assert.equal(moved.category, 'Local mystery'); assert.equal(moved.content, 'Transferred mystery')
+  assert.ok((await t.getEffectiveLoreTypes(f.second.id)).some(type => type.id === moved.typeId && type.ownerId === f.world.id))
+  const privateType = await t.createLoreType(f.first.id, 'Unshared lore')
+  assert.ok(!(await t.getEffectiveLoreTypes(f.second.id)).some(type => type.id === privateType.id))
 })
 test('retiring a used custom type requires a current count and valid replacement for entries and templates', async () => {
   const b = await book(), type = await t.createLoreType(b.id, 'Faction')
@@ -112,44 +122,72 @@ test('chat schemas, proposals and draft edits use stable IDs and apply the curre
   const invalid = await executeChatWorkspaceTool(b.id, call('propose_codex_entry', { title: 'Wrong', category: 'not-a-type', content: '' }))
   assert.equal(JSON.parse(invalid.content).ok, false)
 })
-test('leaving a series localizes shared custom types and template compatibility; joining resolves name collisions', async () => {
-  const f = await seriesFixture(), type = await t.createLoreType(f.series.id, 'Technology')
+test('disconnecting a World localizes custom types with stable entry/template IDs; joining resolves name collisions', async () => {
+  const f = await worldFixture(), type = await t.createLoreType(f.world.id, 'Technology')
   const entry = await p.createCodexEntry(f.first.id, 'Engine', type.id), note = await p.createNote(f.first.id, 'Engine template')
   await p.updateEntityAtomically(note.id, current => ({ ...current, compatibleLoreTypeIds: [type.id] }))
-  await p.updateBookMetadata(f.first.id, { ...metadataValues(await p.getEntity(f.first.id)), seriesId: '' })
+  await w.setBookWorld(f.first.id, '')
   const detached = await p.getEntity(entry.id)
-  assert.notEqual(detached.typeId, type.id); assert.equal(detached.category, 'Technology')
+  assert.equal(detached.typeId, type.id); assert.equal(detached.category, 'Technology')
   assert.deepEqual((await p.getEntity(note.id)).compatibleLoreTypeIds, [detached.typeId])
-  await p.updateBookMetadata(f.first.id, { ...metadataValues(await p.getEntity(f.first.id)), seriesId: f.series.id })
+  assert.equal((await t.getEffectiveLoreTypes(f.first.id)).find(item => item.id === type.id).ownerId, f.first.id)
+  const otherWorld = await w.createWorld('Different technology'), otherType = await t.createLoreType(otherWorld.id, 'Technology')
+  await w.setBookWorld(f.first.id, otherWorld.id)
   const effective = await t.getEffectiveLoreTypes(f.first.id)
   assert.equal(new Set(effective.map(item => item.name.toLowerCase())).size, effective.length)
+  assert.ok(effective.some(item => item.id === otherType.id && item.ownerId === otherWorld.id))
   assert.equal((await p.getEntity(entry.id)).typeId, detached.typeId)
+  assert.deepEqual((await p.getEntity(note.id)).compatibleLoreTypeIds, [detached.typeId])
+  assert.equal((await p.getEntity(entry.id)).category, effective.find(item => item.id === detached.typeId).name)
+})
+test('Series organization never shares or localizes lore types, World canon, or template compatibility', async () => {
+  const f = await worldFixture(), shared = await t.createLoreType(f.world.id, 'World technology'), local = await t.createLoreType(f.first.id, 'Book technology')
+  const series = await p.createSeries('Organizational types')
+  await (await p.database()).table('entities').update(series.id, { loreTypes: [{ id: 'series-technology', name: 'Series technology', order: 7 }] })
+  await assert.rejects(() => t.createLoreType(series.id, 'Unsupported registry'), /unavailable/)
+  const entry = await p.createCodexEntry(f.first.id, 'Engine', shared.id), canon = await p.createCodexEntry(f.world.id, 'World engine', shared.id), note = await p.createNote(f.first.id, 'Engine template')
+  await p.updateEntityAtomically(note.id, current => ({ ...current, compatibleLoreTypeIds: [shared.id, local.id] }))
+  const before = JSON.stringify(await t.getEffectiveLoreTypes(f.first.id))
+  for (const seriesId of [series.id, '']) {
+    await p.updateBookMetadata(f.first.id, { ...metadataValues(await p.getEntity(f.first.id)), seriesId }, 'remove')
+    assert.equal((await p.getEntity(f.first.id)).worldId, f.world.id)
+    assert.equal(JSON.stringify(await t.getEffectiveLoreTypes(f.first.id)), before)
+    assert.equal((await p.getEntity(entry.id)).typeId, shared.id)
+    assert.deepEqual((await p.getEntity(note.id)).compatibleLoreTypeIds, [shared.id, local.id])
+    assert.ok((await p.listEntitiesByBook(f.first.id, 'codexEntry')).some(item => item.id === canon.id))
+  }
+  const outsider = await book()
+  await p.updateBookMetadata(outsider.id, { ...metadataValues(outsider), seriesId: series.id })
+  const outsiderTypes = await t.getEffectiveLoreTypes(outsider.id)
+  assert.ok(!outsiderTypes.some(item => [shared.id, local.id, 'series-technology'].includes(item.id)))
+  assert.deepEqual(await p.listEntitiesByBook(outsider.id, 'codexEntry'), [])
 })
 
-test('retiring a series type preserves override content and refuses book-only replacements', async () => {
-  const f = await seriesFixture(), shared = await t.createLoreType(f.series.id, 'Culture'), local = await t.createLoreType(f.first.id, 'Private culture')
-  const entry = await p.createCodexEntry(f.first.id, 'A people', shared.id)
-  await s.promoteCodexToSeries(f.first.id, entry.id)
-  const override = (await p.listEntitiesByBook(f.second.id, 'codexEntry'))[0]
-  await s.editCodexForBook(f.second.id, override.id)
-  await p.saveDocumentContent(override.id, 'Independent cultural history')
+test('retiring a World type preserves independent copy content and refuses Book-only replacements', async () => {
+  const f = await worldFixture(), shared = await t.createLoreType(f.world.id, 'Culture'), local = await t.createLoreType(f.first.id, 'Private culture')
+  const entry = await p.createCodexEntry(f.world.id, 'A people', shared.id)
+  await p.saveDocumentContent(entry.id, 'Canonical cultural history')
+  const copy = await w.copyWorldEntryToBook(f.second.id, entry.id)
+  await p.saveDocumentContent(copy.id, 'Independent cultural history')
   const note = await p.createNote(f.second.id, 'Culture template')
   await p.updateEntityAtomically(note.id, current => ({ ...current, compatibleLoreTypeIds: [shared.id] }))
-  const usage = await t.loreTypeUsage(f.series.id, shared.id)
-  await assert.rejects(() => t.retireLoreType(f.series.id, shared.id, local.id, usage.token), /replacement/)
-  await t.retireLoreType(f.series.id, shared.id, 'lore-group', usage.token)
-  const saved = await p.getEntity(override.id)
-  assert.equal(saved.content, 'Independent cultural history'); assert.equal(saved.codexScope, 'override'); assert.equal(saved.typeId, 'lore-group')
+  const usage = await t.loreTypeUsage(f.world.id, shared.id)
+  assert.equal(usage.entries.length, 2); assert.equal(usage.templates.length, 1)
+  await assert.rejects(() => t.retireLoreType(f.world.id, shared.id, local.id, usage.token), /replacement/)
+  await t.retireLoreType(f.world.id, shared.id, 'lore-group', usage.token)
+  const saved = await p.getEntity(copy.id), canonical = await p.getEntity(entry.id)
+  assert.equal(saved.content, 'Independent cultural history'); assert.equal(saved.worldId, undefined); assert.equal(saved.codexScope, undefined); assert.equal(saved.typeId, 'lore-group')
+  assert.equal(canonical.content, 'Canonical cultural history'); assert.equal(canonical.worldId, f.world.id); assert.equal(canonical.typeId, 'lore-group')
   assert.deepEqual((await p.getEntity(note.id)).compatibleLoreTypeIds, ['lore-group'])
 })
-test('imported series types become local, same-name collisions retain both identities, and missing compatibility stays unavailable', async () => {
-  const f = await seriesFixture(), shared = await t.createLoreType(f.series.id, 'Technology')
+test('imported World types become local, same-name collisions retain both identities, and missing compatibility stays unavailable', async () => {
+  const f = await worldFixture(), shared = await t.createLoreType(f.world.id, 'Technology')
   const entry = await p.createCodexEntry(f.first.id, 'Machine', shared.id), note = await p.createNote(f.first.id, 'Missing type template')
   await p.updateEntityAtomically(note.id, current => ({ ...current, compatibleLoreTypeIds: ['missing-custom-type'] }))
   const archive = await p.readBookArchive(f.first.id)
   const bookRecord = archive.entities.find(entity => entity.id === f.first.id)
   bookRecord.loreTypes.push({ id: 'lore-collision', name: 'Technology', order: 9 })
-  archive.entities.push({ ...entry, id: 'collision-entry', typeId: 'lore-collision', content: 'Separate lore' })
+  archive.entities.push({ ...entry, id: 'collision-entry', title: 'Separate machine', autoIncludeTriggers: ['Separate machine'], typeId: 'lore-collision', content: 'Separate lore' })
   const copied = copyBookArchive(archive)
   await p.writeBookArchive(copied.data)
   const types = await t.getEffectiveLoreTypes(copied.bookId)

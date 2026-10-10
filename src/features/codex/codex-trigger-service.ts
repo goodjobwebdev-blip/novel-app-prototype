@@ -30,7 +30,7 @@ export function normalizeCodexTrigger(value: string) {
   return value.trim().replace(/\s+/gu, ' ')
 }
 
-function triggerKey(value: string) {
+export function codexTriggerKey(value: string) {
   return normalizeCodexTrigger(value).toLocaleLowerCase()
 }
 
@@ -41,7 +41,7 @@ export function normalizeCodexTriggerList(values: string[]) {
     if (typeof value !== 'string') return
     const normalized = normalizeCodexTrigger(value)
     if (!normalized) return
-    const key = triggerKey(normalized)
+    const key = codexTriggerKey(normalized)
     if (seen.has(key)) return
     seen.add(key)
     result.push(normalized)
@@ -54,8 +54,25 @@ function entryTriggers(entry: CodexEntryEntity) {
   return normalizeCodexTriggerList(Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [])
 }
 
-function archived(entry: CodexEntryEntity) {
-  return typeof entry.archivedAt === 'number' && entry.archivedAt > 0
+export function codexEntryActiveForAutomatic(entry: CodexEntryEntity) {
+  return !entry.hiddenInBook && entry.codexStatus !== 'draft' && !(typeof entry.archivedAt === 'number' && entry.archivedAt > 0)
+}
+
+export type CodexTriggerConflict = { entryId: string; title: string; trigger: string }
+
+/** Compare across scopes; owner-level trigger uniqueness is enforced by persistence. */
+export function conflictingCodexTriggers(entry: CodexEntryEntity, candidates: CodexEntryEntity[]): CodexTriggerConflict[] {
+  const keys = new Set(entryTriggers(entry).map(codexTriggerKey))
+  return candidates.filter(candidate => candidate.id !== entry.id).flatMap(candidate =>
+    entryTriggers(candidate).filter(trigger => keys.has(codexTriggerKey(trigger))).map(trigger => ({ entryId: candidate.id, title: candidate.title, trigger })),
+  )
+}
+
+/** Any shared trigger reserves the entire World entry for the active local entry. */
+export function automaticCodexCandidates(entries: CodexEntryEntity[]): CodexEntryEntity[] {
+  const active = entries.filter(codexEntryActiveForAutomatic)
+  const localKeys = new Set(active.filter(entry => !entry.worldId).flatMap(entry => entryTriggers(entry).map(codexTriggerKey)))
+  return active.filter(entry => !entry.worldId || !entryTriggers(entry).some(trigger => localKeys.has(codexTriggerKey(trigger))))
 }
 
 function escapeRegex(value: string) {
@@ -95,10 +112,10 @@ export function buildCodexMentionIndex(entities: ArcEntity[]): CodexMentionTerm[
   const byKey = new Map<string, CodexMentionTerm>()
   entities
     .filter((entity): entity is CodexEntryEntity => entity.type === 'codexEntry')
-    .filter((entry) => !archived(entry))
+    .filter(codexEntryActiveForAutomatic)
     .forEach((entry) => {
       normalizeCodexTriggerList([entry.title, ...entryTriggers(entry)]).forEach((trigger) => {
-        const key = triggerKey(trigger)
+        const key = codexTriggerKey(trigger)
         const existing = byKey.get(key) ?? { key, text: trigger, entries: [] }
         if (!existing.entries.some((candidate) => candidate.id === entry.id)) {
           existing.entries.push({ id: entry.id, title: entry.title, category: entry.category, trigger })
@@ -134,9 +151,9 @@ export function automaticCodexMatches({
     scene,
     text: scene.id === anchorSceneId && anchorSceneText !== undefined ? anchorSceneText : String(scene.content ?? ''),
   }))
-  const activeEntries = entities
-    .filter((entity): entity is CodexEntryEntity => entity.type === 'codexEntry')
-    .filter((entity) => entity.id !== excludeEntryId && !archived(entity) && entryTriggers(entity).length > 0)
+  const activeEntries = automaticCodexCandidates(entities
+    .filter((entity): entity is CodexEntryEntity => entity.type === 'codexEntry'))
+    .filter((entity) => entity.id !== excludeEntryId && entryTriggers(entity).length > 0)
     .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
 
   return activeEntries.map((entry) => {

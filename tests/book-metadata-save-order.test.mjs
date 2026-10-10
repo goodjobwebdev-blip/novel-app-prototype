@@ -36,7 +36,7 @@ test('Book metadata persistence is transactional, field-level, and cannot recrea
   const start = source.indexOf('export async function updateBookMetadata(')
   const end = source.indexOf('export async function moveStructuralEntity', start)
   const block = source.slice(start, end)
-  const tx = block.indexOf("seriesTransaction(db")
+  const tx = block.indexOf("db.transaction('rw'")
   const read = block.indexOf("db.table('entities').get")
   const update = block.indexOf("db.table('entities').update(id, patch)")
   assert.ok(tx >= 0 && read > tx && update > read)

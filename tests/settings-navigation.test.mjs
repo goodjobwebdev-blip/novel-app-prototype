@@ -43,6 +43,7 @@ const settings = { ...ai.copyAiSettings(ai.initialAiSettings), provider: 'fake',
 ai.saveAiSettings(settings)
 const defaultUi = { ...structuredClone(ui.defaultUiSettings), activeThemeId: 'blue-light', editor: { ...ui.defaultUiSettings.editor, fontSize: 17 } }
 ui.saveUiSettings(defaultUi)
+await p.ensurePrototypeSeed('demo')
 const fixture = await p.createBook(settings, 'Navigation fixture')
 const selections = await assignBookTestProfiles({ persistence: p, ai, profiles }, fixture.book.id, settings, ['text', 'story', 'ui'])
 const profile = id => profiles.loadSettingsProfiles().profiles.find(item => item.id === id)

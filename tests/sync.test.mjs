@@ -39,8 +39,8 @@ async function disconnectedArchive(title = 'Cloud book') {
   return { data: source, bookId: book.id, sceneId: scene.id }
 }
 
-test('schema v7 stores sync control data outside book archives and deletes it with the local book', async () => {
-  assert.equal((await p.database()).verno, 7)
+test('schema v8 stores sync control data outside book archives and deletes it with the local book', async () => {
+  assert.equal((await p.database()).verno, 8)
   const fixture = await disconnectedArchive()
   await sync.writeConnectedBookArchive(fixture.data, link(fixture.bookId), state(fixture.bookId))
   assert.equal((await sync.getSyncLink(fixture.bookId)).remoteBookId, 'remote-1')

@@ -1,4 +1,5 @@
 import { BUILTIN_LORE_TYPES } from '../codex/lore-types'
+import { entityAvailableInBook } from '../worlds/world-service'
 import { requireLoreType } from '../codex/lore-types-service'
 import { sceneBeats } from '../writing/scene-beats'
 import { proseText, protectedRanges, rangeTouchesProtected } from '../editor/document-projection.ts'
@@ -18,12 +19,14 @@ import {
 import {
   createCodexEntry,
   createSnapshot,
+  database,
   getEntity,
   isCodexEntryArchived,
   listEntitiesByBook,
   listCodexDependencies,
   saveDocumentContent,
   type ArcEntity,
+  type BookEntity,
 } from '../../data/persistence'
 
 const editableTypes = ['scene', 'note', 'codexEntry'] as const
@@ -154,7 +157,8 @@ function titleFor(entity: ArcEntity) {
 
 async function editableEntity(bookId: string, entityId: string) {
   const entity = await getEntity<ArcEntity>(entityId)
-  if (!entity || entity.bookId !== bookId || !editableTypeSet.has(entity.type) || isCodexEntryArchived(entity)) {
+  const book = await getEntity<BookEntity>(bookId)
+  if (!entity || !entityAvailableInBook(entity, book) || !editableTypeSet.has(entity.type) || isCodexEntryArchived(entity)) {
     throw new Error('That editable document was not found in the current book.')
   }
   return entity
@@ -349,11 +353,18 @@ export async function applyChatDocumentEdit(messageId: string, proposalId: strin
     throw error
   }
 
-  if (nextContent !== currentContent) {
-    await createSnapshot(entity.id, 'generation', currentContent)
-    try { await saveDocumentContent(entity.id, nextContent, { bookId: message.bookId, updatedAt: entity.updatedAt, content: currentContent }) }
-    catch (error) { await setProposalStatus(message.id, proposal.id, 'stale'); throw error }
-  }
+  try {
+    const db = await database()
+    await db.transaction('rw', db.table('entities'), db.table('snapshots'), async () => {
+      const current = await editableEntity(message.bookId, entity.id)
+      if (current.updatedAt !== entity.updatedAt || String(current.content ?? '') !== currentContent || current.bookId !== entity.bookId) throw new Error('This document changed after the proposal was created. Read it again and prepare a new edit.')
+      if (nextContent !== currentContent) {
+        await createSnapshot(entity.id, 'generation', currentContent)
+        // The requesting Book authorizes access; the optimistic write retains the canonical owner.
+        await saveDocumentContent(entity.id, nextContent, { bookId: current.bookId, updatedAt: current.updatedAt, content: currentContent })
+      }
+    })
+  } catch (error) { await setProposalStatus(message.id, proposal.id, 'stale'); throw error }
   const appliedAt = Date.now()
   await setProposalStatus(message.id, proposal.id, 'applied', appliedAt)
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('arc-entity-changed', { detail: { bookId: message.bookId, entityId: entity.id } }))

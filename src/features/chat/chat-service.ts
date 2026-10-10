@@ -1,6 +1,7 @@
 import { normalizeThinkingEffort, type ThinkingEffort } from '../../shared/ai/thinking-effort'
 import type { CharacterBoundary, CharacterChatConfig } from './character-chat'
 import { getEffectiveLoreTypes } from '../codex/lore-types-service'
+import { entityAvailableInBook } from '../worlds/world-service'
 import { resolveLoreType } from '../codex/lore-types'
 import { updateBrainstormDraft, type ChatBrainstorm } from './chat-brainstorm'
 import { normalizeChatRoundLimit, validateChatRoundLimit } from './chat-round-limit'
@@ -27,6 +28,7 @@ import {
   putEntity,
   updateEntityAtomically,
   type ArcEntity,
+  type BookEntity,
   type GenerationContextProfile,
 } from '../../data/persistence'
 
@@ -264,11 +266,12 @@ export async function createChat(bookId: string, title = 'New chat', role: 'chat
   }
   const db = await database()
   await db.transaction('rw', db.table('entities'), async () => {
-    if ((await db.table('entities').get(bookId))?.type !== 'book') throw new Error('This book no longer exists.')
+    const book = await db.table('entities').get(bookId) as BookEntity | undefined
+    if (book?.type !== 'book') throw new Error('This book no longer exists.')
     if (chat.character) {
       for (const participant of chat.character.participants) {
         const entry = await db.table('entities').get(participant.entryId)
-        if (entry?.type !== 'codexEntry' || entry.bookId !== bookId || entry.archivedAt || (entry.typeId !== 'lore-character' && entry.roleplayParticipant !== true)) throw new Error('A selected character is no longer available.')
+        if (entry?.type !== 'codexEntry' || !entityAvailableInBook(entry, book) || entry.archivedAt || (entry.typeId !== 'lore-character' && entry.roleplayParticipant !== true)) throw new Error('A selected character is no longer available.')
       }
       const cutoff = chat.character.cutoff, scene = await db.table('entities').get(cutoff.sceneId)
       if (cutoff.bookId !== bookId || scene?.type !== 'scene' || scene.bookId !== bookId || !Number.isInteger(cutoff.position) || cutoff.position! < 0 || cutoff.position! > String(scene.content ?? '').length) throw new Error('The selected character-chat position changed. Choose it again.')

@@ -1,6 +1,6 @@
 import { database, getEntity, getBookAiSettings, isCodexEntryArchived, type ArcEntity, type BookEntity, type CodexEntryEntity } from '../../data/persistence'
-import { synchronizeSeriesCodex } from './series-codex'
-import { checkpointPlaced, resolveCodexState, timelineOrderSignature, type CodexCheckpoint, type StoryCutoff, type TimelineMode, type TimelineWorld } from './codex-timeline'
+import { entityAvailableInBook } from '../worlds/world-service'
+import { checkpointBookAvailable, checkpointPlaced, resolveCodexState, timelineOrderSignature, type CodexCheckpoint, type StoryCutoff, type TimelineMode, type TimelineWorld } from './codex-timeline'
 import { proseText } from '../editor/document-projection.ts'
 import { loadAiSettings } from '../../shared/ai/ai-settings'
 import { streamTextProviderCompletion } from '../../shared/ai/text-provider'
@@ -14,14 +14,14 @@ export async function readTimelineWorld(bookId: string): Promise<TimelineWorld> 
   const ids = new Set(books.map(book => book.id))
   return { books, outline: all.filter(e => e.type !== 'book' && ids.has(e.bookId ?? '')) }
 }
-function notify(bookId: string, entityId: string) { if (typeof window !== 'undefined') { window.dispatchEvent(new CustomEvent('arc-entity-changed', { detail: { bookId, entityId } })); window.dispatchEvent(new Event('arc-series-codex-changed')) } }
+function notify(bookId: string, entityId: string) { if (typeof window !== 'undefined') { window.dispatchEvent(new CustomEvent('arc-entity-changed', { detail: { bookId, entityId } })); window.dispatchEvent(new Event('arc-worlds-changed')) } }
 export async function saveCodexCheckpoints(bookId: string, entryId: string, before: CodexCheckpoint[], checkpoints: CodexCheckpoint[]) {
-  const db = await database(); await synchronizeSeriesCodex(db, bookId)
-  const world = await readTimelineWorld(bookId)
+  const db = await database()
   const result = await db.transaction('rw', db.table('entities'), async () => {
+    const world = await readTimelineWorld(bookId)
     const book = await db.table('entities').get(bookId) as BookEntity | undefined
     const entry = await db.table('entities').get(entryId) as CodexEntryEntity | undefined
-    if (!book || entry?.type !== 'codexEntry' || isCodexEntryArchived(entry) || entry.codexScope === 'inherited' || (entry.bookId !== bookId && !(entry.codexScope === 'series' && entry.bookId === book.seriesId))) throw new Error('Edit this book’s own entry or explicitly open its series source before changing checkpoints.')
+    if (entry?.type !== 'codexEntry' || !entityAvailableInBook(entry, book) || isCodexEntryArchived(entry)) throw new Error('This entry is unavailable or archived in this book.')
     if (JSON.stringify(entry.checkpoints ?? []) !== JSON.stringify(before)) throw new Error('These checkpoints changed. Reopen the timeline before saving.')
     if (checkpoints.length > 500 || new Set(checkpoints.map(p => p.id)).size !== checkpoints.length) throw new Error('Checkpoint IDs must be distinct (maximum 500 checkpoints).')
     const anchors = new Set<string>()
@@ -30,8 +30,8 @@ export async function saveCodexCheckpoints(bookId: string, entryId: string, befo
       const old = before.find(p => p.id === point.id)
       const anchorChanged = !old || old.anchorBookId !== point.anchorBookId || old.sceneId !== point.sceneId
       if (anchorChanged) {
-        const scene = await db.table('entities').get(point.sceneId), anchorBook = await db.table('entities').get(point.anchorBookId)
-        if (scene?.type !== 'scene' || scene.bookId !== point.anchorBookId || !checkpointPlaced(point, world) || (point.anchorBookId !== bookId && (!(entry.seriesSourceId || entry.codexScope === 'series') || !book.seriesId || anchorBook?.seriesId !== book.seriesId))) throw new Error('Choose an existing scene in the entry’s book or shared series.')
+        const scene = await db.table('entities').get(point.sceneId)
+        if (scene?.type !== 'scene' || scene.bookId !== point.anchorBookId || !checkpointPlaced(point, world) || !checkpointBookAvailable(entry, point.anchorBookId, bookId, world) || (point.anchorBookId !== bookId && !entry.worldId)) throw new Error('Choose an existing scene in this book or a visible connected World book in the same series.')
       }
       const anchor = point.anchorBookId + ':' + point.sceneId
       if (anchors.has(anchor)) throw new Error('Use one checkpoint per scene; edit the existing checkpoint for that position.')
@@ -44,7 +44,7 @@ export async function saveCodexCheckpoints(bookId: string, entryId: string, befo
 }
 export async function generateTimelineSummary(bookId: string, entryId: string, checkpointId: string, mode: TimelineMode, signal: AbortSignal) {
   const entry = await getEntity<CodexEntryEntity>(entryId), world = await readTimelineWorld(bookId)
-  if (entry?.type !== 'codexEntry' || (entry.bookId !== bookId && entry.bookId !== world.books.find(b => b.id === bookId)?.seriesId) || isCodexEntryArchived(entry)) throw new Error('This entry is unavailable.')
+  if (entry?.type !== 'codexEntry' || !entityAvailableInBook(entry, world.books.find(b => b.id === bookId)) || isCodexEntryArchived(entry)) throw new Error('This entry is unavailable.')
   const checkpoint = entry.checkpoints?.find(point => point.id === checkpointId)
   if (checkpointId !== 'baseline' && !checkpoint) throw new Error('This checkpoint no longer exists.')
   const sourceText = proseText(checkpoint?.content ?? entry.content), orderSignature = timelineOrderSignature(world)
@@ -58,9 +58,16 @@ export async function generateTimelineSummary(bookId: string, entryId: string, c
   const db = await database()
   await db.transaction('rw', db.table('entities'), async () => {
     const latest = await db.table('entities').get(entryId) as CodexEntryEntity | undefined
+    const latestWorld = await readTimelineWorld(bookId)
+    if (!entityAvailableInBook(latest, latestWorld.books.find(book => book.id === bookId))) throw new Error('This entry is no longer available in this book. The summary was not saved.')
+    if (timelineOrderSignature(latestWorld) !== orderSignature) throw new Error('Story order changed during generation. The summary was not saved.')
     const body = checkpointId === 'baseline' ? latest?.content : latest?.checkpoints?.find(p => p.id === checkpointId)?.content
     if (!latest || body === undefined || proseText(body) !== sourceText || isCodexEntryArchived(latest)) throw new Error('The source changed during generation. The summary was not saved.')
     await db.table('entities').update(entryId, { timelineSummaries: [...(latest.timelineSummaries ?? []).filter(s => s.checkpointId !== checkpointId || s.mode !== mode).slice(-31), { checkpointId, mode, sourceText, orderSignature, content }] })
   }); notify(bookId, entryId)
 }
-export async function resolveEntryAt(entryId: string, cutoff: StoryCutoff, mode: TimelineMode = 'cutoff') { const entry = await getEntity<CodexEntryEntity>(entryId); if (entry?.type !== 'codexEntry' || entry.bookId !== cutoff.bookId) throw new Error('The entry is unavailable in this book.'); return resolveCodexState(entry, cutoff, await readTimelineWorld(cutoff.bookId), mode) }
+export async function resolveEntryAt(entryId: string, cutoff: StoryCutoff, mode: TimelineMode = 'cutoff') {
+  const entry = await getEntity<CodexEntryEntity>(entryId), world = await readTimelineWorld(cutoff.bookId)
+  if (entry?.type !== 'codexEntry' || !entityAvailableInBook(entry, world.books.find(book => book.id === cutoff.bookId)) || isCodexEntryArchived(entry)) throw new Error('The entry is unavailable in this book.')
+  return resolveCodexState(entry, cutoff, world, mode)
+}

@@ -30,12 +30,22 @@ const compiled = await build({
 const module = { exports: {} }
 new Function('require', 'module', 'exports', compiled.outputFiles[0].text)(createRequire(import.meta.url), module, module.exports)
 const { App, Panel, BookProfilesPanel, profileLabels, UiSettingsPanel, profiles, ai, ui, media, persistence, chats, catalog, fake, profileCatalogSettings, withoutProfileCredentials } = module.exports
+await persistence.ensurePrototypeSeed('demo')
 const fixture = await persistence.createBook(ai.initialAiSettings, 'Linked test book')
 const library = () => profiles.loadSettingsProfiles()
 const profile = id => library().profiles.find(item => item.id === id)
 const defaults = () => Object.fromEntries(['text', 'tts', 'stt', 'image', 'video', 'ui', 'story', 'codex', 'summary'].map(kind => [kind, library().defaults[kind]]))
 const delay = () => new Promise(resolve => setTimeout(resolve, 15))
 async function settle() { await act(async () => { await delay(); await delay() }) }
+async function waitForProfileUsage(host) {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const summary = host.querySelector('details.profile-usage summary')
+    if (summary) return summary.textContent.trim()
+    if (host.querySelector('.profile-header-meta [role="alert"]')) break
+    await act(async () => { await delay() })
+  }
+  assert.fail(`Linked-book usage did not finish loading: ${host.querySelector('.profile-header-meta')?.textContent ?? 'Missing profile metadata'}`)
+}
 async function mount(t, Component, props = {}) {
   const host = document.createElement('div'); document.body.append(host)
   const root = createRoot(host)
@@ -1165,7 +1175,7 @@ test('book Edit identifies global shared scope; Duplicate does not reassign the 
   const origin = mounted.host.querySelector('.profile-origin-note')
   assert.ok(origin)
   assert.equal(origin.textContent.trim(), `Opened from “${created.book.title}”. You are editing a shared global profile, not a book-only override.`)
-  assert.equal(mounted.host.querySelector('details.profile-usage summary')?.textContent.trim(), 'Used in 1 book')
+  assert.equal(await waitForProfileUsage(mounted.host), 'Used in 1 book')
   const warning = mounted.host.querySelector('.profile-linked-warning')
   assert.ok(warning)
   assert.match(warning.textContent, /shared|linked/i)
@@ -1179,7 +1189,7 @@ test('book Edit identifies global shared scope; Duplicate does not reassign the 
   assert.equal(JSON.stringify(profiles.profileConfiguration(profile(original.id))), beforeConfiguration)
   assert.equal(JSON.stringify(await persistence.getBookProfileSelections(created.book.id)), beforeSelections)
   assert.equal(JSON.stringify(library().defaults), beforeDefaults)
-  assert.equal(mounted.host.querySelector('details.profile-usage summary')?.textContent.trim(), 'Used in 0 books')
+  assert.equal(await waitForProfileUsage(mounted.host), 'Used in 0 books')
   const copyWarning = mounted.host.querySelector('.profile-linked-warning')
   assert.ok(copyWarning, 'Shared effects warning remains visible for an unused copy')
   assert.match(copyWarning.textContent, /No books currently use this profile/)

@@ -37,8 +37,8 @@ test('Workspace enforces stale refresh, load ownership, and latest openBook inte
   const loadEnd = source.indexOf('\n  async function loadScene(', loadStart)
   const loadBlock = source.slice(loadStart, loadEnd)
   assert.match(loadBlock, /documentLoadIntentRef\.current\.begin\(\)/)
-  assert.match(loadBlock, /documentBelongsToBook\(editableDocument\.bookId, expectedBookId\)/)
-  assert.ok(loadBlock.indexOf('documentBelongsToBook(editableDocument.bookId, expectedBookId)') < loadBlock.indexOf('activeDocumentIdRef.current = editableDocument.id'))
+  assert.match(loadBlock, /entityAvailableInBook\(editableDocument, currentBookRef\.current \?\? undefined\)/)
+  assert.ok(loadBlock.indexOf('entityAvailableInBook(editableDocument, currentBookRef.current ?? undefined)') < loadBlock.indexOf('activeDocumentIdRef.current = editableDocument.id'))
 
   const openStart = source.indexOf('  async function openBook(')
   const openEnd = source.indexOf('\n  async function deleteWithSaveBarrier', openStart)

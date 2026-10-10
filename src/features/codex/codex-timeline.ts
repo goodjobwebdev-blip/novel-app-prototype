@@ -1,5 +1,6 @@
 import type { ArcEntity, BookEntity, CodexEntryEntity, StructuralEntity } from '../../data/persistence'
 import { proseText } from '../editor/document-projection.ts'
+import { entityAvailableInBook } from '../worlds/world-service'
 
 export type CodexCheckpoint = { id: string; label: string; anchorBookId: string; sceneId: string; content: string; revision: number }
 export type TimelineMode = 'cutoff' | 'strict'
@@ -17,7 +18,7 @@ export function timelineScenes(world: TimelineWorld, bookId: string): Structural
   visit(bookId); return result
 }
 export function timelineOrderSignature(world: TimelineWorld) {
-  return JSON.stringify(world.books.map(book => [book.id, book.seriesId, book.seriesOrder, timelineScenes(world, book.id).map(scene => scene.id)]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))))
+  return JSON.stringify(world.books.map(book => [book.id, book.seriesId, book.seriesOrder, book.worldId, [...(book.hiddenWorldEntryIds ?? [])].sort(), timelineScenes(world, book.id).map(scene => scene.id)]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))))
 }
 export function checkpointPlaced(checkpoint: CodexCheckpoint, world: TimelineWorld) { return timelineScenes(world, checkpoint.anchorBookId).some(scene => scene.id === checkpoint.sceneId) }
 export function compareStoryPositions(a: StoryCutoff, b: StoryCutoff, world: TimelineWorld): number {
@@ -32,10 +33,20 @@ export function compareStoryPositions(a: StoryCutoff, b: StoryCutoff, world: Tim
   if (orders.some(order => !Number.isFinite(order)) || new Set(orders).size !== orders.length) throw new Error('Set a distinct numeric series order for every book before resolving cross-book checkpoints.')
   return Number(ab.seriesOrder) - Number(bb.seriesOrder)
 }
+export function checkpointBookAvailable(entry: CodexEntryEntity, bookId: string, requestingBookId: string, world: TimelineWorld): boolean {
+  const owner = world.books.find(book => book.id === requestingBookId)
+  const anchor = world.books.find(book => book.id === bookId)
+  if (!entityAvailableInBook(entry, owner)) return false
+  if (bookId === requestingBookId) return true
+  if (!owner?.seriesId || anchor?.seriesId !== owner.seriesId) return false
+  if (entry.worldId) return entityAvailableInBook(entry, anchor)
+  // Keep old snapshot chronology readable without treating Series as an owner.
+  return Boolean(entry.seriesSourceId || entry.codexScope === 'series')
+}
 export function resolveCodexState(entry: CodexEntryEntity, cutoff: StoryCutoff, world: TimelineWorld, mode: TimelineMode = 'cutoff') {
+  if (!entityAvailableInBook(entry, world.books.find(book => book.id === cutoff.bookId))) throw new Error('The entry is unavailable in this book.')
   if (!timelineScenes(world, cutoff.bookId).some(scene => scene.id === cutoff.sceneId)) throw new Error('Choose an existing scene for the Codex cutoff.')
-  const owner = world.books.find(book => book.id === cutoff.bookId)
-  const allowedBook = (bookId: string) => bookId === cutoff.bookId || Boolean((entry.seriesSourceId || entry.codexScope === 'series') && owner?.seriesId && world.books.some(book => book.id === bookId && book.seriesId === owner.seriesId))
+  const allowedBook = (bookId: string) => checkpointBookAvailable(entry, bookId, cutoff.bookId, world)
   const eligible = (entry.checkpoints ?? []).filter(point => allowedBook(point.anchorBookId) && checkpointPlaced(point, world) && compareStoryPositions({ bookId: point.anchorBookId, sceneId: point.sceneId }, cutoff, world) <= 0)
   eligible.sort((a, b) => compareStoryPositions({ bookId: a.anchorBookId, sceneId: a.sceneId }, { bookId: b.anchorBookId, sceneId: b.sceneId }, world) || a.id.localeCompare(b.id))
   const checkpoint = eligible.at(-1)
@@ -45,7 +56,8 @@ export function resolveCodexState(entry: CodexEntryEntity, cutoff: StoryCutoff, 
 }
 /** Resolve once, then discard all alternate bodies and cached summaries from the request snapshot. */
 export function resolveTimelineEntities(entities: ArcEntity[], cutoff: StoryCutoff, world: TimelineWorld): ArcEntity[] {
-  return entities.map(entity => {
+  const book = world.books.find(book => book.id === cutoff.bookId)
+    return entities.filter(entity => entityAvailableInBook(entity, book)).map(entity => {
     if (entity.type !== 'codexEntry') return entity
     const entry = entity as CodexEntryEntity, state = resolveCodexState(entry, cutoff, world)
     const { checkpoints: _checkpoints, timelineSummaries: _summaries, seriesSnapshotSignature: _signature, ...safe } = entry

@@ -1,6 +1,6 @@
 import { validateAuthorPlanning, type AuthorPlanning } from '../features/author-planning/author-planning'
 import { BUILTIN_LORE_TYPES, storedLoreTypes } from '../features/codex/lore-types.ts'
-import { detachedCodex } from '../features/codex/series-codex.ts'
+
 import type { CodexEntryEntity } from './persistence'
 import { documentBlocks, remapDocumentBlocks } from '../features/editor/document-projection.ts'
 import type { GalleryImage, ImageJob } from '../features/images/image-generation-types'
@@ -54,8 +54,53 @@ function portableProfiles(entities: ArcEntity[], definitions?: SettingsProfile[]
   return clean
 }
 
+/** Stable, book-specific identities make World snapshots safe for existing book sync.
+ * The canonical World records are never modified or included in the payload. */
+export function portableWorldBookSnapshot(data: BookArchiveData, bookId: string): BookArchiveData {
+  const book = data.entities.find(entity => entity.type === 'book' && entity.id === bookId)
+  if (!book) throw new Error('The snapshot is missing its Book.')
+  const ids = new Map<string, string>()
+  if (book.worldId) ids.set(book.worldId, bookId)
+  const sharedIds = new Set(data.entities.filter(entity => entity.worldId && entity.type !== 'book').map(entity => entity.id))
+  const snapshotId = (value: string) => `world-snapshot-${bookId}-${value}`
+  for (const value of sharedIds) ids.set(value, snapshotId(value))
+  for (const row of data.snapshots) if (sharedIds.has(row.entityId)) ids.set(row.id, snapshotId(row.id))
+  for (const row of data.dependencies) if (row.bookId !== bookId) ids.set(row.id, snapshotId(row.id))
+  for (const row of [...data.illustrations, ...(data.galleryImages ?? [])]) if (row.bookId !== bookId) ids.set(row.id, snapshotId(row.id))
+  const localTriggers = new Set(data.entities.filter(entity => entity.type === 'codexEntry' && !entity.worldId).flatMap(entity => (entity.autoIncludeTriggers as string[] ?? []).map(trigger => trigger.trim().replace(/\s+/g, ' ').toLocaleLowerCase())))
+  const remap = (value: any, key = '', depth = 0): any => {
+    if (depth > 80) throw new Error('This snapshot contains excessively nested data.')
+    if (value instanceof Blob) return value
+    if (Array.isArray(value)) return value.map(item => remap(item, key, depth + 1))
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).filter(([name]) => !['worldId', 'hiddenWorldEntryIds'].includes(name)).map(([name, item]) => [name, remap(item, name, depth + 1)]))
+    if (typeof value === 'string') {
+      if (key === 'content') return remapDocumentBlocks(value, ids)
+      if (REF_KEYS.has(key) || REF_ARRAYS.has(key) || key === 'id') return ids.get(value) ?? value
+      if (key === 'directImageReferenceIds' && value.startsWith('codex:')) return `codex:${ids.get(value.slice(6)) ?? value.slice(6)}`
+    }
+    return value
+  }
+  return {
+    ...data,
+    entities: data.entities.filter(entity => entity.type !== 'world').map(entity => {
+      const copy = remap(entity) as ArcEntity
+      if (entity.worldId && entity.type === 'codexEntry') {
+        copy.bookId = bookId; copy.parentId = bookId
+        copy.autoIncludeTriggers = (entity.autoIncludeTriggers as string[] ?? []).filter(trigger => !localTriggers.has(trigger.trim().replace(/\s+/g, ' ').toLocaleLowerCase()))
+      }
+      return copy
+    }),
+    snapshots: data.snapshots.map(row => remap(row)),
+    dependencies: data.dependencies.map(row => ({ ...remap(row), bookId })),
+    illustrations: data.illustrations.map(row => ({ ...remap(row), bookId })),
+    galleryImages: data.galleryImages?.map(row => ({ ...remap(row), bookId, kept: true })),
+    imageJobs: data.imageJobs?.map(row => remap(row)),
+  }
+}
+
 /** A versioned binary archive: JSON metadata followed by image blobs (no base64 overhead). */
 export function encodeBookArchive(data: BookArchiveData): Blob {
+  valid(data.entities.every(entity => entity.type !== 'world' && !entity.worldId))
   const images: StoredImage[] = data.illustrations.map(({ image, thumbnail, ...rest }) => ({ ...rest, imageSize: image.size, imageType: image.type, thumbnailSize: thumbnail.size, thumbnailType: thumbnail.type }))
   const gallery: StoredGalleryImage[] = (data.galleryImages ?? []).map(({ image, thumbnail, ...rest }) => ({ ...rest, imageSize: image.size, imageType: image.type, thumbnailSize: thumbnail.size, thumbnailType: thumbnail.type }))
   const entities = data.entities.map((entity) => entity.type === 'settings' ? withoutKeys(entity.settingsType === 'ai' ? { ...entity, value: sanitizeProfileSettings(entity.value as Parameters<typeof sanitizeProfileSettings>[0]) } : entity) : entity.type === 'chatMessage' && Array.isArray(entity.imageGenerations) ? { ...entity, imageGenerations: entity.imageGenerations.map((proposal: any) => ({ ...proposal, ...(proposal.draft ? { draft: { ...proposal.draft, sources: [] } } : {}) })) } : entity)
@@ -104,7 +149,8 @@ export async function decodeBookArchive(file: Blob): Promise<BookArchiveData> {
   const books = entities.filter((entity) => entity.type === 'book')
   valid(books.length === 1 && typeof books[0].title === 'string')
   const book = books[0]
-  valid(!book.parentId && !book.bookId)
+  valid(!book.parentId && !book.bookId && !book.worldId)
+  valid(entities.every(entity => !entity.worldId))
   for (const entity of entities) {
     if (entity.type === 'series') { valid(!entity.parentId && !entity.bookId); continue }
     if (entity.type === 'book') continue
@@ -195,9 +241,16 @@ export function copyBookArchive(data: BookArchiveData, newId = () => crypto.rand
   for (const profile of settingsProfiles ?? []) ids.set(profile.id, `profile-import-${newId()}`)
   const sourceBook = data.entities.find(entity => entity.type === 'book')!
   const sourceSeries = data.entities.find(entity => entity.type === 'series' && entity.id === sourceBook.seriesId)
-  const importedTypes = sourceSeries ? [...storedLoreTypes(sourceSeries), ...storedLoreTypes(sourceBook).filter(type => !type.builtin)] : storedLoreTypes(sourceBook)
+  // Series are organizational metadata, never a Codex/type inheritance source.
+  const importedTypes = storedLoreTypes(sourceBook)
   data = { ...data, entities: data.entities.map(entity => entity.id === sourceBook.id ? { ...entity, loreTypes: importedTypes.map(type => ({ ...type, ownerId: sourceBook.id })) } : entity.id === sourceSeries?.id ? { ...entity, loreTypes: storedLoreTypes(entity).filter(type => type.builtin) } : entity) }
-  data = { ...data, entities: data.entities.map(entity => entity.type === 'codexEntry' ? detachedCodex(entity as CodexEntryEntity) : entity) }
+  data = { ...data, entities: data.entities.filter(entity => entity.type !== 'world').map(entity => {
+    const { worldId: _world, hiddenWorldEntryIds: _hidden, ...local } = entity
+    if (local.type !== 'codexEntry') return local
+    // Old backups can contain series proxy metadata; import it as ordinary lore.
+    const { codexScope: _scope, seriesSourceId: _source, seriesSourceSeriesId: _series, seriesSnapshotSignature: _signature, hiddenInBook: hidden, ...entry } = local as CodexEntryEntity
+    return { ...entry, ...(hidden ? { archivedAt: entry.archivedAt || Date.now() } : {}) }
+  }) }
   for (const entity of data.entities) if (entity.type !== 'settings' && entity.type !== 'summary') ids.set(entity.id, `${entity.type}-${newId()}`)
   for (const entity of data.entities) {
     if (entity.type === 'settings') {

@@ -22,7 +22,7 @@ const p = await import(pathToFileURL(`${directory}/data/persistence.mjs`))
 const archive = await import(pathToFileURL(`${directory}/data/book-archive.mjs`))
 const images = await import(pathToFileURL(`${directory}/features/images/illustration-image.mjs`))
 const { initialAiSettings } = await import(pathToFileURL(`${directory}/shared/ai/ai-settings.mjs`))
-after(() => rmSync(directory, { recursive: true, force: true }))
+after(async () => { try { (await p.database()).close() } finally { rmSync(directory, { recursive: true, force: true }) } })
 const png = new Blob([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6AAAAAElFTkSuQmCC', 'base64')], { type: 'image/png' })
 const pixels = { image: png, thumbnail: png, width: 1, height: 1 }
 const details = { caption: 'The gate', alt: 'A moonlit gate', cropX: 20, cropY: 80 }
@@ -37,7 +37,8 @@ async function bookFixture() {
   return { book, chapter, scene, entry, other, edge, illustration }
 }
 
-test('v3 migration preserves existing lore and adds image storage', async () => {
+test('v3 migration to schema v8 preserves existing lore and adds image storage before startup reset', async () => {
+  assert.equal((await p.database()).verno, 8)
   assert.equal((await p.getEntity('migration-entry')).content, 'Existing lore')
   assert.equal(await p.getIllustration('migration-entry'), undefined)
 })

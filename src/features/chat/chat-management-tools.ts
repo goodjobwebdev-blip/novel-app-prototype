@@ -5,7 +5,8 @@ import { proseEntities } from '../editor/document-projection.ts'
 import { sceneWritingFields, sceneWritingLabels, sceneWritingValues, validateSceneWritingPatch, resolveSceneWriting } from '../writing/scene-writing'
 import type { ChatToolCall, ChatToolDefinition } from './chat-api'
 import { transitionChatMessageProposal, type ChatEntityActionProposal, type ChatMessageEntity } from './chat-service'
-import { applyChatManagementChange, getEntity, isCodexEntryArchived, listCodexDependencies, listEntitiesByBook, listSeries, type ArcEntity, type BookEntity, type CodexEntryEntity, type SummaryEntity } from '../../data/persistence'
+import { applyChatManagementChange, database, getEntity, isCodexEntryArchived, listCodexDependencies, listEntitiesByBook, listSeries, removeCodexDependency, updateCodexDependency, type ArcEntity, type BookEntity, type CodexEntryEntity, type SummaryEntity } from '../../data/persistence'
+import { entityAvailableInBook } from '../worlds/world-service'
 import { bookMetadataFields, bookMetadataLabels, metadataValues, validateMetadataPatch, type ChatManagementOperation } from './chat-management-schema'
 import { normalizeCodexTriggerList } from '../codex/codex-trigger-service'
 import { searchBookEntities, searchableTypes } from './chat-search'
@@ -50,12 +51,12 @@ async function bookEntity(bookId: string) {
 }
 async function codexEntity(bookId: string, id: unknown, allowArchived = false) {
   const entry = await getEntity<CodexEntryEntity>(String(id ?? ''))
-  if (!entry || entry.type !== 'codexEntry' || entry.bookId !== bookId || (!allowArchived && isCodexEntryArchived(entry))) throw new Error('The Codex entry is unavailable or archived in this Book.')
+  if (!entry || entry.type !== 'codexEntry' || !entityAvailableInBook(entry, await bookEntity(bookId)) || (!allowArchived && isCodexEntryArchived(entry))) throw new Error('The Codex entry is unavailable or archived in this Book.')
   return entry
 }
 async function summarySource(bookId: string, id: unknown) {
   const entity = await getEntity<SummarySourceEntity>(String(id ?? ''))
-  if (!entity || entity.bookId !== bookId || !['act', 'chapter', 'scene', 'codexEntry'].includes(entity.type)) throw new Error('Only Scenes, Chapters, Acts and Codex entries in this Book support summaries.')
+  if (!entity || !entityAvailableInBook(entity, await bookEntity(bookId)) || !['act', 'chapter', 'scene', 'codexEntry'].includes(entity.type)) throw new Error('Only Scenes, Chapters, Acts and Codex entries in this Book support summaries.')
   return entity
 }
 function proposal(entity: ArcEntity, action: ChatEntityActionProposal['action'], operation: ChatManagementOperation, args: Record<string, unknown>, changes: NonNullable<ChatEntityActionProposal['changes']>): ChatEntityActionProposal {
@@ -128,6 +129,7 @@ export async function executeChatManagementTool(bookId: string, call: ChatToolCa
       const entry = await codexEntity(bookId, args.entity_id)
       const target = await codexEntity(bookId, args.target_id, args.action === 'remove')
       if (entry.id === target.id) throw new Error('An entry cannot depend on itself.')
+      if (entry.worldId && entry.worldId !== target.worldId) throw new Error('A World entry can depend only on entries in the same World.')
       const action = args.action
       if (action !== 'create' && action !== 'update' && action !== 'remove') throw new Error('Choose create, update or remove.')
       const before = (await listCodexDependencies(bookId)).find((e) => e.sourceId === entry.id && e.targetId === target.id) ?? null
@@ -152,6 +154,27 @@ export async function executeChatManagementTool(bookId: string, call: ChatToolCa
   }
 }
 
+async function applyManagementChange(bookId: string, entityId: string, operation: ChatManagementOperation) {
+  const db = await database()
+  await db.transaction('rw', db.table('entities'), db.table('codexDependencies'), async () => {
+    if (operation.kind === 'dependency' && operation.action !== 'create') {
+      const entry = await codexEntity(bookId, entityId)
+      if (entry.worldId) {
+        const target = await codexEntity(bookId, operation.targetId, operation.action === 'remove')
+        if (target.id === entry.id || target.worldId !== entry.worldId) throw new Error('The dependency target is unavailable.')
+        const current = (await listCodexDependencies(bookId)).find(edge => edge.sourceId === entry.id && edge.targetId === target.id)
+        const before = operation.before
+        if (!current || current.bookId !== entry.bookId || !before || current.id !== before.id || current.updatedAt !== before.updatedAt || current.relationLabel !== before.relationLabel || current.includeWithSource !== before.includeWithSource) throw new Error('The dependency changed since this proposal. Read settings again.')
+        // Canonical edges belong to the World, not the Book approving the edit.
+        if (operation.action === 'remove') await removeCodexDependency(current.id)
+        else await updateCodexDependency(current.id, { relationLabel: operation.relationLabel, includeWithSource: operation.includeWithSource })
+        return
+      }
+    }
+    await applyChatManagementChange(bookId, entityId, operation)
+  })
+}
+
 export async function applyChatManagementProposal(message: ChatMessageEntity, item: ChatEntityActionProposal, signal: AbortSignal) {
   const operation = item.operation
   if (!operation || !item.entityId) throw new Error('This proposal is incomplete.')
@@ -159,7 +182,7 @@ export async function applyChatManagementProposal(message: ChatMessageEntity, it
   try {
     signal.throwIfAborted()
     if (operation.kind === 'summary') entityId = (await regenerateEntitySummary(message.bookId, entityId, signal, { messageId: message.id, proposalId: item.id })).id
-    else await applyChatManagementChange(message.bookId, entityId, operation)
+    else await applyManagementChange(message.bookId, entityId, operation)
   } catch (error) {
     await transitionChatMessageProposal(message.id, 'entityActions', item.id, ['applying'], { status: operation.kind === 'summary' ? 'proposed' : 'stale', error: signal.aborted ? 'Generation stopped. The previous summary was kept.' : error instanceof Error ? error.message : 'Could not apply this proposal.' })
     throw error

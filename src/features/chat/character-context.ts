@@ -1,13 +1,16 @@
 import { isCodexEntryArchived, type ArcEntity, type CodexEntryEntity, type GenerationContextProfile, type SummaryEntity } from '../../data/persistence'
 import { proseEntities, proseText } from '../editor/document-projection'
 import { structuralSelectionIds } from '../../shared/context/context-source-selection'
+import { entityAvailableInBook } from '../worlds/world-service'
+import { codexContextRepresentation } from '../writing/summary-service'
 import { resolveCodexState, timelineScenes, type StoryCutoff, type TimelineWorld } from '../codex/codex-timeline'
 
 export type CharacterAdditionalSource = { entityId: string; title: string; kind: 'scene' | 'codex' | 'note' | 'summary'; content: string }
 
 /** Explicit author selections may supplement the automatic story-position context. */
 export function characterAdditionalSources(entities: ArcEntity[], profile: GenerationContextProfile, cutoff: StoryCutoff, world: TimelineWorld): CharacterAdditionalSource[] {
-  const available = proseEntities(entities.filter(entity => entity.bookId === cutoff.bookId))
+  const book = world.books.find(book => book.id === cutoff.bookId)
+  const available = proseEntities(entities.filter(entity => entityAvailableInBook(entity, book)))
   const scenes = timelineScenes(world, cutoff.bookId)
   const selected = structuralSelectionIds(available, profile.structuralIds)
   const result: CharacterAdditionalSource[] = []
@@ -18,8 +21,10 @@ export function characterAdditionalSources(entities: ArcEntity[], profile: Gener
   for (const entity of available) {
     if (entity.type === 'note' && profile.noteIds.includes(entity.id)) add(entity, 'note')
     if (entity.type === 'codexEntry' && !isCodexEntryArchived(entity) && profile.codexEntryIds.includes(entity.id)) {
-      const content = profile.loreAtCurrentScene ? resolveCodexState(entity as CodexEntryEntity, cutoff, world, 'strict').content : String(entity.content ?? '')
-      add(entity, 'codex', content)
+      const entry = entity as CodexEntryEntity
+      const state = profile.loreAtCurrentScene ? resolveCodexState(entry, cutoff, world, 'strict') : undefined
+      const resolved = state ? { ...entry, content: state.content, timelineResolved: true, timelineSummary: state.summary } : entry
+      add(entity, 'codex', codexContextRepresentation(resolved, available).content)
     }
     if (entity.type !== 'summary' || profile.summaryRange === 'none') continue
     const source = available.find(item => item.id === (entity as SummaryEntity).sourceEntityId && ['act', 'chapter', 'scene'].includes(item.type))

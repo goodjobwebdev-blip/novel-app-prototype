@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { createCharacterChat, listCharacterCandidates, moveCharacterChat, type CharacterParticipant } from './character-chat'
 import { readTimelineWorld } from '../codex/codex-timeline-service'
 import { timelineScenes, type TimelineWorld } from '../codex/codex-timeline'
-import type { CodexEntryEntity } from '../../data/persistence'
-import { updateEntityAtomically } from '../../data/persistence'
+import type { BookEntity, CodexEntryEntity } from '../../data/persistence'
+import { database, isCodexEntryArchived } from '../../data/persistence'
+import { entityAvailableInBook } from '../worlds/world-service'
 import { updateChat, type ChatEntity } from './chat-service'
 import { listGalleryImages } from '../images/image-store'
 import type { GalleryImage } from '../images/image-generation-types'
@@ -30,10 +31,19 @@ export function CharacterPosition({ chat, disabled, onOpen }: { chat: ChatEntity
   const [open, setOpen] = useState(false)
   return chat.character ? <div className="character-position"><p>Character chat · {chat.character.participants.map(p => p.label).join(', ')}</p><Button size="small" disabled={disabled} onClick={() => setOpen(true)}>Story position / restart</Button>{open && <CharacterChatSetup bookId={chat.bookId} chat={chat} onClose={() => setOpen(false)} onOpen={onOpen} />}</div> : null
 }
-export function RoleplayParticipant({ entry, disabled, onBeforeChange, onRefresh, onStart }: { entry: CodexEntryEntity; disabled?: boolean; onBeforeChange: () => Promise<void>; onRefresh: () => Promise<void>; onStart: () => void }) {
+export function RoleplayParticipant({ bookId, entry, disabled, onBeforeChange, onRefresh, onStart }: { bookId?: string; entry: CodexEntryEntity; disabled?: boolean; onBeforeChange: () => Promise<void>; onRefresh: () => Promise<void>; onStart: () => void }) {
   const [error, setError] = useState('')
   const eligible = entry.typeId === 'lore-character' || entry.roleplayParticipant === true
-  return <div className="roleplay-participant">{entry.typeId !== 'lore-character' && <Checkbox label="Use as roleplay participant" disabled={disabled || entry.codexScope === 'inherited'} checked={entry.roleplayParticipant === true} onChange={e => { const enabled = e.target.checked; void onBeforeChange().then(() => updateEntityAtomically<CodexEntryEntity>(entry.id, current => { if (current.type !== 'codexEntry' || current.bookId !== entry.bookId || current.codexScope === 'inherited') throw new Error('Edit for this book first.'); return { ...current, roleplayParticipant: enabled, updatedAt: Date.now() } })).then(onRefresh).catch(e => setError(e.message)) }} />}{eligible && <Button size="small" disabled={disabled} onClick={onStart}>Chat with character</Button>}{error && <p role="alert">{error}</p>}</div>
+  const setParticipant = async (enabled: boolean) => {
+    const db = await database()
+    await db.transaction('rw', db.table('entities'), async () => {
+      const current = await db.table('entities').get(entry.id) as CodexEntryEntity | undefined
+      const book = bookId !== undefined ? await db.table('entities').get(bookId) as BookEntity | undefined : undefined
+      if (current?.type !== 'codexEntry' || current.bookId !== entry.bookId || current.worldId !== entry.worldId || isCodexEntryArchived(current) || (bookId !== undefined && !entityAvailableInBook(current, book))) throw new Error('This entry changed or is no longer available.')
+      await db.table('entities').put({ ...current, roleplayParticipant: enabled, updatedAt: Math.max(Date.now(), current.updatedAt + 1) })
+    })
+  }
+  return <div className="roleplay-participant">{entry.typeId !== 'lore-character' && <Checkbox label="Use as roleplay participant" disabled={disabled || isCodexEntryArchived(entry)} checked={entry.roleplayParticipant === true} onChange={e => { const enabled = e.target.checked; void onBeforeChange().then(() => setParticipant(enabled)).then(onRefresh).catch(e => setError(e.message)) }} />}{eligible && <Button size="small" disabled={disabled || isCodexEntryArchived(entry)} onClick={onStart}>Chat with character</Button>}{error && <p role="alert">{error}</p>}</div>
 }
 export function ChatImageReferences({ chat, disabled, onChange }: { chat: ChatEntity; disabled?: boolean; onChange: (chat: ChatEntity) => void }) {
   const busy = useRef(false)

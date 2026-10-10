@@ -61,6 +61,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 // One persisted book and its explicitly chosen shared Text profile keep setup
 // small. Defaults stay opted out, so this exercises Workspace's book resolution.
 ai.saveAiSettings({ ...ai.copyAiSettings(ai.initialAiSettings), provider: 'fake', apiKey: '', baseUrl: '', mainModel: 'fake/test', autocomplete: ai.defaultAutocompleteSettings() })
+await persistence.ensurePrototypeSeed('demo')
 const fixture = await persistence.createBook(ai.loadAiSettings(), 'Workspace autocomplete fixture')
 const text = profiles.createSettingsProfile('text', 'Workspace autocomplete Text')
 profiles.saveSettingsProfile({ ...text, settings: { ...text.settings, autocomplete: { enabled: true, model: 'fake/test', delayMs: 100, length: 'phrase' } } })
