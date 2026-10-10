@@ -1,5 +1,5 @@
 .settings-profiles-panel, .profile-editor, .book-profiles-panel { min-width: 0; }
-.settings-profiles-panel > .arc-field { margin-bottom: 18px; }
+.settings-profiles-panel .settings-profile-type { margin-bottom: 18px; }
 .settings-breadcrumbs { min-width: 0; margin: 0 0 12px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .settings-breadcrumbs ol { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin: 0; padding: 0; list-style: none; }
 .settings-breadcrumbs li { position: relative; flex: 0 1 auto; min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }

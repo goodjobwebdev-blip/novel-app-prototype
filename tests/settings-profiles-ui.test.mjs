@@ -3,6 +3,7 @@ assertTestResourceLimits()
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createRequire } from 'node:module'
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 import { JSDOM } from 'jsdom'
@@ -143,6 +144,23 @@ test('global App navigation, last-book return, and prompt deep links select the 
   assertBreadcrumbs(mounted.host, ['Global Settings', 'AI', 'Prompts', profileLabels.summary, custom.name])
   assert.ok(mounted.host.querySelector('.response-length-setting'))
   assert.equal(Boolean(mounted.host.querySelector('.models-card')), false)
+  await mounted.close()
+})
+
+test('model and prompt type selectors retain spacing above the profile editor inside the inert wrapper', async (t) => {
+  const style = document.createElement('style')
+  t.after(() => style.remove())
+  style.textContent = readFileSync(new URL('../src/features/settings/settings-profiles.css', import.meta.url), 'utf8')
+  document.head.append(style)
+  const mounted = await mount(t, App)
+  for (const [tab, label] of [['Models', 'Model profile type'], ['Prompts', 'Prompt preset type']]) {
+    await click(button(mounted.host, tab))
+    const typeField = field(mounted.host, label).closest('.arc-field')
+    assert.ok(typeField.classList.contains('settings-profile-type'))
+    assert.ok(typeField.nextElementSibling?.classList.contains('profile-editor'), 'Type selector directly precedes the profile editor')
+    assert.equal(getComputedStyle(typeField).marginBottom, '18px')
+    assert.notEqual(getComputedStyle(field(mounted.host, 'Profile / preset').closest('.arc-field')).marginBottom, '18px', 'Spacing is scoped to the type selector, not fields inside the profile card')
+  }
   await mounted.close()
 })
 
