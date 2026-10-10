@@ -90,6 +90,48 @@ test('unsupported, disabled, missing model or connection, selection and protecte
   assert.equal(buildAutocompleteRequest(input('Prose', { snapshot: { ...snapshot('Prose'), from: 2, to: 2 } })), null)
 })
 
+test('request permits only whitespace after the cursor and sends context up to the cursor', () => {
+  const before = 'The door opened.'
+  for (const tail of ['  ', '\n\n', ' \t\n \n']) {
+    const document = before + tail
+    const captured = { ...snapshot(document), from: before.length, to: before.length }
+    const request = buildAutocompleteRequest(input(document, { snapshot: captured }))
+    assert.ok(request)
+    assert.equal(JSON.parse(request.messages[1].content).manuscript, before)
+  }
+  for (const tail of [' \nNext paragraph.', ' \n<!-- private -->', ' \n![image](asset.png)']) {
+    const document = before + tail
+    assert.equal(buildAutocompleteRequest(input(document, { snapshot: { ...snapshot(document), from: before.length, to: before.length } })), null)
+  }
+  for (const before of ['Prose `unfinished', 'Prose `code`', 'Prose<!-- unfinished', 'Prose\n\n```js\ncode']) {
+    const document = before + ' \n\n'
+    assert.equal(buildAutocompleteRequest(input(document, { snapshot: { ...snapshot(document), from: before.length, to: before.length } })), null)
+  }
+})
+
+test('controller joins against the cursor prefix rather than the whitespace tail', async t => {
+  const h = harness(t)
+  for (const [before, response, expected] of [
+    ['The door opened', ' quietly', ' quietly'],
+    ['The door opened.', 'Then', ' Then'],
+    ['The door opened ', ' quietly', 'quietly'],
+    ['unfin', 'ished', 'ished'],
+  ]) {
+    const document = before + ' \n\n'
+    const captured = { ...snapshot(document), from: before.length, to: before.length }
+    h.controller.schedule(input(document, { snapshot: captured }))
+    h.tick(800)
+    assert.equal(JSON.parse(h.calls.at(-1).request.messages[1].content).manuscript, before)
+    h.calls.at(-1).resolve(response)
+    await nextTurn()
+    assert.equal(h.shown().at(-1).text, expected)
+    assert.equal(h.shown().at(-1).snapshot.from, before.length)
+    assert.equal(h.shown().at(-1).snapshot.document, document)
+  }
+  assert.equal(h.calls.length, 4)
+  assert.equal(h.shown().length, 4)
+})
+
 test('sanitization rejects markup, repeated tails, oversized and explanatory outputs without truncation', () => {
   for (const response of ['', '  ', '```text\nanswer\n```', '<!--private-->', '<img src=x>', '# Heading', '- list', '![image](url)', '[link](url)', '**bold**', '*emphasis*', '{{hidden}}', 'arc:passage', 'Sure: more prose', 'First\nSecond', 'hidden\u200btext', 'x'.repeat(241), 'word '.repeat(33), 'The door opened', 'The door opened and closed']) {
     assert.equal(sanitizeAutocompleteCompletion(response, 'The door opened', 'phrase'), null, response.slice(0, 50))

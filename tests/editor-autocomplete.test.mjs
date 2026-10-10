@@ -90,6 +90,61 @@ test('ghost is an aria-hidden uneditable decoration, not document, change or his
   assert.equal(undoDepth(view.state), 0)
 })
 
+for (const tail of ['  ', '\n\n', ' \t\n \n']) {
+  test(`typing before a whitespace tail allows ghost and acceptance at the cursor: ${JSON.stringify(tail)}`, async t => {
+    const { ref, view, inputs, changes } = await mount(t, 'Original.' + tail)
+    await act(async () => ref.current.placeCursor('Original.'.length))
+    await act(async () => view.dispatch({
+      changes: { from: 'Original.'.length, insert: ' Typed.' },
+      selection: { anchor: 'Original. Typed.'.length },
+      annotations: Transaction.userEvent.of('input.type'),
+    }))
+    assert.equal(inputs.length, 1)
+    const before = 'Original. Typed.'
+    const snapshot = inputs[0]
+    assert.equal(snapshot.from, before.length)
+    assert.equal(snapshot.document, before + tail)
+    assert.equal(ref.current.isAutocompleteSnapshotCurrent(snapshot), true)
+    assert.equal(ref.current.isAutocompleteSnapshotCurrent({ ...snapshot, from: snapshot.document.length, to: snapshot.document.length }), false)
+    const text = ' Continued.'
+    await act(async () => assert.equal(ref.current.setAutocompleteSuggestion(snapshot, text), true))
+    assert.equal(document.querySelector('.cm-autocomplete-ghost')?.textContent, text)
+    assert.equal(changes.length, 1, 'Showing ghost must not modify the document')
+    await act(async () => assert.equal(ref.current.acceptAutocompleteSuggestion(snapshot, text), true))
+    assert.equal(view.state.doc.toString(), before + text + tail)
+    assert.equal(view.state.selection.main.head, before.length + text.length)
+    assert.equal(inputs.length, 1, 'Acceptance must not trigger a new request')
+    await act(async () => assert.equal(ref.current.undo(), true))
+    assert.equal(view.state.doc.toString(), before + tail)
+    await act(async () => assert.equal(ref.current.redo(), true))
+    assert.equal(view.state.doc.toString(), before + text + tail)
+  })
+}
+
+test('text after the cursor blocks autocomplete, and moving within the whitespace tail invalidates snapshots', async t => {
+  const { ref, view, inputs } = await mount(t, 'Original. \nNext paragraph.  \n')
+  await act(async () => ref.current.placeCursor('Original.'.length))
+  assert.equal(ref.current.captureAutocompleteSnapshot(), null)
+  const endOfProse = 'Original. \nNext paragraph.'.length
+  await act(async () => ref.current.placeCursor(endOfProse))
+  const snapshot = await suggest(ref)
+  await act(async () => ref.current.placeCursor(endOfProse + 1))
+  assert.ok(document.querySelector('.cm-autocomplete-ghost') === null, 'Moving within trailing whitespace clears ghost')
+  assert.equal(ref.current.isAutocompleteSnapshotCurrent(snapshot), false)
+  await act(async () => ref.current.placeCursor(endOfProse))
+  assert.equal(ref.current.isAutocompleteSnapshotCurrent(snapshot), false)
+  assert.equal(view.state.doc.toString(), snapshot.document)
+  assert.equal(inputs.length, 0, 'Cursor movement alone must not request autocomplete')
+})
+
+for (const value of ['Text `inline code`', '<!-- private -->', '```js\nconst x = 1']) {
+  test(`protected/code boundary before a whitespace tail remains ineligible: ${JSON.stringify(value)}`, async t => {
+    const { ref } = await mount(t, value + ' \n\n')
+    await act(async () => ref.current.placeCursor(value.length))
+    assert.equal(ref.current.captureAutocompleteSnapshot(), null)
+  })
+}
+
 test('serialized snapshots survive source mutation and suggestion state captures its own copy', async t => {
   const { ref } = await mount(t)
   const source = ref.current.captureAutocompleteSnapshot()

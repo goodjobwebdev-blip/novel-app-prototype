@@ -76,8 +76,9 @@ export function buildAutocompleteContext(source: string, position = source.lengt
 }
 
 function canContinue(snapshot: EditorSelectionSnapshot) {
-  if (snapshot.from !== snapshot.to || snapshot.to !== snapshot.document.length || snapshot.from < 0) return false
-  const source = snapshot.document
+  if (snapshot.from !== snapshot.to || snapshot.from < 0 || snapshot.to > snapshot.document.length
+    || snapshot.document.slice(snapshot.from).trim()) return false
+  const source = snapshot.document.slice(0, snapshot.from)
   // Fail closed at the end of a private/code region, including unfinished markup.
   if ([...protectedRanges(source), ...codeRanges(source)].some((range) => range.from < source.length && range.to === source.length)) return false
   return Boolean(buildAutocompleteContext(source).trim())
@@ -216,7 +217,7 @@ export function createAutocompleteController(options: AutocompleteControllerOpti
         try {
           const response = await request(prepared, controller.signal)
           if (controller.signal.aborted || !current()) return
-          const text = sanitizeAutocompleteCompletion(response, snapshot.document, length)
+          const text = sanitizeAutocompleteCompletion(response, snapshot.document.slice(0, snapshot.from), length)
           if (text && current()) options.onSuggestion({ snapshot, text, configurationKey })
         } catch {
           // Never forward provider messages, credentials, or manuscript text to the UI.

@@ -549,7 +549,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     const selection = view.state.selection
     return (!requireFocus || view.hasFocus) && !view.state.readOnly && view.state.facet(EditorView.editable)
       && !activeGenerationRef.current && !activeDictationRef.current && !composingRef.current && !view.composing
-      && selection.ranges.length === 1 && selection.main.empty && selection.main.head === view.state.doc.length
+      && selection.ranges.length === 1 && selection.main.empty && !view.state.sliceDoc(selection.main.head).trim()
       && !autocompletePositionBlocked(view.state)
   }
 
@@ -565,7 +565,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     return Boolean(view && autocompleteEligible(view, requireFocus)
       && snapshot.autocompleteEpoch === autocompleteEpochRef.current
       && snapshot.editorId === editorIdRef.current && snapshot.revision === documentRevisionRef.current
-      && snapshot.document === view.state.doc.toString() && snapshot.from === view.state.doc.length
+      && snapshot.document === view.state.doc.toString() && snapshot.from === view.state.selection.main.head
       && snapshot.to === snapshot.from && snapshot.text === '')
   }
 
