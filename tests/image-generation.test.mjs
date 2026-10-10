@@ -82,7 +82,7 @@ test('v5 upgrade keeps books, lore, illustrations, and undo; new books still wor
   assert.equal((await p.getEntity('legacy-entry')).content, 'Existing lore')
   assert.equal((await p.getIllustration('legacy-entry')).image.size, png.size)
   assert.equal((await p.getIllustrationUndo('legacy-entry')).id, 'legacy-undo')
-  assert.equal((await p.database()).verno, 7)
+  assert.equal((await p.database()).verno, 8)
   assert.ok((await p.createBook(initialAiSettings, 'Created after upgrade')).book.id)
 })
 

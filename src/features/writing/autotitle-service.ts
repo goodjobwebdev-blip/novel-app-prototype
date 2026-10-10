@@ -11,11 +11,13 @@ import {
   type CodexEntryEntity,
   type NoteEntity,
   type StructuralEntity,
+  type WorldEntity,
 } from '../../data/persistence'
+import { entityAvailableInBook, listWorldEntries } from '../worlds/world-service'
 import { buildSummarySource, summaryStateForSource } from './summary-service'
 
-export type AutotitleTargetType = 'book' | 'act' | 'chapter' | 'scene' | 'note' | 'codexEntry'
-export type AutotitleEntity = BookEntity | StructuralEntity | NoteEntity | CodexEntryEntity
+export type AutotitleTargetType = 'book' | 'world' | 'act' | 'chapter' | 'scene' | 'note' | 'codexEntry'
+export type AutotitleEntity = BookEntity | WorldEntity | StructuralEntity | NoteEntity | CodexEntryEntity
 
 export type AutotitleRequest = {
   targetId: string
@@ -31,7 +33,7 @@ export type AutotitleRequest = {
   diagnostics: ContextDiagnostics
 }
 
-const supportedTypes = new Set<AutotitleTargetType>(['book', 'act', 'chapter', 'scene', 'note', 'codexEntry'])
+const supportedTypes = new Set<AutotitleTargetType>(['book', 'world', 'act', 'chapter', 'scene', 'note', 'codexEntry'])
 const structuralTypes = new Set(['act', 'chapter', 'scene'])
 
 function isSupported(entity: ArcEntity | undefined): entity is AutotitleEntity {
@@ -100,7 +102,7 @@ function orderedScenes(bookId: string, entities: ArcEntity[]) {
   return result
 }
 
-async function contextForTarget(book: BookEntity, target: AutotitleEntity, entities: ArcEntity[]) {
+async function contextForTarget(book: BookEntity, target: Exclude<AutotitleEntity, WorldEntity>, entities: ArcEntity[]) {
   const meta = bookMeta(book)
   if (target.type === 'book') {
     const topLevel = sorted(entities.filter((entity): entity is StructuralEntity => (entity.type === 'act' || entity.type === 'chapter') && entity.parentId === book.id))
@@ -130,7 +132,14 @@ async function contextForTarget(book: BookEntity, target: AutotitleEntity, entit
   return `# Book metadata\n${meta}\n\n# Codex category\n${target.category}\n\n# Authoritative Codex body\n${String(target.content ?? '').trim() || '_Codex entry is empty._'}`
 }
 
+async function contextForWorld(world: WorldEntity) {
+  const entries = sorted(await listWorldEntries(world.id))
+  const lore = entries.map(entry => `## ${entry.category}: ${entry.title}\n\n${proseText(String(entry.content ?? '')).trim() || '_Codex entry is empty._'}`)
+  return `# Current World title\n${world.title}\n\n# Authoritative World Codex\n${lore.join('\n\n') || '_No World Codex entries yet._'}`
+}
+
 function goalFor(type: AutotitleTargetType) {
+  if (type === 'world') return 'Name this shared fictional world from its established Codex lore. Do not invent lore or use a single linked manuscript as the whole world.'
   if (type === 'book') return 'Name the manuscript as a whole from its established premise and story state. Do not overfit to one scene.'
   if (type === 'act') return 'Name this story movement from its established content and role in the book.'
   if (type === 'chapter') return 'Name this chapter from its actual scenes and current story state.'
@@ -153,30 +162,33 @@ function parseSuggestion(output: string) {
   return value
 }
 
-export async function prepareAutotitleRequest(bookId: string, targetId: string, settings: AiSettings): Promise<AutotitleRequest> {
-  if (!['nanogpt', 'litellm', 'fake'].includes(settings.provider)) throw new Error('Dedicated autotitle supports NanoGPT, LiteLLM, or Fake (testing). Choose one in Book AI settings.')
-  if (settings.provider !== 'fake' && !settings.apiKey.trim()) throw new Error(`Add your ${settings.provider === 'litellm' ? 'LiteLLM' : 'NanoGPT'} API key in Book AI settings before generating a title.`)
-  const [bookEntity, targetEntity, entities] = await Promise.all([
-    getEntity<ArcEntity>(bookId),
+export async function prepareAutotitleRequest(ownerId: string, targetId: string, settings: AiSettings): Promise<AutotitleRequest> {
+  if (!['nanogpt', 'litellm', 'fake'].includes(settings.provider)) throw new Error('Dedicated autotitle supports NanoGPT, LiteLLM, or Fake (testing). Choose one in AI settings.')
+  if (settings.provider !== 'fake' && !settings.apiKey.trim()) throw new Error(`Add your ${settings.provider === 'litellm' ? 'LiteLLM' : 'NanoGPT'} API key in AI settings before generating a title.`)
+  const [owner, targetEntity] = await Promise.all([
+    getEntity<ArcEntity>(ownerId),
     getEntity<ArcEntity>(targetId),
-    listEntitiesByBook(bookId),
   ])
-  if (!bookEntity || bookEntity.type !== 'book') throw new Error('The current book is no longer available.')
-  if (!isSupported(targetEntity) || (targetEntity.type !== 'book' && targetEntity.bookId !== bookId) || (targetEntity.type === 'book' && targetEntity.id !== bookId)) {
-    throw new Error('That item cannot be autotitled in this book.')
+  if (!owner || (owner.type !== 'book' && owner.type !== 'world')) throw new Error('The current Book or World is no longer available.')
+  const worldTarget = owner.type === 'world' && targetEntity?.type === 'world' && targetEntity.id === ownerId
+  const bookTarget = owner.type === 'book' && targetEntity?.type !== 'world' && (targetEntity?.type === 'book' ? targetEntity.id === ownerId : entityAvailableInBook(targetEntity, owner as BookEntity))
+  if (!isSupported(targetEntity) || (!worldTarget && !bookTarget)) {
+    throw new Error('That item cannot be autotitled in this Book or World.')
   }
   if (targetEntity.type === 'codexEntry' && isCodexEntryArchived(targetEntity)) {
     throw new Error('Restore this archived Codex entry before generating a title.')
   }
   const model = settings.supportModel.trim() || settings.mainModel.trim()
-  if (!model) throw new Error('Choose a Support or Main model in Book AI settings before generating a title.')
+  if (!model) throw new Error('Choose a Support or Main model in AI settings before generating a title.')
   const usingSupport = Boolean(settings.supportModel.trim())
   let modelContextLength = usingSupport ? settings.supportModelContextLength : settings.mainModelContextLength
   if (!modelContextLength) {
     modelContextLength = await fetchTextProviderModelContextLength({ provider: settings.provider, apiKey: settings.apiKey.trim(), baseUrl: settings.baseUrl, model }).catch(() => undefined)
   }
-  const context = await contextForTarget(bookEntity as BookEntity, { ...targetEntity, content: proseText(String(targetEntity.content ?? '')) }, proseEntities(entities))
-  const language = typeof bookEntity.language === 'string' ? bookEntity.language : ''
+  const context = targetEntity.type === 'world'
+    ? await contextForWorld(targetEntity)
+    : await contextForTarget(owner as BookEntity, { ...targetEntity, content: proseText(String(targetEntity.content ?? '')) }, proseEntities(await listEntitiesByBook(ownerId)))
+  const language = typeof owner.language === 'string' ? owner.language : ''
   const systemPrompt = systemPromptFor(targetEntity.type as AutotitleTargetType, language)
   const userMessage = `# Target\n${targetEntity.type}: ${targetEntity.title}\n\n# Automatic context\n${context}\n\nReturn one suitable title/name.`
   const effectiveContextLimit = usingSupport ? '' : settings.mainEffectiveContextLimit

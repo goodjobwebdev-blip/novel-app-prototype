@@ -1,21 +1,23 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import type { MarkdownEditorHandle } from '../editor/MarkdownEditor'
-import type { NoteEntity } from '../../data/persistence'
+import { getEntity, type BookEntity, type CodexEntryEntity, type NoteEntity } from '../../data/persistence'
+import { entityAvailableInBook } from '../worlds/world-service'
 import { applyCodexTemplate, listCodexTemplates } from './codex-templates'
 import Button from '../../shared/ui/Button'
 import Disclosure from '../../shared/ui/Disclosure'
 import Select from '../../shared/ui/Select'
 import './codex-ui-kit.css'
 export default function CodexTemplates({ bookId, targetId, typeId, body, editor, disabled, sharedSource = false }: { bookId: string; targetId: string; typeId: string; body: string; editor: RefObject<MarkdownEditorHandle | null>; disabled?: boolean; sharedSource?: boolean }) {
-  const [notes, setNotes] = useState<NoteEntity[]>([]), [selected, setSelected] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false), [applied, setApplied] = useState('')
+  const [notes, setNotes] = useState<NoteEntity[]>([]), [selected, setSelected] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false), [applied, setApplied] = useState(''), [worldTarget, setWorldTarget] = useState(false)
   const alive = useRef(true), busyRef = useRef(false)
   useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
   useEffect(() => {
     let active = true
-    const load = () => { void listCodexTemplates(bookId, typeId).then(value => { if (active) setNotes(value) }).catch(reason => { if (active) setError(reason.message) }) }
-    load(); window.addEventListener('arc-entity-changed', load); window.addEventListener('arc-lore-types-changed', load); window.addEventListener('focus', load)
-    return () => { active = false; window.removeEventListener('arc-entity-changed', load); window.removeEventListener('arc-lore-types-changed', load); window.removeEventListener('focus', load) }
-  }, [bookId, typeId])
+    setWorldTarget(false)
+    const load = () => { void Promise.all([listCodexTemplates(bookId, typeId), getEntity<CodexEntryEntity>(targetId), getEntity<BookEntity>(bookId)]).then(([value, entry, book]) => { if (active) { setNotes(value); setWorldTarget(entry?.type === 'codexEntry' && Boolean(entry.worldId) && entityAvailableInBook(entry, book)) } }).catch(reason => { if (active) setError(reason.message) }) }
+    load(); window.addEventListener('arc-entity-changed', load); window.addEventListener('arc-lore-types-changed', load); window.addEventListener('arc-worlds-changed', load); window.addEventListener('focus', load)
+    return () => { active = false; window.removeEventListener('arc-entity-changed', load); window.removeEventListener('arc-lore-types-changed', load); window.removeEventListener('arc-worlds-changed', load); window.removeEventListener('focus', load) }
+  }, [bookId, targetId, typeId])
   const note = notes.find(item => item.id === selected)
   async function apply() {
     if (busyRef.current || disabled || !note) return
@@ -28,7 +30,7 @@ export default function CodexTemplates({ bookId, targetId, typeId, body, editor,
   }
   return <Disclosure className="codex-templates" title="Codex templates" description="Apply a compatible Note to an empty entry." open={!body.trim()}>
     {body.trim() ? <p>Templates apply only to an empty body. Clear the body explicitly before applying a template.</p> : <>
-      <p>Copy a compatible Note from this book. The copy stays independent and can be undone.</p>{sharedSource && <p>This changes the shared editor draft. Save series changes explicitly to publish it to inheriting books.</p>}
+      <p>Copy a compatible Note from this book. The copy stays independent and can be undone.</p>{worldTarget && <p>Edits are saved directly to the World and shared with its connected books.</p>}
       <Select label="Template Note" aria-label="Codex template Note" disabled={busy || disabled} value={note ? selected : ''} onChange={event => { setSelected(event.target.value); setError(''); setApplied('') }}><option value="">Choose a template…</option>{notes.map(item => <option key={item.id} value={item.id}>{item.title}{!item.content.trim() ? ' · empty' : ''}</option>)}</Select>
       {!notes.length && <p>Mark a Note “Use as Codex template” to add one. Its compatible types must include this entry’s type, or be left empty for any type.</p>}
       {note && <Disclosure title="Template preview"><pre>{note.content || 'This template is empty.'}</pre></Disclosure>}

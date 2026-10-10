@@ -26,7 +26,7 @@ test('permanent deletion cleans both outgoing and incoming dependency edges', ()
 })
 
 test('opened Codex metadata exposes editable Dependencies and read-only Needed by through shared controls', () => {
-  assert.match(workspace, /<CodexDependenciesMetadata[\s\S]*readOnly=\{activeCodexArchived \|\| activeDocument\.codexScope === 'inherited'\}/)
+  assert.match(workspace, /<CodexDependenciesMetadata[\s\S]*readOnly=\{activeCodexArchived\}/)
   assert.match(workspace, /<Disclosure className="codex-dependency-section" title=\{`Dependencies · \$\{outgoing\.length\}`\}/)
   assert.match(workspace, /<Disclosure className="codex-dependency-section needed-by" title=\{`Needed by · \$\{incoming\.length\}`\}/)
   assert.match(workspace, /<Checkbox className="codex-dependency-include" label="Include with this entry"[\s\S]*disabled=\{readOnly \|\| archived \|\| !target\}/)

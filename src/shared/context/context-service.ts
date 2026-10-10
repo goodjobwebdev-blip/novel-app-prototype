@@ -1,6 +1,5 @@
 import { resolveTimelineEntities } from '../../features/codex/codex-timeline'
 import { readTimelineWorld } from '../../features/codex/codex-timeline-service'
-import { codexScopeLabel } from '../../features/codex/series-codex.ts'
 import { sceneBeats } from '../../features/writing/scene-beats'
 import { proseText, proseEntities } from '../../features/editor/document-projection.ts'
 import { getBookContextSettings, isCodexEntryArchived, listCodexDependencies, listEntitiesByBook, type ArcEntity, type CodexEntryEntity, type GenerationContextProfile, type GenerationContextType, type StructuralEntity, type SummaryEntity } from '../../data/persistence'
@@ -60,6 +59,7 @@ type AdditionalContextSection = {
   outlineIndex: number
 }
 
+const codexScopeLabel = (entry: CodexEntryEntity) => entry.worldId ? 'World' : 'Book-only'
 const tokenEstimate = (text: string) => Math.max(1, Math.ceil(text.length / 4))
 const section = (heading: string, content: string) => `## ${heading}\n\n${content.trim()}`
 const sorted = <T extends ArcEntity>(items: T[]) => [...items].sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.createdAt - b.createdAt || a.id.localeCompare(b.id))
@@ -229,7 +229,7 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
   }).join('\n\n')
   const automaticSection = automaticText ? section('Automatic Codex', automaticText) : ''
 
-  const selectedCodex = entities.filter((item): item is CodexEntryEntity => item.type === 'codexEntry' && !isCodexEntryArchived(item) && item.id !== options.currentDocumentId && !automaticIds.has(item.id) && options.profile.codexEntryIds.includes(item.id))
+  const selectedCodex = entities.filter((item): item is CodexEntryEntity => item.type === 'codexEntry' && !item.hiddenInBook && !isCodexEntryArchived(item) && item.id !== options.currentDocumentId && !automaticIds.has(item.id) && options.profile.codexEntryIds.includes(item.id))
   const manualRepresentations = selectedCodex.map((item) => codexContextRepresentation(item, entities))
   const codexRepresentations = [...automaticRepresentations, ...manualRepresentations]
   const codex: AdditionalContextSection[] = selectedCodex.map((item) => {

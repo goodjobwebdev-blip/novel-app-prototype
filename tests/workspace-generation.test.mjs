@@ -50,6 +50,7 @@ const { EditorView } = await import('@codemirror/view')
 const view = () => EditorView.findFromDOM(document.querySelector('.cm-editor'))
 async function openWorkspace(t, settings) {
   ai.saveAiSettings(settings)
+  await p.ensurePrototypeSeed('demo')
   const { book, scene } = await p.createBook(settings, `Generation test ${crypto.randomUUID()}`)
   await assignBookTestProfiles({ persistence: p, ai, profiles }, book.id, settings, ['text', 'story', 'ui'])
   await p.saveDocumentContent(scene.id, 'Original scene.')

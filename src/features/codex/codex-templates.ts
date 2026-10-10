@@ -1,6 +1,6 @@
-import { database, listEntitiesByBook, type BookEntity, type CodexEntryEntity, type NoteEntity } from '../../data/persistence'
+import { database, isCodexEntryArchived, listEntitiesByBook, type BookEntity, type CodexEntryEntity, type NoteEntity } from '../../data/persistence'
 import { ensureLoreTypesWithDb, resolveLoreType } from './lore-types'
-import { seriesTransaction } from './series-codex'
+import { entityAvailableInBook } from '../worlds/world-service'
 import { protectedRanges } from '../editor/document-projection'
 import type { MarkdownEditorHandle } from '../editor/MarkdownEditor'
 export function codexTemplateCompatible(note: NoteEntity, typeId: string) {
@@ -18,7 +18,7 @@ export async function listCodexTemplates(bookId: string, typeId: string) {
 export async function setNoteTemplateOptions(bookId: string, noteId: string, patch: { useAsCodexTemplate?: boolean; compatibleLoreTypeIds?: string[] }) {
   const db = await database()
   const snapshot = structuredClone(patch)
-  return seriesTransaction(db, async () => {
+  return db.transaction('rw', db.table('entities'), async () => {
     const current = await db.table('entities').get(noteId) as NoteEntity | undefined
     if (current?.type !== 'note' || current.bookId !== bookId) throw new Error('This Note is no longer available in this book.')
     const types = await ensureLoreTypesWithDb(db, bookId)
@@ -35,18 +35,15 @@ export async function setNoteTemplateOptions(bookId: string, noteId: string, pat
 export type TemplateTarget = { bookId: string; noteId: string; targetId: string; typeId: string; sharedSource?: boolean }
 export async function prepareCodexTemplate(input: TemplateTarget) {
   const db = await database()
-  return seriesTransaction(db, async () => {
+  return db.transaction('rw', db.table('entities'), async () => {
     const book = await db.table('entities').get(input.bookId) as BookEntity | undefined
     const note = await db.table('entities').get(input.noteId) as NoteEntity | undefined
     const target = await db.table('entities').get(input.targetId) as CodexEntryEntity | undefined
     if (book?.type !== 'book' || note?.type !== 'note' || note.bookId !== book.id) throw new Error('This template Note is no longer available in the current book.')
-    if (target?.type !== 'codexEntry' || target.archivedAt || target.hiddenInBook) throw new Error('The target Codex entry is unavailable or archived.')
-    if (input.sharedSource) {
-      if (target.codexScope !== 'series' || target.bookId !== book.seriesId) throw new Error('Open this book’s series source explicitly before applying a shared template.')
-    } else if (target.bookId !== book.id || target.codexScope === 'inherited') throw new Error('Choose Edit for this book or explicitly edit the series source before applying a template.')
+    if (target?.type !== 'codexEntry' || !entityAvailableInBook(target, book) || isCodexEntryArchived(target)) throw new Error('The target Codex entry is unavailable or archived.')
     const type = resolveLoreType(await ensureLoreTypesWithDb(db, target.bookId), input.typeId)
     const currentTarget = await db.table('entities').get(input.targetId) as CodexEntryEntity
-    if (!type || (!input.sharedSource && currentTarget.typeId !== type.id)) throw new Error('The lore type changed or is unavailable. Choose a compatible template again.')
+    if (!type || currentTarget.typeId !== type.id) throw new Error('The lore type changed or is unavailable. Choose a compatible template again.')
     if (!codexTemplateCompatible(note, type.id)) throw new Error('This Note is no longer a compatible Codex template.')
     return { noteId: note.id, title: note.title, content: validateCodexTemplateBody(note.content) }
   })

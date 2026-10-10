@@ -1,4 +1,4 @@
-import { codexScopeLabel } from '../codex/series-codex.ts'
+
 import { proseText } from '../editor/document-projection.ts'
 import type { ArcEntity } from '../../data/persistence'
 
@@ -26,7 +26,7 @@ export function searchBookEntities(entities: ArcEntity[], args: Record<string, u
     const start = Math.max(0, hit - 100)
     return {
       id: entity.id, type: entity.type, title: String(entity.title ?? 'Untitled'), parentId: entity.parentId,
-      ...(entity.type === 'codexEntry' ? { scope: codexScopeLabel(entity), series_source_id: entity.seriesSourceId } : {}),
+      ...(entity.type === 'codexEntry' ? { scope: entity.worldId ? 'World' : 'Book-only', world_id: entity.worldId } : {}),
       category: entity.category, typeId: entity.typeId, updatedAt: entity.updatedAt, archived: Number(entity.archivedAt) > 0,
       preview: `${start ? '…' : ''}${body.slice(start, start + 320)}${body.length > start + 320 ? '…' : ''}`,
     }

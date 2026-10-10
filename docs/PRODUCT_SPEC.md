@@ -16,6 +16,7 @@ The application should feel like a quiet writing workspace, not a general-purpos
 - Global defaults assign shared profile/preset IDs to a new book; changing the default assignment does not reassign existing books. Saving a shared definition affects all linked books for subsequent operations. Duplicate creates an independent definition; model favorites remain a global text-picker preference.
 - Each book selects a UI profile. Home and other global surfaces use the same default UI profile assigned to new books; there is no separate application UI profile.
 - A book can contain optional Acts, Chapters, Scenes, Notes, summaries, a searchable story Codex, and book-aware Chats.
+- **World is not Series:** a Book can link to one World, and many Books can share that World's canonical Codex. Series organizes books; its existing order can still serve chronology, but it does not own shared Codex. The current contract and implementation boundary are in [WORLD_BUILDING.md](WORLD_BUILDING.md).
 - Scenes, Notes, summaries, and Codex entries open in the main workspace.
 - Chat replaces the editor workspace with a persisted conversation surface.
 - AI generation resolves the book-selected model profile and prompt preset with book/chat-local context. One globally active text connection serves every text profile/role; books do not choose credentials or endpoints.
@@ -45,13 +46,14 @@ The application should feel like a quiet writing workspace, not a general-purpos
 ### Right book workspace
 
 - The right side contains persistent Book, Outline, Notes, Codex, and Chat tabs.
-- Book contains current-book identity and story-profile metadata: title, shared series and book index, overview, genre, writing style, point of view, tense, and language. It also contains the destructive delete action.
+- Book contains current-book identity and story-profile metadata: title, organizational series and book index, an independent optional World selection, overview, genre, writing style, point of view, tense, and language. It also contains the destructive delete action.
 - Series are library-level entities shared by books. The Book tab can choose `Standalone`, select an existing series, create one, and rename the selected series for every linked book.
 - Outline supports optional Acts, Chapters, and Scenes. Selecting a Scene opens it in the editor.
 - Acts, Chapters, and Scenes expose distinct current, missing, and outdated summary states.
 - Summary icons open persisted Markdown summaries in the shared editor. Manual edits are supported, and AI summary generation uses the book's Support model.
 - Notes open in the editor workspace.
-- Codex supports search, categories, multiple layouts, and new entries.
+- Codex merges Book-local entries and visible canonical entries from the connected World, with search, categories, multiple layouts, draft/active/archive states, and new local entries. World entries are directly editable from Book without overrides; shared edits/status/archive/delete affect all linked Books, while hiding is Book-local. Transfers are gated by trigger conflicts shown in a separate popup.
+- Home and Book open a separate World Building surface: create/rename/autotitle/delete empty World and a read-only Codex list. Each entry has one mutating menu action: copy into all linked Books and remove the World source. Trigger conflicts or no linked Books block that action to prevent loss; content is managed from Book.
 - Chat shows persisted conversations ordered by recent activity. Selecting a Chat opens the conversation in place of the manuscript editor.
 
 ### Chat
@@ -93,7 +95,8 @@ The application should feel like a quiet writing workspace, not a general-purpos
 ## Data and recovery
 
 - Manuscripts and structured book data are persisted in IndexedDB through Dexie.
-- The current entity model includes Book, Series, Act, Chapter, Scene, Note, Codex entry, Summary, Chat, ChatMessage, and book-scoped Settings records.
+- The current entity model includes Book, World, organizational Series, Act, Chapter, Scene, Note, Codex entry, Summary, Chat, ChatMessage, and book-scoped Settings records. Each Codex entry has one canonical Book or World owner; normalized automatic triggers are owner-unique, including reservations by draft/archived entries. Active Book-local collisions suppress the entire World entry in automatic context and dependency cascades, not only the overlapping trigger.
+- **The World-model transition performs an authorized, irreversible one-time hard reset**, not a preserving Series Codex migration: `ensurePrototypeSeed()` clears all tables in the book IndexedDB (old Books/content/settings, snapshots, dependencies, illustrations/undo, gallery/jobs, sync links/state and metadata), then seeds one demo Book in the same transaction with `world-model-reset-v1`. Global profiles/presets and Connections in `localStorage` are preserved; no warning/confirmation is required for this already-authorized reset. See [WORLD_BUILDING.md](WORLD_BUILDING.md).
 - Document snapshots are stored separately and can be created for autosave, generation, manual, navigation, and lifecycle recovery points.
 - Shared profiles/presets, default selections, global Connections, model favorites, and last-book location use device-local `localStorage`. Books store profile-selection IDs, validated catalog metadata, and local Context settings in IndexedDB.
 - UI profiles contain typography, active theme, custom themes, editor flags, and reveal speed; the selected book profile or global default determines the active UI. The current code embeds custom themes in each UI profile rather than a separate shared theme library.
@@ -102,9 +105,10 @@ The application should feel like a quiet writing workspace, not a general-purpos
 - Local snapshots provide recovery/version history but are not backups because they live on the same device.
 - Manual book export/import uses `.arcbook` **v4** for profile-bearing books: text, book-local settings/selections, sanitized selected profile/preset/theme definitions and Chat/Character dependencies, chat snapshots, history, illustrations, and kept gallery media. The decoder accepts v1–v4; legacy payloads without profiles encode as v2 or v3 with video. See [CODEX_ILLUSTRATIONS.md](CODEX_ILLUSTRATIONS.md).
 - Archives and archive sync exclude all connection configurations: endpoints, accounts, credentials, local connection IDs, and credential/connection fingerprints, including nested job metadata. Provider/model identity remains portable; imported models require compatible local Connections. Free text is not a secret-redaction boundary.
+- Book archives materialize available World entries and related data as detached local snapshots with stable per-Book IDs, strip live World links, and suppress World-copy triggers overlapping local reservations to satisfy import uniqueness. Hidden World entries are excluded. Per-book archive sync transfers this snapshot too; independent World archives/sync and roaming live World links are not implemented.
 - Ordinary imports remap book/profile IDs and create an independent book; paid jobs never resume. Connected sync preserves book identity and installs incoming profiles with conflict clones/remapped references rather than overwrite differing shared local objects; repeat installation can reuse an identical prior clone. This does not transfer global default assignments or the whole library.
 - Book records commit in IndexedDB, but profile installation writes `localStorage`; rollback is not atomic across both stores and failed imports can leave unused profiles. End-to-end failure/recovery validation remains pending.
-- Destructive or bulk operations should create a recovery point when practical.
+- Destructive or bulk operations should create a recovery point when practical; the explicitly authorized one-time World-model hard reset above is intentionally irreversible.
 - Codex entries support one optimized primary illustration plus a thumbnail, with local storage usage and backup controls. Generated images/videos also have a separate kept-media Gallery. A general-purpose audio/PDF library remains outside this storage scope.
 
 ## AI constraints and decisions
@@ -146,7 +150,7 @@ The application should feel like a quiet writing workspace, not a general-purpos
 - Chat uses the globally active text connection with its independently saved per-chat model. Changing Connections still affects existing chats; a saved model ID must be compatible with that provider.
 - The role-linked preset content is copied from the book-selected Text profile into each Chat/Character chat at creation and can then be edited independently. A Main fallback snapshots Main context cap/window, but retains the Chat/Character thinking and rounds.
 - Chat uses a per-conversation PromptComposition: one System prompt plus ordered Predefined System/User/Assistant configuration messages, followed by real chronological history and the newest real User turn. Book/story context is exposed through explicit composition variables; no hidden selected-context or response-length message is injected.
-- Workspace instructions are exposed as the app-owned `chat.workspace_instructions` variable while callable tool schemas remain structured provider metadata. The prototype database v3 migration deletes legacy Chat and ChatMessage entities together while preserving all non-Chat entities and Book-level settings.
+- Workspace instructions are exposed as the app-owned `chat.workspace_instructions` variable while callable tool schemas remain structured provider metadata. The historical database v3 migration deleted legacy Chat and ChatMessage entities only; it does not describe preservation across the later one-time World-model hard reset (see Data and recovery).
 - The request preview shows the Chat system prompt, workspace instructions, selected book context, saved user/assistant turns, and assistant reasoning where present.
 - Chat tool calls can inspect Scenes/Notes/Codex/outline and can create approval proposals for document, entity, Codex, and outline changes.
 - The current implementation still has two open issue #29 gaps: it rejects an over-budget full history instead of trimming older turns first, and a non-abort provider/network failure after streaming begins does not yet persist the partial assistant round.
@@ -184,11 +188,12 @@ Chat book context is exposed through explicit composition variables such as `{{c
 
 Present in the implementation (profile items are based on source inspection, not acceptance-test results):
 
-- book library, Book metadata, shared Series entities, outline navigation, and delete/create flows;
+- book library, Book metadata, organizational Series entities, canonical shared Worlds, outline navigation, and delete/create flows;
 - IndexedDB persistence for book content/settings plus local document snapshots;
 - Markdown editor, autosave, navigation, undo/redo integration, and responsive workspace panels;
 - persisted Scene/Chapter/Act summaries with freshness tracking and Support-model generation;
-- persisted searchable Notes and categorized Codex entries with multiple list layouts;
+- persisted searchable Notes and categorized Book/World Codex entries with multiple list layouts, direct shared editing, per-Book hiding, owner-unique triggers, and conflict-gated transfers;
+- local World Building management/read-only lists, the one-time book-database reset, and detached World-entry snapshots in Book archives (source-inspected, not an acceptance-validation claim);
 - shared UI profiles with typography/themes/custom semantic themes, editor flags, and generation writing pace, resolved per book or from global defaults;
 - global Connections and provider/model loading, text model favorites, shared Text/TTS/STT/Image/Video profiles and book selections;
 - live prompt presets and the current template/composition renderer, explicit shared Save/usage warnings, Duplicate, protected defaults, and per-chat snapshots;

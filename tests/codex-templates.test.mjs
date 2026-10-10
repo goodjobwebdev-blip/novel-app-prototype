@@ -1,6 +1,6 @@
 import { assertTestResourceLimits } from './test-resource-policy.mjs'
 assertTestResourceLimits()
-import test from 'node:test'
+import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
 import { registerHooks } from 'node:module'
 import { existsSync } from 'node:fs'
@@ -22,8 +22,8 @@ const { initialAiSettings } = await import('../src/shared/ai/ai-settings.ts')
 const { setNoteChatSkill } = await import('../src/features/chat/chat-skills.ts')
 const { createLoreType } = await import('../src/features/codex/lore-types-service.ts')
 const { copyBookArchive, encodeBookArchive, decodeBookArchive } = await import('../src/data/book-archive.ts')
-const { metadataValues } = await import('../src/features/chat/chat-management-schema.ts')
-const series = await import('../src/features/codex/series-codex-service.ts')
+const world = await import('../src/features/worlds/world-service.ts')
+after(async () => (await p.database()).close())
 const { encodeDocumentBlock } = await import('../src/features/editor/document-projection.ts')
 const body = '## Overview\n\nDescribe {{ protagonist }} literally.\n\n- Motivation\n- Conflict\n\n| Fact | Detail |\n| --- | --- |\n| Origin | Fill in |\n'
 async function fixture() {
@@ -75,19 +75,39 @@ test('apply captures an empty editor and refuses changed, nonempty, unmarked or 
   await p.updateCodexCategory(f.entry.id, 'Place')
   await assert.rejects(() => templates.prepareCodexTemplate(f.input), /type changed/)
 })
-test('shared templates require an explicit series-source edit; inherited bodies require a local override first', async () => {
-  const f = await fixture(), shared = await p.createSeries('Template shared world')
-  await p.updateBookMetadata(f.book.id, { ...metadataValues(f.book), seriesId: shared.id })
-  const source = await series.promoteCodexToSeries(f.book.id, f.entry.id)
+test('Book templates edit visible World canon directly; copies remain independent and hidden or foreign targets are rejected', async () => {
+  const f = await fixture(), shared = await world.createWorld('Template shared world')
+  await world.setBookWorld(f.book.id, shared.id)
+  const source = await world.moveEntryToWorld(f.book.id, f.entry.id)
+  const { book: second } = await p.createBook(initialAiSettings, 'Second template Book')
+  await world.setBookWorld(second.id, shared.id)
   await templates.setNoteTemplateOptions(f.book.id, f.note.id, { useAsCodexTemplate: true })
-  await assert.rejects(() => templates.prepareCodexTemplate(f.input), /Edit for this book/)
-  await assert.rejects(() => templates.prepareCodexTemplate({ ...f.input, targetId: source.id }), /Edit for this book/)
-  assert.equal((await templates.prepareCodexTemplate({ ...f.input, targetId: source.id, sharedSource: true })).content, body)
-  assert.equal((await p.getEntity(source.id)).content, '')
-  const custom = await createLoreType(f.book.id, 'Private lore')
-  await assert.rejects(() => templates.prepareCodexTemplate({ ...f.input, targetId: source.id, sharedSource: true, typeId: custom.id }), /type changed/)
-  await series.editCodexForBook(f.book.id, f.entry.id)
+  assert.equal(source.id, f.entry.id)
   assert.equal((await templates.prepareCodexTemplate(f.input)).content, body)
+  assert.equal((await p.getEntity(source.id)).content, '', 'Preparing never writes the canonical body')
+  const custom = await createLoreType(f.book.id, 'Private lore')
+  await assert.rejects(() => templates.prepareCodexTemplate({ ...f.input, typeId: custom.id }), /type changed/)
+  const copy = await world.copyWorldEntryToBook(f.book.id, source.id)
+  const editor = { captureSelection: () => ({ document: '' }), replaceRange: (snapshot, content) => { assert.equal(snapshot.document, ''); assert.equal(content, body); return true } }
+  await templates.applyCodexTemplate(f.input, () => editor)
+  assert.equal((await p.getEntity(source.id)).content, '', 'Apply changes the editor, not persistence')
+  await p.saveDocumentContent(source.id, body)
+  assert.equal((await p.listEntitiesByBook(second.id, 'codexEntry'))[0].id, source.id)
+  assert.equal((await p.listEntitiesByBook(second.id, 'codexEntry'))[0].content, body)
+  assert.equal((await p.getEntity(source.id)).bookId, shared.id)
+  assert.equal((await p.getEntity(copy.id)).content, '')
+  const copyInput = { ...f.input, targetId: copy.id }
+  await p.saveDocumentContent(copy.id, (await templates.prepareCodexTemplate(copyInput)).content)
+  await p.saveDocumentContent(source.id, 'Later canonical revision')
+  assert.equal((await p.getEntity(copy.id)).content, body)
+  assert.equal((await p.getEntity(copy.id)).worldId, undefined)
+  await world.setWorldEntryHidden(f.book.id, source.id, true)
+  await assert.rejects(() => templates.prepareCodexTemplate(f.input), /unavailable/)
+  assert.equal((await templates.prepareCodexTemplate(copyInput)).content, body)
+  await world.setWorldEntryHidden(f.book.id, source.id, false)
+  await world.setBookWorld(f.book.id, '')
+  await assert.rejects(() => templates.prepareCodexTemplate(f.input), /unavailable/)
+  assert.equal((await p.getEntity(source.id)).content, 'Later canonical revision')
 })
 test('backup round trips preserve both Note roles, type compatibility and independently copied content', async () => {
   const f = await fixture(), type = await createLoreType(f.book.id, 'Creature')

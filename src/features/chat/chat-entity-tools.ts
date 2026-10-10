@@ -1,3 +1,4 @@
+import { entityAvailableInBook } from '../worlds/world-service'
 import { BUILTIN_LORE_TYPES } from '../codex/lore-types'
 import { requireLoreType } from '../codex/lore-types-service'
 import type { ChatToolCall, ChatToolDefinition } from './chat-api'
@@ -19,6 +20,7 @@ import {
   saveDocumentContent,
   updateCodexCategory,
   type ArcEntity,
+  type BookEntity,
 } from '../../data/persistence'
 
 const manageableTypes = ['note', 'codexEntry'] as const
@@ -148,8 +150,8 @@ function entityTitle(entity: ArcEntity) {
 }
 
 async function manageableEntity(bookId: string, entityId: string) {
-  const entity = await getEntity<ArcEntity>(entityId)
-  if (!entity || entity.bookId !== bookId || !manageableTypeSet.has(entity.type) || isCodexEntryArchived(entity)) {
+  const [entity, book] = await Promise.all([getEntity<ArcEntity>(entityId), getEntity<BookEntity>(bookId)])
+  if (!entity || !entityAvailableInBook(entity, book) || !manageableTypeSet.has(entity.type) || isCodexEntryArchived(entity)) {
     throw new Error('That Note or Codex entry was not found in the current book.')
   }
   return entity
@@ -256,7 +258,7 @@ export async function executeChatEntityTool(bookId: string, call: ChatToolCall):
       const entityId = typeof args.entity_id === 'string' ? args.entity_id : ''
       const entity = await manageableEntity(bookId, entityId)
       if (entity.type !== 'codexEntry') return { content: result({ ok: false, error: 'Only Codex entries have categories.' }) }
-      const loreType = await requireLoreType(bookId, typeof args.category === 'string' ? args.category : '')
+      const loreType = await requireLoreType(entity.worldId ?? bookId, typeof args.category === 'string' ? args.category : '')
       const category = loreType.name
       const proposal: ChatEntityActionProposal = {
         id: makeProposalId(),

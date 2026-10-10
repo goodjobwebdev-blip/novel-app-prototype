@@ -1,12 +1,9 @@
 import type { CodexDependencyEdge, CodexEntryEntity } from '../../data/persistence'
+import { automaticCodexCandidates } from './codex-trigger-service.ts'
 
 export type CascadedCodexDependency = {
   entry: CodexEntryEntity
   pathIds: string[]
-}
-
-function codexEntryArchived(entry: CodexEntryEntity) {
-  return typeof entry.archivedAt === 'number' && entry.archivedAt > 0
 }
 
 function edgeOrder(a: CodexDependencyEdge, b: CodexDependencyEdge) {
@@ -19,8 +16,8 @@ export function cascadeAutomaticCodexDependencies(
   edges: CodexDependencyEdge[],
   excludeEntryId?: string,
 ): CascadedCodexDependency[] {
-  const available = new Map(allEntries
-    .filter((entry) => !codexEntryArchived(entry) && entry.id !== excludeEntryId)
+  const available = new Map(automaticCodexCandidates(allEntries)
+    .filter((entry) => entry.id !== excludeEntryId)
     .map((entry) => [entry.id, entry]))
   const outgoing = new Map<string, CodexDependencyEdge[]>()
   for (const edge of edges.filter((candidate) => candidate.includeWithSource).sort(edgeOrder)) {
@@ -29,10 +26,11 @@ export function cascadeAutomaticCodexDependencies(
     outgoing.set(edge.sourceId, list)
   }
 
-  const directIds = new Set(directEntries.map((entry) => entry.id))
+  const eligibleRoots = directEntries.filter(entry => available.has(entry.id))
+  const directIds = new Set(eligibleRoots.map((entry) => entry.id))
   const visited = new Set(directIds)
   const queue: Array<{ edge: CodexDependencyEdge; pathIds: string[] }> = []
-  for (const root of directEntries) {
+  for (const root of eligibleRoots) {
     for (const edge of outgoing.get(root.id) ?? []) queue.push({ edge, pathIds: [root.id] })
   }
 
