@@ -256,7 +256,9 @@ test('Connections owns speech/media keys, saves explicitly, and preserves media 
   const originalMedia = media.loadImageSettings()
   const mounted = await mount(t, Panel, panelProps())
   await click(button(mounted.host, 'Connections'))
+  await change(field(mounted.host, 'Connection provider'), 'nanogpt')
   assert.ok(field(mounted.host, 'NanoGPT Speech API key'))
+  await change(field(mounted.host, 'Connection provider'), 'openai')
   assert.ok(field(mounted.host, 'OpenAI media API key'))
   await change(field(mounted.host, 'OpenAI media API key'), 'local-media-key')
   assert.equal(media.loadImageSettings().keys.openai, originalMedia.keys.openai)
@@ -264,6 +266,93 @@ test('Connections owns speech/media keys, saves explicitly, and preserves media 
   assert.equal(media.loadImageSettings().keys.openai, 'local-media-key')
   assert.equal(JSON.stringify(media.loadImageSettings().favorites), JSON.stringify(originalMedia.favorites))
   await mounted.close()
+})
+
+test('Connection provider selects the complete credential group and keeps navigation labels spaced', async (t) => {
+  const originalConnection = ai.loadAiSettings()
+  let mounted
+  t.after(async () => { await mounted?.close(); ai.saveAiSettings(originalConnection) })
+  ai.saveAiSettings({ ...originalConnection, provider: 'nanogpt', apiKey: 'active-nano', providerProfiles: {} })
+  const style = document.createElement('style')
+  t.after(() => style.remove())
+  style.textContent = readFileSync(new URL('../src/features/settings/settings-profiles.css', import.meta.url), 'utf8')
+  document.head.append(style)
+  mounted = await mount(t, Panel, panelProps())
+  await click(button(mounted.host, 'Connections'))
+  const panel = mounted.host.querySelector('.profile-connections-panel')
+  assert.equal(getComputedStyle(panel).display, 'grid')
+  assert.equal(getComputedStyle(panel).gap, '18px')
+  assert.ok(field(panel, 'Active text provider').closest('.arc-field').nextElementSibling === field(panel, 'Connection provider').closest('.arc-field'), 'Provider selectors are separated by the panel grid gap')
+  const cases = [
+    ['openai', 'OpenAI', ['API key for OpenAI', 'OpenAI Speech API key', 'OpenAI media API key']],
+    ['nanogpt', 'NanoGPT', ['API key for NanoGPT', 'NanoGPT Speech API key', 'NanoGPT media API key']],
+    ['litellm', 'LiteLLM', ['API key for LiteLLM', 'LiteLLM base URL', 'Pruna / LiteLLM media API key']],
+    ['openrouter', 'OpenRouter', ['API key for OpenRouter']],
+    ['compatible', 'OpenAI-compatible', ['API key for OpenAI-compatible', 'Endpoint URL']],
+    ['fake', 'Fake (testing)', []],
+  ]
+  for (const [provider, name, labels] of cases) {
+    await change(field(panel, 'Connection provider'), provider)
+    const group = panel.querySelector('.profile-connection-fields')
+    assert.equal(group.getAttribute('aria-label'), `${name} connection`)
+    assert.equal(group.querySelector('h3').textContent, `${name} connection`)
+    assert.equal(JSON.stringify([...group.querySelectorAll('.arc-field__label')].map(label => label.textContent)), JSON.stringify(labels))
+    assert.equal(getComputedStyle(group).gap, '16px')
+    assert.equal(field(panel, 'Active text provider').value, 'nanogpt')
+    assert.equal(ai.loadAiSettings().provider, 'nanogpt', 'Editing a group never activates or saves it')
+    assert.equal(Boolean(group.querySelector('[aria-label="Fake provider request trace"]')), provider === 'fake')
+    assert.equal(panel.querySelectorAll('input[type="password"]').length, labels.filter(label => label.includes('API key')).length)
+  }
+})
+
+test('provider credential drafts survive switching groups and Save/Discard preserve provider ownership', async (t) => {
+  const originalConnection = ai.loadAiSettings(), originalMedia = media.loadImageSettings()
+  let mounted
+  t.after(async () => { await mounted?.close(); ai.saveAiSettings(originalConnection); media.saveImageSettings(originalMedia) })
+  ai.saveAiSettings({ ...originalConnection, provider: 'nanogpt', apiKey: 'saved-nano-text', providerProfiles: {}, speech: { ...originalConnection.speech, apiKey: '', openaiApiKey: '' } })
+  const storedConnection = JSON.stringify(ai.loadAiSettings()), storedMedia = JSON.stringify(media.loadImageSettings())
+  mounted = await mount(t, Panel, panelProps())
+  await click(button(mounted.host, 'Connections'))
+  const edits = [
+    ['openai', [['API key for OpenAI', 'openai-text-draft'], ['OpenAI Speech API key', 'openai-speech-draft'], ['OpenAI media API key', 'openai-media-draft']]],
+    ['nanogpt', [['API key for NanoGPT', 'nano-text-draft'], ['NanoGPT Speech API key', 'nano-speech-draft'], ['NanoGPT media API key', 'nano-media-draft']]],
+    ['litellm', [['API key for LiteLLM', 'litellm-text-draft'], ['LiteLLM base URL', 'https://gateway.example/v1'], ['Pruna / LiteLLM media API key', 'pruna-media-draft']]],
+  ]
+  for (const [provider, fields] of edits) {
+    await change(field(mounted.host, 'Connection provider'), provider)
+    for (const [label, value] of fields) await change(field(mounted.host, label), value)
+  }
+  for (const [provider, fields] of edits) {
+    await change(field(mounted.host, 'Connection provider'), provider)
+    for (const [label, value] of fields) assert.equal(field(mounted.host, label).value, value)
+  }
+  assert.equal(JSON.stringify(ai.loadAiSettings()), storedConnection, 'All connection edits remain drafts until Save')
+  assert.equal(JSON.stringify(media.loadImageSettings()), storedMedia, 'Hidden provider media keys are not autosaved')
+  await click(button(mounted.host, 'Save connections'))
+  const saved = ai.loadAiSettings(), savedMedia = media.loadImageSettings()
+  assert.equal(saved.provider, 'nanogpt')
+  assert.equal(saved.apiKey, 'nano-text-draft')
+  assert.equal(saved.providerProfiles.openai.apiKey, 'openai-text-draft')
+  assert.equal(saved.providerProfiles.litellm.apiKey, 'litellm-text-draft')
+  assert.equal(saved.providerProfiles.litellm.baseUrl, 'https://gateway.example/v1')
+  assert.equal(saved.speech.apiKey, 'nano-speech-draft')
+  assert.equal(saved.speech.openaiApiKey, 'openai-speech-draft')
+  assert.equal(savedMedia.keys.nanogpt, 'nano-media-draft')
+  assert.equal(savedMedia.keys.openai, 'openai-media-draft')
+  assert.equal(savedMedia.keys.pruna, 'pruna-media-draft')
+  assert.equal(JSON.stringify(savedMedia.favorites), JSON.stringify(originalMedia.favorites))
+  for (const [provider, fields] of edits) {
+    await change(field(mounted.host, 'Connection provider'), provider)
+    for (const [label] of fields) await change(field(mounted.host, label), label.includes('URL') ? 'https://discard.example/v1' : 'discard-me')
+  }
+  await click(button(mounted.host, 'Discard'))
+  for (const [provider, fields] of edits) {
+    await change(field(mounted.host, 'Connection provider'), provider)
+    for (const [label, value] of fields) assert.equal(field(mounted.host, label).value, value)
+  }
+  assert.equal(button(mounted.host, 'Save connections').disabled, true)
+  assert.equal(JSON.stringify(ai.loadAiSettings()), JSON.stringify(saved))
+  assert.equal(JSON.stringify(media.loadImageSettings()), JSON.stringify(savedMedia))
 })
 
 test('controlled UI editor reports changes without autosaving or applying document theme', async (t) => {
