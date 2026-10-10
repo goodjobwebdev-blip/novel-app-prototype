@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from 'react'
 import { loadAiSettings, saveAiSettings, normalizeAutocompleteSettings, autocompleteDelayInputError, type AiSettings, type AiProvider } from '../../shared/ai/ai-settings'
 import { loadImageSettings, saveImageSettings } from '../images/image-settings'
 import type { ImageSettings } from '../images/image-generation-types'
@@ -10,6 +10,8 @@ import { TextRevealPreview } from '../../shared/ui/TextRevealPreview'
 import Input from '../../shared/ui/Input'
 import Select from '../../shared/ui/Select'
 import Button from '../../shared/ui/Button'
+import ActionMenu from '../../shared/ui/ActionMenu'
+import SettingsBreadcrumbs from './SettingsBreadcrumbs'
 import SettingsSectionTabs from './SettingsSectionTabs'
 import {
   SETTINGS_PROFILES_EVENT, loadSettingsProfiles, saveSettingsProfile, createSettingsProfile,
@@ -66,6 +68,18 @@ function profileSummary(profile?: SettingsProfile) {
   return 'Live prompt preset · shared changes apply to the next operation'
 }
 
+function independentProfileHelp(kind: ProfileKind, bookTitle?: string) {
+  if (kind === 'chat' || kind === 'character') return `Select this copy in the ${kind === 'chat' ? 'Chat' : 'Character chat'} role of a Text models profile. For book-only settings, also duplicate that Text models profile and assign it in the book’s Profiles.`
+  return bookTitle ? `Return to Profiles for “${bookTitle}” and select this copy to use it for that book.` : 'Select the copy in a book’s Profiles for independent settings.'
+}
+
+function sharedProfileEffects(kind: ProfileKind, count: number) {
+  const linked = `${count} linked book${count === 1 ? '' : 's'}`
+  if (kind === 'ui') return `Saving updates all ${linked}. Appearance changes apply immediately on active surfaces using this profile; other linked books use them when opened.`
+  if (kind === 'chat' || kind === 'character') return `Saving updates the preset for new chats in all ${linked}. Existing chats keep their model and prompt snapshots.`
+  return `Saving updates all ${linked} for their next operation. Existing chats keep their model and prompt snapshots.`
+}
+
 export function BookProfilesPanel({ library, selections, busy, error, onChange, onEdit, onRetry }: {
   library: SettingsProfileLibrary; selections: BookProfileSelections | null; busy: boolean; error: string;
   onChange: (kind: keyof BookProfileSelections, id: string) => void; onEdit: (id: string) => void; onRetry: () => void;
@@ -92,8 +106,8 @@ export function BookProfilesPanel({ library, selections, busy, error, onChange, 
 const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
   section: GlobalSettingsSection; initialProfileId?: string;
   renderEditor: (props: ProfileEditorProps) => ReactNode; application: ReactNode; sync: ReactNode;
-  onSaved?: (settings: AiSettings) => void;
-}>(function SettingsProfilesPanel({ section, initialProfileId, renderEditor, application, sync, onSaved }, ref) {
+  onSaved?: (settings: AiSettings) => void; bookOriginTitle?: string;
+}>(function SettingsProfilesPanel({ section, initialProfileId, renderEditor, application, sync, onSaved, bookOriginTitle }, ref) {
   const [library, setLibrary] = useState(loadSettingsProfiles)
   const initial = library.profiles.find(profile => profile.id === initialProfileId)
   const [kind, setKind] = useState<ProfileKind>(section === 'appearance' ? 'ui' : initial?.kind ?? 'text')
@@ -113,6 +127,13 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
   const [busy, setBusy] = useState(false)
   const [pending, setPending] = useState<(() => void) | null>(null)
   const [newName, setNewName] = useState('')
+  const [actionsOpen, setActionsOpen] = useState(false)
+  const [management, setManagement] = useState<'rename' | 'create' | null>(null)
+  const [copyNotice, setCopyNotice] = useState('')
+  const headerRef = useRef<HTMLDivElement | null>(null)
+  const managementRef = useRef<HTMLDivElement | null>(null)
+  const focusProfileRef = useRef(false)
+  const closeActions = useCallback(() => setActionsOpen(false), [])
   const [fakeTrace, setFakeTrace] = useState(getFakeProviderTrace)
   const [editorEpoch, setEditorEpoch] = useState(0)
   const [usageVersion, setUsageVersion] = useState(0)
@@ -160,6 +181,21 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
     else perform(destination)
   }
   useImperativeHandle(ref, () => ({ requestLeave }))
+  useEffect(() => {
+    managementRef.current?.querySelector('input')?.focus()
+  }, [management])
+  useEffect(() => {
+    setActionsOpen(false); setManagement(null); setNewName(''); setCopyNotice('')
+  }, [section, aiSection])
+  useEffect(() => {
+    if (!focusProfileRef.current || busy || pending) return
+    focusProfileRef.current = false
+    headerRef.current?.querySelector('select')?.focus()
+  }, [busy, pending, draft?.id])
+  function closeManagement() {
+    setManagement(null); setNewName('')
+    headerRef.current?.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')?.focus()
+  }
   useEffect(() => subscribeFakeProviderTrace(() => setFakeTrace(getFakeProviderTrace())), [])
   useEffect(() => {
     const prevent = (event: BeforeUnloadEvent) => { if (latest.current.anyDirty) { event.preventDefault(); event.returnValue = '' } }
@@ -209,6 +245,7 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
       const next = nextLibrary.profiles.find(profile => profile.id === id)
       if (!next) { setError('This profile is no longer available.'); return }
       setLibrary(nextLibrary); setDraft(next); setKind(next.kind); setBaseline(JSON.stringify(next)); setError(''); setEditorEpoch(epoch => epoch + 1)
+      setActionsOpen(false); setManagement(null); setNewName(''); setCopyNotice('')
       latest.current.anyDirty = connectionDirty || defaultsDirty
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'Profile could not be loaded.') }
   }
@@ -321,7 +358,9 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
     if (!newName.trim() && !duplicate) { setError('Enter a name for the new profile.'); return }
     requestLeave(() => { void run(async () => {
       const created = await createSettingsProfile(kind, duplicate ? `${loadSettingsProfiles().profiles.find(profile => profile.id === draft?.id)?.name || profileLabels[kind]} copy` : newName.trim(), duplicate ? draft?.id : undefined)
-      setNewName(''); selectProfile(created.id)
+      selectProfile(created.id)
+      focusProfileRef.current = true
+      if (duplicate) setCopyNotice(`Independent copy created. ${independentProfileHelp(kind, bookOriginTitle)} No book assignments or defaults were changed.`)
     }) })
   }
   function remove() {
@@ -338,6 +377,7 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
     </section>}
     {error && <div className="status error" role="alert">{error}</div>}
     <div inert={pending !== null || busy}>
+    <SettingsBreadcrumbs items={['Global Settings', ...(section === 'ai' ? ['AI', aiSection === 'connection' ? 'Connections' : aiSection === 'models' ? 'Models' : 'Prompts'] : [section === 'appearance' ? 'Appearance' : section === 'application' ? 'Application' : 'Sync']), ...(isProfileSection && draft ? [...(section === 'ai' ? [profileLabels[activeKind]] : []), draft.name] : [])]} />
     {section === 'ai' && <><header className="page-heading"><div><p>Global Settings</p><h1 id="page-title">AI</h1><span>One active text connection serves every text profile and role. Shared profile changes are explicit.</span></div></header>
       <SettingsSectionTabs tabs={globalAiSections} active={aiSection} onChange={next => { if (next !== aiSection) requestLeave(() => { setAiSection(next); if (next !== 'connection') selectDefault(next === 'models' ? 'text' : 'story') }) }} idPrefix="ai" label="AI sections" />
       {aiSection !== 'connection' && <Select label={aiSection === 'models' ? 'Model profile type' : 'Prompt preset type'} value={kind} onChange={event => chooseKind(event.target.value as ProfileKind)}>{(aiSection === 'models' ? modelKinds : promptKinds).map(value => <option key={value} value={value}>{profileLabels[value]}</option>)}</Select>}
@@ -361,14 +401,29 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
       <div className="profile-actions"><Button variant="primary" disabled={busy || !connectionDirty} onClick={() => { void save() }}>Save connections</Button><Button disabled={busy || !connectionDirty} onClick={discard}>Discard</Button></div>
     </section>}
     {isProfileSection && draft && effective && <section className="profile-editor" role={section === 'ai' ? 'tabpanel' : undefined} id={section === 'ai' ? `ai-panel-${aiSection}` : undefined} aria-labelledby={section === 'ai' ? `ai-tab-${aiSection}` : undefined} aria-label={`${profileLabels[activeKind]} editor`}>
-      <div className="settings-card profile-library-controls">
-        <Select label={activeKind === 'ui' ? 'UI profile' : 'Profile / preset'} value={draft.id} disabled={busy} onChange={event => { const id = event.target.value; requestLeave(() => selectProfile(id)) }}>{library.profiles.filter(profile => profile.kind === activeKind).map(profile => <option key={profile.id} value={profile.id}>{profile.name}{library.defaults[activeKind] === profile.id ? ' · Default' : ''}</option>)}</Select>
-        <Input label="Profile name" value={draft.name} maxLength={100} disabled={busy} onChange={event => changeDraft({ ...draft, name: event.target.value })} />
-        <div className="profile-actions"><Input label="New profile name" value={newName} disabled={busy} onChange={event => setNewName(event.target.value)} /><Button disabled={busy} onClick={() => create()}>Create</Button><Button disabled={busy} onClick={() => create(true)}>Duplicate</Button></div>
-        <div className="profile-actions"><Button disabled={busy || library.defaults[draft.kind] === draft.id} onClick={() => makeDefault(draft)}>{library.defaults[draft.kind] === draft.id ? 'Default · protected' : 'Set as default'}</Button><Button variant="danger" disabled={busy || !usageReady || usage.length > 0 || library.defaults[draft.kind] === draft.id} onClick={remove}>Delete</Button></div>
-        <p className="profile-help">Defaults apply to new books and outside a book. Changing a default does not reassign existing books. Used profiles and current defaults cannot be deleted.</p>
-        {usageError ? <p role="alert">{usageError}<Button size="small" onClick={() => setUsageVersion(version => version + 1)}>Retry linked books</Button></p> : !usageReady ? <p role="status">Checking linked books…</p> : <details className="profile-usage"><summary>Used in {usage.length} book{usage.length === 1 ? '' : 's'}</summary><ul>{usage.map(book => <li key={book.id}>{book.title}</li>)}</ul></details>}
-        {usage.length > 0 && <p className="profile-linked-warning">Saving updates all {usage.length} linked books for their next operation. Existing chats keep their model and prompt snapshots.</p>}
+      <div ref={headerRef} className="settings-card profile-library-controls">
+        <div className="profile-header-main">
+          <Select label={activeKind === 'ui' ? 'UI profile' : 'Profile / preset'} value={draft.id} disabled={busy} onChange={event => { const id = event.target.value; requestLeave(() => selectProfile(id)) }}>{library.profiles.filter(profile => profile.kind === activeKind).map(profile => <option key={profile.id} value={profile.id}>{profile.name}{library.defaults[activeKind] === profile.id ? ' · Default' : ''}</option>)}</Select>
+          <Button variant="primary" disabled={busy} onClick={() => create(true)}>Duplicate</Button>
+          <ActionMenu title="profile" open={actionsOpen && !pending && !busy} onToggle={() => { if (!busyRef.current) setActionsOpen(open => !open) }} onClose={closeActions} actions={[
+            { label: 'Rename', disabled: busy, onSelect: () => setManagement('rename') },
+            { label: 'Create new profile', disabled: busy, onSelect: () => setManagement('create') },
+            { label: 'Set as default', disabled: busy || library.defaults[draft.kind] === draft.id, onSelect: () => makeDefault(draft) },
+            { label: 'Delete', danger: true, disabled: busy || !usageReady || usage.length > 0 || library.defaults[draft.kind] === draft.id, onSelect: remove },
+          ]} />
+        </div>
+        <div className="profile-header-meta">
+          <span className="profile-scope-badge">Shared profile</span>
+          {library.defaults[draft.kind] === draft.id && <span className="profile-default-badge">Default</span>}
+          {usageError ? <p role="alert">{usageError}<Button size="small" onClick={() => setUsageVersion(version => version + 1)}>Retry linked books</Button></p> : !usageReady ? <span role="status">Checking linked books…</span> : <details className="profile-usage"><summary>Used in {usage.length} book{usage.length === 1 ? '' : 's'}</summary>{usage.length ? <ul>{usage.map(book => <li key={book.id}>{book.title}</li>)}</ul> : <p className="profile-help">No books currently use this profile.</p>}</details>}
+        </div>
+        {bookOriginTitle && <p className="profile-origin-note">Opened from “{bookOriginTitle}”. You are editing a shared global profile, not a book-only override.</p>}
+        {usageReady && <p className="profile-linked-warning">This is a shared global profile. {usage.length > 0 ? sharedProfileEffects(draft.kind, usage.length) : 'No books currently use this profile.'}</p>}
+        {copyNotice && <p className="profile-copy-notice" role="status">{copyNotice}</p>}
+        {management && <div ref={managementRef} className="profile-management-fields">
+          {management === 'rename' ? <><Input label="Profile name" description="Renaming stays in this draft until you Save profile." value={draft.name} maxLength={100} disabled={busy} onChange={event => changeDraft({ ...draft, name: event.target.value })} /><Button disabled={busy} onClick={closeManagement}>Done</Button></> : <><Input label="New profile name" value={newName} maxLength={100} disabled={busy} onChange={event => setNewName(event.target.value)} /><Button disabled={busy || !newName.trim()} onClick={() => create()}>Create</Button><Button disabled={busy} onClick={closeManagement}>Cancel</Button></>}
+        </div>}
+        <details className="profile-about"><summary>About shared profiles</summary><p className="profile-help">Defaults apply to new books and outside a book. Changing a default does not reassign existing books. Used profiles and current defaults cannot be deleted. Duplicate copies the saved configuration. {independentProfileHelp(draft.kind)}</p></details>
       </div>
       <fieldset key={`${draft.id}-${editorEpoch}`} className="profile-draft-fields" disabled={busy}>
         {draft.kind === 'ui' ? <><UiSettingsPanel value={draft.ui ?? defaultUiSettings} onChange={ui => changeDraft({ ...draft, ui })} />

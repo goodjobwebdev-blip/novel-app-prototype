@@ -1,13 +1,43 @@
 .settings-profiles-panel, .profile-editor, .book-profiles-panel { min-width: 0; }
 .settings-profiles-panel > .arc-field { margin-bottom: 18px; }
-.profile-library-controls { display: grid; gap: 16px; }
+.settings-breadcrumbs { min-width: 0; margin: 0 0 12px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.settings-breadcrumbs ol { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin: 0; padding: 0; list-style: none; }
+.settings-breadcrumbs li { position: relative; flex: 0 1 auto; min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.settings-breadcrumbs li + li { padding-inline-start: 16px; }
+.settings-breadcrumbs li + li::before { content: ""; position: absolute; inset-inline-start: 0; top: .55em; width: 6px; height: 6px; border-block-start: 1px solid var(--muted); border-inline-end: 1px solid var(--muted); transform: rotate(45deg); }
+.settings-breadcrumbs li[aria-current="page"] { color: var(--ink); font-weight: 600; }
+.settings-book-scope { display: grid; gap: 8px; min-width: 0; margin-bottom: 16px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
+.settings-book-scope .settings-breadcrumbs, .settings-book-scope > .profile-help { margin: 0; }
+.profile-library-controls { display: grid; gap: 10px; min-width: 0; }
+.settings-card.profile-library-controls { padding: 14px; border-radius: var(--radius); background: var(--surface); box-shadow: none; }
+.profile-header-main { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.profile-header-main > .arc-field { flex: 1 1 260px; margin: 0; }
+.profile-header-main .arc-select { min-width: 0; max-width: 100%; }
+.profile-header-main > .arc-button, .profile-header-main .arc-action-menu__trigger { flex-shrink: 0; min-height: 44px; }
+.profile-header-main .arc-action-menu__trigger { border-color: color-mix(in srgb, var(--ink) 22%, var(--line)); background: color-mix(in srgb, var(--surface-2) 82%, transparent); }
+.profile-header-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; min-width: 0; }
+.profile-scope-badge, .profile-default-badge { display: inline-flex; align-items: center; max-width: 100%; padding: 4px 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); color: var(--soft); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+.profile-default-badge { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); background: color-mix(in srgb, var(--accent) 9%, var(--surface)); color: var(--ink); }
+.profile-header-meta > .profile-usage { flex: 0 1 auto; min-width: 0; max-width: 100%; }
+.profile-header-meta > .profile-usage[open] { flex-basis: 100%; }
+.profile-library-controls > .profile-help, .profile-header-meta > p { margin: 0; }
+.profile-management-fields { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; min-width: 0; padding-top: 12px; border-top: 1px solid var(--line); }
+.profile-management-fields > .arc-field { flex: 1 1 240px; margin: 0; }
+.profile-management-fields > .arc-button { flex-shrink: 0; min-height: 44px; }
+.profile-header-main > .arc-button, .profile-management-fields > .arc-button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.profile-origin-note { margin: 0; padding: 8px 12px; border-inline-start: 2px solid var(--accent); color: var(--muted); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.profile-copy-notice { margin: 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: var(--radius); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); color: var(--ink); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.profile-about { min-width: 0; padding-top: 8px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; line-height: 1.6; }
+.profile-about > .profile-help { margin: 6px 0 0; }
 .profile-actions { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; }
 .profile-actions > .arc-field { flex: 1 1 200px; }
 .profile-actions button { flex-shrink: 0; }
-.profile-help, .profile-usage, .book-profile-row > p { color: var(--muted); font-size: 13px; line-height: 1.6; }
-.profile-usage summary { cursor: pointer; font-weight: 600; }
-.profile-usage ul { margin: 10px 0 0; padding-left: 20px; }
-.profile-linked-warning { padding: 12px 14px; margin: 0; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--accent) 9%, var(--surface)); font-size: 13px; line-height: 1.6; }
+.profile-help, .profile-usage, .book-profile-row > p { color: var(--muted); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.profile-usage summary, .profile-about summary { box-sizing: border-box; min-height: 44px; padding: 10px 0; border-radius: var(--radius); cursor: pointer; font-weight: 600; overflow-wrap: anywhere; }
+.profile-usage summary:focus-visible, .profile-about summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.profile-usage ul { margin: 6px 0 0; padding-inline-start: 20px; }
+.profile-usage li { margin: 4px 0; overflow-wrap: anywhere; }
+.profile-linked-warning { padding: 12px 14px; margin: 0; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--accent) 9%, var(--surface)); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .profile-draft-fields { margin: 0; padding: 0; border: 0; min-width: 0; }
 .profile-save-bar { position: sticky; bottom: 0; z-index: 10; display: flex; gap: 10px; align-items: center; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 -8px 24px color-mix(in srgb, var(--canvas) 75%, transparent); }
 .profile-save-bar > span { flex: 1; color: var(--muted); font-size: 12px; }
@@ -21,6 +51,7 @@
 .profile-leave-dialog { position: fixed; z-index: 1000; top: 20%; left: 50%; transform: translateX(-50%); width: min(620px, calc(100vw - 32px)); padding: 24px; display: grid; gap: 20px; background: var(--surface); border: 1px solid var(--accent); border-radius: 14px; box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--canvas) 80%, transparent); }
 .profile-leave-dialog .profile-actions { justify-content: flex-end; }
 @media (max-width: 700px) {
+  .profile-header-main > .arc-field, .profile-management-fields > .arc-field { flex-basis: 100%; width: 100%; }
   .profile-connections-grid { grid-template-columns: 1fr; }
   .profile-save-bar { flex-wrap: wrap; }
   .profile-save-bar > span { flex-basis: 100%; }

@@ -4,6 +4,7 @@ import { captureCharacterFrame, type CharacterFrame } from '../features/chat/cha
 import { availableChatTools } from '../features/chat/chat-tool-availability'
 import { sceneWritingValues, resolveSceneWriting } from '../features/writing/scene-writing'
 import SettingsSectionTabs from '../features/settings/SettingsSectionTabs'
+import SettingsBreadcrumbs from '../features/settings/SettingsBreadcrumbs'
 import { ContextSourcePicker, ContextSourceInventory, ContextBudget } from '../shared/context/ContextControls'
 import '../shared/context/context-settings-ux.css'
 import Input from '../shared/ui/Input'
@@ -408,6 +409,10 @@ function SettingsApp({ onHome, onBack, onSaved, onGlobalSettings, onLastBook, la
       <p>{isBookSettings ? 'Choose shared profiles for this book. Context remains local to this book or chat.' : 'Shared profiles update linked books after Save. Connections stay local and never enter backups.'}</p>
     </aside>
     <section className="settings-page" aria-labelledby="page-title">
+      {isBookSettings && book && <div className="settings-book-scope">
+        <SettingsBreadcrumbs items={['Book settings', book.title, settingsTab === 'context' ? 'Context' : 'Profiles']} />
+        <p className="profile-help">{settingsTab === 'context' ? 'Context applies only to this book or the selected chat; shared profiles stay unchanged.' : 'Profile assignments apply only to this book. Editing a shared profile can affect other books.'}</p>
+      </div>}
       {!isBookSettings && profileError && <p className="status error" role="alert">{profileError}</p>}
       {!isBookSettings && <header className="global-settings-return profile-actions">
         {localGlobal && book && <Button onClick={() => navigate(() => { setLocalGlobal(false); setSettingsTab('profiles') })}>Back to Profiles · {book.title}</Button>}
@@ -424,7 +429,7 @@ function SettingsApp({ onHome, onBack, onSaved, onGlobalSettings, onLastBook, la
           {book.currentSummary && <BookSummaryPreview book={book} settings={settings} />}
         </>}
       </> : <BookProfilesPanel library={library} selections={selections} busy={profileBusy} error={profileError} onRetry={() => setProfileLoadVersion(version => version + 1)} onChange={(kind, id) => { void selectBookProfile(kind, id) }} onEdit={openGlobalProfile} />
-      : <SettingsProfilesPanel key={editProfileId ?? 'global'} ref={profilePanelRef} section={globalSection} initialProfileId={editProfileId} onSaved={() => { const effective = resolveProfileSettings(selections ?? Object.fromEntries(bookProfileKinds.map(kind => [kind, loadSettingsProfiles().defaults[kind]])) as BookProfileSelections, loadAiSettings().favorites); setSettings(effective); onSavedRef.current?.(effective) }} renderEditor={props => <ProfileEditor key={`${props.kind}-${editProfileId ?? ''}`} {...props} book={book} />} application={<><TtsCacheSettings /><GlobalContextDefaults value={applicationContext} saved={!applicationContextError} saveError={applicationContextError} onRetry={() => saveApplicationContext(applicationContext)} onChange={saveApplicationContext} /></>} sync={<SyncSettingsPanel />} />}
+      : <SettingsProfilesPanel key={editProfileId ?? 'global'} ref={profilePanelRef} section={globalSection} initialProfileId={editProfileId} bookOriginTitle={localGlobal ? book?.title : undefined} onSaved={() => { const effective = resolveProfileSettings(selections ?? Object.fromEntries(bookProfileKinds.map(kind => [kind, loadSettingsProfiles().defaults[kind]])) as BookProfileSelections, loadAiSettings().favorites); setSettings(effective); onSavedRef.current?.(effective) }} renderEditor={props => <ProfileEditor key={`${props.kind}-${editProfileId ?? ''}`} {...props} book={book} />} application={<><TtsCacheSettings /><GlobalContextDefaults value={applicationContext} saved={!applicationContextError} saveError={applicationContextError} onRetry={() => saveApplicationContext(applicationContext)} onChange={saveApplicationContext} /></>} sync={<SyncSettingsPanel />} />}
     </section>
   </main>
 }
