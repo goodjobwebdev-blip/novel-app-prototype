@@ -3,9 +3,13 @@
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
+  padding-bottom: 150px;
+  cursor: text;
   color: var(--ink);
   font: 19px/1.78 var(--serif);
 }
+
+.markdown-editor.read-only { cursor: default; }
 
 .markdown-editor .cm-editor {
   width: 100%;

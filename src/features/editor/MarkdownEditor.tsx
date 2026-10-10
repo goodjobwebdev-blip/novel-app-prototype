@@ -1,4 +1,5 @@
 import { createEditorStateWithHistory } from './editor-history-bridge'
+import { installBlankSpaceFocus } from './editor-blank-space-focus'
 import { editorBlockPreview } from './EditorBlockPreview'
 import { rangeTouchesProtected, protectedRanges, type LocatedBlock } from './document-projection.ts'
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
@@ -887,6 +888,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     editorIdRef.current = crypto.randomUUID()
     const view = new EditorView({ state, parent: hostRef.current })
     viewRef.current = view
+    const removeBlankSpaceFocus = installBlankSpaceFocus(view, hostRef.current)
     // CodeMirror skips keymaps during IME. Escape must still cancel pending
     // autocomplete, without preventing the IME/browser's own Escape behavior.
     const escapeAutocomplete = (event: KeyboardEvent) => {
@@ -905,6 +907,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       autocompleteCallbacksRef.current.onAutocompleteInvalidate?.()
       window.removeEventListener('scroll', repositionSelection, true)
       view.contentDOM.removeEventListener('keydown', escapeAutocomplete, true)
+      removeBlankSpaceFocus()
       onSelectionChangeRef.current?.(null)
       activeGenerationRef.current = null
       activeDictationRef.current = null
