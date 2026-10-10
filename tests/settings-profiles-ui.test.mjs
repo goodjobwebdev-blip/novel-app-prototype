@@ -1021,10 +1021,25 @@ test('profile changed during the asynchronous linked-book check is not overwritt
   await mounted.close()
 })
 
-test('profile headers start compact with shared/default metadata and body-portaled management actions', async (t) => {
-  for (const kind of ['text', 'ui']) {
+test('compact profile headers show loaded usage, kind-specific shared effects and body-portaled management actions', async (t) => {
+  for (const kind of ['text', 'ui', 'chat']) {
     const id = library().defaults[kind]
+    let used = await persistence.listSettingsProfileUsage(id)
+    if (!used.length) {
+      const created = await persistence.createBook(ai.initialAiSettings, `${kind} shared header book`)
+      const selections = await persistence.getBookProfileSelections(created.book.id)
+      if (kind === 'chat') {
+        const text = profiles.createSettingsProfile('text', 'Chat header Text models')
+        profiles.saveSettingsProfile({ ...text, settings: { ...text.settings, chatPromptPresetId: id } })
+        await persistence.saveBookProfileSelections(created.book.id, { ...selections, text: text.id })
+      } else {
+        await persistence.saveBookProfileSelections(created.book.id, { ...selections, [kind]: id })
+      }
+      used = await persistence.listSettingsProfileUsage(id)
+    }
+    assert.ok(used.length > 0, `${kind} shared effects must be checked with a linked book`)
     const mounted = await mount(t, Panel, panelProps({ section: kind === 'ui' ? 'appearance' : 'ai', initialProfileId: id }))
+    assert.equal(await waitForProfileUsage(mounted.host), `Used in ${used.length} book${used.length === 1 ? '' : 's'}`)
     const header = mounted.host.querySelector('.profile-header-main')
     assert.ok(header, 'Missing compact profile header')
     assert.equal(field(header, kind === 'ui' ? 'UI profile' : 'Profile / preset').value, id)
@@ -1036,8 +1051,21 @@ test('profile headers start compact with shared/default metadata and body-portal
     assert.ok(meta, 'Missing profile metadata')
     assert.match(meta.textContent, /Shared profile/)
     assert.match(meta.textContent, /Default/)
-    const used = await persistence.listSettingsProfileUsage(id)
-    assert.equal(meta.querySelector('details.profile-usage summary')?.textContent.trim(), `Used in ${used.length} book${used.length === 1 ? '' : 's'}`)
+    const warning = mounted.host.querySelector('.profile-linked-warning')
+    assert.ok(warning)
+    assert.match(warning.textContent, new RegExp(`\\b${used.length}\\s+linked books?\\b`))
+    if (kind === 'ui') {
+      assert.match(warning.textContent, /appearance/i)
+      assert.match(warning.textContent, /immediately/i)
+      assert.match(warning.textContent, /active/i)
+      assert.doesNotMatch(warning.textContent, /next operation|new chats/i)
+    } else if (kind === 'chat') {
+      assert.match(warning.textContent, /new chats/i)
+      assert.doesNotMatch(warning.textContent, /next operation|immediately/i)
+    } else {
+      assert.match(warning.textContent, /next operation/i)
+      assert.doesNotMatch(warning.textContent, /immediately|new chats/i)
+    }
     const menu = await openProfileMenu(mounted.host)
     assert.equal(JSON.stringify([...menu.querySelectorAll('[role="menuitem"]')].map(item => item.textContent.trim())), JSON.stringify(['Rename', 'Create new profile', 'Set as default', 'Delete']))
     assert.equal(button(menu, 'Set as default').disabled, true)
@@ -1283,43 +1311,6 @@ test('chat prompt copies direct book-origin guidance to their Text models role w
   }
 })
 
-test('shared warning timing distinguishes active appearance, new chats and the next generation operation', async (t) => {
-  for (const kind of ['ui', 'chat', 'text']) {
-    const id = library().defaults[kind]
-    let usage = await persistence.listSettingsProfileUsage(id)
-    if (!usage.length) {
-      const created = await persistence.createBook(ai.initialAiSettings, `${kind} shared timing book`)
-      const selections = await persistence.getBookProfileSelections(created.book.id)
-      if (kind === 'chat') {
-        const text = profiles.createSettingsProfile('text', 'Chat timing Text models')
-        profiles.saveSettingsProfile({ ...text, settings: { ...text.settings, chatPromptPresetId: id } })
-        await persistence.saveBookProfileSelections(created.book.id, { ...selections, text: text.id })
-      } else {
-        await persistence.saveBookProfileSelections(created.book.id, { ...selections, [kind]: id })
-      }
-      usage = await persistence.listSettingsProfileUsage(id)
-    }
-    assert.ok(usage.length > 0, `${kind} timing must be checked with a linked book`)
-    const mounted = await mount(t, Panel, panelProps({ section: kind === 'ui' ? 'appearance' : 'ai', initialProfileId: id }))
-    assert.equal(mounted.host.querySelector('details.profile-usage summary')?.textContent.trim(), `Used in ${usage.length} book${usage.length === 1 ? '' : 's'}`)
-    const warning = mounted.host.querySelector('.profile-linked-warning')
-    assert.ok(warning)
-    assert.match(warning.textContent, new RegExp(`\\b${usage.length}\\s+linked books?\\b`))
-    if (kind === 'ui') {
-      assert.match(warning.textContent, /appearance/i)
-      assert.match(warning.textContent, /immediately/i)
-      assert.match(warning.textContent, /active/i)
-      assert.doesNotMatch(warning.textContent, /next operation|new chats/i)
-    } else if (kind === 'chat') {
-      assert.match(warning.textContent, /new chats/i)
-      assert.doesNotMatch(warning.textContent, /next operation|immediately/i)
-    } else {
-      assert.match(warning.textContent, /next operation/i)
-      assert.doesNotMatch(warning.textContent, /immediately|new chats/i)
-    }
-    await mounted.close()
-  }
-})
 
 test('provider-only Save stays available while linked-book usage is checking or failed and never writes a profile', async (t) => {
   let mounted

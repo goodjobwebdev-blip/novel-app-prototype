@@ -22,6 +22,7 @@ function configurationKey(scope: string, profileId: string, settings: AiSettings
 
 export function useSceneAutocomplete(options: SceneAutocompleteOptions) {
   const [suggestion, setSuggestion] = useState<AutocompleteSuggestion | null>(null)
+  const [requesting, setRequesting] = useState(false)
   const latest = useRef(options)
   latest.current = options
   const scope = JSON.stringify([options.bookId, options.sceneId, options.writing])
@@ -52,6 +53,7 @@ export function useSceneAutocomplete(options: SceneAutocompleteOptions) {
     const instance = createAutocompleteController({
       isCurrent: (snapshot, key) => isCurrent(snapshot, key),
       onError: () => latest.current.onError(),
+      onRequestStateChange: setRequesting,
       onSuggestion: next => {
         const editor = latest.current.editor.current
         if (next && (!isCurrent(next.snapshot, next.configurationKey) || !editor?.setAutocompleteSuggestion(next.snapshot, next.text))) return
@@ -133,5 +135,5 @@ export function useSceneAutocomplete(options: SceneAutocompleteOptions) {
     return accepted
   }
 
-  return { suggestion, onInput, cancel, accept }
+  return { suggestion, requesting, onInput, cancel, accept }
 }

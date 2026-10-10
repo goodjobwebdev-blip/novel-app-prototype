@@ -487,8 +487,10 @@ for (const name of ['explicit cancel', 'cursor movement', 'Escape', 'busy switch
     // Fake stream whose first chunk is delayed five seconds; no partial UI leaks.
     await idle(160)
     empty(ui)
+    assert.equal(ui.observed.api.requesting, true, 'Hook exposes an in-flight request')
     const before = ui.document()
     await invalidations.find(([label]) => label === name)[1](ui, f, t)
+    assert.equal(ui.observed.api.requesting, false, 'Invalidation clears the hook request status')
     await waitFor(() => trace().length === 1, 'Cancelled Fake stream should settle and record its abort')
     assert.equal(trace()[0].outcome, 'aborted')
     assert.equal(trace()[0].emittedContent, '')

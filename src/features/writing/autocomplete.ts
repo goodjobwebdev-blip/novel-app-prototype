@@ -17,6 +17,7 @@ export type AutocompleteRequest = (request: TextProviderGenerationRequest, signa
 export type AutocompleteControllerOptions = {
   onSuggestion: (suggestion: AutocompleteSuggestion | null) => void
   onError: () => void
+  onRequestStateChange?: (requesting: boolean) => void
   isCurrent: (snapshot: EditorSelectionSnapshot, configurationKey: string) => boolean
   request?: AutocompleteRequest
 }
@@ -163,10 +164,17 @@ export function createAutocompleteController(options: AutocompleteControllerOpti
   const request = options.request ?? requestAutocompleteCompletion
   let sequence = 0
   let disposed = false
+  let requesting = false
   let debounce: ReturnType<typeof setTimeout> | undefined
   let timeout: ReturnType<typeof setTimeout> | undefined
   let active: AbortController | undefined
   let lastScheduled: { snapshot: EditorSelectionSnapshot; configurationKey: string } | undefined
+
+  function setRequesting(next: boolean) {
+    if (requesting === next) return
+    requesting = next
+    options.onRequestStateChange?.(next)
+  }
 
   function invalidate() {
     sequence += 1
@@ -177,6 +185,7 @@ export function createAutocompleteController(options: AutocompleteControllerOpti
     const previous = active
     active = undefined
     previous?.abort()
+    setRequesting(false)
   }
   function cancel() {
     if (disposed) return
@@ -211,8 +220,10 @@ export function createAutocompleteController(options: AutocompleteControllerOpti
         if (disposed || sequence !== attempt || controller.signal.aborted) return
         active = undefined
         controller.abort()
+        setRequesting(false)
         if (current()) options.onError()
       }, REQUEST_TIMEOUT_MS)
+      setRequesting(true)
       void (async () => {
         try {
           const response = await request(prepared, controller.signal)
@@ -227,6 +238,7 @@ export function createAutocompleteController(options: AutocompleteControllerOpti
             clearTimeout(timeout)
             timeout = undefined
             if (active === controller) active = undefined
+            setRequesting(false)
           }
         }
       })()
