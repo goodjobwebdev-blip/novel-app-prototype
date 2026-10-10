@@ -164,7 +164,7 @@ test('library/global settings use default UI; book settings, inline UI Edit and 
   await click(textButton(`Back to Profiles · ${fixture.book.title}`))
   await settle(() => field('UI')?.value === selections.ui)
   await assertUi(bookUi)
-  await click(textButton('Global Settings'))
+  await click(ariaButton('Global Settings'))
   await settle(() => lastBookButton())
   await assertUi(defaultUi)
   await click(lastBookButton())

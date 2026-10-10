@@ -48,8 +48,12 @@ button { color: inherit; }
 .rail-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .home-button { min-height: 42px; padding: 0 12px; border: 1px solid var(--line); border-radius: var(--radius); background: rgba(255,255,255,.035); display: flex; align-items: center; gap: 7px; cursor: pointer; }
 .home-button svg { width:18px; height:18px; }.home-button b { font-size: 12px; }
-.settings-close { width:42px; height:42px; padding:0; border:1px solid var(--line); border-radius:var(--radius); background:rgba(255,255,255,.035); display:grid; place-items:center; cursor:pointer; }
-.settings-close svg { width:18px; height:18px; }
+.settings-close, .global-settings-button { width:42px; height:42px; padding:0; border:1px solid var(--line); border-radius:var(--radius); background:rgba(255,255,255,.035); display:grid; place-items:center; cursor:pointer; }
+.settings-close svg, .global-settings-button svg { width:18px; height:18px; }
+.global-settings-button { flex: 0 0 42px; }
+.global-settings-button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-bright); }
+.global-settings-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.global-settings-button:disabled { opacity: .5; cursor: not-allowed; }
 .settings-rail nav { margin: 11px -14px 0; display: flex; overflow-x: auto; scrollbar-width: none; border-top: 1px solid var(--line); }
 .settings-rail nav button { position: relative; min-width: 70px; height: 58px; padding: 7px 10px; border: 0; background: transparent; color: var(--faint); display: grid; place-items: center; gap: 3px; font-size: 11px; cursor: pointer; }
 .settings-rail nav button svg { width:17px; height:17px; }.settings-rail nav button span { font-size: 11px; }.settings-rail nav button.active { color: var(--ink); }.settings-rail nav button.active::after { content:""; position:absolute; inset:auto 12px 0; height:2px; background:var(--accent); }

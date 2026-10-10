@@ -119,11 +119,18 @@ test('book Profiles renders nine live selections and Edit links, without detaile
 })
 
 test('App book navigation is only Profiles and Context; Home, Global Settings and Close remain adjacent', async (t) => {
-  const mounted = await mount(t, App, { book: { id: fixture.book.id, title: fixture.book.title }, onHome() {}, onBack() {} })
+  let globalSettingsOpened = 0
+  const mounted = await mount(t, App, { book: { id: fixture.book.id, title: fixture.book.title }, onHome() {}, onBack() {}, onGlobalSettings() { globalSettingsOpened++ } })
   assert.equal([...mounted.host.querySelectorAll('.settings-rail nav button')].map(item => item.textContent.trim()).join('|'), 'Profiles|Context')
   const header = mounted.host.querySelector('.rail-header')
-  assert.match(header.textContent, /Home.*Global Settings/)
-  assert.ok(header.querySelector('[aria-label="Close settings"]'))
+  assert.equal([...header.querySelectorAll('button')].map(item => item.getAttribute('aria-label')).join('|'), 'Back to library|Global Settings|Close settings')
+  const globalSettings = header.querySelector('button[aria-label="Global Settings"]')
+  assert.equal(globalSettings.textContent.trim(), '')
+  assert.equal(globalSettings.title, 'Global Settings')
+  assert.equal(globalSettings.disabled, false)
+  assert.ok(globalSettings.querySelector('svg.lucide-wrench[aria-hidden="true"]'), 'Global Settings uses a decorative wrench icon')
+  await click(globalSettings)
+  assert.equal(globalSettingsOpened, 1)
   await mounted.close()
 })
 
@@ -290,7 +297,7 @@ test('book Edit opens the selected global profile and dirty Back to Profiles req
 test('Application Context defaults remain global even when entering Global Settings from a book', async (t) => {
   const before = await persistence.getBookContextSettings(fixture.book.id)
   const mounted = await mount(t, App, { book: { id: fixture.book.id, title: fixture.book.title } })
-  await click(button(mounted.host, 'Global Settings'))
+  await click(mounted.host.querySelector('button[aria-label="Global Settings"]'))
   await click(button(mounted.host, 'Application'))
   await change(field(mounted.host, 'Previous Scenes to scan for Codex triggers'), '7')
   assert.equal(persistence.loadDefaultBookContextSettings().previousScenesForCodexTriggers, 7)

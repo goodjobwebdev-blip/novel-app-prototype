@@ -28,6 +28,7 @@ import {
   SlidersHorizontal,
   Trash2,
   Type,
+  Wrench,
   X,
 } from 'lucide-react'
 import {
@@ -403,7 +404,7 @@ function SettingsApp({ onHome, onBack, onSaved, onGlobalSettings, onLastBook, la
   return <main className="app-shell ai-settings-shell">
     <aside className="settings-rail" aria-label={`${isBookSettings ? 'Book' : 'Global'} settings navigation`}>
       <div className="rail-header"><button className="home-button" type="button" onClick={() => navigate(onHome)} disabled={leaveSaving} aria-label="Back to library"><Home aria-hidden="true" /><b>Home</b></button>
-        {isBookSettings && <button className="global-settings-button" type="button" onClick={() => onGlobalSettings ? navigate(onGlobalSettings) : openGlobalProfile()} disabled={leaveSaving}>Global Settings</button>}
+        {isBookSettings && <button className="global-settings-button" type="button" onClick={() => onGlobalSettings ? navigate(onGlobalSettings) : openGlobalProfile()} disabled={leaveSaving} aria-label="Global Settings" title="Global Settings"><Wrench aria-hidden="true" /></button>}
         {onBack && <button className="settings-close" type="button" onClick={() => navigate(onBack)} aria-label="Close settings" disabled={leaveSaving}><X aria-hidden="true" /></button>}</div>
       <nav>{(isBookSettings ? ([['profiles', Bot, 'Profiles'], ['context', SlidersHorizontal, 'Context']] as const) : ([['ai', Bot, 'AI'], ['appearance', Type, 'UI'], ['application', SlidersHorizontal, 'Application'], ['sync', Cloud, 'Sync']] as const)).map(([key, Icon, label]) => <button key={key} className={settingsTab === key ? 'active' : ''} type="button" aria-current={settingsTab === key ? 'page' : undefined} onClick={() => selectSettingsTab(key)}><Icon aria-hidden="true" /><span>{label}</span></button>)}</nav>
       <p>{isBookSettings ? 'Choose shared profiles for this book. Context remains local to this book or chat.' : 'Shared profiles update linked books after Save. Connections stay local and never enter backups.'}</p>
