@@ -128,3 +128,5 @@ Pushes to `main` trigger `.github/workflows/deploy.yml`:
 5. publish `dist/` to GitHub Pages.
 
 GitHub Pages must be configured once with **GitHub Actions** as the Pages source.
+
+Hello world
