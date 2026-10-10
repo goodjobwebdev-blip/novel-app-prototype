@@ -41,6 +41,10 @@
 .profile-draft-fields { margin: 0; padding: 0; border: 0; min-width: 0; }
 .profile-save-bar { position: sticky; bottom: 0; z-index: 10; display: flex; gap: 10px; align-items: center; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 -8px 24px color-mix(in srgb, var(--canvas) 75%, transparent); }
 .profile-save-bar > span { flex: 1; color: var(--muted); font-size: 12px; }
+.text-provider-controls { display: flex; align-items: start; flex-wrap: wrap; gap: 12px; min-width: 0; }
+.text-provider-controls > .arc-field { flex: 1 1 280px; }
+.text-provider-controls > .arc-button { flex-shrink: 0; min-height: 44px; margin-top: 21px; }
+.text-provider-controls + .status { margin-bottom: 18px; }
 .book-profile-rows { display: grid; gap: 12px; }
 .book-profile-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 14px; align-items: end; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .book-profile-row > p { grid-column: 1 / -1; margin: 0; overflow-wrap: anywhere; }
@@ -53,6 +57,8 @@
 .profile-leave-dialog { position: fixed; z-index: 1000; top: 20%; left: 50%; transform: translateX(-50%); width: min(620px, calc(100vw - 32px)); padding: 24px; display: grid; gap: 20px; background: var(--surface); border: 1px solid var(--accent); border-radius: 14px; box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--canvas) 80%, transparent); }
 .profile-leave-dialog .profile-actions { justify-content: flex-end; }
 @media (max-width: 700px) {
+  .text-provider-controls > .arc-field { flex-basis: 100%; }
+  .text-provider-controls > .arc-button { margin-top: 0; }
   .profile-header-main > .arc-field, .profile-management-fields > .arc-field { flex-basis: 100%; width: 100%; }
   .profile-save-bar { flex-wrap: wrap; }
   .profile-save-bar > span { flex-basis: 100%; }

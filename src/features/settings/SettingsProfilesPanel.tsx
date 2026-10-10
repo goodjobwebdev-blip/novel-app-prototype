@@ -38,7 +38,7 @@ const promptKinds = ['story', 'codex', 'summary', 'chat', 'character'] as const
 const providers: Record<AiProvider, string> = { openrouter: 'OpenRouter', nanogpt: 'NanoGPT', openai: 'OpenAI', litellm: 'LiteLLM', compatible: 'OpenAI-compatible', fake: 'Fake (testing)' }
 export type GlobalSettingsSection = 'ai' | 'appearance' | 'application' | 'sync'
 export type SettingsProfilesPanelRef = { requestLeave: (destination: () => void) => void }
-export type ProfileEditorProps = { kind: ProfileKind; settings: AiSettings; library: SettingsProfileLibrary; onChange: (settings: AiSettings) => void }
+export type ProfileEditorProps = { kind: ProfileKind; settings: AiSettings; library: SettingsProfileLibrary; onChange: (settings: AiSettings) => void; textProviderControl?: ReactNode }
 
 /** Credentials are injected only for catalogs; never write this effective value into a profile. */
 export function profileCatalogSettings(settings: AiSettings, connection: AiSettings): AiSettings {
@@ -148,6 +148,16 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
   latest.current = { anyDirty, busy, defaultsDirty }
   const editedConnection = editedProvider === connection.provider ? connection : switchProviderProfile(connection, editedProvider)
   const editedMediaProvider = editedProvider === 'litellm' ? 'pruna' : editedProvider === 'nanogpt' || editedProvider === 'openai' ? editedProvider : null
+
+  function selectActiveTextProvider(provider: AiProvider) {
+    if (busyRef.current) return
+    setConnection(current => {
+      const switched = switchProviderProfile(current, provider)
+      // A global connection change must not replace the selected profile's role models.
+      return { ...current, provider: switched.provider, apiKey: switched.apiKey, baseUrl: switched.baseUrl, providerProfiles: switched.providerProfiles }
+    })
+    setEditedProvider(provider)
+  }
 
   function selectProviderConnection(provider: AiProvider) {
     if (busyRef.current) return
@@ -385,13 +395,6 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
     </>}
     {section === 'ai' && aiSection === 'connection' && <section className="settings-card profile-connections-panel" role="tabpanel" id="ai-panel-connection" aria-labelledby="ai-tab-connection">
       <h2>Global Connections</h2><p>Credentials and endpoints stay on this device and are not included in backups or archive sync. Models and prompts never contain keys.</p>
-      <Select label="Active text provider" value={connection.provider} onChange={event => {
-        const switched = switchProviderProfile(connection, event.target.value as AiProvider)
-        // Switching a connection must not copy a provider's old role/model configuration.
-        if (busyRef.current) return
-        setConnection({ ...connection, provider: switched.provider, apiKey: switched.apiKey, baseUrl: switched.baseUrl, providerProfiles: switched.providerProfiles })
-        setEditedProvider(switched.provider)
-      }}>{Object.entries(providers).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</Select>
       <Select label="Connection provider" description="Edit this provider’s global credentials without changing the active text provider or any profile models." value={editedProvider} disabled={busy} onChange={event => selectProviderConnection(event.target.value as AiProvider)}>{Object.entries(providers).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</Select>
       <section className="profile-connection-fields" aria-label={`${providers[editedProvider]} connection`}>
         <h3>{providers[editedProvider]} connection</h3>
@@ -433,9 +436,9 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
         {draft.kind === 'ui' ? <><UiSettingsPanel value={draft.ui ?? defaultUiSettings} onChange={ui => changeDraft({ ...draft, ui })} />
           <section className="settings-card"><h2>Text reveal speed</h2><SegmentedControl label="Text reveal speed" value={draft.settings.generationWordDelayMs} onChange={delay => changeDraft({ ...draft, settings: { ...draft.settings, generationWordDelayMs: delay } })} options={[{ value: '120', label: 'Slow' }, { value: '40', label: 'Normal' }, { value: '10', label: 'Fast' }]} /><Input label="Custom reveal speed" description="Milliseconds per word, 1–2000. This belongs to the UI profile, not the text model." type="number" min="1" max="2000" value={draft.settings.generationWordDelayMs} onChange={event => changeDraft({ ...draft, settings: { ...draft.settings, generationWordDelayMs: event.target.value } })} /><TextRevealPreview delay={Number(draft.settings.generationWordDelayMs)} /></section></>
           : draft.kind === 'image' || draft.kind === 'video' ? <ImageSettingsPanel ai={connection} value={{ ...(draft.media ?? { favorites: [], defaultAlias: '', defaultAliases: {} }), keys: imageKeys }} hideCredentials mediaKind={draft.kind} onChange={value => { const { keys: _keys, ...media } = value; changeDraft({ ...draft, media }) }} />
-          : renderEditor({ kind: draft.kind, settings: effective, library, onChange: settings => changeDraft({ ...draft, settings: withoutProfileCredentials(settings) }) })}
+          : renderEditor({ kind: draft.kind, settings: effective, library, onChange: settings => changeDraft({ ...draft, settings: withoutProfileCredentials(settings) }), textProviderControl: draft.kind === 'text' ? <Select label="Active text provider" description="Global setting for all text profiles and roles, including existing chats. Configure API keys and endpoints in Connections. Save to apply; role model IDs are not changed." value={connection.provider} disabled={busy} onChange={event => selectActiveTextProvider(event.target.value as AiProvider)}>{Object.entries(providers).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</Select> : undefined })}
       </fieldset>
-      <div className="profile-save-bar"><span role="status">{busy ? 'Saving…' : dirty ? 'Unsaved draft · no linked books changed' : 'Saved'}</span><Button disabled={busy || !dirty} onClick={discard}>Discard</Button><Button variant="primary" disabled={busy || !dirty || !usageReady || !draft.name.trim()} onClick={() => { void save() }}>Save profile</Button></div>
+      <div className="profile-save-bar"><span role="status">{busy ? 'Saving…' : connectionDirty ? dirty ? 'Unsaved profile and global text provider · no changes applied' : 'Unsaved global text provider · no changes applied' : dirty ? 'Unsaved draft · no linked books changed' : 'Saved'}</span><Button disabled={busy || !(dirty || connectionDirty)} onClick={discard}>Discard</Button><Button variant="primary" disabled={busy || !(dirty || connectionDirty) || dirty && (!usageReady || !draft.name.trim())} onClick={() => { void save() }}>{connectionDirty ? dirty ? 'Save profile & provider' : 'Save text provider' : 'Save profile'}</Button></div>
     </section>}
     {section === 'application' && <><header className="page-heading"><div><p>Global Settings</p><h1 id="page-title">Application</h1><span>Defaults are assigned to new books and used outside a book.</span></div></header><section className="settings-card"><h2>Default profiles</h2>{Object.keys(profileLabels).map(value => {
       const profileKind = value as ProfileKind

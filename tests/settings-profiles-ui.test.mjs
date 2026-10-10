@@ -110,6 +110,23 @@ async function change(element, value) {
   })
 }
 const panelProps = extra => ({ section: 'ai', renderEditor: () => React.createElement('p', null, 'Controlled model editor'), application: null, sync: null, ...extra })
+function assertNoActiveTextProvider(host) {
+  assert.equal([...host.querySelectorAll('.arc-field__label')].some(label => label.textContent.trim() === 'Active text provider'), false)
+  assert.equal(host.querySelectorAll('.text-provider-controls').length, 0)
+}
+function preserveLocalStorage(t, getMounted) {
+  const entries = Array.from({ length: localStorage.length }, (_, index) => {
+    const key = localStorage.key(index)
+    return [key, localStorage.getItem(key)]
+  })
+  t.after(async () => {
+    try { await getMounted()?.close() }
+    finally {
+      localStorage.clear()
+      for (const [key, value] of entries) localStorage.setItem(key, value)
+    }
+  })
+}
 
 test('book Profiles renders nine live selections and Edit links, without detailed editors or credentials', () => {
   const html = renderToStaticMarkup(React.createElement(BookProfilesPanel, { library: library(), selections: defaults(), busy: false, error: '', onChange() {}, onEdit() {}, onRetry() {} }))
@@ -175,6 +192,158 @@ test('text editor includes six roles, role-local caps and prompt selections, but
   assert.ok(![...mounted.host.querySelectorAll('label')].some(label => label.textContent.includes('Custom reveal speed')), 'Reveal speed controls belong to the UI profile')
   assert.equal(Boolean(mounted.host.querySelector('input[type="password"]')), false)
   await mounted.close()
+})
+
+test('Active text provider belongs beside Reload in Text models, not other models, prompts, UI or Connections', async (t) => {
+  let mounted
+  preserveLocalStorage(t, () => mounted)
+  ai.saveAiSettings({ ...ai.loadAiSettings(), provider: 'fake', apiKey: '', baseUrl: '' })
+  mounted = await mount(t, App)
+  const card = mounted.host.querySelector('.models-card')
+  const controls = card.querySelector('.text-provider-controls')
+  assert.ok(controls, 'Text Models owns the provider/reload controls')
+  assert.ok(card.querySelector('.card-heading').nextElementSibling === controls, 'Provider/reload controls directly follow the Models heading')
+  assert.ok(controls.contains(field(card, 'Active text provider')), 'The active-provider selector is inside the Models controls')
+  assert.ok(controls.contains(button(card, 'Reload model list')), 'Reload sits beside the provider selector, not after the roles')
+  assert.equal([...mounted.host.querySelectorAll('.arc-field__label')].filter(label => label.textContent.trim() === 'Active text provider').length, 1)
+  assert.equal([...card.querySelectorAll('button')].filter(item => item.textContent.trim() === 'Reload model list').length, 1)
+  assert.equal(controls.nextElementSibling?.getAttribute('role'), 'status')
+  assert.ok(controls.nextElementSibling?.nextElementSibling?.classList.contains('model-role-settings'), 'Catalog status precedes the model roles')
+  assert.match(controls.textContent, /(?:all|every) text profiles?/i)
+  assert.match(controls.textContent, /roles/i)
+  assert.match(controls.textContent, /existing chats/i)
+  assert.match(controls.textContent, /Connections/)
+  assert.equal(card.querySelectorAll('input[type="password"]').length, 0)
+  for (const kind of ['tts', 'stt', 'image', 'video']) {
+    await change(field(mounted.host, 'Model profile type'), kind)
+    assert.equal(field(mounted.host, 'Model profile type').value, kind)
+    assertNoActiveTextProvider(mounted.host)
+  }
+  await click(button(mounted.host, 'Prompts'))
+  for (const kind of ['story', 'codex', 'summary', 'chat', 'character']) {
+    await change(field(mounted.host, 'Prompt preset type'), kind)
+    assert.equal(field(mounted.host, 'Prompt preset type').value, kind)
+    assertNoActiveTextProvider(mounted.host)
+  }
+  await click(button(mounted.host, 'Connections'))
+  assertNoActiveTextProvider(mounted.host)
+  assert.ok(field(mounted.host, 'Connection provider'))
+  assert.equal(ai.loadAiSettings().provider, 'fake')
+  await click(button(mounted.host, 'UI'))
+  assert.ok(field(mounted.host, 'UI profile'))
+  assertNoActiveTextProvider(mounted.host)
+})
+
+test('Text Models saves or discards the global provider without replacing profile roles, and labels combined drafts explicitly', async (t) => {
+  let mounted
+  preserveLocalStorage(t, () => mounted)
+  ai.saveAiSettings({ ...ai.loadAiSettings(), provider: 'fake', apiKey: '', baseUrl: '', providerProfiles: {
+    openai: { apiKey: 'provider-only-openai-key', baseUrl: 'https://api.openai.com/v1', mainModel: 'stale-provider-main', supportModel: 'stale-provider-support', mainThinkingEffort: 'high', mainEffectiveContextLimit: '9999' },
+  } })
+  const first = profiles.createSettingsProfile('text', 'Global provider first')
+  const second = profiles.createSettingsProfile('text', 'Global provider second')
+  profiles.saveSettingsProfile({ ...first, settings: { ...first.settings,
+    mainModel: 'owned/main', supportModel: 'owned/support', codexModel: 'owned/codex', chatModel: 'owned/chat', characterModel: 'owned/character',
+    mainThinkingEffort: 'low', mainEffectiveContextLimit: '8192', codexEffectiveContextLimit: '4096',
+    autocomplete: { enabled: false, model: 'owned/autocomplete', delayMs: 1200, length: 'sentence' },
+  } })
+  const profilesBefore = JSON.stringify(library())
+  const connectionBefore = JSON.stringify(ai.loadAiSettings())
+  const bookSelectionsBefore = JSON.stringify(await persistence.getBookProfileSelections(fixture.book.id))
+  mounted = await mount(t, App, { initialProfileId: first.id })
+  const roleIds = () => JSON.stringify([...mounted.host.querySelectorAll('.model-role-setting')].map(role => field(role, 'Exact model ID').value))
+  const modelIdsBefore = roleIds()
+  assert.equal(button(mounted.host, 'Save profile').disabled, true)
+  assert.equal(button(mounted.host, 'Discard').disabled, true)
+  await change(field(mounted.host, 'Active text provider'), 'openai')
+  assert.equal(field(mounted.host, 'Active text provider').value, 'openai')
+  assert.equal(roleIds(), modelIdsBefore)
+  assert.equal(field(mounted.host, 'Story / Main context cap').value, '8192')
+  assert.equal(JSON.stringify(ai.loadAiSettings()), connectionBefore, 'Provider selection remains a global draft until explicit Save')
+  assert.equal(JSON.stringify(library()), profilesBefore)
+  assert.equal(button(mounted.host, 'Save text provider').disabled, false)
+  assert.equal(button(mounted.host, 'Discard').disabled, false)
+  await click(button(mounted.host, 'Discard'))
+  assert.equal(field(mounted.host, 'Active text provider').value, 'fake')
+  assert.equal(roleIds(), modelIdsBefore)
+  assert.equal(JSON.stringify(ai.loadAiSettings()), connectionBefore)
+  assert.equal(button(mounted.host, 'Save profile').disabled, true)
+  await change(field(mounted.host, 'Active text provider'), 'openai')
+  await click(button(mounted.host, 'Save text provider'))
+  assert.equal(ai.loadAiSettings().provider, 'openai')
+  assert.equal(ai.loadAiSettings().apiKey, 'provider-only-openai-key')
+  assert.equal(JSON.stringify(library()), profilesBefore, 'Provider-only Save never writes a profile or changes defaults')
+  assert.equal(roleIds(), modelIdsBefore)
+  assert.equal(button(mounted.host, 'Save profile').disabled, true)
+  assert.equal(button(mounted.host, 'Discard').disabled, true)
+  for (const id of [first.id, second.id]) {
+    const effective = profiles.resolveProfileSettings({ ...defaults(), text: id })
+    assert.equal(effective.provider, 'openai', 'One saved connection serves every text profile')
+    assert.equal(effective.apiKey, 'provider-only-openai-key')
+    assert.equal(effective.mainModel, profile(id).settings.mainModel)
+  }
+  assert.equal(JSON.stringify(await persistence.getBookProfileSelections(fixture.book.id)), bookSelectionsBefore)
+  const savedSettings = JSON.stringify(profile(first.id).settings)
+  await openRename(mounted.host)
+  await change(field(mounted.host, 'Profile name'), 'Discard combined draft')
+  await change(field(mounted.host, 'Active text provider'), 'fake')
+  assert.equal(button(mounted.host, 'Save profile & provider').disabled, false)
+  await click(button(mounted.host, 'Discard'))
+  assert.equal(field(mounted.host, 'Profile name').value, first.name)
+  assert.equal(field(mounted.host, 'Active text provider').value, 'openai')
+  assert.equal(JSON.stringify(library()), profilesBefore)
+  await change(field(mounted.host, 'Profile name'), 'Saved combined draft')
+  await change(field(mounted.host, 'Active text provider'), 'fake')
+  await click(button(mounted.host, 'Save profile & provider'))
+  assert.equal(profile(first.id).name, 'Saved combined draft')
+  assert.equal(JSON.stringify(profile(first.id).settings), savedSettings)
+  assert.equal(ai.loadAiSettings().provider, 'fake')
+  assert.equal(roleIds(), modelIdsBefore)
+  assert.equal(button(mounted.host, 'Save profile').disabled, true)
+})
+
+test('provider-only drafts guard profile and tab navigation through Keep editing, Discard and Save', async (t) => {
+  let mounted
+  preserveLocalStorage(t, () => mounted)
+  ai.saveAiSettings({ ...ai.loadAiSettings(), provider: 'fake', apiKey: '', baseUrl: '' })
+  const first = profiles.createSettingsProfile('text', 'Provider navigation first')
+  const second = profiles.createSettingsProfile('text', 'Provider navigation second')
+  const profilesBefore = JSON.stringify(library())
+  mounted = await mount(t, App, { initialProfileId: first.id })
+  await change(field(mounted.host, 'Active text provider'), 'openai')
+  await change(field(mounted.host, 'Profile / preset'), second.id)
+  assert.ok(mounted.host.querySelector('[role="alertdialog"]'))
+  assert.equal(field(mounted.host, 'Profile / preset').value, first.id)
+  assert.equal(ai.loadAiSettings().provider, 'fake')
+  await click(button(mounted.host, 'Keep editing'))
+  assert.equal(mounted.host.querySelectorAll('[role="alertdialog"]').length, 0)
+  assert.equal(field(mounted.host, 'Active text provider').value, 'openai')
+  await click(button(mounted.host, 'UI'))
+  assert.ok(mounted.host.querySelector('[role="alertdialog"]'), 'The global section guard also sees provider-only changes')
+  assert.equal(mounted.host.querySelectorAll('.ui-settings-panel').length, 0)
+  await click(button(mounted.host, 'Keep editing'))
+  await click(button(mounted.host, 'Connections'))
+  assert.ok(mounted.host.querySelector('[role="alertdialog"]'))
+  assert.ok(mounted.host.querySelector('.models-card'), 'The dirty Models pane stays mounted until an explicit choice')
+  await click(button(mounted.host, 'Discard and continue'))
+  assert.ok(mounted.host.querySelector('.profile-connections-panel'))
+  assertNoActiveTextProvider(mounted.host)
+  assert.equal(ai.loadAiSettings().provider, 'fake')
+  await click(button(mounted.host, 'Models'))
+  await change(field(mounted.host, 'Profile / preset'), first.id)
+  assert.equal(field(mounted.host, 'Active text provider').value, 'fake')
+  await change(field(mounted.host, 'Active text provider'), 'openai')
+  await change(field(mounted.host, 'Profile / preset'), second.id)
+  assert.ok(mounted.host.querySelector('[role="alertdialog"]'))
+  await click(button(mounted.host, 'Save and continue'))
+  assert.equal(mounted.host.querySelectorAll('[role="alertdialog"]').length, 0)
+  assert.equal(field(mounted.host, 'Profile / preset').value, second.id)
+  assert.equal(field(mounted.host, 'Active text provider').value, 'openai')
+  assert.equal(ai.loadAiSettings().provider, 'openai')
+  assert.equal(JSON.stringify(library()), profilesBefore)
+  await click(button(mounted.host, 'UI'))
+  assert.equal(mounted.host.querySelectorAll('[role="alertdialog"]').length, 0)
+  assertNoActiveTextProvider(mounted.host)
 })
 
 test('profile drafts do not autosave; dirty navigation requires Save or Discard and failures keep the draft', async (t) => {
@@ -282,7 +451,8 @@ test('Connection provider selects the complete credential group and keeps naviga
   const panel = mounted.host.querySelector('.profile-connections-panel')
   assert.equal(getComputedStyle(panel).display, 'grid')
   assert.equal(getComputedStyle(panel).gap, '18px')
-  assert.ok(field(panel, 'Active text provider').closest('.arc-field').nextElementSibling === field(panel, 'Connection provider').closest('.arc-field'), 'Provider selectors are separated by the panel grid gap')
+  assertNoActiveTextProvider(panel)
+  assert.ok(field(panel, 'Connection provider').closest('.arc-field').nextElementSibling?.classList.contains('profile-connection-fields'), 'Connection provider directly precedes its credential group')
   const cases = [
     ['openai', 'OpenAI', ['API key for OpenAI', 'OpenAI Speech API key', 'OpenAI media API key']],
     ['nanogpt', 'NanoGPT', ['API key for NanoGPT', 'NanoGPT Speech API key', 'NanoGPT media API key']],
@@ -298,7 +468,7 @@ test('Connection provider selects the complete credential group and keeps naviga
     assert.equal(group.querySelector('h3').textContent, `${name} connection`)
     assert.equal(JSON.stringify([...group.querySelectorAll('.arc-field__label')].map(label => label.textContent)), JSON.stringify(labels))
     assert.equal(getComputedStyle(group).gap, '16px')
-    assert.equal(field(panel, 'Active text provider').value, 'nanogpt')
+    assertNoActiveTextProvider(panel)
     assert.equal(ai.loadAiSettings().provider, 'nanogpt', 'Editing a group never activates or saves it')
     assert.equal(Boolean(group.querySelector('[aria-label="Fake provider request trace"]')), provider === 'fake')
     assert.equal(panel.querySelectorAll('input[type="password"]').length, labels.filter(label => label.includes('API key')).length)
@@ -520,7 +690,7 @@ test('editing another provider connection never activates it or replaces profile
   await click(button(mounted.host, 'Connections'))
   await change(field(mounted.host, 'Connection provider'), 'openai')
   await change(mounted.host.querySelector('[aria-label="Text API key"]'), 'global-openai-key')
-  assert.equal(field(mounted.host, 'Active text provider').value, 'nanogpt')
+  assertNoActiveTextProvider(mounted.host)
   assert.equal(ai.loadAiSettings().provider, 'nanogpt')
   assert.equal(JSON.stringify(library().profiles), JSON.stringify(profilesBefore))
   await click(button(mounted.host, 'Save connections'))
@@ -765,6 +935,54 @@ test('text catalog reload keeps cached models on failure and ignores stale resul
     assert.equal(catalog.getCachedModelCatalog(connection).models.map(model => model.id).join('|'), 'cached-catalog-model')
     assert.doesNotMatch(mounted.host.textContent, /stale-catalog-model/)
   } finally { globalThis.fetch = originalFetch; await mounted.close() }
+})
+
+test('switching the Models provider aborts a stale catalog request and uses the draft connection catalog without saving', async (t) => {
+  let mounted
+  preserveLocalStorage(t, () => mounted)
+  const connection = ai.saveAiSettings({ ...ai.loadAiSettings(), provider: 'openai', apiKey: 'stale-openai-key', baseUrl: 'https://api.openai.com/v1', providerProfiles: {
+    nanogpt: { apiKey: 'draft-nano-key', baseUrl: 'https://nano-gpt.com/api/v1', mainModel: 'stale-nano-role-model' },
+  } })
+  const nextConnection = { ...connection, provider: 'nanogpt', apiKey: 'draft-nano-key', baseUrl: 'https://nano-gpt.com/api/v1' }
+  catalog.saveModelCatalog(connection, [{ id: 'old-provider-cached-model' }])
+  catalog.saveModelCatalog(nextConnection, [{ id: 'draft-provider-cached-model' }, { id: 'draft-provider-second-model' }])
+  const custom = profiles.createSettingsProfile('text', 'Provider catalog cancellation')
+  const profilesBefore = JSON.stringify(library())
+  mounted = await mount(t, App, { initialProfileId: custom.id })
+  const mainRole = () => mounted.host.querySelector('#main-model-heading').closest('section')
+  const modelBefore = field(mainRole(), 'Exact model ID').value
+  assert.match(mounted.host.querySelector('.models-card [role="status"]').textContent, /1 cached models available/)
+  let complete, signal, requestedUrl, authorization, calls = 0
+  const response = { ok: true, json: async () => ({ data: [{ id: 'stale-switched-provider-model' }] }) }
+  t.after(async () => { await mounted.close(); await act(async () => { complete?.(response); await delay() }) })
+  globalThis.fetch = (url, options) => {
+    calls++
+    requestedUrl = url; authorization = options.headers.Authorization; signal = options.signal
+    return new Promise(resolve => { complete = resolve })
+  }
+  await click(button(mounted.host, 'Reload model list'))
+  assert.equal(requestedUrl, catalog.providerModelEndpoint(connection))
+  assert.equal(authorization, 'Bearer stale-openai-key')
+  assert.ok(signal, 'Catalog reload owns an abort signal')
+  assert.equal(signal.aborted, false)
+  await change(field(mounted.host, 'Active text provider'), 'nanogpt')
+  await settle()
+  assert.equal(signal.aborted, true)
+  assert.equal(ai.loadAiSettings().provider, 'openai', 'Only the draft catalog changes before Save')
+  assert.equal(calls, 1, 'Switching providers uses the cached catalog without an automatic network request')
+  assert.equal(field(mainRole(), 'Exact model ID').value, modelBefore)
+  assert.match(mounted.host.querySelector('.models-card [role="status"]').textContent, /2 cached models available/)
+  assert.equal(button(mounted.host, 'Reload model list').disabled, false)
+  await act(async () => { complete(response); await delay() })
+  await settle()
+  assert.equal(catalog.getCachedModelCatalog(connection).models.map(model => model.id).join('|'), 'old-provider-cached-model')
+  assert.equal(catalog.getCachedModelCatalog(nextConnection).models.map(model => model.id).join('|'), 'draft-provider-cached-model|draft-provider-second-model')
+  assert.match(mounted.host.querySelector('.models-card [role="status"]').textContent, /2 cached models available/)
+  await click(mainRole().querySelector('button[aria-haspopup="listbox"]'))
+  const optionLabels = [...mounted.host.querySelectorAll('[role="option"]')].map(option => option.textContent).join('|')
+  assert.match(optionLabels, /draft-provider-cached-model/)
+  assert.doesNotMatch(optionLabels, /old-provider-cached-model|stale-switched-provider-model/)
+  assert.equal(JSON.stringify(library()), profilesBefore)
 })
 
 test('speech catalog credentials fall back to each global provider without activating it', () => {
@@ -1091,6 +1309,57 @@ test('shared warning timing distinguishes active appearance, new chats and the n
     }
     await mounted.close()
   }
+})
+
+test('provider-only Save stays available while linked-book usage is checking or failed and never writes a profile', async (t) => {
+  let mounted
+  preserveLocalStorage(t, () => mounted)
+  ai.saveAiSettings({ ...ai.loadAiSettings(), provider: 'fake', apiKey: '', baseUrl: '' })
+  const custom = profiles.createSettingsProfile('text', 'Provider save without usage')
+  const profilesBefore = JSON.stringify(library())
+  const db = await persistence.database()
+  const entities = db.table('entities')
+  const originalWhere = entities.where
+  let release, reject
+  const pendingBooks = new Promise((resolve, fail) => { release = resolve; reject = fail })
+  t.after(() => { entities.where = originalWhere; release([]) })
+  entities.where = function(...args) {
+    const clause = originalWhere.apply(this, args)
+    if (args[0] === 'type') {
+      const originalEquals = clause.equals
+      clause.equals = function(value) {
+        const collection = originalEquals.call(this, value)
+        if (value === 'book') collection.toArray = () => pendingBooks
+        return collection
+      }
+    }
+    return clause
+  }
+  mounted = await mount(t, App, { initialProfileId: custom.id })
+  assert.match(mounted.host.querySelector('.profile-header-meta').textContent, /Checking linked books/)
+  await change(field(mounted.host, 'Active text provider'), 'openai')
+  assert.equal(button(mounted.host, 'Save text provider').disabled, false, 'Provider-only Save does not await profile usage')
+  const originalSet = window.Storage.prototype.setItem
+  let profileWrites = 0
+  window.Storage.prototype.setItem = function(key, value) {
+    if (key === profiles.SETTINGS_PROFILES_STORAGE_KEY) profileWrites++
+    return originalSet.call(this, key, value)
+  }
+  try {
+    await click(button(mounted.host, 'Save text provider'))
+    assert.equal(ai.loadAiSettings().provider, 'openai')
+    assert.equal(JSON.stringify(library()), profilesBefore)
+    await act(async () => { reject(new Error('Provider save usage unavailable')); await delay() })
+    await settle()
+    assert.match(mounted.host.querySelector('.profile-header-meta [role="alert"]').textContent, /Linked books could not be checked/)
+    await change(field(mounted.host, 'Active text provider'), 'fake')
+    assert.equal(button(mounted.host, 'Save text provider').disabled, false, 'A failed usage lookup only blocks profile changes, not the global provider')
+    await click(button(mounted.host, 'Save text provider'))
+    assert.equal(ai.loadAiSettings().provider, 'fake')
+    assert.equal(profileWrites, 0)
+    assert.equal(JSON.stringify(library()), profilesBefore)
+    assert.equal(button(mounted.host, 'Discard').disabled, true)
+  } finally { window.Storage.prototype.setItem = originalSet }
 })
 
 test('checking or failed linked-book usage never invents a count and keeps Delete disabled', async (t) => {

@@ -435,7 +435,7 @@ function SettingsApp({ onHome, onBack, onSaved, onGlobalSettings, onLastBook, la
   </main>
 }
 
-function ProfileEditor({ settings, onChange, kind, library, book }: ProfileEditorProps & { book?: AiSettingsProps['book'] }) {
+function ProfileEditor({ settings, onChange, kind, library, book, textProviderControl }: ProfileEditorProps & { book?: AiSettingsProps['book'] }) {
   const promptTab: keyof AiPrompts = kind === 'codex' ? 'lore' : kind === 'summary' ? 'summarize' : kind === 'chat' || kind === 'character' ? 'assistant' : 'story'
 
 
@@ -589,6 +589,11 @@ function ProfileEditor({ settings, onChange, kind, library, book }: ProfileEdito
   return <>
         {kind === 'text' && <section className="settings-card models-card">
           <div className="card-heading"><div><span>02</span><h2>Models</h2></div><p>All roles use the active global text connection. Main writes; Support summarizes; Codex builds your world; Chat and Character chat initialize new conversations.</p></div>
+          <div className="text-provider-controls">
+            {textProviderControl}
+            <Button onClick={() => { void refreshModels() }} disabled={loading} leadingIcon={<RefreshCw aria-hidden="true" />}>{loading ? 'Loading models…' : 'Reload model list'}</Button>
+          </div>
+          <p className={`status ${statusKind}`} role="status">{status}</p>
           <div className="model-role-settings">{modelRoles.map(({ key: role, label, description }) => {
             const configuredModel = settings[`${role}Model`].trim()
             const mainModel = settings.mainModel.trim()
@@ -652,8 +657,6 @@ function ProfileEditor({ settings, onChange, kind, library, book }: ProfileEdito
               <Select label="Autocomplete length" description="Independent of Story, Codex, and Summary response length presets." value={settings.autocomplete.length} onChange={event => updateAutocomplete('length', event.target.value === 'sentence' ? 'sentence' : 'phrase')}><option value="phrase">Short phrase</option><option value="sentence">One sentence</option></Select>
             </section>
           </div>
-          <Button onClick={() => { void refreshModels() }} disabled={loading} leadingIcon={<RefreshCw aria-hidden="true" />}>{loading ? 'Loading models…' : 'Reload model list'}</Button>
-          <p className={`status ${statusKind}`} role="status">{status}</p>
         </section>}
 
         {kind !== 'text' && <section className="settings-card prompts-card">
