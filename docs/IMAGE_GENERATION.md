@@ -35,6 +35,8 @@ NanoGPT and OpenAI requests go directly from the browser to the selected provide
 
 ### Pruna browser connectivity
 
+For the detailed frontend contract, gateway configuration, authentication pitfalls, CORS, deployment, and troubleshooting, see [Pruna AI through LiteLLM: standalone article (Russian)](PRUNA_LITELLM_INTEGRATION.md).
+
 Pruna submissions use asynchronous mode (without `Try-Sync`) and save the prediction ID before polling. Upload, prediction, status, and authenticated delivery requests all use a LiteLLM pass-through route, while Pruna file URLs embedded in prediction bodies remain upstream Pruna URLs.
 
 In **Global Settings > AI > Connections**:
