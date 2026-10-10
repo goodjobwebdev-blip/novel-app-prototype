@@ -38,7 +38,7 @@ const promptKinds = ['story', 'codex', 'summary', 'chat', 'character'] as const
 const providers: Record<AiProvider, string> = { openrouter: 'OpenRouter', nanogpt: 'NanoGPT', openai: 'OpenAI', litellm: 'LiteLLM', compatible: 'OpenAI-compatible', fake: 'Fake (testing)' }
 export type GlobalSettingsSection = 'ai' | 'appearance' | 'application' | 'sync'
 export type SettingsProfilesPanelRef = { requestLeave: (destination: () => void) => void }
-export type ProfileEditorProps = { kind: ProfileKind; settings: AiSettings; library: SettingsProfileLibrary; onChange: (settings: AiSettings) => void }
+export type ProfileEditorProps = { kind: ProfileKind; settings: AiSettings; library: SettingsProfileLibrary; onChange: (settings: AiSettings) => void; textProviderControl?: ReactNode }
 
 /** Credentials are injected only for catalogs; never write this effective value into a profile. */
 export function profileCatalogSettings(settings: AiSettings, connection: AiSettings): AiSettings {
@@ -147,6 +147,17 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
   const latest = useRef({ anyDirty, busy, defaultsDirty })
   latest.current = { anyDirty, busy, defaultsDirty }
   const editedConnection = editedProvider === connection.provider ? connection : switchProviderProfile(connection, editedProvider)
+  const editedMediaProvider = editedProvider === 'litellm' ? 'pruna' : editedProvider === 'nanogpt' || editedProvider === 'openai' ? editedProvider : null
+
+  function selectActiveTextProvider(provider: AiProvider) {
+    if (busyRef.current) return
+    setConnection(current => {
+      const switched = switchProviderProfile(current, provider)
+      // A global connection change must not replace the selected profile's role models.
+      return { ...current, provider: switched.provider, apiKey: switched.apiKey, baseUrl: switched.baseUrl, providerProfiles: switched.providerProfiles }
+    })
+    setEditedProvider(provider)
+  }
 
   function selectProviderConnection(provider: AiProvider) {
     if (busyRef.current) return
@@ -380,24 +391,20 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
     <SettingsBreadcrumbs items={['Global Settings', ...(section === 'ai' ? ['AI', aiSection === 'connection' ? 'Connections' : aiSection === 'models' ? 'Models' : 'Prompts'] : [section === 'appearance' ? 'Appearance' : section === 'application' ? 'Application' : 'Sync']), ...(isProfileSection && draft ? [...(section === 'ai' ? [profileLabels[activeKind]] : []), draft.name] : [])]} />
     {section === 'ai' && <><header className="page-heading"><div><p>Global Settings</p><h1 id="page-title">AI</h1><span>One active text connection serves every text profile and role. Shared profile changes are explicit.</span></div></header>
       <SettingsSectionTabs tabs={globalAiSections} active={aiSection} onChange={next => { if (next !== aiSection) requestLeave(() => { setAiSection(next); if (next !== 'connection') selectDefault(next === 'models' ? 'text' : 'story') }) }} idPrefix="ai" label="AI sections" />
-      {aiSection !== 'connection' && <Select label={aiSection === 'models' ? 'Model profile type' : 'Prompt preset type'} value={kind} onChange={event => chooseKind(event.target.value as ProfileKind)}>{(aiSection === 'models' ? modelKinds : promptKinds).map(value => <option key={value} value={value}>{profileLabels[value]}</option>)}</Select>}
+      {aiSection !== 'connection' && <Select className="settings-profile-type" label={aiSection === 'models' ? 'Model profile type' : 'Prompt preset type'} value={kind} onChange={event => chooseKind(event.target.value as ProfileKind)}>{(aiSection === 'models' ? modelKinds : promptKinds).map(value => <option key={value} value={value}>{profileLabels[value]}</option>)}</Select>}
     </>}
-    {section === 'ai' && aiSection === 'connection' && <section className="settings-card" role="tabpanel" id="ai-panel-connection" aria-labelledby="ai-tab-connection">
+    {section === 'ai' && aiSection === 'connection' && <section className="settings-card profile-connections-panel" role="tabpanel" id="ai-panel-connection" aria-labelledby="ai-tab-connection">
       <h2>Global Connections</h2><p>Credentials and endpoints stay on this device and are not included in backups or archive sync. Models and prompts never contain keys.</p>
-      <Select label="Active text provider" value={connection.provider} onChange={event => {
-        const switched = switchProviderProfile(connection, event.target.value as AiProvider)
-        // Switching a connection must not copy a provider's old role/model configuration.
-        if (busyRef.current) return
-        setConnection({ ...connection, provider: switched.provider, apiKey: switched.apiKey, baseUrl: switched.baseUrl, providerProfiles: switched.providerProfiles })
-        setEditedProvider(switched.provider)
-      }}>{Object.entries(providers).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</Select>
       <Select label="Connection provider" description="Edit this provider’s global credentials without changing the active text provider or any profile models." value={editedProvider} disabled={busy} onChange={event => selectProviderConnection(event.target.value as AiProvider)}>{Object.entries(providers).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</Select>
-      {editedProvider !== 'fake' && <Input label={editedProvider === 'litellm' ? 'LiteLLM API key' : 'API key'} aria-label="Text API key" type="password" autoComplete="off" value={editedConnection.apiKey} onChange={event => updateProviderConnection('apiKey', event.target.value)} />}
-      {(editedProvider === 'compatible' || editedProvider === 'litellm') && <Input label={editedProvider === 'litellm' ? 'LiteLLM base URL' : 'Endpoint URL'} value={editedConnection.baseUrl} onChange={event => updateProviderConnection('baseUrl', event.target.value)} />}
-      <div className="profile-connections-grid"><Input label="NanoGPT Speech API key" description="Optional speech override; otherwise uses the global NanoGPT connection." type="password" autoComplete="off" value={connection.speech.apiKey} onChange={event => setConnection({ ...connection, speech: { ...connection.speech, apiKey: event.target.value } })} />
-      <Input label="OpenAI Speech API key" description="Optional transcription override; otherwise uses the global OpenAI connection." type="password" autoComplete="off" value={connection.speech.openaiApiKey} onChange={event => setConnection({ ...connection, speech: { ...connection.speech, openaiApiKey: event.target.value } })} />
-      {(['nanogpt', 'openai', 'pruna'] as const).map(provider => <Input key={provider} label={`${provider === 'pruna' ? 'Pruna / LiteLLM' : providers[provider]} media API key`} description={provider === 'pruna' ? 'Optional LiteLLM gateway key for Pruna models. Uses the global LiteLLM endpoint; favorite models are preserved.' : 'Optional media override; otherwise uses this provider’s global connection. Favorite models are preserved.'} type="password" autoComplete="off" value={imageKeys[provider]} onChange={event => setImageKeys({ ...imageKeys, [provider]: event.target.value })} />)}</div>
-      {connection.provider === 'fake' && <><div className="status success" role="note">Testing provider — responses, errors, reasoning, and tool calls are generated locally and deterministically. No text-AI network request is sent.</div><Disclosure className="settings-card provider-trace" title="Request trace" description="Session only · last 20 requests." aria-label="Fake provider request trace"><p>Inspect the exact provider-boundary payload generated by Arc.</p><Button size="small" disabled={!fakeTrace.length} onClick={clearFakeProviderTrace}>Clear trace</Button><pre>{fakeTrace.length ? JSON.stringify(fakeTrace, null, 2) : 'No Fake requests yet. Fake runs locally without text-AI network calls.'}</pre></Disclosure></>}
+      <section className="profile-connection-fields" aria-label={`${providers[editedProvider]} connection`}>
+        <h3>{providers[editedProvider]} connection</h3>
+        {editedProvider !== 'fake' && <Input label={`API key for ${providers[editedProvider]}`} aria-label="Text API key" type="password" autoComplete="off" value={editedConnection.apiKey} onChange={event => updateProviderConnection('apiKey', event.target.value)} />}
+        {(editedProvider === 'compatible' || editedProvider === 'litellm') && <Input label={editedProvider === 'litellm' ? 'LiteLLM base URL' : 'Endpoint URL'} value={editedConnection.baseUrl} onChange={event => updateProviderConnection('baseUrl', event.target.value)} />}
+        {editedProvider === 'nanogpt' && <Input label="NanoGPT Speech API key" description="Optional speech override; otherwise uses the global NanoGPT connection." type="password" autoComplete="off" value={connection.speech.apiKey} onChange={event => setConnection({ ...connection, speech: { ...connection.speech, apiKey: event.target.value } })} />}
+        {editedProvider === 'openai' && <Input label="OpenAI Speech API key" description="Optional transcription override; otherwise uses the global OpenAI connection." type="password" autoComplete="off" value={connection.speech.openaiApiKey} onChange={event => setConnection({ ...connection, speech: { ...connection.speech, openaiApiKey: event.target.value } })} />}
+        {editedMediaProvider && <Input label={`${editedMediaProvider === 'pruna' ? 'Pruna / LiteLLM' : providers[editedMediaProvider]} media API key`} description={editedMediaProvider === 'pruna' ? 'Optional LiteLLM gateway key for Pruna models. Uses the LiteLLM base URL above; otherwise uses this connection’s API key.' : 'Optional media override; otherwise uses this provider’s global connection.'} type="password" autoComplete="off" value={imageKeys[editedMediaProvider]} onChange={event => setImageKeys({ ...imageKeys, [editedMediaProvider]: event.target.value })} />}
+        {editedProvider === 'fake' && <><div className="status success" role="note">Testing provider — responses, errors, reasoning, and tool calls are generated locally and deterministically. No text-AI network request is sent.</div><Disclosure className="settings-card provider-trace" title="Request trace" description="Session only · last 20 requests." aria-label="Fake provider request trace"><p>Inspect the exact provider-boundary payload generated by Arc.</p><Button size="small" disabled={!fakeTrace.length} onClick={clearFakeProviderTrace}>Clear trace</Button><pre>{fakeTrace.length ? JSON.stringify(fakeTrace, null, 2) : 'No Fake requests yet. Fake runs locally without text-AI network calls.'}</pre></Disclosure></>}
+      </section>
       <div className="profile-actions"><Button variant="primary" disabled={busy || !connectionDirty} onClick={() => { void save() }}>Save connections</Button><Button disabled={busy || !connectionDirty} onClick={discard}>Discard</Button></div>
     </section>}
     {isProfileSection && draft && effective && <section className="profile-editor" role={section === 'ai' ? 'tabpanel' : undefined} id={section === 'ai' ? `ai-panel-${aiSection}` : undefined} aria-labelledby={section === 'ai' ? `ai-tab-${aiSection}` : undefined} aria-label={`${profileLabels[activeKind]} editor`}>
@@ -429,9 +436,9 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
         {draft.kind === 'ui' ? <><UiSettingsPanel value={draft.ui ?? defaultUiSettings} onChange={ui => changeDraft({ ...draft, ui })} />
           <section className="settings-card"><h2>Text reveal speed</h2><SegmentedControl label="Text reveal speed" value={draft.settings.generationWordDelayMs} onChange={delay => changeDraft({ ...draft, settings: { ...draft.settings, generationWordDelayMs: delay } })} options={[{ value: '120', label: 'Slow' }, { value: '40', label: 'Normal' }, { value: '10', label: 'Fast' }]} /><Input label="Custom reveal speed" description="Milliseconds per word, 1–2000. This belongs to the UI profile, not the text model." type="number" min="1" max="2000" value={draft.settings.generationWordDelayMs} onChange={event => changeDraft({ ...draft, settings: { ...draft.settings, generationWordDelayMs: event.target.value } })} /><TextRevealPreview delay={Number(draft.settings.generationWordDelayMs)} /></section></>
           : draft.kind === 'image' || draft.kind === 'video' ? <ImageSettingsPanel ai={connection} value={{ ...(draft.media ?? { favorites: [], defaultAlias: '', defaultAliases: {} }), keys: imageKeys }} hideCredentials mediaKind={draft.kind} onChange={value => { const { keys: _keys, ...media } = value; changeDraft({ ...draft, media }) }} />
-          : renderEditor({ kind: draft.kind, settings: effective, library, onChange: settings => changeDraft({ ...draft, settings: withoutProfileCredentials(settings) }) })}
+          : renderEditor({ kind: draft.kind, settings: effective, library, onChange: settings => changeDraft({ ...draft, settings: withoutProfileCredentials(settings) }), textProviderControl: draft.kind === 'text' ? <Select label="Active text provider" description="Global setting for all text profiles and roles, including existing chats. Configure API keys and endpoints in Connections. Save to apply; role model IDs are not changed." value={connection.provider} disabled={busy} onChange={event => selectActiveTextProvider(event.target.value as AiProvider)}>{Object.entries(providers).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</Select> : undefined })}
       </fieldset>
-      <div className="profile-save-bar"><span role="status">{busy ? 'Saving…' : dirty ? 'Unsaved draft · no linked books changed' : 'Saved'}</span><Button disabled={busy || !dirty} onClick={discard}>Discard</Button><Button variant="primary" disabled={busy || !dirty || !usageReady || !draft.name.trim()} onClick={() => { void save() }}>Save profile</Button></div>
+      <div className="profile-save-bar"><span role="status">{busy ? 'Saving…' : connectionDirty ? dirty ? 'Unsaved profile and global text provider · no changes applied' : 'Unsaved global text provider · no changes applied' : dirty ? 'Unsaved draft · no linked books changed' : 'Saved'}</span><Button disabled={busy || !(dirty || connectionDirty)} onClick={discard}>Discard</Button><Button variant="primary" disabled={busy || !(dirty || connectionDirty) || dirty && (!usageReady || !draft.name.trim())} onClick={() => { void save() }}>{connectionDirty ? dirty ? 'Save profile & provider' : 'Save text provider' : 'Save profile'}</Button></div>
     </section>}
     {section === 'application' && <><header className="page-heading"><div><p>Global Settings</p><h1 id="page-title">Application</h1><span>Defaults are assigned to new books and used outside a book.</span></div></header><section className="settings-card"><h2>Default profiles</h2>{Object.keys(profileLabels).map(value => {
       const profileKind = value as ProfileKind

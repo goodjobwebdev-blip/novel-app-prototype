@@ -28,6 +28,7 @@ import {
   SlidersHorizontal,
   Trash2,
   Type,
+  Wrench,
   X,
 } from 'lucide-react'
 import {
@@ -403,7 +404,7 @@ function SettingsApp({ onHome, onBack, onSaved, onGlobalSettings, onLastBook, la
   return <main className="app-shell ai-settings-shell">
     <aside className="settings-rail" aria-label={`${isBookSettings ? 'Book' : 'Global'} settings navigation`}>
       <div className="rail-header"><button className="home-button" type="button" onClick={() => navigate(onHome)} disabled={leaveSaving} aria-label="Back to library"><Home aria-hidden="true" /><b>Home</b></button>
-        {isBookSettings && <button className="global-settings-button" type="button" onClick={() => onGlobalSettings ? navigate(onGlobalSettings) : openGlobalProfile()} disabled={leaveSaving}>Global Settings</button>}
+        {isBookSettings && <button className="global-settings-button" type="button" onClick={() => onGlobalSettings ? navigate(onGlobalSettings) : openGlobalProfile()} disabled={leaveSaving} aria-label="Global Settings" title="Global Settings"><Wrench aria-hidden="true" /></button>}
         {onBack && <button className="settings-close" type="button" onClick={() => navigate(onBack)} aria-label="Close settings" disabled={leaveSaving}><X aria-hidden="true" /></button>}</div>
       <nav>{(isBookSettings ? ([['profiles', Bot, 'Profiles'], ['context', SlidersHorizontal, 'Context']] as const) : ([['ai', Bot, 'AI'], ['appearance', Type, 'UI'], ['application', SlidersHorizontal, 'Application'], ['sync', Cloud, 'Sync']] as const)).map(([key, Icon, label]) => <button key={key} className={settingsTab === key ? 'active' : ''} type="button" aria-current={settingsTab === key ? 'page' : undefined} onClick={() => selectSettingsTab(key)}><Icon aria-hidden="true" /><span>{label}</span></button>)}</nav>
       <p>{isBookSettings ? 'Choose shared profiles for this book. Context remains local to this book or chat.' : 'Shared profiles update linked books after Save. Connections stay local and never enter backups.'}</p>
@@ -434,7 +435,7 @@ function SettingsApp({ onHome, onBack, onSaved, onGlobalSettings, onLastBook, la
   </main>
 }
 
-function ProfileEditor({ settings, onChange, kind, library, book }: ProfileEditorProps & { book?: AiSettingsProps['book'] }) {
+function ProfileEditor({ settings, onChange, kind, library, book, textProviderControl }: ProfileEditorProps & { book?: AiSettingsProps['book'] }) {
   const promptTab: keyof AiPrompts = kind === 'codex' ? 'lore' : kind === 'summary' ? 'summarize' : kind === 'chat' || kind === 'character' ? 'assistant' : 'story'
 
 
@@ -588,6 +589,11 @@ function ProfileEditor({ settings, onChange, kind, library, book }: ProfileEdito
   return <>
         {kind === 'text' && <section className="settings-card models-card">
           <div className="card-heading"><div><span>02</span><h2>Models</h2></div><p>All roles use the active global text connection. Main writes; Support summarizes; Codex builds your world; Chat and Character chat initialize new conversations.</p></div>
+          <div className="text-provider-controls">
+            {textProviderControl}
+            <Button onClick={() => { void refreshModels() }} disabled={loading} leadingIcon={<RefreshCw aria-hidden="true" />}>{loading ? 'Loading models…' : 'Reload model list'}</Button>
+          </div>
+          <p className={`status ${statusKind}`} role="status">{status}</p>
           <div className="model-role-settings">{modelRoles.map(({ key: role, label, description }) => {
             const configuredModel = settings[`${role}Model`].trim()
             const mainModel = settings.mainModel.trim()
@@ -651,8 +657,6 @@ function ProfileEditor({ settings, onChange, kind, library, book }: ProfileEdito
               <Select label="Autocomplete length" description="Independent of Story, Codex, and Summary response length presets." value={settings.autocomplete.length} onChange={event => updateAutocomplete('length', event.target.value === 'sentence' ? 'sentence' : 'phrase')}><option value="phrase">Short phrase</option><option value="sentence">One sentence</option></Select>
             </section>
           </div>
-          <Button onClick={() => { void refreshModels() }} disabled={loading} leadingIcon={<RefreshCw aria-hidden="true" />}>{loading ? 'Loading models…' : 'Reload model list'}</Button>
-          <p className={`status ${statusKind}`} role="status">{status}</p>
         </section>}
 
         {kind !== 'text' && <section className="settings-card prompts-card">
