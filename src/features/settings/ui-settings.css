@@ -25,11 +25,13 @@ body {
 /* Global theme bridge for surfaces that predate semantic theme variables. */
 .app-shell,
 .library-screen,
-.workspace-screen {
+.workspace-screen,
+.story-editor,
+.settings-rail,
+.book-panel {
   background: var(--canvas);
 }
 
-.settings-rail,
 .save-bar,
 .arc-drawer,
 .chat-composer {
@@ -44,7 +46,6 @@ body {
   background: color-mix(in srgb, var(--surface) 88%, transparent);
 }
 
-.book-panel,
 .expandable-text-dialog,
 .generation-details-dialog {
   background: var(--surface);
@@ -106,9 +107,6 @@ select {
   background: color-mix(in srgb, var(--surface) 92%, transparent);
 }
 
-.story-editor {
-  background: var(--editor-surface);
-}
 
 .markdown-editor {
   font-family: var(--editor-font-family);
