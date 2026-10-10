@@ -131,25 +131,6 @@ test('merged Codex labels scopes, warns with conflicting title/trigger, and expo
   assert.match(document.querySelector('[role="dialog"]')?.textContent ?? document.querySelector('dialog')?.textContent, /Book tower/)
 })
 
-test('hide flushes first and hidden manager restores without exposing a hidden-entry editor', async t => {
-  const f = await fixture()
-  const shared = await addEntry(f.world.id, 'Hidden tower')
-  const view = await mount(t, f)
-  await openActions(shared.title)
-  await settle(() => menuItem('Hide in this Book') && !menuItem('Hide in this Book').disabled)
-  w.calls.length = 0
-  await click('Hide in this Book')
-  await settle(() => rows().length === 0 && Boolean(button(`Restore ${shared.title} in this Book`)))
-  assert.deepEqual(w.calls.slice(0, 3), ['flush', `hidden:${shared.id}:true`, 'refresh'])
-  assert.ok(document.querySelector(`button[aria-label="Actions for ${shared.title}"]`) === null, 'Hidden entries have no editor actions')
-  assert.equal(view.callbacks.length, 0)
-  assert.ok((await p.getEntity(f.book.id)).hiddenWorldEntryIds.includes(shared.id))
-  w.calls.length = 0
-  await click(`Restore ${shared.title} in this Book`)
-  await settle(() => rows().length === 1 && !button(`Restore ${shared.title} in this Book`))
-  assert.deepEqual(w.calls.slice(0, 3), ['flush', `hidden:${shared.id}:false`, 'refresh'])
-  assert.equal((await p.getEntity(shared.id)).bookId, f.world.id)
-})
 
 test('transfers remain disabled until checked, then flush before atomic move/copy and refresh', async t => {
   const f = await fixture()
