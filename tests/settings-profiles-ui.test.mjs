@@ -146,7 +146,7 @@ test('App book navigation is only Profiles and Context; Home, Global Settings an
   assert.equal(globalSettings.textContent.trim(), '')
   assert.equal(globalSettings.title, 'Global Settings')
   assert.equal(globalSettings.disabled, false)
-  assert.ok(globalSettings.querySelector('svg.lucide-wrench[aria-hidden="true"]'), 'Global Settings uses a decorative wrench icon')
+  assert.ok(globalSettings.querySelector('svg.lucide-settings[aria-hidden="true"]'), 'Global Settings uses a decorative settings gear icon')
   await click(globalSettings)
   assert.equal(globalSettingsOpened, 1)
   await mounted.close()
