@@ -5,6 +5,7 @@ import { documentBlocks } from '../features/editor/document-projection'
 import { assertImageFile, checkStorageHeadroom } from '../features/images/illustration-image'
 import { deleteWorld, setBookWorld, entityAvailableInBook } from '../features/worlds/world-service'
 import { archiveContentHash } from '../features/sync/sync-hash'
+import { ensureLoreTypesWithDb } from '../features/codex/lore-types'
 import { BOOK_PROFILE_KINDS, importSettingsProfiles, sanitizeProfileSettings, sanitizeSettingsProfile, settingsProfilesForSelections, withProfileReferenceLock, type BookProfileSelections, type SettingsProfile } from '../features/settings/settings-profiles'
 
 /** Same binary transport envelope as Book; a distinct canonical manifest contract. */
@@ -253,6 +254,10 @@ async function apply(db: any, data: WorldArchiveData) {
   await db.table('entities').put(data.entities.find(row => row.id === worldId))
   const children = data.entities.filter(row => row.id !== worldId)
   if (children.length) await db.table('entities').bulkAdd(children)
+  // Finish legacy category/type migration before receipts or conflicts capture a
+  // baseline. Otherwise getEntity() can install random custom type IDs on a read,
+  // changing the archive hash despite no authored edit. Keep strict hash checks.
+  await ensureLoreTypesWithDb(db, worldId)
   for (const [table, incoming] of rows) if (table !== 'entities' && incoming.length) await db.table(table).bulkAdd(incoming)
   // Retained links must not keep edges to lore removed by the selected version.
   for (const member of members.filter(book => wanted.has(book.id))) {

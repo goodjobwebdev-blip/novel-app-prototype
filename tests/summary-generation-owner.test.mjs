@@ -35,6 +35,6 @@ test('book switching also honors the active generation navigation guard', () => 
   const start = source.indexOf('  async function openBook(')
   const end = source.indexOf('\n  async function deleteWithSaveBarrier', start)
   const block = source.slice(start, end)
-  assert.match(block, /canUnmountEditor\(Boolean\(generationAbortRef\.current\)\)/)
+  assert.match(block, /canUnmountEditor\(Boolean\(generationAbortRef\.current \|\| generationPreflightRef\.current\)\)/)
   assert.match(block, /Stop generation before switching books\./)
 })

@@ -24,6 +24,40 @@ const s = await import('../src/features/sync/world-sync-service.ts')
 const worlds = await import('../src/features/worlds/world-service.ts')
 after(async () => (await p.database()).close())
 
+// Model the provider routes, including fetch's implicit GET and revision readback.
+function worldTransport(worldId, remoteId, options = {}) {
+  let stored = options.archive, revision = options.revision ?? 0
+  const calls = [], writes = []
+  const ownerUrl = `https://sync.example.test/api/v1/books/${encodeURIComponent(remoteId)}`
+  const fetch = async (url, init = {}) => {
+    const method = init.method ?? 'GET'
+    calls.push({ url, method, headers: init.headers })
+    await options.onRequest?.({ url, method })
+    const metadata = () => new Response(JSON.stringify({ id: remoteId, clientBookId: `arc-world:${worldId}`, title: 'World', currentRevision: revision, currentEtag: `rev-${revision}`, currentSize: stored?.size ?? 0 }), { headers: { ETag: `"rev-${revision}"` } })
+    if (url === 'https://sync.example.test/api/v1/books' && method === 'POST') {
+      assert.equal(JSON.parse(init.body).clientBookId, `arc-world:${worldId}`)
+      assert.equal(revision, 0, 'creation starts with an empty remote owner')
+      return metadata()
+    }
+    assert.ok(url === ownerUrl || url === `${ownerUrl}/state`, `Unexpected World sync URL: ${url}`)
+    if (url === ownerUrl) {
+      assert.equal(method, 'GET', 'owner route is metadata-only')
+      await options.onMetadata?.()
+      return metadata()
+    }
+    if (method === 'PUT') {
+      assert.equal(init.headers.get('If-Match'), `"rev-${revision}"`)
+      assert.ok(init.body instanceof Blob)
+      stored = init.body; writes.push(stored); revision++
+      return metadata()
+    }
+    assert.equal(method, 'GET', 'state route supports only GET or conditional PUT')
+    assert.ok(stored instanceof Blob, 'archive download requires stored binary state')
+    return new Response(stored, { headers: { ETag: `"rev-${revision}"` } })
+  }
+  return { fetch, calls, writes, get stored() { return stored }, get revision() { return revision } }
+}
+
 test('archive replacement detaches against old type registry and prunes only unavailable retained Book edges', async () => {
   const data = fixture('world-detach-regression'), db = await p.database()
   const custom = { id: 'lore-world-detach-custom', name: 'Inherited definition', ownerId: data.worldId, builtin: false, order: 20 }
@@ -66,10 +100,11 @@ test('remote World checks and disconnect notify status without emitting content 
   const data = fixture('world-status-regression'); await a.importWorldArchiveBlob(a.encodeWorldArchive(data))
   const hash = await (await import('../src/features/sync/sync-hash.ts')).archiveContentHash(await a.exportWorldArchiveBlob(data.worldId))
   await (await p.database()).table('meta').put({ key: `world-sync:state:${data.worldId}`, value: { worldId: data.worldId, ownerType: 'world', status: 'idle', endpoint: 'https://sync.example.test', remoteWorldId: 'status-remote', remoteETag: '"rev-1"', localContentHash: hash, updatedAt: 1 } })
-  const original = globalThis.fetch, calls = [], events = []
+  const original = globalThis.fetch, events = []
+  const transport = worldTransport(data.worldId, 'status-remote', { revision: 2, archive: await a.exportWorldArchiveBlob(data.worldId) }), calls = transport.calls
   const record = event => events.push(event.type)
   for (const name of ['arc-entity-changed', 'arc-worlds-changed', s.WORLD_SYNC_CHANGED]) window.addEventListener(name, record)
-  globalThis.fetch = async (url, init) => { calls.push({ url, method: init.method }); return new Response(JSON.stringify({ id: 'status-remote', clientBookId: `arc-world:${data.worldId}`, currentRevision: 2, currentSize: 100 }), { headers: { ETag: '"rev-2"' } }) }
+  globalThis.fetch = transport.fetch
   try {
     await s.checkRemoteWorld(data.worldId)
     assert.equal((await s.getWorldSyncState(data.worldId)).status, 'remote-changed')
@@ -116,6 +151,10 @@ test('World archive carries sanitized profiles and prompt dependencies, remaps c
   const captured = await a.readWorldArchive(data.worldId)
   const hash = await (await import('../src/features/sync/sync-hash.ts')).archiveContentHash(a.encodeWorldArchive(captured))
   assert.equal(hash, await (await import('../src/features/sync/sync-hash.ts')).archiveContentHash(a.encodeWorldArchive({ ...captured, settingsProfiles: [...captured.settingsProfiles].reverse(), entities: [...captured.entities].reverse() })))
+  for (let capture = 0; capture < 5; capture++) {
+    await p.getEntity(data.entities[1].id)
+    assert.equal(await (await import('../src/features/sync/sync-hash.ts')).archiveContentHash(await a.exportWorldArchiveBlob(data.worldId)), hash, 'profile-backed captures remain stable across entity reads')
+  }
 })
 
 test('World archive capture resolves local-only profile selections into portable definitions', async () => {
@@ -144,6 +183,17 @@ test('different canonical version preserves both copies and requires explicit re
   incoming.entities[1].content = 'Remote edit'
   const result = await a.importWorldArchiveBlob(a.encodeWorldArchive(incoming))
   assert.equal(result.kind, 'conflict')
+  const { archiveContentHash } = await import('../src/features/sync/sync-hash.ts')
+  const capturedHash = (await a.getWorldArchiveConflict(result.conflictId)).localHash
+  for (let capture = 0; capture < 5; capture++) {
+    assert.equal(await archiveContentHash(await a.exportWorldArchiveBlob(data.worldId)), capturedHash)
+    await p.getEntity(data.entities[1].id)
+    const preserved = await a.getWorldArchiveConflict(result.conflictId)
+    await a.decodeWorldArchive(preserved.local)
+    await a.decodeWorldArchive(preserved.incoming)
+    assert.equal(await archiveContentHash(await a.exportWorldArchiveBlob(data.worldId)), capturedHash, 'ordinary reads must not invalidate conflict capture')
+    await a.assertWorldArchiveConflict(result.conflictId)
+  }
   assert.equal((await p.getEntity(data.entities[1].id)).content, 'Original')
   const conflict = await a.getWorldArchiveConflict(result.conflictId)
   assert.equal((await a.decodeWorldArchive(conflict.incoming)).entities.find(row => row.id === data.entities[1].id).content, 'Remote edit')
@@ -166,6 +216,7 @@ test('stale resolution is rejected without overwriting a subsequent local edit',
   const incoming = structuredClone(data); incoming.entities[1].content = 'Remote'
   const result = await a.importWorldArchiveBlob(a.encodeWorldArchive(incoming))
   await p.saveDocumentContent(data.entities[1].id, 'Later local edit')
+  await assert.rejects(a.assertWorldArchiveConflict(result.conflictId), /changed/)
   await assert.rejects(a.resolveWorldArchiveConflict(result.conflictId, 'incoming'), /changed/)
   assert.equal((await p.getEntity(data.entities[1].id)).content, 'Later local edit')
 })
@@ -184,15 +235,12 @@ test('connected deletion attempts sync without an owner UI, retains failure and 
   const settings = await import('../src/features/sync/sync-settings.ts')
   settings.saveSyncSettings({ endpoint: 'https://sync.example.test', basicUsername: 'writer', basicPassword: 'secret', token: 'x'.repeat(32), automaticUpload: false })
   const world = await worlds.createWorld('Delete offline'), original = globalThis.fetch
-  let stored, revision = 0, unavailable = false, attempts = 0
-  globalThis.fetch = async (url, init) => {
+  let unavailable = false, attempts = 0
+  const transport = worldTransport(world.id, 'remote-deleted-owner', { onRequest() {
     attempts++
     if (unavailable) throw new Error('Delete upload network unavailable')
-    if (init.method === 'PUT') { assert.equal(init.headers.get('If-Match'), `"rev-${revision}"`); stored = init.body; revision++ }
-    const etag = `"rev-${revision}"`
-    if (url.endsWith('/state') && init.method !== 'PUT') return new Response(stored, { headers: { ETag: etag } })
-    return new Response(JSON.stringify({ id: 'remote-deleted-owner', clientBookId: `arc-world:${world.id}`, currentRevision: revision, currentSize: stored?.size ?? 0 }), { headers: { ETag: etag } })
-  }
+  } })
+  globalThis.fetch = transport.fetch
   try {
     await s.enableWorldSync(world.id)
     const before = attempts; unavailable = true
@@ -204,7 +252,7 @@ test('connected deletion attempts sync without an owner UI, retains failure and 
     assert.ok((await s.listDeletedWorldSyncStates()).some(row => row.worldId === world.id && row.status === 'error'))
     unavailable = false
     assert.equal((await s.syncWorldNow(world.id)).kind, 'uploaded')
-    assert.equal((await a.decodeWorldArchive(stored)).tombstone.worldId, world.id)
+    assert.equal((await a.decodeWorldArchive(transport.stored)).tombstone.worldId, world.id)
     assert.equal((await s.getWorldSyncState(world.id)).status, 'synced')
     assert.equal(await p.getEntity(world.id), undefined)
     await s.disconnectWorldSync(world.id)
@@ -229,25 +277,15 @@ test('World sync uses existing provider auth, namespaced owner identity and cond
   const settings = await import('../src/features/sync/sync-settings.ts')
   settings.saveSyncSettings({ endpoint: 'https://sync.example.test', basicUsername: 'writer', basicPassword: 'secret', token: 'x'.repeat(32), automaticUpload: false })
   const data = fixture('world-network-test'); await a.importWorldArchiveBlob(a.encodeWorldArchive(data))
-  const original = globalThis.fetch, calls = []; let stored, revision = 0
-  globalThis.fetch = async (url, init) => {
-    calls.push({ url, method: init.method, headers: init.headers })
-    const meta = { id: 'remote-world', clientBookId: `arc-world:${data.worldId}`, title: 'World', currentRevision: revision, currentEtag: `rev-${revision}`, currentSize: stored?.size ?? 0 }
-    if (init.method === 'POST') {
-      assert.equal(JSON.parse(init.body).clientBookId, `arc-world:${data.worldId}`)
-      return new Response(JSON.stringify(meta), { headers: { ETag: '"rev-0"' } })
-    }
-    if (init.method === 'PUT') {
-      assert.equal(init.headers.get('If-Match'), '"rev-0"'); stored = init.body; revision++
-      return new Response(JSON.stringify({ ...meta, currentRevision: revision }), { headers: { ETag: '"rev-1"' } })
-    }
-    if (url.endsWith('/state')) return new Response(stored, { headers: { ETag: '"rev-1"' } })
-    return new Response(JSON.stringify(meta), { headers: { ETag: `"rev-${revision}"` } })
-  }
+  const original = globalThis.fetch
+  const transport = worldTransport(data.worldId, 'remote-world'), calls = transport.calls
+  globalThis.fetch = transport.fetch
   try {
     assert.equal((await s.enableWorldSync(data.worldId, async () => {})).kind, 'uploaded')
     assert.equal((await s.syncWorldNow(data.worldId, async () => {})).kind, 'unchanged')
-    assert.equal((await a.decodeWorldArchive(stored)).worldId, data.worldId)
+    assert.equal((await a.decodeWorldArchive(transport.stored)).worldId, data.worldId)
+    assert.equal(transport.revision, 1)
+    assert.deepEqual(calls.map(call => call.method), ['POST', 'GET', 'PUT', 'GET', 'GET'])
     assert.match(calls[0].headers.get('Authorization'), /^Basic /)
     assert.equal(calls[0].headers.get('X-Sync-Token'), 'x'.repeat(32))
     assert.equal((await s.getWorldSyncState(data.worldId)).status, 'synced')
@@ -264,17 +302,9 @@ test('superseded cloud conflict cannot authorize a conditional upload', async ()
   const fresh = await a.importWorldArchiveBlob(a.encodeWorldArchive(second), { remoteETag: '"rev-1"' })
   const db = await p.database()
   await db.table('meta').put({ key: `world-sync:state:${data.worldId}`, value: { worldId: data.worldId, ownerType: 'world', status: 'conflict', endpoint: 'https://sync.example.test', remoteWorldId: 'remote-superseded', remoteETag: '"rev-0"', localContentHash: '', updatedAt: 1, conflictId: fresh.conflictId } })
-  const original = globalThis.fetch, writes = []
-  let stored = a.encodeWorldArchive(second), revision = 1
-  globalThis.fetch = async (url, init) => {
-    if (init.method === 'PUT') {
-      assert.equal(init.headers.get('If-Match'), '"rev-1"')
-      writes.push(init.body); stored = init.body; revision++
-    }
-    const etag = `"rev-${revision}"`
-    if (url.endsWith('/state') && init.method !== 'PUT') return new Response(stored, { headers: { ETag: etag } })
-    return new Response(JSON.stringify({ id: 'remote-superseded', clientBookId: `arc-world:${data.worldId}`, currentRevision: revision, currentSize: stored.size, currentEtag: `rev-${revision}` }), { headers: { ETag: etag } })
-  }
+  const original = globalThis.fetch
+  const transport = worldTransport(data.worldId, 'remote-superseded', { archive: a.encodeWorldArchive(second), revision: 1 }), writes = transport.writes
+  globalThis.fetch = transport.fetch
   try {
     await assert.rejects(s.resolveWorldSyncConflict(data.worldId, stale.conflictId, 'local'), /superseded|unresolved/)
     assert.equal(writes.length, 0, 'stale choices must be rejected BEFORE any cloud write')
@@ -290,18 +320,16 @@ test('conflict superseded while remote metadata is in flight cannot authorize up
   const incoming = structuredClone(data); incoming.entities[1].content = 'Remote first'
   const conflict = await a.importWorldArchiveBlob(a.encodeWorldArchive(incoming), { remoteETag: '"rev-1"' })
   await (await p.database()).table('meta').put({ key: `world-sync:state:${data.worldId}`, value: { worldId: data.worldId, ownerType: 'world', status: 'conflict', endpoint: 'https://sync.example.test', remoteWorldId: 'inflight-remote', remoteETag: '"rev-0"', localContentHash: '', updatedAt: 1, conflictId: conflict.conflictId } })
-  const original = globalThis.fetch, writes = []
-  globalThis.fetch = async (url, init) => {
-    if (init.method === 'PUT') writes.push(init.body)
-    if (init.method === 'GET') {
-      const later = structuredClone(data); later.entities[1].content = 'Remote newer'
-      await a.importWorldArchiveBlob(a.encodeWorldArchive(later), { remoteETag: '"rev-1"' })
-    }
-    return new Response(JSON.stringify({ id: 'inflight-remote', clientBookId: `arc-world:${data.worldId}`, currentRevision: 1, currentSize: 100 }), { headers: { ETag: '"rev-1"' } })
-  }
+  const original = globalThis.fetch
+  const transport = worldTransport(data.worldId, 'inflight-remote', { archive: a.encodeWorldArchive(incoming), revision: 1, async onMetadata() {
+    const later = structuredClone(data); later.entities[1].content = 'Remote newer'
+    await a.importWorldArchiveBlob(a.encodeWorldArchive(later), { remoteETag: '"rev-1"' })
+  } }), writes = transport.writes
+  globalThis.fetch = transport.fetch
   try {
     await assert.rejects(s.resolveWorldSyncConflict(data.worldId, conflict.conflictId, 'local'), /superseded/)
     assert.equal(writes.length, 0)
+    assert.deepEqual(transport.calls.map(({ method, url }) => ({ method, url })), [{ method: 'GET', url: 'https://sync.example.test/api/v1/books/inflight-remote' }])
     assert.equal((await p.getEntity(data.entities[1].id)).content, 'Original')
     assert.ok((await a.getWorldArchiveConflict(conflict.conflictId)).supersededAt)
   } finally { globalThis.fetch = original }

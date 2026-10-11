@@ -35,19 +35,28 @@ async function settle(predicate) {
 test('deleted owner list exposes durable error/retry and in-flight sync survives library unmount', async () => {
   settings.saveSyncSettings({ endpoint: 'https://sync.example.test', basicUsername: 'writer', basicPassword: 'secret', token: 'x'.repeat(32), automaticUpload: false })
   const world = await worlds.createWorld('Deleted owner retry')
+  const remoteArchive = await a.exportWorldArchiveBlob(world.id)
   await a.deleteWorldWithTombstone(world.id)
   await db.table('meta').put({ key: `world-sync:state:${world.id}`, value: { worldId: world.id, ownerType: 'world', status: 'error', message: 'Offline deletion upload failed', endpoint: 'https://sync.example.test', remoteWorldId: 'deleted-ui-remote', remoteETag: '"rev-1"', localContentHash: 'old-live-hash', updatedAt: 1 } })
   const original = globalThis.fetch
-  let stored, revision = 1, release
+  let stored = remoteArchive, revision = 1, release
   const calls = []
   const gate = new Promise(resolve => { release = resolve })
-  globalThis.fetch = async (url, init) => {
-    calls.push(init.method)
-    if (init.method === 'GET' && !url.endsWith('/state')) await gate
-    if (init.method === 'PUT') { assert.equal(init.headers.get('If-Match'), '"rev-1"'); stored = init.body; revision++ }
+  globalThis.fetch = async (url, init = {}) => {
+    const method = init.method ?? 'GET'
+    const ownerUrl = 'https://sync.example.test/api/v1/books/deleted-ui-remote'
+    assert.ok(url === ownerUrl || url === `${ownerUrl}/state`, `Unexpected sync URL: ${url}`)
+    calls.push(method)
+    if (url === ownerUrl) { assert.equal(method, 'GET'); await gate }
+    else if (method === 'PUT') {
+      assert.equal(init.headers.get('If-Match'), `"rev-${revision}"`)
+      assert.ok(init.body instanceof Blob); stored = init.body; revision++
+    } else {
+      assert.equal(method, 'GET'); assert.ok(stored instanceof Blob)
+      return new Response(stored, { headers: { ETag: `"rev-${revision}"` } })
+    }
     const etag = `"rev-${revision}"`
-    if (url.endsWith('/state') && init.method !== 'PUT') return new Response(stored, { headers: { ETag: etag } })
-    return new Response(JSON.stringify({ id: 'deleted-ui-remote', clientBookId: `arc-world:${world.id}`, currentRevision: revision, currentSize: stored?.size ?? 1 }), { headers: { ETag: etag } })
+    return new Response(JSON.stringify({ id: 'deleted-ui-remote', clientBookId: `arc-world:${world.id}`, currentRevision: revision, currentEtag: `rev-${revision}`, currentSize: stored.size }), { headers: { ETag: etag } })
   }
   let root = createRoot(document.getElementById('root'))
   try {
@@ -59,10 +68,15 @@ test('deleted owner list exposes durable error/retry and in-flight sync survives
     const retry = [...document.querySelectorAll('button')].find(button => button.textContent === 'Retry sync')
     await act(async () => { retry.click() })
     await settle(async () => (await s.getWorldSyncState(world.id)).status === 'syncing')
+    await settle(() => calls.length === 1)
+    assert.deepEqual(calls, ['GET'])
+    assert.equal(stored, remoteArchive, 'upload remains gated until after unmount')
     await act(async () => { root.unmount() })
     root = undefined
     release()
     await settle(async () => (await s.getWorldSyncState(world.id)).status === 'synced')
+    assert.deepEqual(calls, ['GET', 'PUT', 'GET'])
+    assert.equal(revision, 2)
     assert.equal((await a.decodeWorldArchive(stored)).tombstone.worldId, world.id)
     assert.equal(await p.getEntity(world.id), undefined)
     root = createRoot(document.getElementById('root'))
