@@ -36,6 +36,8 @@ export const profileLabels: Record<ProfileKind, string> = {
 const modelKinds = ['text', 'tts', 'stt', 'image', 'video'] as const
 const promptKinds = ['story', 'codex', 'summary', 'chat', 'character'] as const
 const providers: Record<AiProvider, string> = { openrouter: 'OpenRouter', nanogpt: 'NanoGPT', openai: 'OpenAI', litellm: 'LiteLLM', compatible: 'OpenAI-compatible', fake: 'Fake (testing)' }
+type ConnectionProvider = AiProvider | 'leonardo'
+const connectionProviders: Record<ConnectionProvider, string> = { ...providers, leonardo: 'Leonardo.AI' }
 export type GlobalSettingsSection = 'ai' | 'appearance' | 'application' | 'sync'
 export type SettingsProfilesPanelRef = { requestLeave: (destination: () => void) => void }
 export type ProfileEditorProps = { kind: ProfileKind; settings: AiSettings; library: SettingsProfileLibrary; onChange: (settings: AiSettings) => void; textProviderControl?: ReactNode }
@@ -115,7 +117,7 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
   const [draft, setDraft] = useState<SettingsProfile | undefined>(section === 'appearance' ? initial?.kind === 'ui' ? initial : library.profiles.find(profile => profile.id === library.defaults.ui) : initial ?? library.profiles.find(profile => profile.id === library.defaults.text))
   const [baseline, setBaseline] = useState(() => JSON.stringify(draft))
   const [connection, setConnection] = useState(loadAiSettings)
-  const [editedProvider, setEditedProvider] = useState<AiProvider>(connection.provider)
+  const [editedProvider, setEditedProvider] = useState<ConnectionProvider>(connection.provider)
   const [defaultDraft, setDefaultDraft] = useState(library.defaults)
   const [defaultBaseline, setDefaultBaseline] = useState(() => JSON.stringify(library.defaults))
   const [imageKeys, setImageKeys] = useState(() => loadImageSettings().keys)
@@ -146,7 +148,7 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
   const anyDirty = dirty || connectionDirty || defaultsDirty
   const latest = useRef({ anyDirty, busy, defaultsDirty })
   latest.current = { anyDirty, busy, defaultsDirty }
-  const editedConnection = editedProvider === connection.provider ? connection : switchProviderProfile(connection, editedProvider)
+  const editedConnection = editedProvider === 'leonardo' || editedProvider === connection.provider ? connection : switchProviderProfile(connection, editedProvider)
   const editedMediaProvider = editedProvider === 'litellm' ? 'pruna' : editedProvider === 'nanogpt' || editedProvider === 'openai' ? editedProvider : null
 
   function selectActiveTextProvider(provider: AiProvider) {
@@ -159,9 +161,10 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
     setEditedProvider(provider)
   }
 
-  function selectProviderConnection(provider: AiProvider) {
+  function selectProviderConnection(provider: ConnectionProvider) {
     if (busyRef.current) return
     setEditedProvider(provider)
+    if (provider === 'leonardo') return
     setConnection(current => {
       if (provider === current.provider || current.providerProfiles?.[provider]) return current
       // Persist the displayed default endpoint on Save, even when only a media key is edited.
@@ -171,7 +174,7 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
   }
 
   function updateProviderConnection(key: 'apiKey' | 'baseUrl', value: string) {
-    if (busyRef.current) return
+    if (busyRef.current || editedProvider === 'leonardo') return
     setConnection(current => {
       if (editedProvider === current.provider) return { ...current, [key]: value }
       const edited = { ...switchProviderProfile(current, editedProvider), [key]: value }
@@ -398,19 +401,17 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
     </>}
     {section === 'ai' && aiSection === 'connection' && <section className="settings-card profile-connections-panel" role="tabpanel" id="ai-panel-connection" aria-labelledby="ai-tab-connection">
       <h2>Global Connections</h2><p>Credentials and endpoints stay on this device and are not included in backups or archive sync. Models and prompts never contain keys.</p>
-      <Select label="Connection provider" description="Edit this provider’s global credentials without changing the active text provider or any profile models." value={editedProvider} disabled={busy} onChange={event => selectProviderConnection(event.target.value as AiProvider)}>{Object.entries(providers).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</Select>
-      <section className="profile-connection-fields" aria-label={`${providers[editedProvider]} connection`}>
-        <h3>{providers[editedProvider]} connection</h3>
+      <Select label="Connection provider" description="Edit this provider’s global credentials without changing the active text provider or any profile models." value={editedProvider} disabled={busy} onChange={event => selectProviderConnection(event.target.value as ConnectionProvider)}>{Object.entries(connectionProviders).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</Select>
+      <section className="profile-connection-fields" aria-label={`${connectionProviders[editedProvider]} connection`}>
+        <h3>{connectionProviders[editedProvider]} connection</h3>
+        {editedProvider === 'leonardo' ? <Input label="Leonardo.AI media API key" description="Image generation only. No text-provider fallback. Stored on this device; account access and browser CORS are not verified." type="password" autoComplete="off" value={imageKeys.leonardo} onChange={event => setImageKeys({ ...imageKeys, leonardo: event.target.value })} /> : <>
         {editedProvider !== 'fake' && <Input label={`API key for ${providers[editedProvider]}`} aria-label="Text API key" type="password" autoComplete="off" value={editedConnection.apiKey} onChange={event => updateProviderConnection('apiKey', event.target.value)} />}
         {(editedProvider === 'compatible' || editedProvider === 'litellm') && <Input label={editedProvider === 'litellm' ? 'LiteLLM base URL' : 'Endpoint URL'} value={editedConnection.baseUrl} onChange={event => updateProviderConnection('baseUrl', event.target.value)} />}
         {editedProvider === 'nanogpt' && <Input label="NanoGPT Speech API key" description="Optional speech override; otherwise uses the global NanoGPT connection." type="password" autoComplete="off" value={connection.speech.apiKey} onChange={event => setConnection({ ...connection, speech: { ...connection.speech, apiKey: event.target.value } })} />}
         {editedProvider === 'openai' && <Input label="OpenAI Speech API key" description="Optional transcription override; otherwise uses the global OpenAI connection." type="password" autoComplete="off" value={connection.speech.openaiApiKey} onChange={event => setConnection({ ...connection, speech: { ...connection.speech, openaiApiKey: event.target.value } })} />}
         {editedMediaProvider && <Input label={`${editedMediaProvider === 'pruna' ? 'Pruna / LiteLLM' : providers[editedMediaProvider]} media API key`} description={editedMediaProvider === 'pruna' ? 'Optional LiteLLM gateway key for Pruna models. Uses the LiteLLM base URL above; otherwise uses this connection’s API key.' : 'Optional media override; otherwise uses this provider’s global connection.'} type="password" autoComplete="off" value={imageKeys[editedMediaProvider]} onChange={event => setImageKeys({ ...imageKeys, [editedMediaProvider]: event.target.value })} />}
         {editedProvider === 'fake' && <><div className="status success" role="note">Testing provider — responses, errors, reasoning, and tool calls are generated locally and deterministically. No text-AI network request is sent.</div><Disclosure className="settings-card provider-trace" title="Request trace" description="Session only · last 20 requests." aria-label="Fake provider request trace"><p>Inspect the exact provider-boundary payload generated by Arc.</p><Button size="small" disabled={!fakeTrace.length} onClick={clearFakeProviderTrace}>Clear trace</Button><pre>{fakeTrace.length ? JSON.stringify(fakeTrace, null, 2) : 'No Fake requests yet. Fake runs locally without text-AI network calls.'}</pre></Disclosure></>}
-      </section>
-      <section className="profile-connection-fields" aria-label="Media-only connections">
-        <h3>Media-only connections</h3>
-        <Input label="Leonardo.AI media API key" description="Image generation only. No text-provider fallback. Stored on this device; account access and browser CORS are not verified." type="password" autoComplete="off" value={imageKeys.leonardo} onChange={event => setImageKeys({ ...imageKeys, leonardo: event.target.value })} />
+        </>}
       </section>
       <div className="profile-actions"><Button variant="primary" disabled={busy || !connectionDirty} onClick={() => { void save() }}>Save connections</Button><Button disabled={busy || !connectionDirty} onClick={discard}>Discard</Button></div>
     </section>}
