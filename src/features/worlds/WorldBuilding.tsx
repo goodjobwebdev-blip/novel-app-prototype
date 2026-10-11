@@ -3,6 +3,8 @@ import { ArrowLeft, BookOpen, Copy, Globe2, Pencil, Plus, Search, Trash2, WandSp
 import { listBooks, type BookEntity, type CodexEntryEntity } from '../../data/persistence'
 import { deleteWorldWithTombstone } from '../../data/world-archive'
 import WorldSyncPanel from '../sync/WorldSyncPanel'
+import CloudWorldImport from '../sync/CloudWorldImport'
+import DeletedWorldSync from '../sync/DeletedWorldSync'
 import { loadAiSettings } from '../../shared/ai/ai-settings'
 import ActionMenu from '../../shared/ui/ActionMenu'
 import Button from '../../shared/ui/Button'
@@ -135,11 +137,14 @@ function NewWorldButton({ onOpen, disabled = false }: { onOpen: (id: string) => 
 
 const counts = ({ books, entries }: WorldRecord) => `${entries.length} Codex ${entries.length === 1 ? 'entry' : 'entries'} · ${books.length} linked ${books.length === 1 ? 'Book' : 'Books'}`
 
-export function WorldsHomeSection({ onViewAll, onOpen }: { onViewAll: () => void; onOpen: (worldId: string) => void }) {
+export function WorldsHomeSection({ onViewAll, onOpen }: { onViewAll: () => void; onOpen: (worldId: string) => void | Promise<void> }) {
   const { records, loading, error, reload } = useWorldLibrary()
+  const imported = async (worldId: string) => { await reload(); await onOpen(worldId) }
   return <section className="worlds-home-section" aria-label="Worlds">
     <PanelHeader eyebrow="Shared knowledge" title="Worlds" actions={<><Button size="small" onClick={onViewAll}>View all</Button><NewWorldButton disabled={loading || Boolean(error)} onOpen={onOpen} /></>} />
     <p className="world-help">Shared Codex lore for linked Books.</p>
+    <CloudWorldImport onImported={imported} />
+    <DeletedWorldSync onRemoteApplied={async () => { await reload() }} />
     {loading && <p role="status">Loading Worlds…</p>}
     {error && <p className="world-error" role="alert">{error} <Button size="small" onClick={() => { void reload() }}>Retry</Button></p>}
     {!loading && !error && !records.length && <p className="world-empty">No Worlds yet. Create a World to share lore between Books.</p>}
@@ -346,8 +351,9 @@ function WorldDetail({ record, disabled, onOpen }: { record: WorldRecord; disabl
   </section>
 }
 
-export default function WorldBuilding({ initialWorldId, onHome, onOpen }: { initialWorldId?: string; onHome: () => void; onOpen: (id: string) => void }) {
+export default function WorldBuilding({ initialWorldId, onHome, onOpen }: { initialWorldId?: string; onHome: () => void; onOpen: (id: string) => void | Promise<void> }) {
   const { records, loading, error, reload } = useWorldLibrary()
+  const imported = async (worldId: string) => { await reload(); await onOpen(worldId) }
   const [selectedId, setSelectedId] = useState(initialWorldId ?? '')
   useEffect(() => { setSelectedId(initialWorldId ?? '') }, [initialWorldId])
   const selected = records.find(record => record.world.id === selectedId)
@@ -356,6 +362,8 @@ export default function WorldBuilding({ initialWorldId, onHome, onOpen }: { init
     <div className="world-building-layout">
       <section className="world-library" aria-label="World library">
         <PanelHeader eyebrow="Library" title="Worlds" actions={<NewWorldButton disabled={loading || Boolean(error)} onOpen={onOpen} />} />
+        <CloudWorldImport onImported={imported} />
+        <DeletedWorldSync onRemoteApplied={async () => { await reload() }} />
         {loading && <p role="status">Loading Worlds…</p>}
         {error && <p className="world-error" role="alert">{error} <Button size="small" onClick={() => { void reload() }}>Retry</Button></p>}
         {!loading && !error && !records.length && <p className="world-empty">No Worlds yet.</p>}

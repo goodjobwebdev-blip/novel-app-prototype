@@ -186,7 +186,7 @@ export { disconnectBookSync }
 
 // Explicit canonical World scope; Book functions above retain detached snapshots.
 export {
-  enableWorldSync, syncWorldNow, getWorldSyncState, listWorldSyncStates,
+  enableWorldSync, syncWorldNow, getWorldSyncState, listWorldSyncStates, listDeletedWorldSyncStates,
   listCloudWorlds, importCloudWorld, resolveWorldSyncConflict, disconnectWorldSync, checkRemoteWorld,
   listWorldArchiveConflicts, getWorldArchiveConflict, WORLD_SYNC_CHANGED,
 } from './world-sync-service'

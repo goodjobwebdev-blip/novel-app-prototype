@@ -62,6 +62,8 @@ const { default: Workspace } = await moduleAt('app/Workspace')
 const triggerCss = readFileSync(new URL('../src/features/codex/codex-triggers.css', import.meta.url), 'utf8')
 const links = await moduleAt('features/codex/codex-article-links')
 const chatService = await moduleAt('features/chat/chat-service')
+const worldArchive = await moduleAt('data/world-archive')
+const bookArchive = await moduleAt('data/book-archive')
 
 beforeEach(async () => {
   // Preserve startup markers while isolating all fixture entities, media and snapshots.
@@ -118,7 +120,7 @@ async function selectWorld(worldId) {
   await settle(() => !select.disabled && select.value === worldId && !document.querySelector('.book-world-selector [role="status"]'), 'World link update finishes')
 }
 async function panelTab(tab) {
-  if (!document.querySelector('.book-panel')) await click(labeledButton('Open book workspace'))
+  if (!document.querySelector('.book-panel')) await click(labeledButton('Open World workspace') ?? labeledButton('Open book workspace'))
   await click([...document.querySelectorAll('.book-panel nav button')].find(item => item.textContent.trim() === tab), `Book panel ${tab} tab exists`)
 }
 async function openEntry(entry) {
@@ -385,7 +387,7 @@ async function openWorldRow(world) {
   await settle(() => Boolean(document.querySelector('.workspace-screen.world-building')))
 }
 async function worldTab(label) {
-  if (!document.querySelector('.book-panel')) await click(labeledButton('Open book workspace'))
+  if (!document.querySelector('.book-panel')) await click(labeledButton('Open World workspace') ?? labeledButton('Open book workspace'))
   await click([...document.querySelectorAll('.book-panel nav button')].find(item => item.textContent.trim() === label))
 }
 
@@ -474,6 +476,116 @@ test('failed save blocks article links and World-to-Book navigation, and retry p
   await settle(() => titleIs(target.title))
   assert.equal((await p.getEntity(source.id)).content, dirty)
   assert.equal((await p.getOwnerWorkspaceState(f.world.id)).lastOpenedCodexEntryId, target.id)
+})
+
+async function uploadArchive(label, file) {
+  const input = document.querySelector(`input[aria-label="${label}"]`)
+  assert.ok(input)
+  Object.defineProperty(input, 'files', { configurable: true, value: [file] })
+  await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })))
+}
+
+test('library archive import opens its canonical World and later Book restore resolves pending references', async t => {
+  const f = await fixture({ linked: false })
+  const article = await addEntry(f.world.id, 'Imported canonical article', [], 'Archive body')
+  const worldData = await worldArchive.readWorldArchive(f.world.id)
+  worldData.bookReferences = [f.book.id]
+  const worldFile = worldArchive.encodeWorldArchive(worldData)
+  const bookFile = bookArchive.encodeBookArchive(await p.readBookArchive(f.book.id))
+  await db.transaction('rw', db.tables, async () => {
+    for (const table of db.tables) if (table.name !== 'meta') await table.clear()
+  })
+  await mount(t)
+  await uploadArchive('Import World archive', worldFile)
+  await settle(() => titleIs(article.title) && editor()?.getAttribute('data-history-key') === `${f.world.id}:${article.id}`, 'World archive imports without an existing owner and opens its canonical article')
+  assert.equal((await p.listBooks()).length, 0, 'Pending reference never creates a phantom Book')
+  await click(button('Home'))
+  await settle(() => document.querySelector('.library-screen'))
+  await uploadArchive('Import book backup file', bookFile)
+  await settle(async () => editor()?.getAttribute('data-book-id') === f.book.id && (await p.getEntity(f.book.id))?.worldId === f.world.id, 'Book restore reconciles the pending World reference before opening')
+  assert.equal((await w.listBookCodexEntries(f.book.id))[0].id, article.id)
+})
+
+test('World library exposes cloud and archive imports before any World exists', async t => {
+  await mount(t)
+  assert.ok(button('Cloud Worlds'))
+  assert.ok(document.querySelector('input[aria-label="Import World archive"]'))
+  await click(button('View all'))
+  await settle(() => document.querySelector('[aria-label="World library"]'))
+  assert.ok(button('Cloud Worlds'))
+  assert.ok(document.querySelector('input[aria-label="Import World archive"]'))
+})
+
+test('standalone Last article survives World to Book to World without Book labels', async t => {
+  const f = await fixture()
+  await addEntry(f.world.id, 'A article')
+  const last = await addEntry(f.world.id, 'Last article')
+  await mount(t)
+  await openWorldRow(f.world)
+  await worldTab('Codex')
+  await click(codexRow(last.title).querySelector('.arc-resource-row__open'))
+  await settle(() => titleIs(last.title))
+  assert.ok(labeledButton('Open World workspace'))
+  assert.ok(labeledButton('Open current World settings'))
+  assert.ok(!labeledButton('Open book workspace'))
+  assert.ok(!labeledButton('Open current book settings'))
+  assert.equal(document.body.textContent.includes('Open Book Workspace'), false)
+  await worldTab('Books')
+  await settle(() => document.querySelector('[aria-label="Linked Books"] .arc-resource-row__open'))
+  await click(document.querySelector('[aria-label="Linked Books"] .arc-resource-row__open'))
+  await settle(() => editor()?.getAttribute('data-book-id') === f.book.id)
+  await homeViaWorldBuilding()
+  await openWorldRow(f.world)
+  await settle(() => titleIs(last.title))
+  assert.equal((await p.getOwnerWorkspaceState(f.world.id)).lastOpenedCodexEntryId, last.id)
+})
+
+test('creation opens the new canonical article and Note even when mutation events supersede the list refresh', async t => {
+  const world = await w.createWorld('Creation race')
+  await mount(t)
+  await openWorldRow(world)
+  assert.doesNotMatch(document.querySelector('.document-path').textContent, /Outline/)
+  assert.ok(button('Open World Workspace'))
+  await click(button('Create first article'))
+  await settle(async () => (await w.listWorldEntries(world.id)).length === 1, 'Article is persisted')
+  const [article] = await w.listWorldEntries(world.id)
+  await settle(() => editor()?.getAttribute('data-history-key') === `${world.id}:${article.id}`, 'Persisted article is also opened')
+  await worldTab('Notes')
+  await click([...document.querySelectorAll('.notes-panel button')].find(item => item.textContent.trim() === 'New'))
+  await settle(async () => (await p.listEntitiesByBook(world.id, 'note')).length === 1, 'Note is persisted')
+  const [note] = await p.listEntitiesByBook(world.id, 'note')
+  await settle(() => editor()?.getAttribute('data-history-key') === `${world.id}:${note.id}`, 'Persisted Note is also opened')
+})
+
+test('a refresh which read A cannot replace B after a newer edit and navigation save', async t => {
+  const world = await w.createWorld('Refresh race')
+  const article = await addEntry(world.id, 'Race article', [], 'A')
+  await mount(t)
+  await openWorldRow(world)
+  await settle(() => editor()?.value === 'A')
+  const table = db.table('entities'), originalGet = table.get
+  let release, captured = false
+  const gate = new Promise(resolve => { release = resolve })
+  table.get = async function (id) {
+    const result = await originalGet.call(this, id)
+    if (id === article.id && !captured) {
+      captured = true
+      table.get = originalGet
+      await gate
+    }
+    return result
+  }
+  t.after(() => { table.get = originalGet; release() })
+  await act(async () => window.dispatchEvent(new Event('focus')))
+  await settle(() => captured, 'Refresh reads the old canonical body')
+  await setTextarea(editor(), 'B')
+  await worldTab('Books')
+  await settle(() => button('New Book in this World') && !button('New Book in this World').disabled)
+  await click(button('New Book in this World'))
+  await settle(async () => (await p.getEntity(article.id)).content === 'B' && (await p.listBooks()).length === 1 && !button('New Book in this World').disabled, 'Required save makes B durable and clears dirty state')
+  await act(async () => { release(); await new Promise(resolve => setTimeout(resolve, 100)) })
+  assert.equal(editor().value, 'B', 'Obsolete refresh never replaces the saved editor body')
+  assert.equal((await p.getEntity(article.id)).content, 'B')
 })
 
 test('empty World creates articles, Notes and a summary through the shared editor without creating a Book', async t => {

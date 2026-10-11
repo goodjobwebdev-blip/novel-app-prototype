@@ -11,12 +11,12 @@ const contextSectionsBlock = app.slice(contextSectionsStart, app.indexOf('\n]', 
 test('Context Management exposes accessible tabs only for configurable context modes', () => {
   assert.match(contextSectionsBlock, /\['scene', 'Story'\][\s\S]*\['codex', 'Codex'\][\s\S]*\['chat', 'Chat'\]/)
   assert.doesNotMatch(contextSectionsBlock, /Summary|Note/)
-  assert.match(app, /<SettingsSectionTabs tabs=\{contextSections\}[\s\S]*idPrefix="context" label="Context type"/)
+  assert.match(app, /<SettingsSectionTabs tabs=\{ownerKind === 'world' \? contextSections\.filter\(\(\[id\]\) => id !== 'scene'\) : contextSections\}[\s\S]*idPrefix="context" label="Context type"/)
   assert.match(app, /role="tabpanel"[\s\S]*aria-labelledby=\{`context-tab-/)
 })
 
 test('selected Context tab controls rendering and persistence without overwriting per-Chat profiles', () => {
-  assert.match(app, /book\?\.contextType === 'codex' \|\| book\?\.contextType === 'chat' \? book\.contextType : 'scene'/)
+  assert.match(app, /book\?\.contextType === 'codex' \|\| book\?\.contextType === 'chat' \? book\.contextType : ownerKind === 'world' \? 'codex' : 'scene'/)
   assert.doesNotMatch(app, /contextSection === 'summary'|contextSection === 'note'/)
   assert.match(app, /type=\{contextSection\}/)
   assert.match(app, /section === 'chat' && book\.chatId && chatContextProfile/)

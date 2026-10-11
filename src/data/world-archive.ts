@@ -5,6 +5,7 @@ import { documentBlocks } from '../features/editor/document-projection'
 import { assertImageFile, checkStorageHeadroom } from '../features/images/illustration-image'
 import { deleteWorld, setBookWorld, entityAvailableInBook } from '../features/worlds/world-service'
 import { archiveContentHash } from '../features/sync/sync-hash'
+import { BOOK_PROFILE_KINDS, importSettingsProfiles, sanitizeProfileSettings, sanitizeSettingsProfile, settingsProfilesForSelections, withProfileReferenceLock, type BookProfileSelections, type SettingsProfile } from '../features/settings/settings-profiles'
 
 /** Same binary transport envelope as Book; a distinct canonical manifest contract. */
 export type WorldArchiveData = {
@@ -12,6 +13,7 @@ export type WorldArchiveData = {
   entities: ArcEntity[]; snapshots: DocumentSnapshot[]; dependencies: CodexDependencyEdge[]
   illustrations: Illustration[]; galleryImages: GalleryImage[]; imageJobs: ImageJob[]
   bookReferences: string[]
+  settingsProfiles?: SettingsProfile[]
   tombstone?: { worldId: string; deletedAt: number }
 }
 export type WorldImportResult = { worldId: string; kind: 'imported' | 'unchanged' | 'deleted' | 'conflict'; conflictId?: string; localContentHash?: string }
@@ -55,12 +57,34 @@ function canonical(value: any): any {
   if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(name => [name, canonical(value[name])]))
   return value
 }
+/** Match Book archive portability: selected definitions plus Text prompt dependencies. */
+function portableWorldProfiles(source: WorldArchiveData): WorldArchiveData {
+  const entities: ArcEntity[] = source.entities.map(entity => entity.type === 'settings' && entity.settingsType === 'ai' ? { ...entity, value: sanitizeProfileSettings(entity.value as Parameters<typeof sanitizeProfileSettings>[0]) } : { ...entity })
+  const selections = entities.filter(entity => entity.type === 'settings' && ['profiles-book', 'profiles-world'].includes(String(entity.settingsType)))
+  valid(selections.length <= 1)
+  if (!selections.length) { valid(source.settingsProfiles === undefined); return { ...source, entities } }
+  const selection = selections[0]
+  const definitions = source.settingsProfiles ?? selection.definitions as SettingsProfile[] | undefined
+  valid(Array.isArray(definitions) && definitions.length <= 1000)
+  const clean = definitions.map(sanitizeSettingsProfile).sort((a, b) => a.id.localeCompare(b.id)), byId = new Map(clean.map(profile => [profile.id, profile]))
+  valid(byId.size === clean.length)
+  for (const kind of BOOK_PROFILE_KINDS) valid(byId.get((selection.value as BookProfileSelections)?.[kind])?.kind === kind)
+  for (const profile of clean.filter(profile => profile.kind === 'text')) {
+    valid(byId.get(profile.settings.chatPromptPresetId ?? '')?.kind === 'chat')
+    valid(byId.get(profile.settings.characterPromptPresetId ?? '')?.kind === 'character')
+  }
+  if (selection.modelMetadata !== undefined) valid(selection.modelMetadata && typeof selection.modelMetadata === 'object' && !Array.isArray(selection.modelMetadata) && Object.entries(selection.modelMetadata).every(([name, length]) => /^(openrouter|nanogpt|openai|litellm|compatible|fake):\S/.test(name) && Number.isSafeInteger(length) && Number(length) > 0))
+  selection.definitions = clean
+  return { ...source, entities, settingsProfiles: clean }
+}
 export function validateWorldArchive(data: WorldArchiveData): void {
   valid(data?.format === 'arc-world' && data.version === 1 && typeof data.worldId === 'string' && data.worldId.length > 0)
   for (const name of ['entities', 'snapshots', 'dependencies', 'illustrations', 'galleryImages', 'imageJobs', 'bookReferences'] as const) valid(Array.isArray(data[name]) && data[name].length <= 100_000)
   for (const rows of [data.entities, data.snapshots, data.dependencies, data.illustrations, data.galleryImages, data.imageJobs]) unique(rows)
   valid(data.bookReferences.every(id => typeof id === 'string' && id.length > 0 && id !== data.worldId) && new Set(data.bookReferences).size === data.bookReferences.length)
+  portableWorldProfiles(data)
   if (data.tombstone) {
+    valid(data.settingsProfiles === undefined)
     valid(data.tombstone.worldId === data.worldId && Number.isFinite(data.tombstone.deletedAt))
     valid([data.entities, data.snapshots, data.dependencies, data.illustrations, data.galleryImages, data.imageJobs, data.bookReferences].every(rows => rows.length === 0))
     return
@@ -100,7 +124,7 @@ export function validateWorldArchive(data: WorldArchiveData): void {
 }
 export function encodeWorldArchive(source: WorldArchiveData): Blob {
   validateWorldArchive(source)
-  const data = portable(source) as WorldArchiveData
+  const data = portable(portableWorldProfiles(source)) as WorldArchiveData
   const sorted = <T extends { id: string }>(rows: T[]) => [...rows].sort((a, b) => a.id.localeCompare(b.id))
   const media = [...sorted(data.illustrations), ...sorted(data.galleryImages)]
   const storeMedia = (row: Illustration | GalleryImage) => {
@@ -137,7 +161,7 @@ export async function decodeWorldArchive(file: Blob): Promise<WorldArchiveData> 
     await assertImageFile(row.thumbnail)
     delete row.imageSize; delete row.imageType; delete row.thumbnailSize; delete row.thumbnailType
   }
-  valid(offset === file.size); validateWorldArchive(data); return data
+  valid(offset === file.size); validateWorldArchive(data); return portableWorldProfiles(data)
 }
 async function capture(db: any, worldId: string): Promise<WorldArchiveData | undefined> {
   const tombstone = (await db.table('meta').get(key('tombstone', worldId)))?.value
@@ -146,6 +170,9 @@ async function capture(db: any, worldId: string): Promise<WorldArchiveData | und
   if (!world) return undefined
   valid(world.type === 'world')
   const entities = [world, ...await db.table('entities').where('bookId').equals(worldId).toArray()] as ArcEntity[]
+  const selection = entities.find(row => row.type === 'settings' && ['profiles-book', 'profiles-world'].includes(String(row.settingsType)))
+  const settingsProfiles = selection ? ((selection.definitions as SettingsProfile[] | undefined)?.map(sanitizeSettingsProfile) ?? settingsProfilesForSelections(selection.value as BookProfileSelections)) : undefined
+  if (selection) selection.definitions = settingsProfiles
   const ids = entities.map(row => row.id)
   const snapshots = await db.table('snapshots').where('entityId').anyOf(ids).toArray() as DocumentSnapshot[]
   const allGallery = await db.table('galleryImages').where('bookId').equals(worldId).toArray() as GalleryImage[]
@@ -156,7 +183,7 @@ async function capture(db: any, worldId: string): Promise<WorldArchiveData | und
   const imageJobs = (await db.table('imageJobs').where('bookId').equals(worldId).toArray() as ImageJob[]).filter(row => row.status === 'completed' && row.decision === 'kept' && assetIds.has(row.assetId ?? ''))
   const members = (await db.table('entities').where('worldId').equals(worldId).toArray() as ArcEntity[]).filter(row => row.type === 'book').map(row => row.id)
   const pending = (await db.table('meta').get(key('references', worldId)))?.value ?? []
-  return { ...empty(worldId), entities, snapshots, dependencies: await db.table('codexDependencies').where('bookId').equals(worldId).toArray(), illustrations: await db.table('illustrations').where('bookId').equals(worldId).toArray(), galleryImages, imageJobs, bookReferences: [...new Set<string>([...members, ...pending])] }
+  return { ...empty(worldId), settingsProfiles, entities, snapshots, dependencies: await db.table('codexDependencies').where('bookId').equals(worldId).toArray(), illustrations: await db.table('illustrations').where('bookId').equals(worldId).toArray(), galleryImages, imageJobs, bookReferences: [...new Set<string>([...members, ...pending])] }
 }
 export async function readWorldArchive(worldId: string): Promise<WorldArchiveData> {
   const db = await database()
@@ -207,6 +234,13 @@ async function apply(db: any, data: WorldArchiveData) {
     await db.table('meta').delete(key('references', worldId))
     return
   }
+  // Use the same collision-safe, retry-idempotent profile installer as Book import.
+  data = { ...data, entities: data.entities.map(entity => {
+    if (entity.type !== 'settings' || !['profiles-book', 'profiles-world'].includes(String(entity.settingsType))) return entity
+    const value = importSettingsProfiles(entity.definitions as SettingsProfile[], entity.value as BookProfileSelections)
+    const { definitions: _portable, ...local } = entity
+    return { ...local, settingsType: 'profiles-world', worldId, value }
+  }) }
   // Detach against the OLD registry so inherited custom definitions survive.
   const wanted = new Set(data.bookReferences)
   const members = (await db.table('entities').where('worldId').equals(worldId).toArray() as ArcEntity[]).filter(row => row.type === 'book')
@@ -240,7 +274,7 @@ export async function importWorldArchiveBlob(file: Blob, options: { expectedLoca
   const data = await decodeWorldArchive(file), incoming = encodeWorldArchive(data)
   await checkStorageHeadroom(incoming.size)
   const incomingHash = await archiveContentHash(incoming), db = await database()
-  const result = await db.transaction('rw', worldArchiveTables.map(name => db.table(name)), async () => {
+  const result = await withProfileReferenceLock<WorldImportResult>(() => db.transaction('rw', worldArchiveTables.map(name => db.table(name)), async () => {
     const current = await snapshot(db, data.worldId)
     const receipt = (await db.table('meta').get(key('receipt', data.worldId)))?.value
     if (current.hash === incomingHash || (receipt?.incomingHash === incomingHash && receipt.localHash === current.hash)) return { kind: 'unchanged', worldId: data.worldId, localContentHash: current.hash } as WorldImportResult
@@ -252,7 +286,7 @@ export async function importWorldArchiveBlob(file: Blob, options: { expectedLoca
     const applied = await snapshot(db, data.worldId)
     await db.table('meta').put({ key: key('receipt', data.worldId), value: { incomingHash, localHash: applied.hash } })
     return { kind: data.tombstone ? 'deleted' : 'imported', worldId: data.worldId, localContentHash: applied.hash } as WorldImportResult
-  })
+  }))
   notifyWorldArchive(data.worldId); return result
 }
 export async function getWorldArchiveConflict(id: string): Promise<WorldArchiveConflict | undefined> {
@@ -277,7 +311,7 @@ export async function resolveWorldArchiveConflict(id: string, choice: 'local' | 
   const conflict = await getWorldArchiveConflict(id)
   if (!conflict) throw new Error('This conflict no longer exists.')
   const incoming = await decodeWorldArchive(conflict.incoming), db = await database()
-  const result = await db.transaction('rw', worldArchiveTables.map(name => db.table(name)), async () => {
+  const result = await withProfileReferenceLock<WorldImportResult>(() => db.transaction('rw', worldArchiveTables.map(name => db.table(name)), async () => {
     const latest = (await db.table('meta').get(id))?.value as WorldArchiveConflict | undefined
     if (!latest || latest.resolution || latest.supersededAt) throw new Error('This conflict was already resolved or superseded. Sync again.')
     const current = await snapshot(db, conflict.worldId)
@@ -287,7 +321,7 @@ export async function resolveWorldArchiveConflict(id: string, choice: 'local' | 
     const applied = await snapshot(db, conflict.worldId)
     if (choice === 'incoming') await db.table('meta').put({ key: key('receipt', conflict.worldId), value: { incomingHash: conflict.incomingHash, localHash: applied.hash } })
     return { worldId: conflict.worldId, kind: choice === 'local' ? 'unchanged' : incoming.tombstone ? 'deleted' : 'imported', localContentHash: applied.hash } as WorldImportResult
-  })
+  }))
   notifyWorldArchive(conflict.worldId); return result
 }
 /** UI deletion entrypoint: empty-only deletion + tombstone commit atomically. */
@@ -300,6 +334,13 @@ export async function deleteWorldWithTombstone(worldId: string): Promise<void> {
     await apply(db, { ...empty(worldId), tombstone: { worldId, deletedAt: Date.now() } })
   })
   notifyWorldArchive(worldId)
+  // Commit deletion before network I/O. This attempt belongs to the durable owner,
+  // not a mounted panel or the automatic-upload preference.
+  const sync = await import('../features/sync/world-sync-service')
+  if (await sync.getWorldSyncState(worldId)) {
+    try { await sync.syncWorldNow(worldId) }
+    catch { /* Sync persists error/offline state; local deletion remains successful. */ }
+  }
 }
 /** Missing/conflicting Books stay pending; no phantom Book or forced relinking. */
 export async function resolvePendingWorldBookReferences(worldId: string): Promise<string[]> {

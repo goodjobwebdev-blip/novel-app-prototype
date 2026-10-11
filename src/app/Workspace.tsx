@@ -92,6 +92,8 @@ import AiSettingsScreen from './App'
 import CodexIllustration, { CodexThumbnail } from '../features/codex/CodexIllustration'
 import BookStorage, { BookBackupImport } from '../data/BookStorage'
 import CloudBookImport from '../features/sync/CloudBookImport'
+import { resolvePendingWorldBookReferences } from '../data/world-archive'
+import { listWorlds } from '../features/worlds/world-service'
 import LocalBookSync from '../features/sync/LocalBookSync'
 import { useWorkspaceSyncStatus } from '../features/sync/WorkspaceSyncStatus'
 import { checkRemoteBook, syncBookNow, checkRemoteWorld, syncWorldNow } from '../features/sync/sync-service'
@@ -331,6 +333,8 @@ export default function Workspace() {
   const editorRef = useRef<MarkdownEditorHandle | null>(null)
   const promptRef = useRef<HTMLTextAreaElement | null>(null)
   const storyRef = useRef(initialStoryMarkdown)
+  // Monotonic edit epoch also detects A → B → A while a read is pending.
+  const editorContentRevisionRef = useRef(0)
   const activeDocumentIdRef = useRef<string | null>(null)
   const activeSceneIdRef = useRef<string | null>(null)
   const scenePovRef = useRef('')
@@ -488,19 +492,30 @@ export default function Workspace() {
               return
             }
       void (async () => {
-        const structural = await reloadBookContent(expectedBookId)
-        if (!structural || !bookScopeMatches(expectedBookId, currentBookIdRef.current)) return
+        const intent = bookRefreshIntentRef.current.begin()
+        const documentId = activeDocumentIdRef.current
+        const contentRevision = editorContentRevisionRef.current
+        const editorContent = storyRef.current
+        const dirtyAtStart = changedSinceSnapshotRef.current
+        const isCurrent = () => bookRefreshIntentRef.current.isCurrent(intent)
+          && bookScopeMatches(expectedBookId, currentBookIdRef.current)
+          && activeDocumentIdRef.current === documentId
+          && editorContentRevisionRef.current === contentRevision && storyRef.current === editorContent
+        const contentSnapshot = await readBookContent(expectedBookId)
+        if (!isCurrent()) return
+        applyBookContent(contentSnapshot)
+        const structural = contentSnapshot.structural
 
         if (detail.entityId === expectedBookId) {
           const refreshedBook = await getEntity<BookEntity>(expectedBookId)
-          if (!bookScopeMatches(expectedBookId, currentBookIdRef.current)) return
+          if (!isCurrent()) return
           if (refreshedBook?.type === 'book') {
             setCurrentBook(refreshedBook)
             setBookList((books) => books.map((book) => book.id === refreshedBook.id ? refreshedBook : book))
           }
         }
 
-        if (!bookScopeMatches(expectedBookId, currentBookIdRef.current)) return
+        if (!isCurrent()) return
         if (activeDocumentIdRef.current && detail.deletedIds?.includes(activeDocumentIdRef.current)) {
           const fallback = structural.find((entity) => entity.type === 'scene')
           if (fallback) {
@@ -518,9 +533,9 @@ export default function Workspace() {
           }
           return
         }
-        if (activeDocumentIdRef.current !== detail.entityId || changedSinceSnapshotRef.current || generationAbortRef.current) return
+        if (activeDocumentIdRef.current !== detail.entityId || dirtyAtStart || changedSinceSnapshotRef.current || generationAbortRef.current) return
         const refreshed = await getEntity<EditableEntity>(detail.entityId)
-        if (!bookScopeMatches(expectedBookId, currentBookIdRef.current)) return
+        if (!isCurrent() || changedSinceSnapshotRef.current || generationAbortRef.current) return
         if (!refreshed || !['scene', 'note', 'codexEntry', 'summary'].includes(refreshed.type) || !entityAvailableInWorkspace(refreshed, currentBookRef.current ?? undefined)) return
         setActiveDocument(refreshed)
         const content = String(refreshed.content ?? '')
@@ -667,6 +682,7 @@ export default function Workspace() {
   }
 
   function handleStoryChange(value: string) {
+    editorContentRevisionRef.current += 1
     storyRef.current = value
     if (activeDocument?.type === 'scene') {
       setOutlineEntities((items) => items.map((item) => item.id === activeDocument.id ? { ...item, content: value } : item))
@@ -714,8 +730,13 @@ export default function Workspace() {
 
   async function reloadBookContent(bookId: string) {
     const intent = bookRefreshIntentRef.current.begin()
+    const documentId = activeDocumentIdRef.current
+    const contentRevision = editorContentRevisionRef.current
+    const editorContent = storyRef.current
     const content = await readBookContent(bookId)
-    if (!bookRefreshIntentRef.current.isCurrent(intent) || !bookScopeMatches(bookId, currentBookIdRef.current)) return null
+    if (!bookRefreshIntentRef.current.isCurrent(intent) || !bookScopeMatches(bookId, currentBookIdRef.current)
+      || activeDocumentIdRef.current !== documentId || editorContentRevisionRef.current !== contentRevision
+      || storyRef.current !== editorContent) return null
     applyBookContent(content)
     return content.structural
   }
@@ -736,6 +757,7 @@ export default function Workspace() {
       return
     }
 
+    bookRefreshIntentRef.current.invalidate()
     const intent = documentLoadIntentRef.current.begin()
     if (!await saveRequiredBeforeNavigation(changedSinceSnapshotRef.current, () => flushDocument('navigation', true))) {
       if (documentLoadIntentRef.current.isCurrent(intent) && bookScopeMatches(expectedBookId, currentBookIdRef.current)) {
@@ -803,6 +825,7 @@ export default function Workspace() {
 
   async function openWorld(worldId: string) {
     const intent = bookOpenIntentRef.current.begin()
+    bookRefreshIntentRef.current.invalidate()
     if (generationAbortRef.current || generationPreflightRef.current) { showToast('Stop generation before switching workspaces.'); return }
     if (!await saveRequiredBeforeNavigation(changedSinceSnapshotRef.current, () => flushDocument('navigation', true))) { showToast('Could not save the current document. Retry before switching workspaces.'); return }
     if (!bookOpenIntentRef.current.isCurrent(intent)) return
@@ -902,6 +925,9 @@ export default function Workspace() {
   }
 
   async function importedBook(bookId: string) {
+    // Archives may arrive in either order. Reconcile only references whose Book
+    // now exists; the archive service retains missing/conflicting links.
+    for (const world of await listWorlds()) await resolvePendingWorldBookReferences(world.id)
     setBookList(await listBooks())
     setSeriesList(await listSeries())
     await openBook(bookId)
@@ -1010,12 +1036,19 @@ export default function Workspace() {
     const bookId = currentBookIdRef.current
     if (!bookId) return
     const documentId = activeDocumentIdRef.current
+    const intent = bookRefreshIntentRef.current.begin()
+    const contentRevision = editorContentRevisionRef.current
+    const editorContent = storyRef.current
+    const dirtyAtStart = changedSinceSnapshotRef.current
+    const isCurrent = () => bookRefreshIntentRef.current.isCurrent(intent)
+      && currentBookIdRef.current === bookId && activeDocumentIdRef.current === documentId
+      && editorContentRevisionRef.current === contentRevision && storyRef.current === editorContent
     const [book, refreshed, books] = await Promise.all([
       getEntity<WorkspaceOwner>(bookId),
       documentId ? getEntity<EditableEntity>(documentId) : Promise.resolve(undefined),
       listBooks(),
     ])
-    if (currentBookIdRef.current !== bookId) return
+    if (!isCurrent()) return
     setBookList(books)
     if (!book || !['book', 'world'].includes(book.type)) {
       bookOpenIntentRef.current.invalidate(); documentLoadIntentRef.current.invalidate(); bookRefreshIntentRef.current.invalidate()
@@ -1029,11 +1062,13 @@ export default function Workspace() {
     currentBookRef.current = book
     setCurrentBook(current => JSON.stringify(current) === JSON.stringify(book) ? current : book)
     if (book.type === 'book') setBookList(books => books.map(item => item.id === bookId ? book : item))
-    await reloadBookContent(bookId)
-    if (currentBookIdRef.current !== bookId || activeDocumentIdRef.current !== documentId || generationAbortRef.current || changedSinceSnapshotRef.current) return
+    const content = await readBookContent(bookId)
+    if (!isCurrent()) return
+    applyBookContent(content)
+    if (dirtyAtStart || generationAbortRef.current || changedSinceSnapshotRef.current) return
     if (currentArticleId) {
       const article = await getEntity<CodexEntryEntity>(currentArticleId)
-      if (currentBookIdRef.current !== bookId || activeDocumentIdRef.current !== documentId) return
+      if (!isCurrent() || generationAbortRef.current || changedSinceSnapshotRef.current) return
       if (!article || article.type !== 'codexEntry' || !entityAvailableInWorkspace(article, book)) setCurrentArticleId(null)
     }
     if (!documentId) return
@@ -1073,6 +1108,7 @@ export default function Workspace() {
   async function goHome() {
     if (generationAbortRef.current || generationPreflightRef.current) { showToast('Stop generation before leaving the workspace.'); return }
     if (!await saveRequiredBeforeNavigation(changedSinceSnapshotRef.current, () => flushDocument('navigation', true))) { showToast('Could not save. Retry before leaving the workspace.'); return }
+    bookRefreshIntentRef.current.invalidate()
     setRightOpen(false); setScreen('home')
   }
 
@@ -1201,7 +1237,8 @@ export default function Workspace() {
       if (currentBookIdRef.current !== currentBook.id) return
       const sourceBookId = currentBook.id
       const note = await createNote(sourceBookId)
-      if (!await reloadBookContent(sourceBookId)) return
+      await reloadBookContent(sourceBookId)
+      if (currentBookIdRef.current !== sourceBookId) return
       await loadDocument(note.id)
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Could not create the note.')
@@ -1220,7 +1257,8 @@ export default function Workspace() {
       let title = 'Untitled Entry', suffix = 2
       while (existingTitles.has(title.toLocaleLowerCase())) title = `Untitled Entry ${suffix++}`
       const entry = await createCodexEntry(sourceBookId, title)
-      if (!await reloadBookContent(sourceBookId)) return
+      await reloadBookContent(sourceBookId)
+      if (currentBookIdRef.current !== sourceBookId) return
       await loadDocument(entry.id)
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Could not create the Codex entry.')
@@ -2223,8 +2261,8 @@ export default function Workspace() {
     : activeDocument?.type === 'codexEntry'
       ? `Codex / ${activeDocument.category} / ${activeDocument.title}`
       : activeDocument?.type === 'summary'
-        ? summaryCodexSource ? `Codex / ${summaryCodexSource.title} / Summary` : `Outline / ${summarySource?.title ?? 'Missing source'} / Summary`
-        : ['Outline', activeAct?.title, activeChapter?.title, activeDocument?.title].filter(Boolean).join(' / ')
+        ? summaryCodexSource ? `Codex / ${summaryCodexSource.title} / Summary` : `${isWorldWorkspace ? 'Codex' : 'Outline'} / ${summarySource?.title ?? 'Missing source'} / Summary`
+        : isWorldWorkspace ? `World / ${currentBook?.title ?? ''}` : ['Outline', activeAct?.title, activeChapter?.title, activeDocument?.title].filter(Boolean).join(' / ')
   const activeCodexArchived = activeDocument?.type === 'codexEntry' && isCodexEntryArchived(activeDocument)
   const activeSummarySourceArchived = Boolean(summaryCodexSource && isCodexEntryArchived(summaryCodexSource))
   const pageLabel = activeDocument?.type === 'note'
@@ -2275,7 +2313,7 @@ export default function Workspace() {
     />
   }
 
-  if (screen === 'worlds') return <WorldBuilding key={selectedWorldId ?? 'all-worlds'} initialWorldId={selectedWorldId} onOpen={id => { void openWorldBuilding(id) }} onHome={() => setScreen('home')} />
+  if (screen === 'worlds') return <WorldBuilding key={selectedWorldId ?? 'all-worlds'} initialWorldId={selectedWorldId} onOpen={openWorldBuilding} onHome={() => setScreen('home')} />
 
     if (screen === 'home') return (
     <main className="library-screen">
@@ -2294,7 +2332,7 @@ export default function Workspace() {
           <button type="button" className="library-book" onClick={() => { void openBook(book.id).catch((error) => showToast(error instanceof Error ? error.message : 'Could not open the book.')) }}><i className={`mock-cover ${['tide', 'orchard', 'fires'][index % 3]}`}>{book.title.slice(0,1)}</i><span><small>{formatSeries(book, seriesList)}</small><strong>{book.title}</strong><em>{formatEdited(book.updatedAt)}</em></span></button>
           <div className="library-book-actions"><Button className="library-book-action autotitle-trigger" variant="ghost" onClick={() => { void startAutotitle(book) }} aria-label={`Autotitle ${book.title}`} title="Autotitle" leadingIcon={<WandSparkles aria-hidden="true" />} /><Button className="library-book-action" variant="ghost" onClick={() => { void editBookTitle(book) }} aria-label={`Rename ${book.title}`} leadingIcon={<Pencil aria-hidden="true" />} /><Button className="library-book-action" variant="danger" onClick={() => { void removeBook(book) }} aria-label={`Delete ${book.title}`} leadingIcon={<Trash2 aria-hidden="true" />} /></div>
         </article>)}</div>
-        {libraryState === 'ready' && <WorldsHomeSection onViewAll={() => { void openWorldBuilding() }} onOpen={worldId => { void openWorldBuilding(worldId) }} />}
+        {libraryState === 'ready' && <WorldsHomeSection onViewAll={() => { void openWorldBuilding() }} onOpen={openWorldBuilding} />}
       </section>
     </main>
   )
@@ -2303,9 +2341,9 @@ export default function Workspace() {
     <main className={`workspace-screen ${isWorldWorkspace ? 'world-building' : ''} ${screen === 'chat' ? 'chat-active' : ''}`}>
       {isWorldWorkspace && <nav className="world-workspace-navigation" aria-label="World navigation"><Button onClick={() => { void goHome() }}>Home</Button><button disabled aria-describedby="world-story-unavailable">Story</button><small id="world-story-unavailable">Story settings are available only in Books · Настройки истории доступны только в книгах</small></nav>}
       <header className="floating-controls">
-        <div className="floating-control-group"><button type="button" onClick={() => openSettings(screen)} aria-label="Open current book settings" title="Book settings"><PanelLeftOpen aria-hidden="true" /></button><button className="image-destination-button" type="button" onClick={() => { void openImages(screen) }} aria-label="Open images and gallery" title="Images and gallery"><ImageIcon aria-hidden="true" /><ImageActivityBadge active={activeImageJobs} review={reviewImageJobs} attention={attentionImageJobs} /></button></div>
+        <div className="floating-control-group"><button type="button" onClick={() => openSettings(screen)} aria-label={isWorldWorkspace ? 'Open current World settings' : 'Open current book settings'} title={isWorldWorkspace ? 'World settings' : 'Book settings'}><PanelLeftOpen aria-hidden="true" /></button><button className="image-destination-button" type="button" onClick={() => { void openImages(screen) }} aria-label="Open images and gallery" title="Images and gallery"><ImageIcon aria-hidden="true" /><ImageActivityBadge active={activeImageJobs} review={reviewImageJobs} attention={attentionImageJobs} /></button></div>
         <span className={`save-state ${saveState} ${syncStatus.state === 'conflict' ? 'sync-conflict-state' : ''}`} title={syncStatus.message || (saveState === 'error' ? 'Local save failed; your current editor text remains in memory.' : undefined)}><i /> {saveState === 'loading' ? 'Loading' : saveState === 'saving' ? 'Saving' : saveState === 'error' ? 'Save failed' : 'Saved'}{syncStatus.label ? ` · ${syncStatus.label}` : ''}</span>
-        <button type="button" onClick={() => setRightOpen(true)} aria-label="Open book workspace" title="Book workspace"><PanelRightOpen aria-hidden="true" /></button>
+        <button type="button" onClick={() => setRightOpen(true)} aria-label={isWorldWorkspace ? 'Open World workspace' : 'Open book workspace'} title={isWorldWorkspace ? 'World workspace' : 'Book workspace'}><PanelRightOpen aria-hidden="true" /></button>
       </header>
 
       {toast && <Toast fixed key={toast.id} variant={toast.variant} title={toast.title} onDismiss={() => setToast(null)}>{toast.message}</Toast>}
@@ -2344,7 +2382,7 @@ export default function Workspace() {
         {activeDocument?.type === 'codexEntry' && <ArticleLinks key={activeDocument.id} entry={activeDocument} content={storyMarkdown} entries={codexEntries} disabled={generationActive || activeCodexArchived} onOpen={id => { void openArticle(id) }} onInsert={markdown => { const selection = editorRef.current?.captureSelection?.(); if (selection) { editorRef.current?.replaceRange(selection, markdown); return } handleStoryChange(storyRef.current + markdown) }} />}
         {activeDocument?.type === 'summary' && summaryContextIndicator && <div className="summary-context-indicator">{summaryContextIndicator}</div>}
         {activeDocument && currentBook && ['scene', 'note', 'codexEntry'].includes(activeDocument.type) && !activeCodexArchived && <EditorBlocks key={`blocks-${activeDocument.id}`} bookId={activeDocument.bookId} editor={editorRef} disabled={generationActive} onEditRequestHandled={() => setBlockEditRequest(null)} insertImage={imageInsertRequest === activeDocument.id} onInsertHandled={() => setImageInsertRequest(null)} editRequest={blockEditRequest?.documentId === activeDocument.id && blockEditRequest.snapshot.document === storyMarkdown ? blockEditRequest : null} />}
-        <div hidden={timelineView?.entryId === activeDocument?.id && timelineView?.nonBaseline}>{activeDocument ? <MarkdownEditor key={`${activeDocument.id}-${editorRevision}`} ref={editorRef} historyKey={`${currentBook?.id}:${activeDocument.id}`} onArticleLink={id => { void openArticle(id) }} onAutocompleteInput={snapshot => { if (!generationPreflightRef.current && !generationAbortRef.current) void autocomplete.onInput(snapshot) }} onAutocompleteInvalidate={autocomplete.cancel} onAutocompleteAccept={autocomplete.accept} onSelectionChange={(selection) => setSelectedProse(selection ? { documentId: activeDocument.id, selection } : null)} bookId={activeDocument.bookId} showBeats={showBeats} highlightDialogue={activeDocument.type === 'scene' && highlightDialogue} onBeatAction={actOnBeat} onEditBlock={(item) => { const snapshot = editorRef.current?.captureSelection(item.from, item.to); if (snapshot) setBlockEditRequest({ documentId: activeDocument.id, item, snapshot }) }} value={storyMarkdown} onChange={handleStoryChange} onHistoryChange={setEditorHistory} ariaLabel={`${activeDocument.title} Markdown editor`} readOnly={activeCodexArchived || activeSummarySourceArchived} mentionTerms={activeDocument.type === 'scene' ? codexMentionIndex : []} onMentionClick={activeDocument.type === 'scene' ? openLoreMention : undefined} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No document selected</strong><p>{isWorldWorkspace ? 'Create a Codex article to start building this World. Books are optional.' : 'Choose a Scene, Note, Codex entry, or Summary from the book workspace.'}</p>{isWorldWorkspace && <Button onClick={() => { void addCodexEntry() }}>Create first article</Button>}<button type="button" onClick={() => setRightOpen(true)}>Open Book Workspace</button></div>}</div>
+        <div hidden={timelineView?.entryId === activeDocument?.id && timelineView?.nonBaseline}>{activeDocument ? <MarkdownEditor key={`${activeDocument.id}-${editorRevision}`} ref={editorRef} historyKey={`${currentBook?.id}:${activeDocument.id}`} onArticleLink={id => { void openArticle(id) }} onAutocompleteInput={snapshot => { if (!generationPreflightRef.current && !generationAbortRef.current) void autocomplete.onInput(snapshot) }} onAutocompleteInvalidate={autocomplete.cancel} onAutocompleteAccept={autocomplete.accept} onSelectionChange={(selection) => setSelectedProse(selection ? { documentId: activeDocument.id, selection } : null)} bookId={activeDocument.bookId} showBeats={showBeats} highlightDialogue={activeDocument.type === 'scene' && highlightDialogue} onBeatAction={actOnBeat} onEditBlock={(item) => { const snapshot = editorRef.current?.captureSelection(item.from, item.to); if (snapshot) setBlockEditRequest({ documentId: activeDocument.id, item, snapshot }) }} value={storyMarkdown} onChange={handleStoryChange} onHistoryChange={setEditorHistory} ariaLabel={`${activeDocument.title} Markdown editor`} readOnly={activeCodexArchived || activeSummarySourceArchived} mentionTerms={activeDocument.type === 'scene' ? codexMentionIndex : []} onMentionClick={activeDocument.type === 'scene' ? openLoreMention : undefined} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No document selected</strong><p>{isWorldWorkspace ? 'Create a Codex article to start building this World. Books are optional.' : 'Choose a Scene, Note, Codex entry, or Summary from the book workspace.'}</p>{isWorldWorkspace && <Button onClick={() => { void addCodexEntry() }}>Create first article</Button>}<button type="button" onClick={() => setRightOpen(true)}>{isWorldWorkspace ? 'Open World Workspace' : 'Open Book Workspace'}</button></div>}</div>
         {characterSetupEntry && currentBook && <CharacterChatSetup bookId={currentBook.id} initialEntryId={characterSetupEntry} currentSceneId={activeSceneId || undefined} onClose={() => setCharacterSetupEntry(null)} onOpen={openChat} />}
       </article> : currentBook ? <ChatView key={`${currentBook.type}:${currentBook.id}`} bookId={currentBook.id} chatId={activeChatId} bookPromptValues={toBookPromptValues(currentBook, seriesList)} currentSceneId={isWorldWorkspace ? null : activeSceneId} currentArticleId={currentArticleId} onOpenArticle={id => { void openArticle(id) }} onBeforeArticleAction={beforeWorldCodexChange} onChatChange={openChat} onToast={showToast} /> : <section className="conversation chat-empty"><MessageCircle aria-hidden="true" /><p>Open a workspace before starting a chat.</p></section>}
 
@@ -2361,7 +2399,7 @@ export default function Workspace() {
       }><div className="arc-prompt-field" hidden={drawerCollapsed}><ExpandableTextInput ref={promptRef} value={activeDocument.type === 'codexEntry' ? lorePrompt : arcPrompt} onChange={activeDocument.type === 'codexEntry' ? setLorePrompt : setArcPrompt} readOnly={sttState.target === 'instruction' && ['requesting-permission', 'recording', 'recording-live', 'stopping', 'transcribing', 'finalizing'].includes(sttState.status)} aria-label="generation prompt" dialogTitle="Edit generation prompt" onDictate={dictateInstruction} dictationStatus={sttState.target === 'instruction' ? sttState.status : 'idle'} dictationError={sttState.target === 'instruction' ? sttState.error : undefined} dictationDisabled={generationActive} onStopDictation={stopSttSession} onCancelDictation={cancelSttSession} /></div><GenerateControl autocompleteReady={Boolean(autocomplete.suggestion)} onAcceptAutocomplete={autocomplete.accept} onCancelAutocomplete={autocomplete.cancel} inDrawer={!drawerCollapsed} drawerCollapsed={drawerCollapsed} onToggleDrawer={() => setDrawerCollapsed(value => !value)} onInsertImage={() => setImageInsertRequest(activeDocument.id)} isGenerating={generationActive} phase={generationPhase} elapsedSeconds={generationElapsedSeconds} sttState={sttState} canUndo={editorHistory.canUndo} canRedo={editorHistory.canRedo} onOpenDetails={() => setGenerationDetailsOpen(true)} onGenerate={generate} onStop={stopGeneration} onMicro={() => { void dictateEditor() }} onMicro2={() => { void dictateInstruction() }} onUndo={() => editorRef.current?.undo()} onRedo={() => editorRef.current?.redo()} onRegenerate={regenerate} onReadAloud={() => { void readCurrentDocument() }} readAloudDisabled={activeDocument?.type === 'scene' && !lastGeneratedPassage.trim()} readAloudTitle={activeDocument?.type === 'scene' ? 'Read latest generated passage' : 'Read full Codex entry'} /></Composer>}
 
       {rightOpen && <aside className="book-panel">
-        <header><div><small>{formatSeries(currentBook, seriesList)}</small><strong>{currentBook?.title ?? 'Untitled Book'}</strong></div><div className="book-panel-header-actions">{activeSceneId && <button type="button" onClick={() => { void loadScene(activeSceneId) }} aria-label="Return to Scene" title="Return to Scene"><CornerUpLeft aria-hidden="true" /></button>}<button type="button" onClick={() => setRightOpen(false)} aria-label="Close book workspace" title="Close book workspace"><X aria-hidden="true" /></button></div></header>
+        <header><div><small>{formatSeries(currentBook, seriesList)}</small><strong>{currentBook?.title ?? 'Untitled Book'}</strong></div><div className="book-panel-header-actions">{activeSceneId && <button type="button" onClick={() => { void loadScene(activeSceneId) }} aria-label="Return to Scene" title="Return to Scene"><CornerUpLeft aria-hidden="true" /></button>}<button type="button" onClick={() => setRightOpen(false)} aria-label={isWorldWorkspace ? 'Close World workspace' : 'Close book workspace'} title={isWorldWorkspace ? 'Close World workspace' : 'Close book workspace'}><X aria-hidden="true" /></button></div></header>
         <nav>{([['book', Settings2], ['outline', BookOpenText], ['notes', NotebookPen], ['codex', WandSparkles], ['chat', MessageCircle]] as const).map(([tab, Icon]) => <button type="button" className={rightTab === tab ? 'active' : ''} onClick={() => { setRightTab(tab); if (tab === 'chat') setChatPanel(screen === 'chat' ? 'settings' : 'list') }} key={tab}><Icon aria-hidden="true" /><span>{isWorldWorkspace ? tab === 'book' ? 'World' : tab === 'outline' ? 'Books' : tab[0].toUpperCase() + tab.slice(1) : tab}</span></button>)}</nav>
         <div className="panel-content">{isWorldWorkspace && currentBook?.type === 'world' && (rightTab === 'book' || rightTab === 'outline') ? <WorldWorkspacePanel world={currentBook} tab={rightTab === 'book' ? 'world' : 'books'} beforeChange={beforeWorldCodexChange} onOpenBook={id => { void openBook(id) }} onRefresh={refreshWorldCodexWorkspace} onHome={() => { void goHome() }} /> :
           rightTab === 'book' ? <BookSettings planning={<AuthorGoalsTasks key={`planning-${currentBook?.id}`} bookId={currentBook?.id ?? ''} liveScene={activeDocument?.type === 'scene' ? { id: activeDocument.id, content: storyMarkdown } : undefined} onOpen={id => { void getEntity<EditableEntity>(id).then(entity => { if (!entity) return; if (entity.type === 'chapter') void openSummary(entity as unknown as StructuralEntity); else void loadDocument(id) }) }} />} onBeforeExport={prepareBookExport} onImported={importedBook} book={currentBook?.type === 'book' ? currentBook : null} books={bookList} series={seriesList} onSave={saveBookMetadata} onWorldChange={changeBookWorld} onOpenWorld={worldId => { void openWorldBuilding(worldId) }} onCreateSeries={addSeries} onRenameSeries={renameSeries} onDelete={removeCurrentBookFromSettings} /> :

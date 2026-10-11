@@ -860,7 +860,9 @@ export async function saveBookProfileSelections(bookId: string, value: BookProfi
 }
 
 export async function listSettingsProfileUsage(profileId: string): Promise<Array<{ id: string; title: string }>> {
-  const books = await (await database()).table('entities').where('type').anyOf(['book', 'world']).toArray() as Array<BookEntity | WorldEntity>, used: Array<{ id: string; title: string }> = []
+  const db = await database()
+  const books: Array<BookEntity | WorldEntity> = [...await listBooks(), ...await db.table('entities').where('type').equals('world').toArray()]
+  const used: Array<{ id: string; title: string }> = []
   for (const book of books) {
     let selections: BookProfileSelections
     try { selections = await getBookProfileSelections(book.id) } catch (error) {
@@ -1032,12 +1034,13 @@ export async function saveWorldProfileSelections(ownerId: string, value: BookPro
   return withProfileReferenceLock(async () => {
     await getWorldProfileSelections(ownerId)
     const db = await database()
-    const clean = validateBookProfileSelections(snapshot)
-    await db.transaction('rw', db.table('entities'), async () => {
+    const clean = await db.transaction('rw', db.table('entities'), async () => {
       await requireWorldOwner(db, ownerId)
+      const clean = validateBookProfileSelections(snapshot)
       const existing = await db.table('entities').get(bookProfilesId(ownerId))
-      if (!existing || existing.settingsType !== 'profiles-world') throw new Error('World profiles changed. Reopen Settings.')
+      if (!existing || existing.settingsType !== 'profiles-world' || existing.bookId !== ownerId || existing.worldId !== ownerId) throw new Error('World profiles changed. Reopen Settings.')
       await db.table('entities').put({ ...existing, value: clean, updatedAt: Math.max(Date.now(), existing.updatedAt + 1) })
+      return clean
     })
     notifySettingsProfilesChanged(ownerId)
     return clean

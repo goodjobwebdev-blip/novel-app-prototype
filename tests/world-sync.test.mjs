@@ -89,6 +89,43 @@ function fixture(id) {
     { id: `${id}-message`, type: 'chatMessage', bookId: id, worldId: id, parentId: `${id}-chat`, content: 'History', createdAt: 1, updatedAt: 1 },
   ], snapshots: [{ id: `${id}-snapshot`, entityId: `${id}-entry`, entityType: 'codexEntry', content: 'Previous', createdAt: 1, reason: 'manual' }], dependencies: [], illustrations: [], galleryImages: [], imageJobs: [], bookReferences: ['absent-book'] }
 }
+test('World archive carries sanitized profiles and prompt dependencies, remaps collisions and reuses import receipts', async () => {
+  const profiles = await import('../src/features/settings/settings-profiles.ts')
+  const library = profiles.loadSettingsProfiles(), data = fixture('world-portable-profiles')
+  const selections = profiles.defaultBookProfileSelections()
+  const definitions = profiles.settingsProfilesForSelections(selections)
+  const text = definitions.find(row => row.kind === 'text'), chat = definitions.find(row => row.kind === 'chat')
+  text.settings.mainModel = 'remote-custom-model'
+  chat.settings.promptCompositions.assistant.systemPrompt = 'Remote custom chat preset'
+  text.settings.apiKey = 'DO-NOT-EXPORT'; text.settings.baseUrl = 'https://private-provider.test'
+  data.entities.push({ id: `settings-profiles-book-${data.worldId}`, type: 'settings', settingsType: 'profiles-world', bookId: data.worldId, worldId: data.worldId, parentId: data.worldId, value: selections, definitions, createdAt: 1, updatedAt: 1 })
+  const blob = a.encodeWorldArchive(data), decoded = await a.decodeWorldArchive(blob)
+  assert.equal(decoded.settingsProfiles.find(row => row.kind === 'text').settings.mainModel, 'remote-custom-model')
+  assert.doesNotMatch(await blob.text(), /DO-NOT-EXPORT|private-provider/)
+  assert.equal((await a.importWorldArchiveBlob(blob)).kind, 'imported')
+  const entity = (await a.readWorldArchive(data.worldId)).entities.find(row => row.settingsType === 'profiles-world')
+  assert.notEqual(entity.value.text, selections.text)
+  const installed = profiles.loadSettingsProfiles()
+  const installedText = installed.profiles.find(row => row.id === entity.value.text)
+  assert.equal(installedText.settings.mainModel, 'remote-custom-model')
+  assert.equal(installed.profiles.find(row => row.id === installedText.settings.chatPromptPresetId).settings.promptCompositions.assistant.systemPrompt, 'Remote custom chat preset')
+  assert.deepEqual(installed.profiles.find(row => row.id === selections.text), library.profiles.find(row => row.id === selections.text))
+  const count = installed.profiles.length
+  assert.equal((await a.importWorldArchiveBlob(blob)).kind, 'unchanged')
+  assert.equal(profiles.loadSettingsProfiles().profiles.length, count)
+  const captured = await a.readWorldArchive(data.worldId)
+  const hash = await (await import('../src/features/sync/sync-hash.ts')).archiveContentHash(a.encodeWorldArchive(captured))
+  assert.equal(hash, await (await import('../src/features/sync/sync-hash.ts')).archiveContentHash(a.encodeWorldArchive({ ...captured, settingsProfiles: [...captured.settingsProfiles].reverse(), entities: [...captured.entities].reverse() })))
+})
+
+test('World archive capture resolves local-only profile selections into portable definitions', async () => {
+  const world = await worlds.createWorld('Profile capture')
+  const selections = await p.getBookProfileSelections(world.id)
+  const captured = await a.readWorldArchive(world.id)
+  assert.ok(captured.settingsProfiles.some(row => row.id === selections.text))
+  assert.ok(captured.settingsProfiles.some(row => row.kind === 'chat'))
+})
+
 test('canonical World import is idempotent, includes Notes/Chat/history and never creates a missing Book', async () => {
   const data = fixture('world-archive-test')
   const blob = a.encodeWorldArchive(data)
@@ -143,6 +180,39 @@ test('empty World deletion records a durable tombstone and old archives cannot r
   assert.equal(await p.getEntity(world.id), undefined)
   await assert.rejects(a.resolveWorldArchiveConflict(result.conflictId, 'incoming'), /deleted/)
 })
+test('connected deletion attempts sync without an owner UI, retains failure and retries its tombstone', async () => {
+  const settings = await import('../src/features/sync/sync-settings.ts')
+  settings.saveSyncSettings({ endpoint: 'https://sync.example.test', basicUsername: 'writer', basicPassword: 'secret', token: 'x'.repeat(32), automaticUpload: false })
+  const world = await worlds.createWorld('Delete offline'), original = globalThis.fetch
+  let stored, revision = 0, unavailable = false, attempts = 0
+  globalThis.fetch = async (url, init) => {
+    attempts++
+    if (unavailable) throw new Error('Delete upload network unavailable')
+    if (init.method === 'PUT') { assert.equal(init.headers.get('If-Match'), `"rev-${revision}"`); stored = init.body; revision++ }
+    const etag = `"rev-${revision}"`
+    if (url.endsWith('/state') && init.method !== 'PUT') return new Response(stored, { headers: { ETag: etag } })
+    return new Response(JSON.stringify({ id: 'remote-deleted-owner', clientBookId: `arc-world:${world.id}`, currentRevision: revision, currentSize: stored?.size ?? 0 }), { headers: { ETag: etag } })
+  }
+  try {
+    await s.enableWorldSync(world.id)
+    const before = attempts; unavailable = true
+    await a.deleteWorldWithTombstone(world.id)
+    assert.ok(attempts > before, 'delete must attempt networking even with no mounted owner')
+    assert.equal(await p.getEntity(world.id), undefined)
+    const failed = await s.getWorldSyncState(world.id)
+    assert.equal(failed.status, 'error'); assert.match(failed.message, /network unavailable/)
+    assert.ok((await s.listDeletedWorldSyncStates()).some(row => row.worldId === world.id && row.status === 'error'))
+    unavailable = false
+    assert.equal((await s.syncWorldNow(world.id)).kind, 'uploaded')
+    assert.equal((await a.decodeWorldArchive(stored)).tombstone.worldId, world.id)
+    assert.equal((await s.getWorldSyncState(world.id)).status, 'synced')
+    assert.equal(await p.getEntity(world.id), undefined)
+    await s.disconnectWorldSync(world.id)
+    assert.equal((await s.listDeletedWorldSyncStates()).some(row => row.worldId === world.id), false)
+    assert.equal((await a.readWorldArchive(world.id)).tombstone.worldId, world.id)
+  } finally { globalThis.fetch = original }
+})
+
 test('nonempty Notes/Chat World cannot be deleted through the sync deletion API', async () => {
   const data = fixture('world-delete-content-test'); data.entities = data.entities.filter(e => e.type !== 'codexEntry'); data.snapshots = []
   await a.importWorldArchiveBlob(a.encodeWorldArchive(data))

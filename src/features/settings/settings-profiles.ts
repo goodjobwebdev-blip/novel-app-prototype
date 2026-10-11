@@ -213,9 +213,13 @@ export async function deleteSettingsProfile(id: string): Promise<void> {
     // Serialize with IndexedDB selection writers across browser tabs, then recheck. A writer
     // queued behind this transaction must validate against the newly saved library.
     await db.transaction('rw', db.table('entities'), async () => {
-      const rows = await db.table('entities').toArray() as Array<{ id: string; type: string; bookId?: string; settingsType?: string; value?: Record<string, string> }>
+      const rows = await db.table('entities').toArray() as Array<{ id: string; type: string; bookId?: string; worldId?: string; settingsType?: string; value?: Record<string, string> }>
       const books = new Set(rows.filter(row => row.type === 'book').map(row => row.id))
-      if (rows.some(row => row.settingsType === 'profiles-book' && books.has(row.bookId ?? '') && Object.values(row.value ?? {}).includes(id))) throw new Error('This profile is used by books and cannot be deleted.')
+      const worlds = new Set(rows.filter(row => row.type === 'world').map(row => row.id))
+      if (rows.some(row => (
+        (row.settingsType === 'profiles-book' && books.has(row.bookId ?? '')) ||
+        (row.settingsType === 'profiles-world' && worlds.has(row.bookId ?? '') && row.worldId === row.bookId)
+      ) && Object.values(row.value ?? {}).includes(id))) throw new Error('This profile is used by books or Worlds and cannot be deleted.')
       const library = loadSettingsProfiles()
       if (!library.profiles.some(profile => profile.id === id)) throw new Error('This profile no longer exists.')
       if (Object.values(library.defaults).includes(id)) throw new Error('Default profiles cannot be deleted.')

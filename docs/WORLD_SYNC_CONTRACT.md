@@ -11,6 +11,7 @@ World owners use the existing authenticated provider `/api/v1/books` storage API
 ## Captured data
 
 - World metadata, lore-type definitions and owner settings.
+- Sanitized selected settings profiles and Text profile Chat/Character prompt-preset dependencies, in `settingsProfiles` and the portable selection record's `definitions`. Local `profiles-world` selections are exported with their definitions rather than device-local IDs alone. Profile/model/prompt/UI/media sanitizers and the collision-safe installer are the same as Book archives.
 - All owned Codex entries, including draft/archived entries, summaries, Notes, Chat sessions and saved messages/context/proposals.
 - Document history/snapshots, canonical Codex dependency edges, illustrations.
 - Kept owner gallery assets and assets referenced by document/checkpoint/history blocks; completed kept image jobs associated with exported assets.
@@ -20,6 +21,8 @@ World owners use the existing authenticated provider `/api/v1/books` storage API
 Provider secrets, connection fingerprints, active provider tickets, execution leases/heartbeats and inline generation-source payloads are not portable. In-progress image jobs are not resumed by import. The local illustration undo buffer and local sync/control records are not archive content.
 
 Metadata/object keys and resource rows are serialized deterministically. Import receipts account for database normalization (for example Codex defaults and World Chat context filtering), making a repeated unchanged archive idempotent rather than a duplicate or spurious conflict.
+
+Profile definitions are sorted by stable ID before hashing. Import preserves free/equal profile IDs, reuses equal prior collision clones and remaps selected IDs and Text preset references without overwriting shared local profiles. A receipt binds the incoming hash to the post-remap local hash, so retrying the same remote archive does not create profiles or a false conflict. As with Book profile import, the profile library is localStorage-backed: archive owner rows commit atomically in IndexedDB, but a later IndexedDB failure can leave unused installed profiles; this is not cross-storage rollback.
 
 ## Import, links and atomicity
 
@@ -39,6 +42,8 @@ Network/storage failures throw, record sync error/offline state where a connecti
 
 Use **`deleteWorldWithTombstone(worldId)`**, not the old World deletion entrypoint, from every World workspace deletion action. It performs empty-only deletion and durable tombstone creation in the same transaction. Codex (including archived), Notes, saved Chat and summaries block deletion. Existing safe unlink/type-materialization behavior preserves Books and their local data.
 
+After committing and notifying deletion, the wrapper attempts `syncWorldNow` when a durable connection exists, independently of mounted owner UI and `automaticUpload`. It awaits that attempt; network/configuration failure retains error/offline connection state but does not undo or reject the successful local deletion. An unconnected deletion does not create a cloud owner. Retry is explicit from the World library, not an automatic incoming-version choice.
+
 A tombstone is a canonical archive with only `worldId` and `{ worldId, deletedAt }`, with all resource/link arrays empty. It syncs through the same conditional state upload, rather than removing the remote owner. A locally tombstoned identity cannot be recreated by import, pull or incoming conflict resolution. A live archive arriving for that ID becomes a preserved conflict; choose local to keep deletion. Recovery under a new identity is intentionally not implemented. An incoming tombstone encountering local content is a conflict and cannot bypass the empty-only protection.
 
 Tombstones and conflict copies survive sync disconnection. Plain direct calls to `world-service.deleteWorld` cannot write sync metadata atomically; integration must use the wrapper above. This is an explicit UI/data-owner wiring requirement, not an implicit hook on unrelated persistence functions.
@@ -53,6 +58,7 @@ syncWorldNow(worldId: string, beforeSync?: () => Promise<void>): Promise<WorldSy
 checkRemoteWorld(worldId: string): Promise<void>
 getWorldSyncState(worldId: string): Promise<WorldSyncState | undefined>
 listWorldSyncStates(): Promise<WorldSyncState[]>
+listDeletedWorldSyncStates(): Promise<WorldSyncState[]>
 listCloudWorlds(): Promise<RemoteBook[]>
 importCloudWorld(remote: RemoteBook): Promise<WorldSyncResult & { worldId: string }>
 resolveWorldSyncConflict(worldId: string, conflictId: string,
@@ -89,6 +95,8 @@ Use the **sync** resolution API for cloud conflicts, not the archive-only resolu
 
 `CloudWorldImport` (default and named export from `src/features/sync/CloudWorldImport.tsx`) is reusable in the World library, with `{ onImported: (worldId: string) => Promise<void>, beforeImport?: () => Promise<void> }`. It lists authenticated cloud Worlds, imports/connects them, and imports local World archive files. The callback must refresh/open the canonical World and expose its conflict panel if an import preserved a conflict. Parent/UI agent must mount this component in the World library; this agent does not edit those screens.
 
+`DeletedWorldSync` (default and named export from `src/features/sync/DeletedWorldSync.tsx`) must be mounted alongside the library importer. Props: `{ onRemoteApplied?: (worldId: string) => Promise<void> }`; `<DeletedWorldSync />` also works. The optional callback refreshes library data, never opens/recreates a deleted owner. The list joins durable sync states with local tombstones, shows status/error/retry, conflict choices and preserved downloads through `WorldSyncPanel`, and requires no deleted workspace/save barrier. Disconnect removes the list entry, not its tombstone or preserved conflict data. Sync actions continue if the library unmounts; no implicit sync runs on mount.
+
 `useWorkspaceSyncStatus(ownerId, ownerType: 'book' | 'world' = 'book')` retains Book behavior and reads World state separately. Subscriptions are owner-scoped, clean up on owner changes/unmount, and reject stale refresh results. `checkRemoteWorld` is a metadata-only check (no download/upload/apply), records error/offline status, and throws failures to its caller.
 
 `WORLD_SYNC_CHANGED` is now **`arc-world-sync-status-changed`**, separate from `WORLD_ARCHIVE_CHANGED` (`arc-world-sync-changed`). Sync acknowledgement/check/disconnect do not emit entity or library content invalidations. Automatic upload must listen to actual content changes, not status events. Owner routing and successful-save barriers remain required in Workspace scheduling.
@@ -102,3 +110,5 @@ Guarded CI **38165829587**, test commit **4ba07ad**, ran the behavioral supersed
 Additional behavioral regressions cover supersession during metadata I/O, detach type preservation, retained dependency cleanup, and metadata-check/disconnect event isolation. They retain the mandatory resource-policy guard and use real fake-indexeddb transactions; only network transport is mocked. Parent must run these in guarded CI (no local resource-policy bypass). `npm run build`, test syntax checks, and `git diff --check` succeeded locally after production/UI changes. **GREEN behavioral CI is not yet claimed.** No commit or push was made by this agent.
 
 Outside this edit scope, parent/UI integration must mount the library importer, route World focus/online checks and automatic sync correctly, use `deleteWorldWithTombstone` for every World deletion, and resolve pending references when a real Book becomes available. No force-overwrite or automatic conflict-choice control is exposed.
+
+Follow-up regressions in `tests/world-sync.test.mjs` cover portable local selections, sanitized custom profiles/presets, shared-profile collision isolation, deterministic profile hashing/import receipts, and connected deletion failure/retry with no owner UI. `tests/world-sync-ui.test.mjs` covers the deleted-owner retry/error controls and an in-flight retry surviving library unmount. The local supported test runner fails closed because this environment has no systemd/cgroup isolation; these new tests require parent guarded CI. No resource guard was bypassed and no new behavioral GREEN result is claimed. The follow-up `npm run build` completed successfully (Vite emitted mixed static/dynamic import and bundle-size warnings).

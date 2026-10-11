@@ -3,6 +3,9 @@
 .world-help, .world-empty { color: var(--faint); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .world-error { color: var(--danger); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .world-new-action { min-width: 0; }
+.world-library .cloud-book-import, .worlds-home-section .cloud-book-import { margin-bottom: 16px; }
+.world-library .sync-actions, .worlds-home-section .sync-actions { flex-wrap: wrap; }
+.world-library [aria-label="Deleted Worlds cloud sync"], .worlds-home-section [aria-label="Deleted Worlds cloud sync"] { margin: 16px 0; }
 .world-new-action p { max-width: 32ch; color: var(--danger); font-size: 12px; }
 .world-building { min-height: 100dvh; background: var(--surface); color: var(--ink); }
 .world-building-header { display: flex; align-items: center; gap: 18px; padding: 20px 28px; border-bottom: 1px solid var(--line); }

@@ -43,6 +43,12 @@ export async function getWorldSyncState(worldId: string): Promise<WorldSyncState
 export async function listWorldSyncStates(): Promise<WorldSyncState[]> {
   return (await (await database()).table('meta').toArray()).filter((row: any) => row.key.startsWith('world-sync:state:')).map((row: any) => row.value)
 }
+/** Deleted owners have no workspace; their durable connection remains retryable. */
+export async function listDeletedWorldSyncStates(): Promise<WorldSyncState[]> {
+  const rows = await (await database()).table('meta').toArray()
+  const deleted = new Set(rows.filter((row: any) => row.key.startsWith('world-archive:tombstone:')).map((row: any) => row.value.worldId))
+  return rows.filter((row: any) => row.key.startsWith('world-sync:state:') && deleted.has(row.value.worldId)).map((row: any) => row.value).sort((a: WorldSyncState, b: WorldSyncState) => a.worldId.localeCompare(b.worldId))
+}
 async function save(state: WorldSyncState) {
   await (await database()).table('meta').put({ key: stateKey(state.worldId), value: { ...state, updatedAt: Date.now() } })
   notifyStatus(state.worldId)
@@ -75,11 +81,11 @@ async function captureRemote(state: WorldSyncState, expectedLocalHash?: string, 
   return { kind: result.kind === 'unchanged' ? 'unchanged' : 'pulled', message: data.tombstone ? 'Downloaded the deletion tombstone.' : 'Downloaded the canonical World.' }
 }
 async function syncConnected(worldId: string): Promise<WorldSyncResult> {
-  const configured = settings(), state = await getWorldSyncState(worldId)
+  const state = await getWorldSyncState(worldId)
   if (!state) throw new Error('Enable cloud sync for this World first.')
-  assertEndpoint(state, configured.endpoint)
   await save({ ...state, status: 'syncing', message: undefined })
   try {
+    const configured = settings(); assertEndpoint(state, configured.endpoint)
     const unresolved = await listWorldArchiveConflicts(worldId)
     if (unresolved.length) {
       const currentHash = await archiveContentHash(await exportWorldArchiveBlob(worldId))
