@@ -1,5 +1,5 @@
 import { loadAiSettings, type AiSettings } from '../../shared/ai/ai-settings'
-import { leonardoModels, leonardoDefaults, LEONARDO_CONTRACT_VERSION } from './leonardo-contracts'
+import { buildLeonardoRequest, leonardoModels, leonardoDefaults, validateLeonardoOptions, validateLeonardoSize, LEONARDO_CONTRACT_VERSION } from './leonardo-contracts'
 import { generationTask, modelTasks, type FavoriteImageModel, type GenerationSource, type GenerationTask, type ImageGenerationSpec, type ImageModel, type ImageProvider, type ImageSettings, type ImageSize, type VideoGenerationOptions } from './image-generation-types'
 export const IMAGE_SETTINGS_KEY = 'arc-image-settings-v1'
 export const IMAGE_SETTINGS_CHANGED = 'arc-image-settings-changed'
@@ -75,6 +75,11 @@ export function validateImageSettings(settings: ImageSettings): ImageSettings {
     const enabled = [...new Set(favorite.enabledSizes ?? [])].filter((size) => validSizes.some((valid) => valid.value === size))
     if (!enabled.length || !enabled.includes(favorite.defaultSize)) throw new Error(`Enable at least one size and a valid default for ${alias}.`)
     const tasks = normalizedTasks(favorite)
+    if (favorite.provider === 'leonardo') {
+      if (tasks.length !== 1 || tasks[0] !== 'text-to-image' || favorite.maxSourceImages || favorite.quality !== undefined || favorite.moderation !== undefined || favorite.videoResolutions || favorite.videoDurations || favorite.aspectRatios) throw new Error('Leonardo supports text-to-image only, with namespaced options.')
+      for (const size of favorite.sizes) validateLeonardoSize(favorite.id, size)
+      validateLeonardoOptions(favorite.id, favorite.leonardoOptions ?? leonardoDefaults(favorite.id))
+    }
     if (!tasks.length) throw new Error(`Choose at least one supported task for ${alias}.`)
     const base = { ...favorite, alias, tasks, sizes: validSizes, enabledSizes: enabled, maxSourceImages: Math.max(0, Math.min(10, Number(favorite.maxSourceImages) || 0)) || undefined }
     if (favorite.provider === 'openai') {
@@ -147,7 +152,9 @@ export function resolveImageSpec(prompt: string, alias?: string, size?: string, 
     ...(Number.isFinite(video.seed) ? { seed: Math.round(video.seed!) } : {}),
     ...(video.draft !== undefined ? { draft: Boolean(video.draft) } : {}),
   } : undefined
-  return { prompt, modelAlias: model.alias, provider: model.provider, model: model.id, size: { ...chosen }, task, sources: sources.map((source) => ({ ...source })), ...(cleanVideo ? { video: cleanVideo } : {}), ...(model.provider === 'leonardo' ? { leonardoOptions: structuredClone(model.leonardoOptions ?? leonardoDefaults(model.id)), leonardoContractVersion: LEONARDO_CONTRACT_VERSION } : {}), ...(model.provider === 'openai' ? { quality: model.quality ?? (/^gpt-image-2\.5-/.test(model.id) ? 'auto' : 'low'), moderation: model.moderation ?? 'low' } : {}) }
+  const spec = { prompt, modelAlias: model.alias, provider: model.provider, model: model.id, size: { ...chosen }, task, sources: sources.map((source) => ({ ...source })), ...(cleanVideo ? { video: cleanVideo } : {}), ...(model.provider === 'leonardo' ? { leonardoOptions: structuredClone(model.leonardoOptions ?? leonardoDefaults(model.id)), leonardoContractVersion: LEONARDO_CONTRACT_VERSION } : {}), ...(model.provider === 'openai' ? { quality: model.quality ?? (/^gpt-image-2\.5-/.test(model.id) ? 'auto' : 'low'), moderation: model.moderation ?? 'low' } : {}) }
+  if (model.provider === 'leonardo') buildLeonardoRequest(spec)
+  return spec
 }
 export function imageFavorite(model: ImageModel, used: FavoriteImageModel[]): FavoriteImageModel {
   const base = `${model.provider}/${model.id}`.slice(0, 58)

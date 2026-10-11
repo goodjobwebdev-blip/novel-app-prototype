@@ -48,7 +48,7 @@ function sanitizeMedia(value: Omit<ImageSettings, 'keys'>): Omit<ImageSettings, 
     if (favorite.videoDurations !== undefined && (!Array.isArray(favorite.videoDurations) || !favorite.videoDurations.every(Number.isFinite))) throw new Error('Invalid video durations.')
     if (favorite.cost !== undefined && !Number.isFinite(favorite.cost)) throw new Error('Invalid media model cost.')
   }
-  const favoriteKeys = ['id', 'name', 'provider', 'sizes', 'source', 'cost', 'description', 'tasks', 'maxSourceImages', 'videoResolutions', 'videoDurations', 'aspectRatios', 'quality', 'moderation', 'alias', 'enabledSizes', 'defaultSize']
+  const favoriteKeys = ['id', 'name', 'provider', 'sizes', 'source', 'cost', 'description', 'tasks', 'maxSourceImages', 'videoResolutions', 'videoDurations', 'aspectRatios', 'quality', 'moderation', 'leonardoOptions', 'alias', 'enabledSizes', 'defaultSize']
   const favorites = value.favorites.map(favorite => Object.fromEntries(favoriteKeys.filter(key => key in favorite).map(key => [key, favorite[key as keyof typeof favorite]]))) as ImageSettings['favorites']
   const { keys: _keys, ...media } = validateImageSettings({ keys: emptyKeys, favorites, defaultAlias: value.defaultAlias, defaultAliases: value.defaultAliases })
   return media
