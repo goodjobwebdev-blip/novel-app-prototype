@@ -11,7 +11,7 @@
 
 Добавить image-провайдера `leonardo` с отображаемым именем `Leonardo.AI` в существующую систему Image profiles, избранных моделей, очереди, Chat proposals и Gallery. Не создавать отдельную систему генерации и не менять активного текстового провайдера.
 
-Обязательный первый этап — text-to-image для пяти моделей ниже. Video, upscaling, background removal, дополнительные модели и пакетная генерация вне объёма. Одна локальная задача должна заказывать ровно одно изображение.
+Обязательный первый этап — text-to-image для шести моделей ниже. Video, upscaling, background removal, дополнительные модели и пакетная генерация вне объёма. Одна локальная задача должна заказывать ровно одно изображение.
 
 Референсы документированы отдельно в разделе 5: это не обещание I2I в первом этапе. Не выставлять `image-to-image` в каталоге, пока не реализованы роли референсов, загрузка/передача, проверки и тесты. Поддержка image guidance не равнозначна универсальному редактированию изображения.
 
@@ -24,10 +24,11 @@
 | FLUX Schnell | `flux-schnell` | [S3] |
 | P-Image-Ideogram | `ideogram/p-image-ideogram` | [S4] |
 | Krea 2 | `krea/krea-2` | [S5], схема `Krea_krea2GenerationRequest` |
+| Krea 2 Turbo | `krea-2-turbo` | [S5], [S8], схема `Krea2TurboGenerationRequest` |
 
-Пользователь написал `p-image-ideograph`; такого идентификатора в проверенном контракте нет. Для согласования явно зафиксировано соответствие документированной **P-Image-Ideogram**. Не отправлять исходное написание в API и не реализовывать эвристическую нормализацию неизвестных IDs.
+Для P-Image-Ideogram использовать документированное название и точный API slug `ideogram/p-image-ideogram` [S4]. Не реализовывать эвристическую нормализацию неизвестных IDs.
 
-Выбрана **Krea 2 без Turbo**. `krea-2-turbo` — другая модель с отдельным контрактом [S8], не alias и не fallback. В индексе руководств [S10] видна Turbo, но отдельная Krea 2 присутствует в OpenAPI Create Async Generation [S5]. Предыдущий список, основанный только на индексе guides, был неполным. Наличие схемы не доказывает доступность модели конкретному аккаунту.
+В объём входят **Krea 2 и Krea 2 Turbo** как две отдельные модели с разными контрактами [S5], [S8], не alias и не fallback. Krea 2 документирована в OpenAPI Create Async Generation [S5], Turbo — также в отдельном guide [S8]. Наличие схемы не доказывает доступность модели конкретному аккаунту.
 
 ## 2. Основной принцип: контракт определяется моделью
 
@@ -49,7 +50,7 @@
 
 ### 3.1. Создание задачи
 
-Согласно [S1–S5], используется:
+Согласно [S1–S5], [S8], используется:
 
 ```text
 POST https://cloud.leonardo.ai/api/rest/v2/generations
@@ -65,7 +66,7 @@ Defaults приложения:
 - `public: false` всегда задаётся явно; публичная публикация не входит в первый этап;
 - `quantity: 1` всегда задаётся явно; API default `4` нельзя наследовать;
 - `prompt_enhance: OFF` по умолчанию, чтобы без согласия не повторять enhancement приложения. Пользователь может явно выбрать `AUTO`, `ON` или `OFF`; документированный default провайдера — `AUTO` [S1–S4];
-- Lucid: явный `mode: FAST`; P-Image-Ideogram и Krea 2: явный `quality: MEDIUM`; Schnell: ни `mode`, ни `quality`;
+- Lucid: явный `mode: FAST`; P-Image-Ideogram и Krea 2: явный `quality: MEDIUM`; Schnell и Krea 2 Turbo: ни `mode`, ни `quality`;
 - если seed не выбран, поле отсутствует, а не `null` или автоматически сгенерированное значение;
 - для моделей со styles профиль по умолчанию явно выбирает Dynamic. UUID и допустимость сверяются по конкретной модели, а не общей legacy-таблице.
 
@@ -77,7 +78,7 @@ Defaults приложения:
 
 Требования:
 
-1. Показывать только пять выбранных моделей. Не импортировать весь production-каталог в UI.
+1. Показывать только шесть выбранных моделей. Не импортировать весь production-каталог в UI.
 2. Хранить API generation slug отдельно от discovery ID. Не считать, что `id` discovery совпадает с `model` POST; соответствие должно быть доказано схемой/ответом, а не выводиться из имени.
 3. Оставить проверенный curated-каталог доступным без ключа с пометкой «документировано, доступность аккаунта не проверена».
 4. Authenticated refresh не должен запускать генерацию. Сохранить время проверки и состояние доступности отдельно от настроек профиля.
@@ -96,6 +97,7 @@ Defaults приложения:
 | FLUX Schnell [S3] | `1..2000` | `32..2048`, шаг `8` | `32..2048`, шаг `8` | нет `mode`, нет `quality` | целое `0..2147483637` |
 | P-Image-Ideogram [S4] | `1..10000` | enum ниже | тот же enum | `quality: VERY_LOW / LOW / MEDIUM / HIGH` | не документирован: не отправлять |
 | Krea 2 [S5] | `1..5000` | `16..4096`, шаг `8` | `16..4096`, шаг `8` | `quality: MEDIUM / HIGH` | целое `0..4294967295` |
+| Krea 2 Turbo [S5], [S8] | `1..9999` | `16..4096`, шаг `8` | `16..4096`, шаг `8` | нет `mode`, нет `quality` | не документирован: не отправлять |
 
 P-Image-Ideogram width/height enum [S4]:
 
@@ -117,7 +119,7 @@ P-Image-Ideogram width/height enum [S4]:
 Dynamic: `111dc692-d470-4eec-b791-3475abac4c46`.
 None: `556c1ee5-ec38-42e8-955a-1e82dad0ffa1`.
 
-Для P-Image-Ideogram и Krea 2 `style_ids` не входит в проверенные схемы: запретить. Это не запрещает отдельно документированные image style references Krea 2.
+Для P-Image-Ideogram, Krea 2 и Krea 2 Turbo `style_ids` не входит в проверенные схемы: запретить. Это не запрещает отдельно документированные image style references Krea 2. У Turbo разрешены только `prompt`, `width`, `height`, `quantity`, `prompt_enhance`; не переносить `quality`, `seed` или `guidances` из контракта Krea 2.
 
 Для выбранных T2I-моделей не включать unsupported `negative_prompt`, CFG/guidance scale, steps, sampler, safety-disable или OpenAI moderation. Отсутствие поля в проверенном контракте трактовать как отсутствие поддержки в приложении, а не как разрешение экспериментально отправить его.
 
@@ -145,6 +147,10 @@ None: `556c1ee5-ec38-42e8-955a-1e82dad0ffa1`.
 {"model":"krea/krea-2","parameters":{"prompt":"A fox in a quiet forest","width":1024,"height":1024,"quantity":1,"prompt_enhance":"OFF","quality":"MEDIUM"},"public":false}
 ```
 
+```json
+{"model":"krea-2-turbo","parameters":{"prompt":"A fox in a quiet forest","width":1024,"height":1024,"quantity":1,"prompt_enhance":"OFF"},"public":false}
+```
+
 ## 5. Image guidance: будущий этап и расхождения источников
 
 Схемы [S5] описывают разные роли и лимиты:
@@ -154,6 +160,7 @@ None: `556c1ee5-ec38-42e8-955a-1e82dad0ffa1`.
 | Origin / Realism / Schnell | `guidances.content`, `guidances.style` | по `1` |
 | P-Image-Ideogram | нет документированного guidance | не включать |
 | Krea 2 | только `guidances.style` | `10` |
+| Krea 2 Turbo | нет документированного guidance | не включать |
 
 Структурированные schema [S5] допускают reference types `UPLOADED`, `GENERATED`, `VARIATION`, `URL`, `BASE64`, требуют у guidance item `image` и `strength`; style strength: `LOW/MID/HIGH/ULTRA/MAX`. В schema content strength включает `ULTRA`, тогда как guides [S1–S3] перечисляют только `LOW/MID/HIGH`. Guides также перечисляют более узкие/legacy image types.
 
@@ -193,7 +200,7 @@ Polling предпочтителен для текущего browser-only при
 - Leonardo key не имеет fallback к NanoGPT/OpenAI/LiteLLM. Отсутствие ключа блокирует генерацию с указанием, где его добавить. Profile editor с `hideCredentials` не должен быть единственным местом настройки.
 - Настройки конкретной модели оформить namespaced типом, например `leonardoOptions`, с discriminated contracts. Не переиспользовать `OpenAIImageQuality` и `moderation` для Leonardo.
 - В favorite/profile сохранять только валидные mode/quality, prompt enhancement, style preset и optional seed. В queued job — snapshot всех effective options и версии контракта. Не сохранять API key, headers или полный remote schema в job/profile.
-- Показывать `FAST/ULTRA` только Lucid; quality — только P-Image-Ideogram/Krea 2 с их собственными enum; у Schnell quality-control отсутствует. Seed-control отсутствует у P-Image-Ideogram. Styles-control отсутствует у P-Image-Ideogram/Krea 2.
+- Показывать `FAST/ULTRA` только Lucid; quality — только P-Image-Ideogram/Krea 2 с их собственными enum; у Schnell и Krea 2 Turbo quality-control отсутствует. Seed-control отсутствует у P-Image-Ideogram и Krea 2 Turbo. Styles-control отсутствует у P-Image-Ideogram/Krea 2/Krea 2 Turbo.
 - При смене модели не переносить несовместимые опции. При чтении повреждённого/старого профиля показать ошибку и сохранить оригинальные данные, не сбрасывать библиотеку целиком.
 - Миграция добавляет пустой `keys.leonardo`, сохраняет существующие favorites, defaults, книги, captions и profiles. Обновить все constructors/test fixtures с `Record<ImageProvider, string>`.
 - Добавить новые media-option поля в sanitizer allowlist профилей: иначе save/import потеряет настройки. Обновить portable archive/sync валидацию provider и options; ключи, tickets и fingerprints по-прежнему исключаются.
@@ -234,11 +241,11 @@ Polling предпочтителен для текущего browser-only при
 
 ### Contract tests, без платных запросов
 
-- Для каждой из пяти моделей проверить точный URL, headers и тело из раздела 4.2; `public:false`, `quantity:1`, вложенный parameters. Assertions должны проверять отсутствие запрещённых полей, не только наличие разрешённых.
+- Для каждой из шести моделей проверить точный URL, headers и тело из раздела 4.2; `public:false`, `quantity:1`, вложенный parameters. Assertions должны проверять отсутствие запрещённых полей, не только наличие разрешённых.
 - Границы prompt: accepted maximum и rejected maximum+1 для каждой модели, пустой/whitespace prompt, фактически выбранный enhanced prompt. Unicode length policy согласовать с provider schema, не считать байты лимитом символов.
 - Width/height: оба края диапазона, шаг 8, асимметрия Origin, enum P-Image-Ideogram, application min 64 и 40 MP; отказ вместо округления.
-- Seed 0 сохраняется; разные upper bounds; отрицательные, дробные, NaN/Infinity отклоняются. P-Image-Ideogram seed запрещён. Krea 2 не превращается в Turbo.
-- Lucid не получает quality; Schnell не получает mode/quality; Krea 2 отвергает LOW/VERY_LOW; styles проверяются по отдельному model allowlist; v1/OpenAI/video fields не просачиваются.
+- Seed 0 сохраняется; разные upper bounds; отрицательные, дробные, NaN/Infinity отклоняются. У P-Image-Ideogram и Krea 2 Turbo seed запрещён. Krea 2 и Turbo сохраняют разные IDs и контракты; смена модели не подменяет сохранённые задачи.
+- Lucid не получает quality; Schnell и Krea 2 Turbo не получают mode/quality; Krea 2 отвергает LOW/VERY_LOW; Turbo отвергает seed/style_ids/guidances и принимает prompt до 9999 символов вместо лимита 5000 у Krea 2; styles проверяются по отдельному model allowlist; v1/OpenAI/video fields не просачиваются.
 - Неизвестный ID, несовместимые options из cached/imported favorite и поддержка I2I до реализации — локальный отказ, ноль POST.
 - Discovery fixtures: реальный response shape, отдельный mapping ID→slug, missing model, 401/429, malformed metadata и cache/offline fallback без потери profiles.
 
@@ -264,11 +271,11 @@ Frontend tests запускать только через resource-limited `npm 
 5. Проверить POST v2 → сохранённый ID → reader v1 → реальный image Blob. Не retry POST автоматически и не отправлять рукопись/личные изображения.
 6. Записать только очищенные shapes/status/errors, не секреты. После проверки временный ключ отзывается владельцем.
 
-Приёмка: все пять точных моделей доступны в curated-каталоге, каждый builder/validator соответствует отдельному контракту, lifecycle не дублирует оплату, UI и portable data не теряют options/secret isolation, transport проверен для поддерживаемого способа deployment. Состояние live access каждой модели должно быть честно обозначено; fixtures не доказывают доступность аккаунта.
+Приёмка: все шесть точных моделей доступны в curated-каталоге, каждый builder/validator соответствует отдельному контракту, lifecycle не дублирует оплату, UI и portable data не теряют options/secret isolation, transport проверен для поддерживаемого способа deployment. Состояние live access каждой модели должно быть честно обозначено; fixtures не доказывают доступность аккаунта.
 
 ## 11. Непроверенные факты и решения перед реализацией
 
-- Доступность пяти моделей конкретному аккаунту и точная форма их GET models metadata.
+- Доступность шести моделей конкретному аккаунту и точная форма их GET models metadata.
 - Совместимость generation ID POST v2 с documented GET v1 для каждой модели.
 - CORS на фактическом browser origin и media CDN; нужен ли приватный gateway.
 - Дополнительные ограничения пар размеров, зависящие от model/quality/account.
@@ -285,7 +292,7 @@ Frontend tests запускать только через resource-limited `npm 
 - [S2] [Lucid Realism](https://docs.leonardo.ai/docs/lucid-realism.md).
 - [S3] [FLUX Schnell](https://docs.leonardo.ai/docs/flux-schnell.md).
 - [S4] [P-Image-Ideogram](https://docs.leonardo.ai/docs/p-image-ideogram.md).
-- [S5] [Create Async Generation: OpenAPI v2](https://docs.leonardo.ai/reference/creategeneration.md), discriminator `model` и схемы `LucidOriginGenerationRequest`, `LucidRealismGenerationRequest`, `FluxSchnellGenerationRequest`, `Ideogram_pImageIdeogramGenerationRequest`, `Krea_krea2GenerationRequest`; страница отмечена updatedAt `2026-09-01`.
+- [S5] [Create Async Generation: OpenAPI v2](https://docs.leonardo.ai/reference/creategeneration.md), discriminator `model` и схемы `LucidOriginGenerationRequest`, `LucidRealismGenerationRequest`, `FluxSchnellGenerationRequest`, `Ideogram_pImageIdeogramGenerationRequest`, `Krea_krea2GenerationRequest`, `Krea2TurboGenerationRequest`; страница отмечена updatedAt `2026-09-01`.
 - [S6] [Get Available Models: OpenAPI v2](https://docs.leonardo.ai/reference/getmodels.md).
 - [S7] [Get a Single Generation: OpenAPI v1](https://docs.leonardo.ai/v1.0/reference/getgenerationbyid.md).
 - [S8] [Krea 2 Turbo — другой контракт](https://docs.leonardo.ai/docs/krea-2-turbo.md).
