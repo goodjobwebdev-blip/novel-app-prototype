@@ -43,6 +43,34 @@ test('Leonardo discovery never sends its key to OpenAI and preserves curated con
   await assert.rejects(() => fetchImageModels('leonardo', 'fixture-only-key', async () => response({ data: [] })), /invalid.*catalog/i)
   await assert.rejects(() => fetchImageModels('leonardo', 'fixture-only-key', async () => new Response('private remote error', { status: 401 })), /401/)
 })
+test('Leonardo polling retries transient GETs with Retry-After but never repeats an uncertain POST', async () => {
+  const { generateLeonardo } = await import('../src/features/images/leonardo-adapter.ts')
+  const favorite = settings.imageFavorite(settings.documentedImageModels.find(m => m.id === 'krea-2-turbo'), [])
+  const spec = settings.resolveImageSpec('A fox', favorite.alias, undefined, undefined, { keys: {}, favorites: [favorite], defaultAlias: favorite.alias })
+  const job = { ...spec, id: 'retry-fixture', status: 'running', createdAt: 1, providerJobId: 'saved-ticket' }
+  const sleeps = []
+  let gets = 0
+  const url = await generateLeonardo(job, 'fixture-only-key', new AbortController().signal, async () => assert.fail('saved ticket must not submit'), async (_url, init) => {
+    assert.notEqual(init.method, 'POST')
+    gets++
+    if (gets === 1) return new Response('', { status: 429, headers: { 'Retry-After': '3' } })
+    if (gets === 2) throw new TypeError('network disconnected')
+    return response({ generations_by_pk: { status: 'COMPLETE', generated_images: [{ id: 'output', url: 'https://cdn.example.org/output.png' }] } })
+  }, async ms => { sleeps.push(ms) })
+  assert.equal(url, 'https://cdn.example.org/output.png')
+  assert.equal(gets, 3)
+  assert.equal(sleeps[0], 3000)
+  assert.ok(sleeps[1] >= 2000 && sleeps[1] <= 30000)
+  let posts = 0
+  await assert.rejects(() => generateLeonardo({ ...job, providerJobId: undefined }, 'fixture-only-key', new AbortController().signal, async () => {}, async () => { posts++; throw new TypeError('uncertain submission') }, async () => assert.fail('POST must not retry')), /history.*paid|paid.*history/i)
+  assert.equal(posts, 1)
+  let denied = 0
+  await assert.rejects(() => generateLeonardo(job, 'fixture-only-key', new AbortController().signal, async () => {}, async () => { denied++; return new Response('', { status: 401 }) }, async () => assert.fail('401 must not retry')), /401/)
+  assert.equal(denied, 1)
+  let unavailable = 0
+  await assert.rejects(() => generateLeonardo(job, 'fixture-only-key', new AbortController().signal, async () => {}, async () => { unavailable++; return new Response('', { status: 503 }) }, async () => {}), /503/)
+  assert.ok(unavailable <= 5)
+})
 test('Leonardo explicit Generate persists snapshot and ticket before polling, keeps Gallery output, and resumes GET-only', async () => {
   const profiles = await import('../src/features/settings/settings-profiles.ts')
   const store = await import('../src/features/images/image-store.ts')
