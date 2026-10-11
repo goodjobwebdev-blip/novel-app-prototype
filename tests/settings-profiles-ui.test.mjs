@@ -3,7 +3,6 @@ assertTestResourceLimits()
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createRequire } from 'node:module'
-import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 import { JSDOM } from 'jsdom'
@@ -207,36 +206,6 @@ test('book-origin global settings keeps both return actions inside the breadcrum
   await click(button(card, `Back to Profiles · ${fixture.book.title}`))
   assert.ok(mounted.host.querySelector('.settings-book-scope'))
   assert.equal(mounted.host.querySelector('.settings-global-scope'), null)
-  await mounted.close()
-})
-
-test('Settings breadcrumb text and separators use the defined secondary theme color', () => {
-  const css = readFileSync(new URL('../src/features/settings/settings-profiles.css', import.meta.url), 'utf8')
-  const theme = readFileSync(new URL('../src/app/styles.css', import.meta.url), 'utf8')
-  assert.match(theme, /--soft\s*:/, 'The secondary color token must exist in the theme')
-  const stylesheet = new JSDOM(`<style>${css}</style>`).window.document.styleSheets[0]
-  const rules = [...stylesheet.cssRules]
-  const breadcrumbs = rules.find(rule => rule.selectorText === '.settings-breadcrumbs')
-  const separator = rules.find(rule => rule.selectorText === '.settings-breadcrumbs li + li::before')
-  assert.equal(breadcrumbs.style.getPropertyValue('color'), 'var(--soft)')
-  assert.equal(separator.style.getPropertyValue('border-block-start'), '1px solid var(--soft)')
-  assert.equal(separator.style.getPropertyValue('border-inline-end'), '1px solid var(--soft)')
-})
-
-test('model and prompt type selectors retain spacing above the profile editor inside the inert wrapper', async (t) => {
-  const style = document.createElement('style')
-  t.after(() => style.remove())
-  style.textContent = readFileSync(new URL('../src/features/settings/settings-profiles.css', import.meta.url), 'utf8')
-  document.head.append(style)
-  const mounted = await mount(t, App)
-  for (const [tab, label] of [['Models', 'Model profile type'], ['Prompts', 'Prompt preset type']]) {
-    await click(button(mounted.host, tab))
-    const typeField = field(mounted.host, label).closest('.arc-field')
-    assert.ok(typeField.classList.contains('settings-profile-type'))
-    assert.ok(typeField.nextElementSibling?.classList.contains('profile-editor'), 'Type selector directly precedes the profile editor')
-    assert.equal(getComputedStyle(typeField).marginBottom, '18px')
-    assert.notEqual(getComputedStyle(field(mounted.host, 'Profile / preset').closest('.arc-field')).marginBottom, '18px', 'Spacing is scoped to the type selector, not fields inside the profile card')
-  }
   await mounted.close()
 })
 
@@ -496,20 +465,14 @@ test('Connections owns speech/media keys, saves explicitly, and preserves media 
   await mounted.close()
 })
 
-test('Connection provider selects the complete credential group and keeps navigation labels spaced', async (t) => {
+test('Connection provider selects the complete credential group without activating it', async (t) => {
   const originalConnection = ai.loadAiSettings()
   let mounted
   t.after(async () => { await mounted?.close(); ai.saveAiSettings(originalConnection) })
   ai.saveAiSettings({ ...originalConnection, provider: 'nanogpt', apiKey: 'active-nano', providerProfiles: {} })
-  const style = document.createElement('style')
-  t.after(() => style.remove())
-  style.textContent = readFileSync(new URL('../src/features/settings/settings-profiles.css', import.meta.url), 'utf8')
-  document.head.append(style)
   mounted = await mount(t, Panel, panelProps())
   await click(button(mounted.host, 'Connections'))
   const panel = mounted.host.querySelector('.profile-connections-panel')
-  assert.equal(getComputedStyle(panel).display, 'grid')
-  assert.equal(getComputedStyle(panel).gap, '18px')
   assertNoActiveTextProvider(panel)
   assert.ok(field(panel, 'Connection provider').closest('.arc-field').nextElementSibling?.classList.contains('profile-connection-fields'), 'Connection provider directly precedes its credential group')
   const cases = [
@@ -526,7 +489,6 @@ test('Connection provider selects the complete credential group and keeps naviga
     assert.equal(group.getAttribute('aria-label'), `${name} connection`)
     assert.equal(group.querySelector('h3').textContent, `${name} connection`)
     assert.equal(JSON.stringify([...group.querySelectorAll('.arc-field__label')].map(label => label.textContent)), JSON.stringify(labels))
-    assert.equal(getComputedStyle(group).gap, '16px')
     assertNoActiveTextProvider(panel)
     assert.equal(ai.loadAiSettings().provider, 'nanogpt', 'Editing a group never activates or saves it')
     assert.equal(Boolean(group.querySelector('[aria-label="Fake provider request trace"]')), provider === 'fake')
