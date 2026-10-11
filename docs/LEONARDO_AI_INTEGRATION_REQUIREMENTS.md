@@ -168,7 +168,7 @@ None: `556c1ee5-ec38-42e8-955a-1e82dad0ffa1`.
 
 ## 6. Async lifecycle и защита от повторной оплаты
 
-Create Async Generation v2 возвращает корневой `generationId` и nullable `apiCreditCost` [S5]. Не использовать response shape v1 или OpenAI `data[0]` для этого ответа.
+Create Async Generation v2 возвращает объект `generate`, внутри которого находятся `generationId`, nullable `apiCreditCost` и, при наличии, `cost` с отдельной единицей [S5]. Фактический ответ Lucid Origin проверен: `{"generate":{"generationId":"…","apiCreditCost":null,"cost":{"amount":"0.012","unit":"DOLLARS"}}}`. Читать ID из `generate.generationId`, валидировать и сохранить его до polling. Не искать `generationId` в корне и не использовать response shape v1 или OpenAI `data[0]` для этого ответа. Некорректный ответ не должен приводить к автоматическому повтору платного POST.
 
 Опубликованный endpoint чтения изображения находится в **v1** [S7]:
 

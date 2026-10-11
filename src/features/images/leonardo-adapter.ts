@@ -48,7 +48,8 @@ export async function generateLeonardo(job: ImageJob, key: string, signal: Abort
       throw new Error('Leonardo submission outcome is unknown. Check provider history before starting another paid generation.')
     }
     const submitted = await json(submission)
-    id = ticket(submitted?.generationId)
+    // Leonardo v2 wraps submission metadata in `generate`, not at the root.
+    id = ticket(submitted?.generate?.generationId)
     await onSubmitted(id)
   }
   for (let attempt = 0; attempt < 300; attempt++) {

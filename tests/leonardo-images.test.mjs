@@ -43,6 +43,20 @@ test('Leonardo discovery never sends its key to OpenAI and preserves curated con
   await assert.rejects(() => fetchImageModels('leonardo', 'fixture-only-key', async () => response({ data: [] })), /invalid.*catalog/i)
   await assert.rejects(() => fetchImageModels('leonardo', 'fixture-only-key', async () => new Response('private remote error', { status: 401 })), /401/)
 })
+test('Leonardo rejects malformed submission tickets without polling or repeating a paid POST', async () => {
+  const { generateLeonardo } = await import('../src/features/images/leonardo-adapter.ts')
+  const favorite = settings.imageFavorite(settings.documentedImageModels.find(m => m.id === 'lucid-origin'), [])
+  const job = settings.resolveImageSpec('A cup', favorite.alias, undefined, undefined, { keys: {}, favorites: [favorite], defaultAlias: favorite.alias })
+  for (const payload of [{}, { generationId: 'root-only-ticket' }, { generate: null }, { generate: { generationId: null } }, { generate: { generationId: 123 } }, { generate: { generationId: '../unsafe' } }]) {
+    let posts = 0
+    await assert.rejects(() => generateLeonardo(job, 'fixture-only-key', new AbortController().signal, async () => assert.fail('invalid ticket must not persist'), async (_url, init) => {
+      assert.equal(init.method, 'POST', 'invalid ticket must not poll')
+      posts++
+      return response(payload)
+    }, async () => assert.fail('paid submission must not retry')), /invalid generation ID.*history.*paid/i)
+    assert.equal(posts, 1)
+  }
+})
 test('Leonardo polling retries transient GETs with Retry-After but never repeats an uncertain POST', async () => {
   const { generateLeonardo } = await import('../src/features/images/leonardo-adapter.ts')
   const favorite = settings.imageFavorite(settings.documentedImageModels.find(m => m.id === 'krea-2-turbo'), [])
