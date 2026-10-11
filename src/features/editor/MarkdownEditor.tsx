@@ -228,7 +228,9 @@ const generationHighlightField = StateField.define<DecorationSet>({
 })
 
 function buildLivePreviewDecorations(state: EditorState): DecorationSet {
-  const activeLine = state.doc.lineAt(state.selection.main.head).number
+  // Read-only DOM selection follows keyboard focus onto preview links. Revealing
+  // source on that line would remove the focused span during the next rebuild.
+  const activeLine = state.readOnly ? -1 : state.doc.lineAt(state.selection.main.head).number
   const tables = [...markdownTableRanges(state), ...protectedRanges(state.doc.toString())]
   const ranges: any[] = []
   const hide = (from: number, to: number) => {
