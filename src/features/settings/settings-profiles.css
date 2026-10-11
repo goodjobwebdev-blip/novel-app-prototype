@@ -6,8 +6,8 @@
 .settings-breadcrumbs li + li { padding-inline-start: 16px; }
 .settings-breadcrumbs li + li::before { content: ""; position: absolute; inset-inline-start: 0; top: .55em; width: 6px; height: 6px; border-block-start: 1px solid var(--soft); border-inline-end: 1px solid var(--soft); transform: rotate(45deg); }
 .settings-breadcrumbs li[aria-current="page"] { color: var(--ink); font-weight: 600; }
-.settings-book-scope { display: grid; gap: 8px; min-width: 0; margin-bottom: 16px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
-.settings-book-scope .settings-breadcrumbs, .settings-book-scope > .profile-help { margin: 0; }
+.settings-book-scope, .settings-global-scope { display: grid; gap: 8px; min-width: 0; margin-bottom: 16px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
+.settings-book-scope .settings-breadcrumbs, .settings-global-scope .settings-breadcrumbs, .settings-book-scope > .profile-help { margin: 0; }
 .profile-library-controls { display: grid; gap: 10px; min-width: 0; }
 .settings-card.profile-library-controls { padding: 14px; border-radius: var(--radius); background: var(--surface); box-shadow: none; }
 .profile-header-main { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; min-width: 0; }
@@ -54,7 +54,11 @@
 .profile-connection-fields > h3 { margin: 0; font-size: 16px; }
 .ai-settings-shell .rail-header { justify-content: flex-start; gap: 8px; flex-wrap: wrap; }
 .ai-settings-shell .settings-close { margin-inline-start: auto; }
-.global-settings-return { padding-bottom: 20px; }
+.global-settings-return { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 20px; min-width: 0; }
+.settings-return-link { appearance: none; min-width: 0; max-width: 100%; min-height: 44px; padding: 6px 0; border: 0; border-radius: 3px; background: transparent; color: var(--soft); font: inherit; font-size: 13px; line-height: 1.6; text-align: start; text-decoration: underline; text-underline-offset: 3px; white-space: normal; overflow-wrap: anywhere; cursor: pointer; }
+.settings-return-link:hover:not(:disabled) { color: var(--ink); }
+.settings-return-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.settings-return-link:disabled { opacity: .5; cursor: default; }
 .profile-leave-dialog { position: fixed; z-index: 1000; top: 20%; left: 50%; transform: translateX(-50%); width: min(620px, calc(100vw - 32px)); padding: 24px; display: grid; gap: 20px; background: var(--surface); border: 1px solid var(--accent); border-radius: 14px; box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--canvas) 80%, transparent); }
 .profile-leave-dialog .profile-actions { justify-content: flex-end; }
 @media (max-width: 700px) {
