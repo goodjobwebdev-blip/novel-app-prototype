@@ -3,6 +3,7 @@ import type { AiSettings } from '../../shared/ai/ai-settings'
 import { modelTasks, type ImageModel, type ImageProvider, type ImageSettings, type OpenAIImageQuality, type OpenAIImageModeration } from './image-generation-types'
 import { documentedImageModels, generationTaskNames, imageSize, imageFavorite, imageProviderNames, imageRatio, IMAGE_PROVIDERS, loadImageSettings, resolveImageKey, resolvePrunaGatewayUrl, saveImageSettings, validateImageSettings } from './image-settings'
 import { fetchImageModels } from './image-providers'
+import LeonardoOptionsControls from './LeonardoOptionsControls'
 import Button from '../../shared/ui/Button'
 import Checkbox from '../../shared/ui/Checkbox'
 import Choice from '../../shared/ui/Choice'
@@ -67,7 +68,7 @@ const ImageSettingsPanel = forwardRef<ImageSettingsPanelRef, ImageSettingsPanelP
       const next = { ...catalogs, [selectedProvider]: models }
       setCatalogs(next)
       try { localStorage.setItem('arc-image-catalog-v1', JSON.stringify(next)) } catch { /* Favorites can still be saved separately. */ }
-      setMessage(`${models.length} generation models with verified capabilities loaded.`)
+      setMessage(selectedProvider === 'leonardo' ? `${models.length} documented Leonardo models loaded. Account access and live transport are not verified; see per-model discovery status.` : `${models.length} generation models with verified capabilities loaded.`)
     } catch (e) { setError(e instanceof Error ? e.message : 'Models could not be loaded.') }
     finally { setBusy(false) }
   }
@@ -122,6 +123,7 @@ const ImageSettingsPanel = forwardRef<ImageSettingsPanelRef, ImageSettingsPanelP
         </fieldset>
         <div className="image-favorite-defaults">
           <Select className="image-default-size" label="Default size" value={f.defaultSize} onChange={(e) => update({ defaultSize: e.target.value })}>{f.sizes.filter((s) => f.enabledSizes.includes(s.value)).map((s) => <option key={s.value} value={s.value}>{s.value}</option>)}</Select>
+          {f.provider === 'leonardo' && <LeonardoOptionsControls model={f.id} value={f.leonardoOptions} onChange={leonardoOptions => update({ leonardoOptions })} />}
           {f.provider === 'openai' && <>
             <Select label="Image quality" description="Higher quality can take longer and cost more." value={f.quality ?? 'low'} onChange={(e) => update({ quality: e.target.value as OpenAIImageQuality })}>
               <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>{/^gpt-image-2\.5-/.test(f.id) && <><option value="xhigh">Extra high</option><option value="max">Maximum</option></>}<option value="auto">Auto</option>

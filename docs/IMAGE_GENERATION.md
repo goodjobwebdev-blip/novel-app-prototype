@@ -107,6 +107,18 @@ Database v6 only adds `imageJobs` and `galleryImages` stores. Existing books, te
 
 Image-only `.arcbook` backups remain version 2. Backups containing kept videos use version 3 and store the original MP4/WebM plus its poster. Source blobs, queued/running jobs, unkept results, provider IDs, ownership state, and API keys are excluded. Imports continue reading versions 1 and 2, create new identities, stale old proposals, and never submit generation.
 
+## Leonardo.AI (experimental direct-browser transport)
+
+Configure a separate **Leonardo.AI media API key** in **Global Settings > AI > Connections**, then **Save connections**. Leonardo is not a text provider and never falls back to another provider's key. In an Image profile, choose Leonardo.AI and favorite any of the six curated text-to-image models: Lucid Origin, Lucid Realism, FLUX Schnell, P-Image-Ideogram, Krea 2, and Krea 2 Turbo. Krea 2 and Turbo are distinct models, not aliases. Reference-image and video tasks are not enabled.
+
+Each model has its own validated contract. Lucid exposes FAST/ULTRA; P-Image-Ideogram exposes VERY_LOW/LOW/MEDIUM/HIGH; Krea 2 exposes MEDIUM/HIGH. Schnell and Krea 2 Turbo have no quality/mode parameter. Seeds and style presets appear only on supporting models. Prompt enhancement defaults to OFF. Requests explicitly set private output and quantity 1, and snapshot model-specific options and contract version. Invalid options, prompt lengths and dimensions are rejected locally rather than rounded or silently replaced.
+
+Without a key, the curated catalog remains usable for configuration. With a key, Refresh reads Leonardo's v2 models endpoint only. Discovery IDs are not guessed from names: an exact returned ID match is noted with its check time, otherwise account access/ID mapping remains unconfirmed. Discovery never expands the local parameter allowlists, replaces favorites automatically, or generates an image. Cached timestamps are historical checks, not proof of current availability.
+
+Generate submits once to POST v2 generations, saves the returned ticket before polling the documented GET v1 reader, then downloads the image without the API Authorization header. Each poll allows at most five GET attempts (the initial attempt plus four retries) for network TypeErrors during fetch or response-body reading and HTTP 408/429/500/502/503/504. Retry delays use exponential backoff or Retry-After, bounded to 2–30 seconds with a 30-second cap; cancellation stops polling. Malformed JSON is not retried, and POST submissions are never automatically repeated. Saved tickets resume GET-only and require the original connection identity. API credits are not stored as USD cost. Kept images and model options survive portable book archives; keys, account fingerprints and provider tickets are excluded.
+
+Live model access, v2-ticket/v1-reader compatibility and API/CDN CORS from the deployed app origin are **not verified** by fixture tests. Direct transport is experimental until those checks succeed. No Leonardo gateway or public CORS proxy is configured. If browser CORS blocks requests, a separately agreed private HTTPS gateway is required; do not use no-cors. No paid API calls have been made during implementation.
+
 ## Verification
 
 `npm test` (the mandatory resource-limited runner) covers schema upgrades and book creation, provider key fallback, favorite validation, no generation before explicit action, concurrent claims, cancellation/late writes, interruption recovery, provider request fixtures, gallery ownership, backups, and the rendered proposal → queue → keep → viewer flow. Existing mobile gesture tests continue to exercise the shared zoom/modal components. `npm run build` runs TypeScript and the production Vite build.

@@ -24,7 +24,7 @@ export async function listGalleryImages(bookId?: string): Promise<GalleryImage[]
 export type ImageJobOrigin = { bookId?: string; chatId?: string; messageId?: string; proposalId?: string; submissionId?: string }
 function assertUnchangedMediaModel(displayed: ImageGenerationSpec, current: ImageGenerationSpec) {
   if (displayed.provider !== current.provider || displayed.model !== current.model) throw new Error('The selected media model changed. Review the model in global Settings before generating.')
-  if (displayed.quality !== current.quality || displayed.moderation !== current.moderation || JSON.stringify(displayed.video) !== JSON.stringify(current.video)) throw new Error('The selected media model options changed. Review the options before generating.')
+  if (displayed.quality !== current.quality || displayed.moderation !== current.moderation || JSON.stringify(displayed.video) !== JSON.stringify(current.video) || JSON.stringify(displayed.leonardoOptions) !== JSON.stringify(current.leonardoOptions) || displayed.leonardoContractVersion !== current.leonardoContractVersion) throw new Error('The selected media model options changed. Review the options before generating.')
 }
 export async function enqueueImageJob(spec: ImageGenerationSpec, origin: ImageJobOrigin = {}): Promise<ImageJob> {
   const settings = await loadBookImageSettings(origin.bookId)
@@ -46,7 +46,7 @@ export async function enqueueImageProposal(draft: MediaGenerationDraft, origin: 
 }
 async function queueImageJob(spec: ImageGenerationSpec, origin: ImageJobOrigin, approvedDraft?: MediaGenerationDraft): Promise<ImageJob> {
   // Copy only request fields: retries must not inherit old job lifecycle metadata or rebind aliases.
-  const clean: ImageGenerationSpec = structuredClone({ prompt: spec.prompt, modelAlias: spec.modelAlias, provider: spec.provider, model: spec.model, size: spec.size, task: generationTask(spec), sources: spec.sources ?? [], ...(spec.video ? { video: spec.video } : {}), ...(spec.quality ? { quality: spec.quality } : {}), ...(spec.moderation ? { moderation: spec.moderation } : {}) })
+  const clean: ImageGenerationSpec = structuredClone({ prompt: spec.prompt, modelAlias: spec.modelAlias, provider: spec.provider, model: spec.model, size: spec.size, task: generationTask(spec), sources: spec.sources ?? [], ...(spec.video ? { video: spec.video } : {}), ...(spec.leonardoOptions ? { leonardoOptions: spec.leonardoOptions, leonardoContractVersion: spec.leonardoContractVersion } : {}), ...(spec.quality ? { quality: spec.quality } : {}), ...(spec.moderation ? { moderation: spec.moderation } : {}) })
   // Digest before opening IndexedDB: Web Crypto must not suspend its transaction.
   const localConnectionFingerprint = await imageConnectionFingerprint(clean.provider, captureImageCredentials(clean.provider))
   const db = await database()

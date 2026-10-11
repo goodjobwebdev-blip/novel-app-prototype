@@ -1,6 +1,7 @@
 import { documentedImageModels, imageRatio, imageSize, prunaImageModels } from './image-settings'
 import { generationTask, modelTasks, outputKind, type GenerationSource, type ImageJob, type ImageModel, type ImageProvider, type ImageSize } from './image-generation-types'
 import { assertImageFile, makeThumbnail } from './illustration-image'
+import { generateLeonardo } from './leonardo-adapter'
 export type ImageOutput = { image: Blob; thumbnail: Blob; width: number; height: number; kind?: 'image' | 'video'; mediaDurationMs?: number; seed?: number; cost?: number; revisedPrompt?: string }
 export type ProviderResult = { image: Blob; kind?: 'image' | 'video'; seed?: number; cost?: number; revisedPrompt?: string }
 export type ImageProviderCredentials = string | { key: string; gatewayUrl: string }
@@ -59,6 +60,21 @@ export function normalizeNanoVideoModels(payload: any): ImageModel[] {
 }
 export async function fetchImageModels(provider: ImageProvider, key: string, fetcher = fetch): Promise<ImageModel[]> {
   if (provider === 'pruna') return documentedImageModels.filter((model) => model.provider === provider)
+  if (provider === 'leonardo') {
+    const curated = documentedImageModels.filter(model => model.provider === provider)
+    if (!key) return curated
+    const response = await fetcher('https://cloud.leonardo.ai/api/rest/v2/models', { headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' }, credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(30000) })
+    if (!response.ok) throw new Error(`Leonardo catalog request failed (${response.status}).`)
+    const data = await response.json().catch(() => null)
+    const records = data?.productionApiAvailableModels
+    if (!Array.isArray(records) || records.some(record => !record || typeof record.id !== 'string' || typeof record.name !== 'string' || !record.parameters || typeof record.parameters !== 'object' || Array.isArray(record.parameters))) throw new Error('Leonardo returned an invalid model catalog. Saved favorites were not changed.')
+    const checkedAt = new Date().toISOString()
+    // Only exact, explicitly returned generation IDs can be matched. Never infer
+    // a slug from display names or execute/merge remote parameter schemas.
+    return curated.map(model => ({ ...model, description: records.some(record => record.id === model.id)
+      ? `Discovery ID confirmed at ${checkedAt}; local documented contract retained. Live generation and browser CORS not verified.`
+      : `Account availability not confirmed at ${checkedAt}: discovery ID mapping or model access requires verification. Local documented contract retained.` }))
+  }
   if (provider === 'nanogpt') {
     const imagePromise = jsonResponse(await fetcher(`${NANO}/api/v1/image-models?detailed=true`, { credentials: 'omit', signal: AbortSignal.timeout(30000) }))
     const videoPromise = key ? fetcher(`${NANO}/api/v1/video-models?detailed=true`, { headers: { Authorization: `Bearer ${key}` }, credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(30000) }).then((response) => jsonResponse(response, key)).catch(() => ({ data: [] })) : Promise.resolve({ data: [] })
@@ -135,7 +151,7 @@ async function decodeOutput(data: any, provider: ImageProvider, key: string, sig
     const rawUrl = outputUrl(data, kind, provider)
     if (typeof rawUrl !== 'string') throw new Error(`The provider returned no downloadable ${kind}.`)
     const url = deliveryUrl(rawUrl, provider)
-    media = await boundedResponse(await fetcher(provider === 'pruna' ? prunaRequestUrl(url, gatewayUrl) : url, { headers: provider === 'pruna' ? prunaHeaders(key) : provider === 'nanogpt' && kind === 'video' ? { 'x-api-key': key } : {}, signal, credentials: 'omit', referrerPolicy: 'no-referrer', redirect: provider === 'pruna' ? 'error' : 'follow' }), kind)
+    media = await boundedResponse(await fetcher(provider === 'pruna' ? prunaRequestUrl(url, gatewayUrl) : url, { headers: provider === 'pruna' ? prunaHeaders(key) : provider === 'nanogpt' && kind === 'video' ? { 'x-api-key': key } : {}, signal, credentials: 'omit', referrerPolicy: 'no-referrer', redirect: provider === 'pruna' || provider === 'leonardo' ? 'error' : 'follow' }), kind)
   }
   if (kind === 'image') {
     await assertImageFile(media)
@@ -244,6 +260,10 @@ export async function generateProviderImage(job: ImageJob, credentials: ImagePro
   if (!key.trim()) throw new Error(`Add a ${job.provider === 'pruna' ? 'LiteLLM' : job.provider} media key or configure its AI-settings key first.`)
   signal.throwIfAborted()
   const kind = outputKind(job)
+  if (job.provider === 'leonardo') {
+    const url = await generateLeonardo(job, key, signal, onSubmitted, fetcher, pause)
+    return decodeOutput({ data: [{ url }] }, 'leonardo', key, signal, fetcher, 'image')
+  }
   if (job.provider === 'openai') {
     if (kind === 'video') throw new Error('OpenAI video generation is not configured in this product.')
     return decodeOutput(await openAI(job, key, signal, fetcher), 'openai', key, signal, fetcher, 'image')

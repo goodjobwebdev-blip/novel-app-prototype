@@ -4,6 +4,7 @@ import { BUILTIN_LORE_TYPES, storedLoreTypes } from '../features/codex/lore-type
 import type { CodexEntryEntity } from './persistence'
 import { documentBlocks, remapDocumentBlocks } from '../features/editor/document-projection.ts'
 import type { GalleryImage, ImageJob } from '../features/images/image-generation-types'
+import { buildLeonardoRequest } from '../features/images/leonardo-contracts'
 import type { ArcEntity, BookArchiveData, Illustration } from './persistence'
 import { assertImageFile } from '../features/images/illustration-image'
 import { BOOK_PROFILE_KINDS, sanitizeProfileSettings, sanitizeSettingsProfile, type BookProfileSelections, type SettingsProfile } from '../features/settings/settings-profiles'
@@ -200,7 +201,7 @@ export async function decodeBookArchive(file: Blob): Promise<BookArchiveData> {
   valid(Array.isArray(storedGallery) && storedGallery.length <= 20000 && unique(storedGallery))
   for (const record of storedGallery as StoredGalleryImage[]) {
     valid(record.entryId === undefined && record.illustrationId === undefined)
-    valid(record.provider === undefined || ['openai', 'nanogpt', 'pruna'].includes(record.provider))
+    valid(record.provider === undefined || ['openai', 'nanogpt', 'pruna', 'leonardo'].includes(record.provider))
     valid([record.model, record.modelAlias, record.bookTitle, record.requestedSize, record.revisedPrompt].every((value) => value === undefined || typeof value === 'string'))
     valid([record.seed, record.cost, record.durationMs].every((value) => value === undefined || Number.isFinite(value)))
     valid(record.bookId === book.id && record.kept === true && typeof record.prompt === 'string' && record.prompt.length <= 32000 && Number.isFinite(record.createdAt))
@@ -222,10 +223,11 @@ export async function decodeBookArchive(file: Blob): Promise<BookArchiveData> {
   valid(Array.isArray(imageJobs) && imageJobs.length <= 100000 && unique(imageJobs))
   for (const job of imageJobs) {
     valid(job.bookId === book.id && job.status === 'completed' && job.decision === 'kept' && galleryImages.some((a) => a.id === job.assetId))
-    valid(typeof job.prompt === 'string' && typeof job.modelAlias === 'string' && typeof job.model === 'string' && ['openai', 'nanogpt', 'pruna'].includes(job.provider) && typeof job.size?.value === 'string' && Number.isFinite(job.size.width) && Number.isFinite(job.size.height) && Number.isFinite(job.createdAt))
+    valid(typeof job.prompt === 'string' && typeof job.modelAlias === 'string' && typeof job.model === 'string' && ['openai', 'nanogpt', 'pruna', 'leonardo'].includes(job.provider) && typeof job.size?.value === 'string' && Number.isFinite(job.size.width) && Number.isFinite(job.size.height) && Number.isFinite(job.createdAt))
     if (job.messageId) valid(byId.get(job.messageId)?.type === 'chatMessage' && byId.get(job.messageId)?.parentId === job.chatId)
     valid(job.task === undefined || ['text-to-image', 'image-to-image', 'text-to-video', 'image-to-video'].includes(job.task))
     valid(job.sources === undefined)
+    if (job.provider === 'leonardo') buildLeonardoRequest(job)
     delete job.providerJobId; delete job.owner; delete job.heartbeat; delete job.sources
   }
   valid(offset === file.size)

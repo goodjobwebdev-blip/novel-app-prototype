@@ -17,7 +17,7 @@ export const PROFILE_KINDS: ProfileKind[] = ['text', 'tts', 'stt', 'image', 'vid
 export const BOOK_PROFILE_KINDS: Array<keyof BookProfileSelections> = ['text', 'tts', 'stt', 'image', 'video', 'ui', 'story', 'codex', 'summary']
 export const PROFILE_PROMPT_SCOPES: Partial<Record<ProfileKind, PromptCompositionScope>> = { story: 'story', codex: 'lore', summary: 'summarize', chat: 'assistant', character: 'assistant' }
 const characterComposition: PromptComposition = { systemPrompt: 'Roleplay the selected characters at the supplied story position. Stay in character, distinguish uncertainty, and write dialogue naturally. Use only the selected speaker labels.', predefinedMessages: [{ id: 'character-context', name: 'Story context', role: 'system', enabled: true, template: '{{context.automatic}}' }, { id: 'character-additional', name: 'Selected references', role: 'system', enabled: true, template: '{{context.additional}}' }] }
-const emptyKeys: ImageSettings['keys'] = { nanogpt: '', openai: '', pruna: '' }
+const emptyKeys: ImageSettings['keys'] = { nanogpt: '', openai: '', pruna: '', leonardo: '' }
 // Server-side/test imports have no browser storage. Do not mask browser storage failures.
 let serverLibrary: string | null = null
 function readStoredLibrary() { return typeof localStorage === 'undefined' && typeof window === 'undefined' ? serverLibrary : localStorage.getItem(SETTINGS_PROFILES_STORAGE_KEY) }
@@ -48,7 +48,7 @@ function sanitizeMedia(value: Omit<ImageSettings, 'keys'>): Omit<ImageSettings, 
     if (favorite.videoDurations !== undefined && (!Array.isArray(favorite.videoDurations) || !favorite.videoDurations.every(Number.isFinite))) throw new Error('Invalid video durations.')
     if (favorite.cost !== undefined && !Number.isFinite(favorite.cost)) throw new Error('Invalid media model cost.')
   }
-  const favoriteKeys = ['id', 'name', 'provider', 'sizes', 'source', 'cost', 'description', 'tasks', 'maxSourceImages', 'videoResolutions', 'videoDurations', 'aspectRatios', 'quality', 'moderation', 'alias', 'enabledSizes', 'defaultSize']
+  const favoriteKeys = ['id', 'name', 'provider', 'sizes', 'source', 'cost', 'description', 'tasks', 'maxSourceImages', 'videoResolutions', 'videoDurations', 'aspectRatios', 'quality', 'moderation', 'leonardoOptions', 'alias', 'enabledSizes', 'defaultSize']
   const favorites = value.favorites.map(favorite => Object.fromEntries(favoriteKeys.filter(key => key in favorite).map(key => [key, favorite[key as keyof typeof favorite]]))) as ImageSettings['favorites']
   const { keys: _keys, ...media } = validateImageSettings({ keys: emptyKeys, favorites, defaultAlias: value.defaultAlias, defaultAliases: value.defaultAliases })
   return media

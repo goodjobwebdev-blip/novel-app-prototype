@@ -9,5 +9,5 @@ export async function loadBookImageSettings(bookId?: string): Promise<ImageSetti
 }
 
 export function emptyImageSettings(): ImageSettings {
-  return { keys: { nanogpt: '', openai: '', pruna: '' }, favorites: [], defaultAlias: '', defaultAliases: {} }
+  return { keys: { nanogpt: '', openai: '', pruna: '', leonardo: '' }, favorites: [], defaultAlias: '', defaultAliases: {} }
 }
