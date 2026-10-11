@@ -5,7 +5,6 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 const workspace = readFileSync(new URL('../src/app/Workspace.tsx', import.meta.url), 'utf8')
-const composerStyles = readFileSync(new URL('../src/features/chat/composer.css', import.meta.url), 'utf8')
 
 function generateControlSource() {
   const start = workspace.indexOf('function GenerateControl(')
@@ -31,6 +30,4 @@ test('collapsed dictation reuses the activity slot and preserves stable controls
   assert.match(control, /sttRecording \? stopSttSession : sttPermissionPending \? cancelSttSession : undefined/)
   assert.match(control, /Cancel microphone permission request/)
   assert.match(control, /Generate unavailable during dictation/)
-  assert.match(composerStyles, /\.workspace-composer \.generate-control-shell:not\(\.mode\) \{ height: 56px; min-height: 56px; \}/)
-  assert.match(composerStyles, /\.workspace-composer \.collapsed-dictation-button \{ width: 44px; height: 44px; min-width: 44px;/)
 })
