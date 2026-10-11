@@ -174,6 +174,42 @@ test('global App navigation, last-book return, and prompt deep links select the 
   await mounted.close()
 })
 
+test('global settings groups breadcrumbs and compact return actions in one scope card', async (t) => {
+  let returned = 0
+  const mounted = await mount(t, App, { lastBookTitle: 'Last Book', onLastBook() { returned++ } })
+  const card = mounted.host.querySelector('.settings-global-scope')
+  assert.ok(card, 'Global breadcrumbs need a bordered scope card like book settings')
+  assert.ok(card.querySelector('.settings-breadcrumbs'))
+  const returns = card.querySelector('.global-settings-return')
+  assert.ok(returns, 'Return actions belong below breadcrumbs inside the card')
+  assert.equal(card.firstElementChild.className, 'settings-breadcrumbs')
+  const action = button(returns, 'Back to last book · Last Book')
+  assert.ok(action.classList.contains('settings-return-link'))
+  assert.equal(action.classList.contains('arc-button'), false)
+  await click(action)
+  assert.equal(returned, 1)
+  await mounted.close()
+})
+
+test('global settings without a book still has a scope card but no empty return row', async (t) => {
+  const mounted = await mount(t, App)
+  assert.ok(mounted.host.querySelector('.settings-global-scope .settings-breadcrumbs'))
+  assert.equal(mounted.host.querySelector('.global-settings-return'), null)
+  await mounted.close()
+})
+
+test('book-origin global settings keeps both return actions inside the breadcrumb card', async (t) => {
+  const mounted = await mount(t, App, { book: { id: fixture.book.id, title: fixture.book.title }, onBack() {} })
+  await click(mounted.host.querySelector('[aria-label="Edit Text models profile"]'))
+  const card = mounted.host.querySelector('.settings-global-scope')
+  assert.ok(card)
+  assert.equal(card.querySelectorAll('.settings-return-link').length, 2)
+  await click(button(card, `Back to Profiles · ${fixture.book.title}`))
+  assert.ok(mounted.host.querySelector('.settings-book-scope'))
+  assert.equal(mounted.host.querySelector('.settings-global-scope'), null)
+  await mounted.close()
+})
+
 test('Settings breadcrumb text and separators use the defined secondary theme color', () => {
   const css = readFileSync(new URL('../src/features/settings/settings-profiles.css', import.meta.url), 'utf8')
   const theme = readFileSync(new URL('../src/app/styles.css', import.meta.url), 'utf8')

@@ -106,8 +106,8 @@ export function BookProfilesPanel({ library, selections, busy, error, onChange, 
 const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
   section: GlobalSettingsSection; initialProfileId?: string;
   renderEditor: (props: ProfileEditorProps) => ReactNode; application: ReactNode; sync: ReactNode;
-  onSaved?: (settings: AiSettings) => void; bookOriginTitle?: string;
-}>(function SettingsProfilesPanel({ section, initialProfileId, renderEditor, application, sync, onSaved, bookOriginTitle }, ref) {
+  onSaved?: (settings: AiSettings) => void; bookOriginTitle?: string; returnActions?: ReactNode;
+}>(function SettingsProfilesPanel({ section, initialProfileId, renderEditor, application, sync, onSaved, bookOriginTitle, returnActions }, ref) {
   const [library, setLibrary] = useState(loadSettingsProfiles)
   const initial = library.profiles.find(profile => profile.id === initialProfileId)
   const [kind, setKind] = useState<ProfileKind>(section === 'appearance' ? 'ui' : initial?.kind ?? 'text')
@@ -388,7 +388,10 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
     </section>}
     {error && <div className="status error" role="alert">{error}</div>}
     <div inert={pending !== null || busy}>
+    <div className="settings-global-scope">
     <SettingsBreadcrumbs items={['Global Settings', ...(section === 'ai' ? ['AI', aiSection === 'connection' ? 'Connections' : aiSection === 'models' ? 'Models' : 'Prompts'] : [section === 'appearance' ? 'Appearance' : section === 'application' ? 'Application' : 'Sync']), ...(isProfileSection && draft ? [...(section === 'ai' ? [profileLabels[activeKind]] : []), draft.name] : [])]} />
+    {returnActions}
+    </div>
     {section === 'ai' && <><header className="page-heading"><div><p>Global Settings</p><h1 id="page-title">AI</h1><span>One active text connection serves every text profile and role. Shared profile changes are explicit.</span></div></header>
       <SettingsSectionTabs tabs={globalAiSections} active={aiSection} onChange={next => { if (next !== aiSection) requestLeave(() => { setAiSection(next); if (next !== 'connection') selectDefault(next === 'models' ? 'text' : 'story') }) }} idPrefix="ai" label="AI sections" />
       {aiSection !== 'connection' && <Select className="settings-profile-type" label={aiSection === 'models' ? 'Model profile type' : 'Prompt preset type'} value={kind} onChange={event => chooseKind(event.target.value as ProfileKind)}>{(aiSection === 'models' ? modelKinds : promptKinds).map(value => <option key={value} value={value}>{profileLabels[value]}</option>)}</Select>}
