@@ -50,7 +50,7 @@ function pauseSecondWrite(db) {
 const outcome = operation => operation.then(value => ({ value }), error => ({ error }))
 
 for (const field of ['bookId', 'worldId', 'settingsType']) {
-  test(`World profile save rejects a ${field} change committed before its write lock`, async () => {
+  test(`World profile ownership rejects a competing ${field} change before saving`, async () => {
     const f = await fixture(`World profile ${field} ownership race`)
     const original = await f.db.table('entities').get(f.recordId)
     const pause = pauseSecondWrite(f.db)
@@ -58,11 +58,22 @@ for (const field of ['bookId', 'worldId', 'settingsType']) {
     const changed = { ...original, [field]: field === 'settingsType' ? 'profiles-book' : 'another-owner' }
     try {
       await pause.paused
-      await f.db.table('entities').put(changed)
-      pause.release()
-      const result = await saving
-      assert.match(result.error?.message ?? '', /World profiles changed/)
-      assert.deepEqual(await f.db.table('entities').get(f.recordId), changed)
+      if (field === 'settingsType') {
+        await f.db.table('entities').put(changed)
+        pause.release()
+        const result = await saving
+        assert.match(result.error?.message ?? '', /World profiles changed/)
+        assert.deepEqual(await f.db.table('entities').get(f.recordId), changed)
+      } else {
+        // Canonical-owner validation rejects the competing raw mutation before
+        // it can corrupt the row. The queued legitimate save may then finish.
+        await assert.rejects(f.db.table('entities').put(changed), /canonical.*owner/i)
+        assert.deepEqual(await f.db.table('entities').get(f.recordId), original)
+        pause.release()
+        const result = await saving
+        assert.equal(result.error, undefined)
+        assert.equal((await f.db.table('entities').get(f.recordId)).value.text, f.profile.id)
+      }
     } finally { pause.release(); pause.restore(); await saving }
   })
 }

@@ -491,7 +491,8 @@ test('library archive import opens its canonical World and later Book restore re
   const worldData = await worldArchive.readWorldArchive(f.world.id)
   worldData.bookReferences = [f.book.id]
   const worldFile = worldArchive.encodeWorldArchive(worldData)
-  const bookFile = bookArchive.encodeBookArchive(await p.readBookArchive(f.book.id))
+  const canonicalBookData = await p.readBookArchive(f.book.id)
+  const bookFile = bookArchive.encodeBookArchive(canonicalBookData)
   await db.transaction('rw', db.tables, async () => {
     for (const table of db.tables) if (table.name !== 'meta') await table.clear()
   })
@@ -502,7 +503,20 @@ test('library archive import opens its canonical World and later Book restore re
   await click(button('Home'))
   await settle(() => document.querySelector('.library-screen'))
   await uploadArchive('Import book backup file', bookFile)
-  await settle(async () => editor()?.getAttribute('data-book-id') === f.book.id && (await p.getEntity(f.book.id))?.worldId === f.world.id, 'Book restore reconciles the pending World reference before opening')
+  await settle(async () => Boolean(document.querySelector('.scene-title')) && (await p.listBooks()).length === 1)
+  const copiedBook = (await p.listBooks())[0]
+  assert.notEqual(copiedBook.id, f.book.id, 'Book backup preserves its existing new-copy identity contract')
+  assert.ok(!copiedBook.worldId, 'An independent backup copy must not consume the canonical pending reference')
+  assert.equal(await p.getEntity(f.book.id), undefined)
+  // A canonical identity becomes available through restoration/sync, unlike a
+  // detached backup copy. Opening it reconciles the pending reference.
+  const canonicalRoot = canonicalBookData.entities.find(row => row.id === f.book.id)
+  canonicalRoot.title = 'Restored canonical Book'
+  await p.writeBookArchive(canonicalBookData)
+  await click(button('Home'))
+  await settle(() => document.querySelector('.library-screen'))
+  await openBook(canonicalRoot)
+  await settle(async () => (await p.getEntity(f.book.id))?.worldId === f.world.id, 'Canonical Book availability reconciles the pending World reference before opening')
   assert.equal((await w.listBookCodexEntries(f.book.id))[0].id, article.id)
 })
 

@@ -876,6 +876,8 @@ export default function Workspace() {
 
     await ensureBookAiSettings(bookId, loadAiSettings())
     if (!bookOpenIntentRef.current.isCurrent(intent)) return
+    await resolvePendingWorldBookReferences()
+    if (!bookOpenIntentRef.current.isCurrent(intent)) return
     const [book, content] = await Promise.all([
       getEntity<BookEntity>(bookId),
       readBookContent(bookId),
