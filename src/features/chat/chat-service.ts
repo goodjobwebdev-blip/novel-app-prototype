@@ -24,11 +24,13 @@ import {
   getBookProfileSelections,
   getBookContextSettings,
   getEntity,
+  isCodexEntryArchived,
   listEntitiesByBook,
   putEntity,
   updateEntityAtomically,
   type ArcEntity,
   type BookEntity,
+  type WorldEntity,
   type GenerationContextProfile,
 } from '../../data/persistence'
 
@@ -266,12 +268,17 @@ export async function createChat(bookId: string, title = 'New chat', role: 'chat
   }
   const db = await database()
   await db.transaction('rw', db.table('entities'), async () => {
-    const book = await db.table('entities').get(bookId) as BookEntity | undefined
-    if (book?.type !== 'book') throw new Error('This book no longer exists.')
+    const book = await db.table('entities').get(bookId) as BookEntity | WorldEntity | undefined
+    if (!book || !['book', 'world'].includes(book.type)) throw new Error('This workspace owner no longer exists.')
+    if (book.type === 'world') {
+      if (role === 'character' || chat.character) throw new Error('Character Chat requires a Book story position.')
+      chat.worldId = bookId
+      chat.contextProfile = { ...chat.contextProfile, includeLastScene: false, includePreviousSceneWhenEmpty: false, loreAtCurrentScene: false, structuralIds: [], summaryRange: 'none' }
+    }
     if (chat.character) {
       for (const participant of chat.character.participants) {
         const entry = await db.table('entities').get(participant.entryId)
-        if (entry?.type !== 'codexEntry' || !entityAvailableInBook(entry, book) || entry.archivedAt || (entry.typeId !== 'lore-character' && entry.roleplayParticipant !== true)) throw new Error('A selected character is no longer available.')
+        if (entry?.type !== 'codexEntry' || !entityAvailableInBook(entry, book.type === 'book' ? book : undefined) || entry.archivedAt || (entry.typeId !== 'lore-character' && entry.roleplayParticipant !== true)) throw new Error('A selected character is no longer available.')
       }
       const cutoff = chat.character.cutoff, scene = await db.table('entities').get(cutoff.sceneId)
       if (cutoff.bookId !== bookId || scene?.type !== 'scene' || scene.bookId !== bookId || !Number.isInteger(cutoff.position) || cutoff.position! < 0 || cutoff.position! > String(scene.content ?? '').length) throw new Error('The selected character-chat position changed. Choose it again.')
@@ -300,6 +307,27 @@ export async function updateChat(chatId: string, patch: Partial<Pick<ChatEntity,
         contextProfile: patchSnapshot.contextProfile ? copyProfile(patchSnapshot.contextProfile) : current.contextProfile,
         updatedAt: Date.now(),
       }
+    })
+    notifyChatChange(next.bookId)
+    return next
+  })
+}
+
+export async function setChatArticleIncluded(chatId: string, articleId: string, include: boolean): Promise<ChatEntity> {
+  return chatWriteQueue.run(chatId, async () => {
+    const db = await database()
+    const next = await db.transaction('rw', db.table('entities'), async () => {
+      const chat = await getEntity<ChatEntity>(chatId)
+      if (!chat || chat.type !== 'chat' || chat.character) throw new Error('This Chat is no longer available for article context.')
+      if (include) {
+        const entries = await listEntitiesByBook(chat.bookId, 'codexEntry')
+        if (!entries.some(entry => entry.id === articleId && entry.type === 'codexEntry' && !isCodexEntryArchived(entry))) throw new Error('This article is not available in this workspace.')
+      }
+      return updateEntityAtomically<ChatEntity>(chatId, current => {
+        const ids = new Set(current.contextProfile.codexEntryIds)
+        if (include) ids.add(articleId); else ids.delete(articleId)
+        return { ...current, contextProfile: { ...current.contextProfile, codexEntryIds: [...ids] }, updatedAt: Math.max(Date.now(), current.updatedAt + 1) }
+      })
     })
     notifyChatChange(next.bookId)
     return next
@@ -360,6 +388,7 @@ export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntit
     id: makeId('chat-message'),
     type: 'chatMessage',
     bookId: chat.bookId,
+    ...(chat.worldId ? { worldId: chat.worldId } : {}),
     parentId: chat.id,
     order: messages.length ? Math.max(...messages.map((item) => item.order)) + 1 : 0,
     role,
@@ -382,7 +411,14 @@ export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntit
     createdAt: now,
     updatedAt: now,
   }
-  await putEntity(message)
+  const db = await database()
+  await db.transaction('rw', db.table('entities'), async () => {
+    const current = await db.table('entities').get(chat.id) as ChatEntity | undefined
+    if (current?.type !== 'chat' || current.bookId !== chat.bookId) throw new Error('The Chat owner changed or no longer exists.')
+    const siblings = await db.table('entities').where('parentId').equals(chat.id).toArray() as ArcEntity[]
+    message.order = siblings.filter(row => row.type === 'chatMessage').reduce((maximum, row) => Math.max(maximum, Number(row.order ?? -1)), -1) + 1
+    await db.table('entities').add(message)
+  })
   if (role === 'user' && chat.title === 'New chat') {
     const title = content.trim().replace(/\s+/g, ' ').slice(0, 54) || 'New chat'
     await touchFromMessages(chat.bookId, chat.id, title)
@@ -460,6 +496,7 @@ export async function transitionChatMessageProposal(
   proposalId: string,
   allowedStatuses: readonly string[] | null,
   patch: Partial<AnyChatProposal>,
+  touchChat = true,
 ): Promise<{ message: ChatMessageEntity; proposal: AnyChatProposal; changed: boolean }> {
   let selected: AnyChatProposal | undefined
   let changed = false
@@ -474,7 +511,7 @@ export async function transitionChatMessageProposal(
       : current
   })
   if (!selected) throw new Error('That proposal is no longer available.')
-  if (changed) await touchFromMessages(next.bookId, next.parentId)
+  if (changed && touchChat) await touchFromMessages(next.bookId, next.parentId)
   return { message: next, proposal: selected, changed }
 }
 

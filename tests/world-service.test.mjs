@@ -337,7 +337,9 @@ test('requesting-Book summary saves validate live World access, canonical owners
   const entry = await p.createCodexEntry(f.world.id, 'Approved summary source')
   const summary = await p.getOrCreateSummary(entry)
   const approval = { messageId: 'approval-' + crypto.randomUUID(), proposalId: 'proposal-' + crypto.randomUUID() }
-  const message = { id: approval.messageId, type: 'chatMessage', bookId: book.id, parentId: book.id, content: '', createdAt: 1, updatedAt: 1, entityActions: [{ id: approval.proposalId, status: 'applying', entityId: entry.id, operation: { kind: 'summary' } }] }
+  const conversation = { id: 'summary-approval-chat-' + crypto.randomUUID(), type: 'chat', bookId: book.id, parentId: book.id, title: 'Summary approvals', createdAt: 1, updatedAt: 1 }
+  await p.putEntity(conversation)
+  const message = { id: approval.messageId, type: 'chatMessage', bookId: book.id, parentId: conversation.id, content: '', createdAt: 1, updatedAt: 1, entityActions: [{ id: approval.proposalId, status: 'applying', entityId: entry.id, operation: { kind: 'summary' } }] }
   await p.putEntity(message)
   const saved = await p.saveSummaryContent(summary.id, 'Approved World summary', entry.sourceRevision, summary, approval, book.id)
   assert.equal(saved.bookId, f.world.id)

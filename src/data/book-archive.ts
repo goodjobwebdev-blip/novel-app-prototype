@@ -1,5 +1,6 @@
 import { validateAuthorPlanning, type AuthorPlanning } from '../features/author-planning/author-planning'
 import { BUILTIN_LORE_TYPES, storedLoreTypes } from '../features/codex/lore-types.ts'
+import { remapArticleLinks } from '../features/codex/codex-article-links.ts'
 
 import type { CodexEntryEntity } from './persistence'
 import { documentBlocks, remapDocumentBlocks } from '../features/editor/document-projection.ts'
@@ -15,6 +16,16 @@ const MAX_ARCHIVE = 2_000_000_000
 const TYPES = new Set(['book', 'series', 'act', 'chapter', 'scene', 'note', 'codexEntry', 'summary', 'chat', 'chatMessage', 'settings'])
 const REF_KEYS = new Set(['chatPromptPresetId', 'characterPromptPresetId', 'goalId', 'linkedEntityId', 'jobId', 'directUserMessageId', 'sceneId', 'anchorBookId', 'typeId', 'ownerId', 'bookId', 'entryId', 'parentId', 'seriesId', 'sourceEntityId', 'entityId', 'sourceId', 'targetId', 'primaryImageId', 'assetId', 'messageId', 'chatId', 'lastOpenedSceneId', 'sourceParentId', 'targetParentId', 'beforeId'])
 const REF_ARRAYS = new Set(['compatibleLoreTypeIds', 'skillNoteIds', 'structuralIds', 'noteIds', 'codexEntryIds', 'sourceIds'])
+
+// Navigation is device-local, not portable Book content or settings.
+function portableBookData(data: BookArchiveData): BookArchiveData {
+  const navigationIds = new Set(data.entities.filter(entity => entity.type === 'settings' && entity.settingsType === 'workspace-owner').map(entity => entity.id))
+  return { ...data, entities: data.entities.filter(entity => !navigationIds.has(entity.id)), snapshots: data.snapshots.filter(row => !navigationIds.has(row.entityId)) }
+}
+
+function remapDocumentContent(content: string, ids: Map<string, string>): string {
+  return remapArticleLinks(remapDocumentBlocks(content, ids), ids)
+}
 
 type StoredGalleryImage = Omit<GalleryImage, 'image' | 'thumbnail'> & { imageSize: number; imageType: string; thumbnailSize: number; thumbnailType: string }
 type StoredImage = Omit<Illustration, 'image' | 'thumbnail'> & { imageSize: number; imageType: string; thumbnailSize: number; thumbnailType: string }
@@ -58,6 +69,7 @@ function portableProfiles(entities: ArcEntity[], definitions?: SettingsProfile[]
 /** Stable, book-specific identities make World snapshots safe for existing book sync.
  * The canonical World records are never modified or included in the payload. */
 export function portableWorldBookSnapshot(data: BookArchiveData, bookId: string): BookArchiveData {
+  data = portableBookData(data)
   const book = data.entities.find(entity => entity.type === 'book' && entity.id === bookId)
   if (!book) throw new Error('The snapshot is missing its Book.')
   const ids = new Map<string, string>()
@@ -75,7 +87,7 @@ export function portableWorldBookSnapshot(data: BookArchiveData, bookId: string)
     if (Array.isArray(value)) return value.map(item => remap(item, key, depth + 1))
     if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).filter(([name]) => !['worldId', 'hiddenWorldEntryIds'].includes(name)).map(([name, item]) => [name, remap(item, name, depth + 1)]))
     if (typeof value === 'string') {
-      if (key === 'content') return remapDocumentBlocks(value, ids)
+      if (key === 'content') return remapDocumentContent(value, ids)
       if (REF_KEYS.has(key) || REF_ARRAYS.has(key) || key === 'id') return ids.get(value) ?? value
       if (key === 'directImageReferenceIds' && value.startsWith('codex:')) return `codex:${ids.get(value.slice(6)) ?? value.slice(6)}`
     }
@@ -101,6 +113,7 @@ export function portableWorldBookSnapshot(data: BookArchiveData, bookId: string)
 
 /** A versioned binary archive: JSON metadata followed by image blobs (no base64 overhead). */
 export function encodeBookArchive(data: BookArchiveData): Blob {
+  data = portableBookData(data)
   valid(data.entities.every(entity => entity.type !== 'world' && !entity.worldId))
   const images: StoredImage[] = data.illustrations.map(({ image, thumbnail, ...rest }) => ({ ...rest, imageSize: image.size, imageType: image.type, thumbnailSize: thumbnail.size, thumbnailType: thumbnail.type }))
   const gallery: StoredGalleryImage[] = (data.galleryImages ?? []).map(({ image, thumbnail, ...rest }) => ({ ...rest, imageSize: image.size, imageType: image.type, thumbnailSize: thumbnail.size, thumbnailType: thumbnail.type }))
@@ -236,8 +249,9 @@ export async function decodeBookArchive(file: Blob): Promise<BookArchiveData> {
   return { entities, settingsProfiles, snapshots: manifest.snapshots, dependencies: manifest.dependencies, illustrations, galleryImages, imageJobs }
 }
 
-/** Import as a new book; preserve text verbatim while remapping structural references. */
+/** Import as a new book; preserve prose while remapping structural and article references. */
 export function copyBookArchive(data: BookArchiveData, newId = () => crypto.randomUUID()): { data: BookArchiveData; bookId: string } {
+  data = portableBookData(data)
   const ids = new Map<string, string>()
   const settingsProfiles = portableProfiles(data.entities.map(entity => ({ ...entity })), data.settingsProfiles)
   for (const profile of settingsProfiles ?? []) ids.set(profile.id, `profile-import-${newId()}`)
@@ -280,7 +294,7 @@ export function copyBookArchive(data: BookArchiveData, newId = () => crypto.rand
       return Object.fromEntries(Object.entries(value).map(([name, item]) => [name, remap(item, name, depth + 1)]))
     }
     if (typeof value === 'string' && (key === 'linkedEntityId' || key === 'goalId')) return ids.get(value) ?? (value ? `unavailable-${newId()}` : '')
-    if (typeof value === 'string' && key === 'content') return remapDocumentBlocks(value, ids)
+    if (typeof value === 'string' && key === 'content') return remapDocumentContent(value, ids)
     if (typeof value === 'string' && (REF_KEYS.has(key) || key === 'id')) return ids.get(value) ?? (key === 'id' ? value : '')
     return value
   }

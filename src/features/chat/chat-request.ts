@@ -36,6 +36,10 @@ You can inspect and propose edits to Scenes, Notes, and Codex entries in this bo
 
 export const CHAT_TOOL_DEFINITIONS = [...chatWorkspaceTools, ...chatEntityTools, ...chatOutlineTools, ...chatManagementTools, ...chatImageTools, ...brainstormTools]
 
+export const CHAT_WORLD_WORKSPACE_INSTRUCTIONS = `# World workspace tools
+
+Work only with the current World's canonical Codex articles and World Notes. Linked Books do not grant access to their manuscripts, scenes, private lore, metadata, or Notes. Search and read available entities before preparing changes. Use stable article IDs, not titles, for targets and Markdown links of the form [Article title](arc-codex:ARTICLE_ID). Mutating tools prepare review proposals only; no creation, append, replacement, or deletion happens until the user explicitly approves its card. Read the latest target and pass its updatedAt as expected_updated_at for document changes. Prefer localized edits; whole-document replacement requires the user's preview and approval. Scene, Outline, story-position, and Book metadata operations are unavailable in this workspace.`
+
 export type ChatRequestHistoryItem = {
   id?: string
   characterBoundary?: CharacterBoundary
@@ -113,6 +117,7 @@ export function chatRequestValues(book: BookPromptValues, context: PreparedConte
 }
 
 export function assembleChatGenerationRequest(input: {
+  scope?: 'book' | 'world'
   restrictedInstructions?: string
   mediaSettings?: ImageSettings
   composition: PromptComposition
@@ -123,7 +128,8 @@ export function assembleChatGenerationRequest(input: {
   skills?: CapturedChatSkill[]
   tools?: ChatToolDefinition[]
 }): NormalizedAssembledRequest {
-  const values = chatRequestValues(input.restrictedInstructions ? emptyCharacterBook : input.book, input.context, input.restrictedInstructions, input.mediaSettings)
+  const values = chatRequestValues(input.restrictedInstructions || input.scope === 'world' ? emptyCharacterBook : input.book, input.context, input.restrictedInstructions, input.mediaSettings)
+  if (input.scope === 'world' && !input.restrictedInstructions) values['chat.workspace_instructions'] = CHAT_WORLD_WORKSPACE_INSTRUCTIONS + imageModelInstructions(input.mediaSettings)
   if (input.restrictedInstructions) values['chat.workspace_instructions'] = input.restrictedInstructions
   const storySources = input.context.storySoFarSources ?? []
   const sceneSources = input.context.currentSceneText.trim()

@@ -128,7 +128,10 @@ test('editable chat proposal → repeated generation → navigate → keep → c
     await click('Open generation tool')
     await settle(() => Boolean(document.querySelector('textarea')))
     assert.equal(document.querySelector('textarea').value, 'Edited moonlit gate')
+    // Reopening mounts fresh controls: the textarea precedes their async Book profile read.
     await act(async () => document.querySelector('.arc-searchable-select__trigger').click())
+    await settle(() => document.querySelectorAll('.arc-searchable-select__options button').length === 2)
+    assert.deepEqual([...document.querySelectorAll('.arc-searchable-select__options button strong')].map(option => option.textContent), ['Portrait', 'Fast'])
     await input(document.querySelector('.arc-searchable-select input[type=search]'), 'Fast')
     assert.equal(document.querySelectorAll('.arc-searchable-select__options button').length, 1)
     await act(async () => document.querySelector('.arc-searchable-select__options button').click())
@@ -170,6 +173,16 @@ test('editable chat proposal → repeated generation → navigate → keep → c
 
 test('gallery includes other books and current uploads; Only this book filters them', async (t) => {
   configure()
+  // Build both sides of the filter here, not from a previous UI test's kept result.
+  const db = await p.database()
+  await db.table('imageJobs').clear()
+  await db.table('galleryImages').clear()
+  await db.table('illustrations').clear()
+  const { book: otherBook } = await p.createBook(initialAiSettings, 'Other gallery book')
+  const generated = await store.enqueueImageJob(settings.resolveImageSpec('Other book generated image', 'Portrait', undefined, undefined, await loadBookImageSettings(otherBook.id)), { bookId: otherBook.id })
+  await runImageQueue('openai', deps)
+  await store.decideImageJob(generated.id, true)
+  assert.equal((await store.listGalleryImages(otherBook.id)).length, 1, 'The other Book owns a real completed and kept generation')
   const { book } = await p.createBook(initialAiSettings, 'Second book')
   const entry = await p.createCodexEntry(book.id, 'Uploaded entry', 'Character')
   await p.saveIllustration(entry.id, { image: png, thumbnail: png, width: 1, height: 1 }, { caption: 'Uploaded image', alt: '', cropX: 50, cropY: 50 })
@@ -178,9 +191,12 @@ test('gallery includes other books and current uploads; Only this book filters t
     await act(async () => root.render(h(Panel, { bookId: book.id, ai: initialAiSettings })))
     await click('Gallery')
     await settle(() => document.querySelectorAll('.image-gallery-grid article').length === 2)
+    assert.match(document.querySelector('.image-gallery-grid').textContent, /Other book generated image/)
+    assert.match(document.querySelector('.image-gallery-grid').textContent, /Uploaded image/)
     await act(async () => document.querySelector('.image-gallery-tools input[type=checkbox]').click())
     await settle(() => document.querySelectorAll('.image-gallery-grid article').length === 1)
     assert.match(document.querySelector('.image-gallery-grid').textContent, /Uploaded image/)
+    assert.doesNotMatch(document.querySelector('.image-gallery-grid').textContent, /Other book generated image/)
   } finally { await act(async () => root.unmount()) }
 })
 

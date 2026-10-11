@@ -1,0 +1,151 @@
+import { assertTestResourceLimits } from './test-resource-policy.mjs'
+assertTestResourceLimits()
+import test, { after } from 'node:test'
+import assert from 'node:assert/strict'
+import { registerHooks } from 'node:module'
+import { existsSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import 'fake-indexeddb/auto'
+const storage = new Map()
+globalThis.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)), removeItem: key => storage.delete(key) }
+globalThis.window = new EventTarget()
+window.localStorage = localStorage
+registerHooks({ resolve(specifier, context, next) {
+  if (specifier.startsWith('.') && context.parentURL?.startsWith('file:')) {
+    const url = new URL(specifier + '.ts', context.parentURL)
+    if (existsSync(fileURLToPath(url))) return next(url.href, context)
+  }
+  return next(specifier, context)
+} })
+const p = await import('../src/data/persistence.ts')
+const w = await import('../src/features/worlds/world-service.ts')
+const chat = await import('../src/features/chat/chat-service.ts')
+const ai = await import('../src/shared/ai/ai-settings.ts')
+after(async () => (await p.database()).close())
+
+test('World Notes and Chat persist with canonical isolated ownership and block deletion', async () => {
+  const world = await w.createWorld('Independent'), other = await w.createWorld('Other')
+  const { book } = await p.createBook(ai.initialAiSettings)
+  await w.setBookWorld(book.id, world.id)
+  const note = await p.createNote(world.id, 'World template')
+  await p.saveDocumentContent(note.id, 'World secret')
+  const conversation = await chat.createChat(world.id)
+  await chat.createChatMessage(conversation, 'user', 'World message')
+  assert.equal(note.worldId, world.id)
+  assert.equal((await p.getEntity(conversation.id)).worldId, world.id)
+  assert.equal((await chat.listChatMessages(world.id, conversation.id))[0].content, 'World message')
+  assert.equal((await p.listEntitiesByBook(book.id, 'note')).length, 0)
+  assert.equal((await chat.listChats(other.id)).length, 0)
+  assert.equal((await chat.listChats(book.id)).length, 0)
+  assert.deepEqual(await w.getWorldDeletionImpact(world.id), { worldId: world.id, entries: 0, notes: 1, chats: 1, messages: 1, linkedBooks: 1, canDelete: false })
+  await assert.rejects(() => w.deleteWorld(world.id), /Notes|notes/)
+  await assert.rejects(() => p.putEntity({ ...note, bookId: other.id, worldId: other.id, parentId: other.id }), /owner/)
+  await chat.deleteChat(conversation.id)
+  await p.deleteEntityTree(note.id)
+  await w.deleteWorld(world.id)
+  assert.equal((await p.getEntity(book.id)).worldId, undefined)
+  assert.ok(await p.getEntity(book.id))
+})
+
+test('World settings remove Book context and persist independent AI profiles/navigation', async () => {
+  const world = await w.createWorld('Context'), other = await w.createWorld('Other context')
+  const { book, scene } = await p.createBook(ai.initialAiSettings)
+  const note = await p.createNote(world.id), entry = await p.createCodexEntry(world.id, 'World source')
+  const settings = await p.getBookContextSettings(world.id)
+  const saved = await p.saveBookContextSettings(world.id, { ...settings, lastOpenedSceneId: scene.id, profiles: { ...settings.profiles, chat: { ...settings.profiles.chat, includeLastScene: true, includePreviousSceneWhenEmpty: true, structuralIds: [scene.id], noteIds: [note.id], codexEntryIds: [entry.id], summaryRange: 'all' } } })
+  assert.equal(saved.lastOpenedSceneId, '')
+  assert.equal(saved.profiles.chat.includeLastScene, false)
+  assert.deepEqual(saved.profiles.chat.structuralIds, [])
+  assert.equal(saved.profiles.chat.summaryRange, 'none')
+  assert.deepEqual(saved.profiles.chat.noteIds, [note.id])
+  await p.saveOwnerWorkspaceState(world.id, { lastOpenedCodexEntryId: entry.id })
+  assert.equal((await p.getOwnerWorkspaceState(world.id)).lastOpenedCodexEntryId, entry.id)
+  assert.equal((await p.getOwnerWorkspaceState(other.id)).lastOpenedCodexEntryId, '')
+  await assert.rejects(() => p.saveOwnerWorkspaceState(other.id, { lastOpenedCodexEntryId: entry.id }), /available/)
+  await p.deleteEntityTree(entry.id)
+  assert.equal((await p.getOwnerWorkspaceState(world.id)).lastOpenedCodexEntryId, '')
+  assert.ok(await p.getBookAiSettings(world.id, []))
+  assert.ok(await p.getBookProfileSelections(world.id))
+  assert.equal(await p.getBook(world.id), undefined)
+  assert.equal((await p.getWorld(world.id)).id, world.id)
+  assert.equal((await p.getOwner(book.id)).type, 'book')
+})
+
+test('World writes reserve archived triggers, reject private dependencies, and detect stale document saves', async () => {
+  const world = await w.createWorld('Protected owner')
+  const { book } = await p.createBook(ai.initialAiSettings)
+  await w.setBookWorld(book.id, world.id)
+  const shared = await p.createCodexEntry(world.id, 'Reserved'), local = await p.createCodexEntry(book.id, 'Private')
+  await p.archiveCodexEntry(shared.id)
+  await assert.rejects(() => p.createCodexEntry(world.id, 'reserved'), /reserved/)
+  await p.restoreCodexEntry(shared.id)
+  await assert.rejects(() => p.createCodexDependency(world.id, shared.id, local.id), /not available/)
+  // Archive/restore changes the revision too: a proposal made before those writes is stale.
+  await assert.rejects(() => p.saveDocumentContent(shared.id, 'Pre-restore proposal', { bookId: world.id, updatedAt: shared.updatedAt, content: '' }), /changed/)
+  const restored = await p.getEntity(shared.id)
+  const expected = { bookId: world.id, updatedAt: restored.updatedAt, content: restored.content }
+  const saved = await p.saveDocumentContent(shared.id, 'New revision', expected)
+  assert.ok(saved.updatedAt > restored.updatedAt)
+  await assert.rejects(() => p.saveDocumentContent(shared.id, 'Stale content', expected), /changed/)
+  assert.equal((await p.getEntity(shared.id)).content, 'New revision')
+})
+
+test('World Chat sanitizes foreign context and concurrent messages allocate distinct durable order', async () => {
+  const world = await w.createWorld('Concurrent Chat'), other = await w.createWorld('Foreign')
+  const foreign = await p.createNote(other.id)
+  const conversation = await chat.createChat(world.id)
+  await chat.saveChatContextProfile(conversation.id, { ...conversation.contextProfile, noteIds: [foreign.id], structuralIds: ['foreign-scene'], includeLastScene: true, summaryRange: 'all' })
+  const current = await chat.getChat(conversation.id)
+  assert.deepEqual(current.contextProfile.noteIds, [])
+  assert.deepEqual(current.contextProfile.structuralIds, [])
+  assert.equal(current.contextProfile.includeLastScene, false)
+  await Promise.all([chat.createChatMessage(current, 'user', 'One'), chat.createChatMessage(current, 'assistant', 'Two')])
+  const messages = await chat.listChatMessages(world.id, current.id)
+  assert.deepEqual(messages.map(message => message.order), [0, 1])
+  assert.ok(messages.every(message => message.worldId === world.id))
+  await assert.rejects(() => chat.createChat(world.id, 'Character', 'character'), /Book story position/)
+})
+
+test('creating a Book in World commits the link and rejects missing Worlds without orphan Books', async () => {
+  const world = await w.createWorld('New Book owner')
+  const created = await w.createBookInWorld(world.id, ai.initialAiSettings, 'Linked Book')
+  assert.equal(created.book.worldId, world.id)
+  assert.equal((await w.listWorldBooks(world.id))[0].id, created.book.id)
+  const before = (await p.listBooks()).length
+  await assert.rejects(() => w.createBookInWorld('missing-world', ai.initialAiSettings), /no longer exists/)
+  assert.equal((await p.listBooks()).length, before)
+})
+
+test('confirmed reassignment detects stale links and cleans local-to-old-World dependencies without copying', async () => {
+  const old = await w.createWorld('Old'), next = await w.createWorld('New')
+  const { book } = await p.createBook(ai.initialAiSettings)
+  await w.setBookWorld(book.id, old.id)
+  const local = await p.createCodexEntry(book.id, 'Local'), shared = await p.createCodexEntry(old.id, 'Shared')
+  const edge = await p.createCodexDependency(book.id, local.id, shared.id)
+  const impact = await w.getBookWorldChangeImpact(book.id, next.id)
+  assert.equal(impact.previousWorldTitle, 'Old')
+  assert.equal(impact.nextWorldTitle, 'New')
+  assert.equal(impact.unavailableDependencies, 1)
+  await assert.rejects(() => w.changeBookWorld(book.id, next.id), /confirm/i)
+  await w.changeBookWorld(book.id, next.id, { confirmed: true, expectedWorldId: old.id })
+  assert.equal(await (await p.database()).table('codexDependencies').get(edge.id), undefined)
+  assert.equal((await p.getEntity(shared.id)).worldId, old.id)
+  assert.equal((await p.getEntity(local.id)).bookId, book.id)
+  await assert.rejects(() => w.changeBookWorld(book.id, '', { confirmed: true, expectedWorldId: old.id }), /changed/i)
+})
+
+test('Book messages cannot attach to World Chats through raw persistence writes', async () => {
+  const world = await w.createWorld('Protected Chat tree')
+  const { book } = await p.createBook(ai.initialAiSettings)
+  const conversation = await chat.createChat(world.id)
+  const bookChat = await chat.createChat(book.id)
+  const message = await chat.createChatMessage(bookChat, 'user', 'Book-only secret')
+  const db = await p.database()
+  await assert.rejects(() => db.table('entities').update(message.id, { parentId: conversation.id }), /owner|Chat/i)
+  await assert.rejects(() => db.table('entities').put({ ...message, parentId: conversation.id }), /owner|Chat/i)
+  await assert.rejects(() => db.table('entities').bulkAdd([{ ...message, id: 'raw-cross-owner-message', parentId: conversation.id }]), /owner|Chat/i)
+  assert.equal(await p.getEntity('raw-cross-owner-message'), undefined)
+  assert.equal((await p.getEntity(message.id)).parentId, bookChat.id)
+  await p.deleteEntityTree(conversation.id)
+  assert.equal((await p.getEntity(message.id)).content, 'Book-only secret')
+})

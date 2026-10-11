@@ -10,7 +10,7 @@ import { dialogueHighlight } from './DialogueHighlight'
 import { autocompleteDecorationField, autocompletePositionBlocked, sameAutocompleteSnapshot, setAutocompleteDecoration } from './autocomplete-decoration'
 import { markdownTableRanges } from './markdown-tables'
 import { syntaxTree } from '@codemirror/language'
-import { Annotation, Compartment, EditorState, StateEffect, StateField, Transaction, type Text } from '@codemirror/state'
+import { Annotation, Compartment, EditorState, Prec, StateEffect, StateField, Transaction, type Text } from '@codemirror/state'
 import { findTriggerRanges, type CodexMentionTerm } from '../codex/codex-trigger-service'
 import { normalizeTranscriptForInsertion } from '../speech/stt-service'
 import {
@@ -52,6 +52,7 @@ type MarkdownEditorProps = {
   readOnly?: boolean
   mentionTerms?: CodexMentionTerm[]
   onMentionClick?: (mention: CodexMentionClick) => void
+  onArticleLink?: (articleId: string) => void
   onHistoryChange?: (state: { canUndo: boolean; canRedo: boolean }) => void
 }
 
@@ -227,7 +228,9 @@ const generationHighlightField = StateField.define<DecorationSet>({
 })
 
 function buildLivePreviewDecorations(state: EditorState): DecorationSet {
-  const activeLine = state.doc.lineAt(state.selection.main.head).number
+  // Read-only DOM selection follows keyboard focus onto preview links. Revealing
+  // source on that line would remove the focused span during the next rebuild.
+  const activeLine = state.readOnly ? -1 : state.doc.lineAt(state.selection.main.head).number
   const tables = [...markdownTableRanges(state), ...protectedRanges(state.doc.toString())]
   const ranges: any[] = []
   const hide = (from: number, to: number) => {
@@ -302,13 +305,17 @@ function buildLivePreviewDecorations(state: EditorState): DecorationSet {
 
       if (node.name === 'Link') {
         const raw = state.doc.sliceString(node.from, node.to)
-        const matchResult = raw.match(/^\[([^\]\n]+)\]\(([^)\n]+)\)$/)
+        const matchResult = raw.match(/^\[((?:\\.|[^\]\\\n])+)\]\(([^)\n]+)\)$/)
         if (matchResult) {
           const labelFrom = node.from + 1
           const labelTo = labelFrom + matchResult[1].length
           hide(node.from, labelFrom)
           hide(labelTo, node.to)
-          mark(labelFrom, labelTo, 'cm-live-link')
+          if (matchResult[2].startsWith('arc-codex:')) {
+            ranges.push(Decoration.mark({ class: 'cm-live-link cm-article-link', attributes: { 'data-article-id': matchResult[2].slice('arc-codex:'.length), role: 'link', tabindex: '0', 'aria-label': `Open article ${matchResult[1]}` } }).range(labelFrom, labelTo))
+          } else {
+            ranges.push(Decoration.mark({ class: 'cm-live-link', attributes: { 'data-link-href': matchResult[2], role: 'link', tabindex: '0', 'aria-label': `Open link ${matchResult[1]}` } }).range(labelFrom, labelTo))
+          }
           return false
         }
       }
@@ -486,7 +493,7 @@ function runHistoryCommand(view: EditorView | null, command: (target: EditorView
 }
 
 const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor(
-  { value, onChange, historyKey, bookId = '', onEditBlock, showBeats = true, highlightDialogue = false, onBeatAction, onSelectionChange, ariaLabel = 'Markdown editor', className = '', readOnly = false, mentionTerms = [], onMentionClick, onHistoryChange, onAutocompleteInput, onAutocompleteInvalidate, onAutocompleteAccept },
+  { value, onChange, historyKey, bookId = '', onEditBlock, showBeats = true, highlightDialogue = false, onBeatAction, onSelectionChange, ariaLabel = 'Markdown editor', className = '', readOnly = false, mentionTerms = [], onMentionClick, onArticleLink, onHistoryChange, onAutocompleteInput, onAutocompleteInvalidate, onAutocompleteAccept },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null)
@@ -506,6 +513,8 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
   const onHistoryChangeRef = useRef(onHistoryChange)
   const mentionTermsRef = useRef(mentionTerms)
   const onMentionClickRef = useRef(onMentionClick)
+  const onArticleLinkRef = useRef(onArticleLink)
+  onArticleLinkRef.current = onArticleLink
   const activeGenerationRef = useRef<ActiveGeneration | null>(null)
   const latestGenerationRef = useRef<GenerationRecord | null>(null)
   const activeDictationRef = useRef<ActiveDictation | null>(null)
@@ -518,6 +527,24 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
   const compositionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const autocompleteEpochRef = useRef(0)
 
+  function openPreviewLink(event: Event) {
+    const link = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-article-id], [data-link-href]') : null
+    if (!link) return false
+    try {
+      if (link.dataset.articleId !== undefined) {
+        if (!onArticleLinkRef.current) return false
+        const id = decodeURIComponent(link.dataset.articleId)
+        if (!id) return false
+        onArticleLinkRef.current(id)
+      } else {
+        const href = link.dataset.linkHref!
+        if (!['https:', 'http:', 'mailto:', 'tel:'].includes(new URL(href, window.location.href).protocol)) return false
+        window.open(href, '_blank', 'noopener,noreferrer')
+      }
+      event.preventDefault()
+      return true
+    } catch { return false }
+  }
 
   function clearAutocompleteSuggestion() {
     const view = viewRef.current
@@ -788,6 +815,11 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
         EditorState.readOnly.of(readOnly),
         editableCompartmentRef.current.of(EditorView.editable.of(!readOnly)),
         history(),
+        // Keymaps install their own DOM handler and consume Enter before lower
+        // precedence handlers. A focused preview link must navigate, not edit.
+        Prec.highest(EditorView.domEventHandlers({
+          keydown: event => event.key === 'Enter' && !event.isComposing && openPreviewLink(event),
+        })),
         keymap.of([
           { key: 'Tab', run: view => {
             const suggestion = view.state.field(autocompleteDecorationField)
@@ -802,6 +834,9 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
         autocompleteDecorationField,
         mentionField,
         EditorView.domEventHandlers({
+          // Navigate before CodeMirror moves the cursor onto the linked line and
+          // removes its preview decoration. Physical clicks are handled here.
+          mousedown: event => event.button === 0 && openPreviewLink(event),
           compositionstart: () => {
             cancelCompositionInput()
             composingRef.current = true
@@ -830,6 +865,9 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
             return false
           },
           click: (event, view) => {
+            // Assistive/programmatic activation has no mousedown. Do not open a
+            // physical mouse click twice after it was handled above.
+            if (event.button === 0 && event.detail === 0 && openPreviewLink(event)) return true
             if (event.button !== 0 || !view.state.selection.main.empty) return false
             const element = event.target instanceof Element ? event.target.closest<HTMLElement>('.cm-codex-mention') : null
             const key = element?.dataset.codexTerm

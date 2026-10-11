@@ -57,9 +57,18 @@ export async function testSyncConnection(settings: SyncSettings): Promise<{ id: 
   return (await apiFetch(settings, '/me')).json()
 }
 
-export async function listRemoteBooks(settings: SyncSettings): Promise<RemoteBook[]> {
+export async function listRemoteOwners(settings: SyncSettings): Promise<RemoteBook[]> {
   const result = await (await apiFetch(settings, '/books')).json()
   return Array.isArray(result.books) ? result.books : []
+}
+
+/** World owners share the opaque archive provider, not the Book archive contract. */
+export const WORLD_REMOTE_PREFIX = 'arc-world:'
+export async function listRemoteBooks(settings: SyncSettings): Promise<RemoteBook[]> {
+  return (await listRemoteOwners(settings)).filter(owner => !owner.clientBookId.startsWith(WORLD_REMOTE_PREFIX))
+}
+export async function listRemoteWorlds(settings: SyncSettings): Promise<RemoteBook[]> {
+  return (await listRemoteOwners(settings)).filter(owner => owner.clientBookId.startsWith(WORLD_REMOTE_PREFIX))
 }
 
 export async function createRemoteBook(settings: SyncSettings, clientBookId: string, title: string): Promise<{ book: RemoteBook; etag: string }> {

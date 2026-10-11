@@ -4,7 +4,7 @@ import type { CodexCheckpoint, TimelineSummary } from '../features/codex/codex-t
 import { ensureLoreTypesWithDb, resolveLoreType, type LoreType } from '../features/codex/lore-types.ts'
 import { buildSummarySource } from '../features/writing/summary-service.ts'
 import { portableWorldBookSnapshot } from './book-archive.ts'
-import { codexTriggerConflicts, entityAvailableInBook } from '../features/worlds/world-service.ts'
+import { codexTriggerConflicts, entityAvailableInBook, entityAvailableInOwner } from '../features/worlds/world-service.ts'
 import { documentBlocks, encodeDocumentBlock } from '../features/editor/document-projection.ts'
 import { PROSE_PROJECTION_VERSION } from '../features/editor/document-projection.ts'
 import { sceneWritingValues, validateSceneWritingPatch, type SceneWritingOverrides, type SceneWritingField } from '../features/writing/scene-writing'
@@ -78,6 +78,8 @@ export type BookMetadata = {
   tense: string
   language: string
 }
+export type WorkspaceOwner = { type: 'book' | 'world'; id: string }
+export type OwnerWorkspaceState = { lastOpenedCodexEntryId: string }
 export type WorldEntity = ArcEntity & { type: 'world'; title: string }
 export type BookEntity = ArcEntity & { type: 'book'; title: string; worldId?: string; hiddenWorldEntryIds?: string[] } & Partial<Omit<BookMetadata, 'title'>>
 export type SeriesEntity = ArcEntity & { type: 'series'; title: string }
@@ -202,8 +204,37 @@ function installWorldPersistenceValidation(db: Dexie) {
   const notifications = new WeakMap<object, { books: Set<string>; worlds: boolean }>()
   const mutations = new WeakMap<object, Promise<unknown>>()
   db.use({ stack: 'dbcore', name: 'world-owner-validation', create(core) {
-    return { ...core, table(name) {
+    return { ...core, transaction(stores, mode, options) {
+      // Raw edge writes must read owners/endpoints inside the same locked transaction.
+      const validatedStores = mode === 'readwrite' && stores.includes('codexDependencies') && !stores.includes('entities') ? [...stores, 'entities'] : stores
+      return core.transaction(validatedStores, mode, options)
+    }, table(name) {
       const table = core.table(name)
+      if (name === 'codexDependencies') return { ...table, async mutate(request) {
+        if (request.type !== 'add' && request.type !== 'put') return table.mutate(request)
+        const execute = async () => {
+          const entities = core.table('entities')
+          for (const edge of request.values as CodexDependencyEdge[]) {
+            const [source, target, owner] = await Promise.all([
+              entities.get({ trans: request.trans, key: edge.sourceId }) as Promise<CodexEntryEntity | undefined>,
+              entities.get({ trans: request.trans, key: edge.targetId }) as Promise<CodexEntryEntity | undefined>,
+              entities.get({ trans: request.trans, key: edge.bookId }) as Promise<BookEntity | WorldEntity | undefined>,
+            ])
+            if (!owner || !['book', 'world'].includes(owner.type) || source?.type !== 'codexEntry' || source.bookId !== edge.bookId || !entityAvailableInOwner(source, owner)) throw new Error('The dependency source must have its canonical owner.')
+            if (target?.type !== 'codexEntry' || source.id === target.id || !entityAvailableInOwner(target, owner) || (owner.type === 'world' && target.worldId !== owner.id)) throw new Error('The dependency target is not available in this Book or World.')
+            // Archive/sync restores may legitimately contain archived endpoints.
+            // Interactive creation rejects archived targets at its service boundary.
+          }
+          return table.mutate(request)
+        }
+        const pending = mutations.get(request.trans) ?? Dexie.Promise.resolve()
+        const operation = pending.then(execute).catch(error => {
+          try { request.trans.abort() } catch { /* A sibling mutation may already have aborted it. */ }
+          throw error
+        })
+        mutations.set(request.trans, operation)
+        return operation
+      } }
       if (name !== 'entities') return table
       return { ...table, async mutate(request) {
         if (request.type !== 'add' && request.type !== 'put') return table.mutate(request)
@@ -222,9 +253,31 @@ function installWorldPersistenceValidation(db: Dexie) {
           const entries = [...next.values()].filter(row => row.type === 'codexEntry') as CodexEntryEntity[]
           for (const row of request.values as ArcEntity[]) {
             if (row.type === 'book' && row.worldId && next.get(row.worldId)?.type !== 'world') throw new Error('This World no longer exists.')
+            if (row.bookId && ['codexEntry', 'summary', 'note', 'chat', 'chatMessage', 'settings'].includes(row.type)) {
+              const owner = next.get(row.bookId)
+              if (!owner || !['book', 'world'].includes(owner.type) || (owner.type === 'world' ? row.worldId !== owner.id : row.worldId !== undefined)) throw new Error('The workspace resource must have a canonical Book or World owner.')
+            }
+            if (['note', 'chat', 'chatMessage'].includes(row.type)) {
+              const owner = next.get(String(row.bookId))
+              if (!owner || !['book', 'world'].includes(owner.type)) throw new Error('This workspace owner no longer exists.')
+              const previous = rows.find(item => item.id === row.id)
+              if (previous && (previous.bookId !== row.bookId || previous.type !== row.type)) throw new Error('Notes and Chat cannot change owner.')
+              if (row.type === 'chatMessage') {
+                const parent = next.get(String(row.parentId))
+                if (parent?.type !== 'chat' || parent.bookId !== owner.id || parent.worldId !== row.worldId) throw new Error('The Chat belongs to another owner or no longer exists.')
+              }
+              if (owner.type === 'world') {
+                if (row.type !== 'chatMessage' && row.parentId !== owner.id) throw new Error('The resource parent must be its workspace owner.')
+                if (row.type === 'chat') {
+                  if (row.character) throw new Error('Character Chat requires a Book story position.')
+                  row.contextProfile = worldContextProfile(row.contextProfile as GenerationContextProfile, [...next.values()], owner.id)
+                  row.skillNoteIds = uniqueIds(row.skillNoteIds as string[] ?? []).filter(id => next.get(id)?.type === 'note' && next.get(id)?.bookId === owner.id)
+                }
+              }
+            }
             if (row.type === 'codexEntry') {
               const owner = next.get(String(row.bookId))
-              if (!owner || !['book', 'world'].includes(owner.type) || (owner.type === 'world' ? row.worldId !== owner.id : Boolean(row.worldId))) throw new Error('The Codex entry must have a canonical book or World owner.')
+              if (!owner || !['book', 'world'].includes(owner.type) || (owner.type === 'world' ? row.worldId !== owner.id : row.worldId !== undefined)) throw new Error('The Codex entry must have a canonical book or World owner.')
               const conflicts = codexTriggerConflicts(row as CodexEntryEntity, row.autoIncludeTriggers as string[] ?? [], entries)
               if (conflicts.length) throw Object.assign(new Error(`Automatic trigger “${conflicts[0].trigger}” is already reserved by “${conflicts[0].title}” in this owner.`), { conflicts })
             }
@@ -567,10 +620,10 @@ export async function listEntitiesByParent(parentId: string): Promise<ArcEntity[
 export async function listEntitiesByBook(bookId: string, type?: EntityType): Promise<ArcEntity[]> {
   const db = await database()
   return db.transaction('r', db.table('entities'), async () => {
-    const book = await db.table('entities').get(bookId) as BookEntity | undefined
+    const owner = await db.table('entities').get(bookId) as BookEntity | WorldEntity | undefined
     const locals: ArcEntity[] = await db.table('entities').where('bookId').equals(bookId).toArray()
-    const shared: ArcEntity[] = book?.type === 'book' && book.worldId ? await db.table('entities').where('bookId').equals(book.worldId).toArray() : []
-    return [...locals, ...shared].filter(entity => (!book || book.type !== 'book' ? entity.bookId === bookId : entityAvailableInBook(entity, book)) && (!type || entity.type === type))
+    const shared: ArcEntity[] = owner?.type === 'book' && owner.worldId ? await db.table('entities').where('bookId').equals(owner.worldId).toArray() : []
+    return [...locals, ...shared].filter(entity => (owner && ['book', 'world'].includes(owner.type) ? entityAvailableInOwner(entity, owner) : entity.bookId === bookId) && (!type || entity.type === type))
   })
 }
 
@@ -696,7 +749,7 @@ export async function ensureBookAiSettings(bookId: string, _defaults: AiSettings
   return makeBookAiSettingsEntity(bookId, await getBookAiSettings(bookId, loadAiSettings().favorites))
 }
 
-type BookProfileSelectionsEntity = ArcEntity & { settingsType: 'profiles-book'; value: BookProfileSelections; definitions?: SettingsProfile[]; modelMetadata?: Record<string, number> }
+type BookProfileSelectionsEntity = ArcEntity & { settingsType: 'profiles-book' | 'profiles-world'; value: BookProfileSelections; definitions?: SettingsProfile[]; modelMetadata?: Record<string, number> }
 const profileMigrationQueue = new KeyedAsyncQueue()
 function validatedBookModelMetadata(value: unknown): Record<string, number> {
   if (value === undefined) return {}
@@ -782,10 +835,12 @@ async function readBookProfileSelectionsEntity(bookId: string): Promise<BookProf
 }
 
 export async function getBookProfileSelections(bookId: string): Promise<BookProfileSelections> {
+  if (await getWorld(bookId)) return getWorldProfileSelections(bookId)
   return { ...(await readBookProfileSelectionsEntity(bookId)).value }
 }
 
 export async function saveBookProfileSelections(bookId: string, value: BookProfileSelections): Promise<BookProfileSelections> {
+  if (await getWorld(bookId)) return saveWorldProfileSelections(bookId, value)
   const snapshot = structuredClone(value)
   return withProfileReferenceLock(async () => {
     await getBookProfileSelections(bookId)
@@ -805,7 +860,9 @@ export async function saveBookProfileSelections(bookId: string, value: BookProfi
 }
 
 export async function listSettingsProfileUsage(profileId: string): Promise<Array<{ id: string; title: string }>> {
-  const books = await listBooks(), used: Array<{ id: string; title: string }> = []
+  const db = await database()
+  const books: Array<BookEntity | WorldEntity> = [...await listBooks(), ...await db.table('entities').where('type').equals('world').toArray()]
+  const used: Array<{ id: string; title: string }> = []
   for (const book of books) {
     let selections: BookProfileSelections
     try { selections = await getBookProfileSelections(book.id) } catch (error) {
@@ -828,12 +885,18 @@ function withBookModelMetadata(settings: AiSettings, metadata: Record<string, nu
   return settings
 }
 export async function getBookAiSettings(bookId: string, globalFavorites: string[]): Promise<AiSettings> {
+  if (await getWorld(bookId)) {
+    const value = await getWorldProfileSelections(bookId)
+    const entity = await getEntity<ArcEntity>(bookProfilesId(bookId))
+    return withBookModelMetadata(resolveProfileSettings(value, globalFavorites), validatedBookModelMetadata(entity?.modelMetadata))
+  }
   const entity = await readBookProfileSelectionsEntity(bookId)
   return withBookModelMetadata(resolveProfileSettings(entity.value, globalFavorites), validatedBookModelMetadata(entity.modelMetadata))
 }
 
 /** Compatibility for catalog metadata writers, not a back door to edit a shared profile. */
 export async function saveBookAiSettings(bookId: string, settings: AiSettings): Promise<AiSettings> {
+  if (await getWorld(bookId)) return saveWorldAiSettings(bookId, settings)
   const snapshot = copyAiSettings(settings)
   await getBookProfileSelections(bookId)
   const db = await database()
@@ -859,6 +922,7 @@ export async function copyDefaultAiSettingsToBook(bookId: string, _defaults: AiS
 }
 
 export async function getBookContextSettings(bookId: string): Promise<BookContextSettings> {
+  if (await getWorld(bookId)) return getWorldContextSettings(bookId)
   const db = await database()
   return db.transaction('rw', db.table('entities'), async () => {
     if ((await db.table('entities').get(bookId))?.type !== 'book') throw new Error('This book no longer exists.')
@@ -874,6 +938,7 @@ export async function getBookContextSettings(bookId: string): Promise<BookContex
 }
 
 export async function saveBookContextSettings(bookId: string, value: BookContextSettings): Promise<BookContextSettings> {
+  if (await getWorld(bookId)) return saveWorldContextSettings(bookId, value)
   const normalized = normalizeBookContextSettings(value), db = await database()
   return db.transaction('rw', db.table('entities'), async () => {
     if ((await db.table('entities').get(bookId))?.type !== 'book') throw new Error('This book no longer exists.')
@@ -893,6 +958,145 @@ export async function rememberLastOpenedScene(bookId: string, sceneId: string) {
   if (settings.lastOpenedSceneId === sceneId) return settings
   return saveBookContextSettings(bookId, { ...settings, lastOpenedSceneId: sceneId })
 }
+
+/** Owner-general access keeps getBook strictly Book-only. Legacy bookId fields are canonical owner IDs. */
+export async function getOwner(ownerId: string): Promise<BookEntity | WorldEntity | undefined> {
+  const row = await getEntity(ownerId)
+  return row && (row.type === 'book' || row.type === 'world') ? row as BookEntity | WorldEntity : undefined
+}
+export async function getBook(ownerId: string): Promise<BookEntity | undefined> {
+  const owner = await getOwner(ownerId)
+  return owner?.type === 'book' ? owner : undefined
+}
+export async function getWorld(ownerId: string): Promise<WorldEntity | undefined> {
+  const owner = await getOwner(ownerId)
+  return owner?.type === 'world' ? owner : undefined
+}
+export async function listEntitiesByOwner(ownerId: string, type?: EntityType): Promise<ArcEntity[]> {
+  if (!await getOwner(ownerId)) throw new Error('This workspace owner no longer exists.')
+  return listEntitiesByBook(ownerId, type)
+}
+function worldContextProfile(value: Partial<GenerationContextProfile> | undefined, rows: ArcEntity[], ownerId: string): GenerationContextProfile {
+  const profile = normalizeContextProfile(value)
+  const available = (id: string, type: EntityType) => rows.some(row => row.id === id && row.type === type && row.bookId === ownerId && row.worldId === ownerId)
+  return { ...profile, includeLastScene: false, includePreviousSceneWhenEmpty: false, loreAtCurrentScene: false, structuralIds: [], summaryRange: 'none', noteIds: profile.noteIds.filter(id => available(id, 'note')), codexEntryIds: profile.codexEntryIds.filter(id => available(id, 'codexEntry')) }
+}
+async function requireWorldOwner(db: any, ownerId: string): Promise<WorldEntity> {
+  const owner = await db.table('entities').get(ownerId) as WorldEntity | undefined
+  if (owner?.type !== 'world') throw new Error('This World no longer exists.')
+  return owner
+}
+export async function getWorldContextSettings(ownerId: string): Promise<BookContextSettings> {
+  const db = await database()
+  return db.transaction('rw', db.table('entities'), async () => {
+    await requireWorldOwner(db, ownerId)
+    const existing = await db.table('entities').get(bookContextSettingsId(ownerId))
+    return saveWorldContextSettings(ownerId, existing?.value ?? loadDefaultBookContextSettings())
+  })
+}
+export async function saveWorldContextSettings(ownerId: string, value: BookContextSettings): Promise<BookContextSettings> {
+  const snapshot = structuredClone(value), db = await database()
+  return db.transaction('rw', db.table('entities'), async () => {
+    await requireWorldOwner(db, ownerId)
+    const rows = await db.table('entities').where('bookId').equals(ownerId).toArray() as ArcEntity[]
+    const normalized = normalizeBookContextSettings(snapshot)
+    normalized.lastOpenedSceneId = ''
+    normalized.previousScenesForCodexTriggers = 0
+    for (const type of ['scene', 'codex', 'note', 'chat'] as const) normalized.profiles[type] = worldContextProfile(normalized.profiles[type], rows, ownerId)
+    const existing = await db.table('entities').get(bookContextSettingsId(ownerId))
+    const next = { ...makeBookContextSettingsEntity(ownerId, normalized, existing?.createdAt), worldId: ownerId, settingsType: 'context-world', updatedAt: Math.max(Date.now(), Number(existing?.updatedAt ?? 0) + 1) }
+    if (!existing || JSON.stringify(existing.value) !== JSON.stringify(normalized)) await db.table('entities').put(next)
+    return normalized
+  })
+}
+export async function getWorldProfileSelections(ownerId: string): Promise<BookProfileSelections> {
+  const db = await database()
+  return db.transaction('rw', db.table('entities'), async () => {
+    await requireWorldOwner(db, ownerId)
+    const existing = await db.table('entities').get(bookProfilesId(ownerId)) as BookProfileSelectionsEntity | undefined
+    if (existing) {
+      if (existing.settingsType !== 'profiles-world' || existing.bookId !== ownerId || existing.worldId !== ownerId) throw new Error('Invalid World profile selections. Original data was preserved.')
+      if (existing.definitions) {
+        const value = importSettingsProfiles(existing.definitions, existing.value)
+        const { definitions: _portable, ...local } = existing
+        await db.table('entities').put({ ...local, value })
+        return value
+      }
+      return validateBookProfileSelections(existing.value)
+    }
+    const value = defaultBookProfileSelections()
+    await db.table('entities').put({ ...makeBookProfileSelectionsEntity(ownerId, value), worldId: ownerId, settingsType: 'profiles-world' })
+    return { ...value }
+  })
+}
+export async function saveWorldProfileSelections(ownerId: string, value: BookProfileSelections): Promise<BookProfileSelections> {
+  const snapshot = structuredClone(value)
+  return withProfileReferenceLock(async () => {
+    await getWorldProfileSelections(ownerId)
+    const db = await database()
+    const clean = await db.transaction('rw', db.table('entities'), async () => {
+      await requireWorldOwner(db, ownerId)
+      const clean = validateBookProfileSelections(snapshot)
+      const existing = await db.table('entities').get(bookProfilesId(ownerId))
+      if (!existing || existing.settingsType !== 'profiles-world' || existing.bookId !== ownerId || existing.worldId !== ownerId) throw new Error('World profiles changed. Reopen Settings.')
+      await db.table('entities').put({ ...existing, value: clean, updatedAt: Math.max(Date.now(), existing.updatedAt + 1) })
+      return clean
+    })
+    notifySettingsProfilesChanged(ownerId)
+    return clean
+  })
+}
+async function saveWorldAiSettings(ownerId: string, settings: AiSettings): Promise<AiSettings> {
+  const snapshot = copyAiSettings(settings)
+  await getWorldProfileSelections(ownerId)
+  const db = await database()
+  await db.transaction('rw', db.table('entities'), async () => {
+    await requireWorldOwner(db, ownerId)
+    const entity = await db.table('entities').get(bookProfilesId(ownerId))
+    const current = resolveProfileSettings(entity.value, snapshot.favorites)
+    const modelMetadata = validatedBookModelMetadata(entity.modelMetadata)
+    for (const role of modelRoles) {
+      const model = snapshot[`${role}Model`], length = snapshot[`${role}ModelContextLength`]
+      if (model.trim() && snapshot.provider === current.provider && model === current[`${role}Model`] && typeof length === 'number' && Number.isSafeInteger(length) && length > 0) modelMetadata[`${snapshot.provider}:${model}`] = length
+    }
+    await db.table('entities').put({ ...entity, modelMetadata })
+  })
+  return getBookAiSettings(ownerId, snapshot.favorites)
+}
+export async function getOwnerWorkspaceState(ownerId: string): Promise<OwnerWorkspaceState> {
+  const db = await database()
+  return db.transaction('r', db.table('entities'), async () => {
+    const owner = await db.table('entities').get(ownerId) as BookEntity | WorldEntity | undefined
+    if (!owner || !['book', 'world'].includes(owner.type)) throw new Error('This workspace owner no longer exists.')
+    const row = await db.table('entities').get(`settings-workspace-${ownerId}`)
+    const entryId = String(row?.value?.lastOpenedCodexEntryId ?? '')
+    const entry = entryId ? await db.table('entities').get(entryId) : undefined
+    const available = entry?.type === 'codexEntry' && (owner.type === 'world' ? entry.bookId === ownerId && entry.worldId === ownerId : entityAvailableInBook(entry, owner))
+    return { lastOpenedCodexEntryId: available ? entryId : '' }
+  })
+}
+export async function saveOwnerWorkspaceState(ownerId: string, value: Partial<OwnerWorkspaceState>): Promise<OwnerWorkspaceState> {
+  const snapshot = structuredClone(value), db = await database()
+  return db.transaction('rw', db.table('entities'), async () => {
+    const owner = await db.table('entities').get(ownerId) as BookEntity | WorldEntity | undefined
+    if (!owner || !['book', 'world'].includes(owner.type)) throw new Error('This workspace owner no longer exists.')
+    const current = await getOwnerWorkspaceState(ownerId)
+    const next = { ...current, ...snapshot }
+    if (next.lastOpenedCodexEntryId) {
+      const entry = await db.table('entities').get(next.lastOpenedCodexEntryId)
+      if (entry?.type !== 'codexEntry' || (owner.type === 'world' ? entry.bookId !== ownerId || entry.worldId !== ownerId : !entityAvailableInBook(entry, owner))) throw new Error('This article is not available in the current owner.')
+    }
+    const id = `settings-workspace-${ownerId}`, previous = await db.table('entities').get(id), now = Date.now()
+    await db.table('entities').put({ id, type: 'settings', settingsType: 'workspace-owner', bookId: ownerId, ...(owner.type === 'world' ? { worldId: ownerId } : {}), parentId: ownerId, value: next, createdAt: previous?.createdAt ?? now, updatedAt: Math.max(now, Number(previous?.updatedAt ?? 0) + 1) })
+    return next
+  })
+}
+export const getOwnerContextSettings = getBookContextSettings
+export const saveOwnerContextSettings = saveBookContextSettings
+export const getOwnerProfileSelections = getBookProfileSelections
+export const saveOwnerProfileSelections = saveBookProfileSelections
+export const getOwnerAiSettings = getBookAiSettings
+export const saveOwnerAiSettings = saveBookAiSettings
 
 export async function createStructuralEntity(
   type: StructuralEntityType,
@@ -928,6 +1132,9 @@ export async function createNote(bookId: string, title = 'Untitled Note'): Promi
   const now = Date.now()
   const note: NoteEntity = { id: makeId('note'), type: 'note', bookId, parentId: bookId, title, content: '', createdAt: now, updatedAt: now }
   await db.transaction('rw', db.table('entities'), async () => {
+    const owner = await db.table('entities').get(bookId) as ArcEntity | undefined
+    if (!owner || !['book', 'world'].includes(owner.type)) throw new Error('This workspace owner no longer exists.')
+    if (owner.type === 'world') note.worldId = bookId
     await db.table('entities').put(note)
     await touchAncestors(db, bookId, now)
   })
@@ -983,9 +1190,9 @@ export async function saveSummaryContent(summaryIdValue: string, content: string
     const current = await db.table('entities').get(summaryIdValue) as SummaryEntity | undefined
     if (!current || current.type !== 'summary') throw new Error(`Cannot save missing summary ${summaryIdValue}`)
     if (requestingBookId !== undefined) {
-      const book = await db.table('entities').get(requestingBookId) as BookEntity | undefined
+      const book = await db.table('entities').get(requestingBookId) as BookEntity | WorldEntity | undefined
       const source = await db.table('entities').get(current.sourceEntityId) as StructuralEntity | CodexEntryEntity | undefined
-      if (!entityAvailableInBook(current, book) || !source || !['act', 'chapter', 'scene', 'codexEntry'].includes(source.type) || !entityAvailableInBook(source, book) || isCodexEntryArchived(source) || current.sourceType !== source.type || current.parentId !== source.id || current.bookId !== source.bookId || current.worldId !== source.worldId) throw new Error('The summary source is unavailable or archived in this book. The previous summary was kept.')
+      if (!entityAvailableInOwner(current, book) || !source || !['act', 'chapter', 'scene', 'codexEntry'].includes(source.type) || !entityAvailableInOwner(source, book) || isCodexEntryArchived(source) || current.sourceType !== source.type || current.parentId !== source.id || current.bookId !== source.bookId || current.worldId !== source.worldId) throw new Error('The summary source is unavailable or archived in this owner. The previous summary was kept.')
       const latest = await buildSummarySource(source.id, requestingBookId)
       if (latest.sourceRevision !== sourceRevision) throw new Error('The source changed during generation. Regenerate its summary again.')
     }
@@ -1260,7 +1467,7 @@ export async function deleteEntity(id: string) {
   const db = await database()
   const linked = await db.table('entities').get(id) as ArcEntity | undefined
   if (linked?.type === 'world') throw new Error('Use deleteWorld to delete an empty World safely.')
-  if (linked?.type === 'codexEntry') { await deleteEntityTree(id); return }
+  if (linked && ['codexEntry', 'note', 'chat'].includes(linked.type)) { await deleteEntityTree(id); return }
   await db.transaction('rw', db.table('entities'), db.table('codexDependencies'), db.table('illustrations'), db.table('illustrationUndo'), db.table('imageJobs'), db.table('galleryImages'), db.table('syncLinks'), db.table('syncState'), db.table('meta'), async () => {
     await deleteImageJobsWithDb(db, [id])
     await db.table('illustrations').where('entryId').equals(id).delete()
@@ -1287,7 +1494,7 @@ export async function saveDocumentContent(entityId: string, content: string, exp
     if (!current) throw new Error(`Cannot save missing entity ${entityId}`)
     if (expected && (current.bookId !== expected.bookId || current.updatedAt !== expected.updatedAt || String(current.content ?? '') !== expected.content)) throw new Error('This document changed after the proposal was created. Read it again and prepare a new edit.')
 
-    const now = Date.now()
+    const now = Math.max(Date.now(), current.updatedAt + 1)
     const patch: Record<string, unknown> = { content, updatedAt: now }
     if (current.type === 'codexEntry') patch.sourceRevision = now
     await db.table('entities').update(entityId, patch)
@@ -1441,8 +1648,8 @@ export async function applyChatManagementChange(bookId: string, entityId: string
       await touchAncestors(db, bookId, now)
       return
     }
-    const book = await db.table('entities').get(bookId) as BookEntity | undefined
-    if (entity.type !== 'codexEntry' || !entityAvailableInBook(entity, book) || isCodexEntryArchived(entity)) throw new Error('The Codex entry is unavailable or archived.')
+    const book = await db.table('entities').get(bookId) as BookEntity | WorldEntity | undefined
+    if (entity.type !== 'codexEntry' || !entityAvailableInOwner(entity, book) || isCodexEntryArchived(entity)) throw new Error('The Codex entry is unavailable or archived.')
     await db.table('entities').update(entityId, { updatedAt: Math.max(Date.now(), entity.updatedAt + 1) })
     if (operation.kind === 'triggers') {
       if (JSON.stringify(entity.autoIncludeTriggers ?? []) !== JSON.stringify(operation.before)) throw new Error('The triggers changed since this proposal. Read settings again.')
@@ -1452,14 +1659,14 @@ export async function applyChatManagementChange(bookId: string, entityId: string
     }
     if (operation.kind !== 'dependency') throw new Error('Unsupported management operation.')
     const target = await db.table('entities').get(operation.targetId) as CodexEntryEntity | undefined
-    if (!target || target.type !== 'codexEntry' || !entityAvailableInBook(target, book) || (entity.worldId && target.worldId !== entity.worldId) || target.id === entityId || (operation.action !== 'remove' && isCodexEntryArchived(target))) throw new Error('The dependency target is unavailable.')
+    if (!target || target.type !== 'codexEntry' || !entityAvailableInOwner(target, book) || (entity.worldId && target.worldId !== entity.worldId) || target.id === entityId || (operation.action !== 'remove' && isCodexEntryArchived(target))) throw new Error('The dependency target is unavailable.')
     const current = await db.table('codexDependencies').where('[sourceId+targetId]').equals([entityId, target.id]).first() as CodexDependencyEdge | undefined
     if (operation.action === 'create') {
       if (current) throw new Error('This dependency already exists.')
       await db.table('codexDependencies').put({ id: makeId('codex-dependency'), bookId: entity.bookId, sourceId: entityId, targetId: target.id, relationLabel: operation.relationLabel, includeWithSource: operation.includeWithSource, createdAt: now, updatedAt: now })
     } else {
       const before = operation.before
-      if (!current || current.bookId !== bookId || !before || current.id !== before.id || current.updatedAt !== before.updatedAt || current.relationLabel !== before.relationLabel || current.includeWithSource !== before.includeWithSource) throw new Error('The dependency changed since this proposal. Read settings again.')
+      if (!current || current.bookId !== entity.bookId || !before || current.id !== before.id || current.updatedAt !== before.updatedAt || current.relationLabel !== before.relationLabel || current.includeWithSource !== before.includeWithSource) throw new Error('The dependency changed since this proposal. Read settings again.')
       if (operation.action === 'remove') await db.table('codexDependencies').delete(current.id)
       else await db.table('codexDependencies').update(current.id, { relationLabel: operation.relationLabel, includeWithSource: operation.includeWithSource, updatedAt: now })
     }

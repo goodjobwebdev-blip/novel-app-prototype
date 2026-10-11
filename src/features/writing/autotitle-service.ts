@@ -170,7 +170,7 @@ export async function prepareAutotitleRequest(ownerId: string, targetId: string,
     getEntity<ArcEntity>(targetId),
   ])
   if (!owner || (owner.type !== 'book' && owner.type !== 'world')) throw new Error('The current Book or World is no longer available.')
-  const worldTarget = owner.type === 'world' && targetEntity?.type === 'world' && targetEntity.id === ownerId
+  const worldTarget = owner.type === 'world' && ((targetEntity?.type === 'world' && targetEntity.id === ownerId) || (targetEntity?.bookId === ownerId && ['codexEntry', 'note'].includes(targetEntity.type) && (!targetEntity.worldId || targetEntity.worldId === ownerId)))
   const bookTarget = owner.type === 'book' && targetEntity?.type !== 'world' && (targetEntity?.type === 'book' ? targetEntity.id === ownerId : entityAvailableInBook(targetEntity, owner as BookEntity))
   if (!isSupported(targetEntity) || (!worldTarget && !bookTarget)) {
     throw new Error('That item cannot be autotitled in this Book or World.')
@@ -187,7 +187,9 @@ export async function prepareAutotitleRequest(ownerId: string, targetId: string,
   }
   const context = targetEntity.type === 'world'
     ? await contextForWorld(targetEntity)
-    : await contextForTarget(owner as BookEntity, { ...targetEntity, content: proseText(String(targetEntity.content ?? '')) }, proseEntities(await listEntitiesByBook(ownerId)))
+    : owner.type === 'world'
+      ? `# World\n${owner.title}\n\n# Authoritative ${targetEntity.type === 'note' ? 'Note' : 'Codex'} body\n${proseText(String(targetEntity.content ?? '')).trim() || '_Empty document._'}${targetEntity.type === 'codexEntry' ? `\n\n# Category\n${targetEntity.category}` : ''}`
+      : await contextForTarget(owner as BookEntity, { ...targetEntity, content: proseText(String(targetEntity.content ?? '')) }, proseEntities(await listEntitiesByBook(ownerId)))
   const language = typeof owner.language === 'string' ? owner.language : ''
   const systemPrompt = systemPromptFor(targetEntity.type as AutotitleTargetType, language)
   const userMessage = `# Target\n${targetEntity.type}: ${targetEntity.title}\n\n# Automatic context\n${context}\n\nReturn one suitable title/name.`

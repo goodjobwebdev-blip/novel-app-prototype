@@ -25,6 +25,7 @@ function countLabel(count: number, singular: string) {
 }
 
 type DashboardProps = {
+  ownerKind?: 'world' | 'book'
   bookId: string; entries: CodexEntryEntity[]; activeId: string | null; summaryStates: Record<string, SummaryState>; dependencies?: CodexDependencyEdge[]; management?: ReactNode
   onCreate: () => void; onOpen: (id: string) => void; onAutotitle: (entry: CodexEntryEntity) => void; onRename: (entry: CodexEntryEntity) => void; onArchive: (entry: CodexEntryEntity) => void; onRestore: (entry: CodexEntryEntity) => void; onDelete: (entry: CodexEntryEntity) => void; onBeforeChange: () => Promise<void>; onRefresh: () => Promise<void>
 }
@@ -37,7 +38,7 @@ export default function CodexDashboard(props: DashboardProps) {
   return <BookCodexDashboard key={props.bookId} {...props} />
 }
 
-function BookCodexDashboard({ bookId, entries, activeId, summaryStates, dependencies = [], management, onCreate, onOpen, onAutotitle, onRename, onArchive, onRestore, onDelete, onBeforeChange, onRefresh }: DashboardProps) {
+function BookCodexDashboard({ ownerKind = 'book', bookId, entries, activeId, summaryStates, dependencies = [], management, onCreate, onOpen, onAutotitle, onRename, onArchive, onRestore, onDelete, onBeforeChange, onRefresh }: DashboardProps) {
   const key = `arc-codex-dashboard-${bookId}`
   const [prefs, setPrefs] = useState(() => { try { return dashboardPreferences(JSON.parse(localStorage.getItem(key) ?? 'null')) } catch { return { ...defaultCodexDashboard } } })
   const [page, setPage] = useState(0), [error, setError] = useState(''), [saveError, setSaveError] = useState(false), [busy, setBusy] = useState(''), [world, setWorld] = useState<TimelineWorld>()
@@ -50,9 +51,10 @@ function BookCodexDashboard({ bookId, entries, activeId, summaryStates, dependen
   const { types } = useLoreTypes(bookId)
   useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
   useEffect(() => { try { localStorage.setItem(key, JSON.stringify(prefs)); setSaveError(false) } catch { setSaveError(true) } }, [key, prefs])
-  useEffect(() => { let current = true; setWorld(undefined); if (entries.some(entry => entry.checkpoints?.length)) void readTimelineWorld(bookId).then(world => { if (current) setWorld(world) }).catch(() => {}); return () => { current = false } }, [bookId, entries])
+  useEffect(() => { let current = true; setWorld(undefined); if (ownerKind === 'book' && entries.some(entry => entry.checkpoints?.length)) void readTimelineWorld(bookId).then(world => { if (current) setWorld(world) }).catch(() => {}); return () => { current = false } }, [bookId, entries, ownerKind])
   useEffect(closeActions, [bookId, page, prefs, closeActions])
   useEffect(() => {
+    if (ownerKind === 'world') { setBookData(undefined); setLoadError(''); return }
     let current = true, request = 0
     const load = async () => {
       const version = ++request
@@ -68,7 +70,7 @@ function BookCodexDashboard({ bookId, entries, activeId, summaryStates, dependen
     const changed = () => { void load() }
     window.addEventListener('arc-worlds-changed', changed)
     return () => { current = false; window.removeEventListener('arc-worlds-changed', changed) }
-  }, [bookId, entries, reload])
+  }, [bookId, entries, reload, ownerKind])
   const currentData = bookData?.visibleEntries === entries ? bookData : undefined
   useEffect(() => {
     let current = true
@@ -83,7 +85,7 @@ function BookCodexDashboard({ bookId, entries, activeId, summaryStates, dependen
   const update = (patch: Partial<CodexDashboardPreferences>) => { setPrefs(value => ({ ...value, ...patch })); if (Object.keys(patch).some(key => key !== 'view')) setPage(0) }
   const hiddenIds = useMemo(() => new Set(currentData?.book.hiddenWorldEntryIds ?? []), [currentData])
   const visibleEntries = useMemo(() => entries.filter(entry => !hiddenIds.has(entry.id)), [entries, hiddenIds])
-  const filtered = useMemo(() => queryCodexDashboard(visibleEntries, prefs, summaryStates), [visibleEntries, prefs, summaryStates])
+  const filtered = useMemo(() => queryCodexDashboard(visibleEntries, ownerKind === 'world' ? { ...prefs, scope: 'all' } : prefs, summaryStates), [visibleEntries, prefs, summaryStates, ownerKind])
   const pages = Math.max(1, Math.ceil(filtered.length / CODEX_PAGE_SIZE)), currentPage = Math.min(page, pages - 1), visible = filtered.slice(currentPage * CODEX_PAGE_SIZE, (currentPage + 1) * CODEX_PAGE_SIZE)
   const entryIds = useMemo(() => new Set(visibleEntries.map(entry => entry.id)), [visibleEntries])
   const worldEntries = useMemo(() => visibleEntries.filter(entry => entry.worldId && !entry.hiddenInBook), [visibleEntries])
@@ -104,12 +106,12 @@ function BookCodexDashboard({ bookId, entries, activeId, summaryStates, dependen
   return <section className="codex-dashboard" aria-label="Codex browser">
     <PanelHeader eyebrow="Book and World knowledge" title={prefs.archived ? 'Codex archive' : 'Codex'} actions={!prefs.archived && <Button size="small" variant="secondary" leadingIcon={<Plus />} onClick={onCreate}>New</Button>} />
     {management && <div className="codex-dashboard-management">{management}</div>}
-    {worldEntries.length > 0 && <p>World entries are shared. Editing, changing status, archiving, or deleting them affects every linked Book. Hiding affects only this Book.</p>}
+    {worldEntries.length > 0 && <p>World entries are shared. Editing, changing status, archiving, or deleting them affects every linked Book.{ownerKind === 'book' && ' Hiding affects only this Book.'}</p>}
     <div className="codex-view-controls"><SegmentedControl label="Codex view" value={prefs.view} options={[{ value: 'list', label: 'List', icon: <List /> }, { value: 'cards', label: 'Cards', icon: <LayoutGrid /> }]} onChange={view => update({ view })} /><Select className="codex-archive-mode" aria-label="Codex archive mode" value={prefs.archived ? 'archived' : 'active'} onChange={e => update({ archived: e.target.value === 'archived' })}><option value="active">Unarchived</option><option value="archived">Archived</option></Select></div>
     <Input className="codex-dashboard-search" type="search" aria-label="Search Codex" value={prefs.query} onChange={e => update({ query: e.target.value })} placeholder="Search title, type, or prose" leadingIcon={<Search />} />
     <Disclosure className="codex-dashboard-filters" title="Filters and sort"><div className="codex-dashboard-filter-grid">
       <Select label="Type" value={prefs.typeId} onChange={e => update({ typeId: e.target.value })}><option value="">All types</option>{types.map(type => <option key={type.id} value={type.id}>{type.name}</option>)}{prefs.typeId && !types.some(type => type.id === prefs.typeId) && <option value={prefs.typeId}>Unavailable type</option>}</Select>
-      <Select label="Scope" value={prefs.scope === 'inherited' ? 'world' : prefs.scope === 'override' ? 'book' : prefs.scope} onChange={e => update({ scope: e.target.value as CodexDashboardPreferences['scope'] })}><option value="all">All scopes</option><option value="book">Book-only</option><option value="world">World</option></Select>
+      {ownerKind === 'book' && <Select label="Scope" value={prefs.scope === 'inherited' ? 'world' : prefs.scope === 'override' ? 'book' : prefs.scope} onChange={e => update({ scope: e.target.value as CodexDashboardPreferences['scope'] })}><option value="all">All scopes</option><option value="book">Book-only</option><option value="world">World</option></Select>}
       <Select label="Status" value={prefs.status} disabled={prefs.archived} onChange={e => update({ status: e.target.value as CodexDashboardPreferences['status'] })}><option value="all">Active and draft</option><option value="active">Active</option><option value="draft">Draft</option></Select>
       <Select label="Summary" value={prefs.summary} onChange={e => update({ summary: e.target.value as CodexDashboardPreferences['summary'] })}>{['all','missing','current','outdated'].map(id => <option key={id} value={id}>{id === 'all' ? 'Any summary state' : id}</option>)}</Select>
       <Select label="Triggers" value={prefs.triggers} onChange={e => update({ triggers: e.target.value as CodexDashboardPreferences['triggers'] })}><option value="all">Any</option><option value="yes">With triggers</option><option value="no">Without triggers</option></Select>
@@ -135,6 +137,7 @@ function BookCodexDashboard({ bookId, entries, activeId, summaryStates, dependen
         const check = transferCheck?.id === entry.id && transferCheck.data === currentData ? transferCheck : undefined
         const checkedConflicts = check?.conflicts
         const destination = isWorld ? 'Book' : 'World'
+        if (ownerKind === 'book') {
         addAction(isWorld ? 'Copy to Book' : 'Link to World', isWorld ? <Copy /> : <Link />, () => {
           void run(entry.id, () => isWorld ? copyWorldEntryToBook(bookId, entry.id) : moveEntryToWorld(bookId, entry.id))
         }, !currentData?.book.worldId || !checkedConflicts || checkedConflicts.length > 0)
@@ -142,6 +145,7 @@ function BookCodexDashboard({ bookId, entries, activeId, summaryStates, dependen
           setConflictDialog({ title: `Trigger conflicts with ${destination} — ${entry.title}`, conflicts: checkedConflicts! })
         }, !currentData?.book.worldId || !checkedConflicts)
         if (isWorld) addAction('Hide in this Book', <EyeOff />, () => { void run(entry.id, () => setWorldEntryHidden(bookId, entry.id, true)) }, !currentData)
+        }
         addAction(`${prefs.archived ? 'Restore' : 'Archive'}${globalLabel}`, prefs.archived ? <ArchiveRestore /> : <Archive />, () => prefs.archived ? onRestore(entry) : onArchive(entry))
         addAction(`Delete${globalLabel}`, <Trash2 />, () => onDelete(entry))
         const preview = proseText(entry.content).replace(/\s+/g, ' ').trim().slice(0, 240) || 'No body yet'

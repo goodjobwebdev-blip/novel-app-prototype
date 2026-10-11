@@ -1,9 +1,10 @@
+import { entityAvailableInOwner } from '../../features/worlds/world-service'
 import { resolveTimelineEntities } from '../../features/codex/codex-timeline'
 import { readTimelineWorld } from '../../features/codex/codex-timeline-service'
 import { sceneBeats } from '../../features/writing/scene-beats'
 import { proseText, proseEntities } from '../../features/editor/document-projection.ts'
-import { getBookContextSettings, isCodexEntryArchived, listCodexDependencies, listEntitiesByBook, type ArcEntity, type CodexEntryEntity, type GenerationContextProfile, type GenerationContextType, type StructuralEntity, type SummaryEntity } from '../../data/persistence'
-import { automaticCodexMatches, type CodexTriggerSceneMatch } from '../../features/codex/codex-trigger-service'
+import { getOwner, getBookContextSettings, isCodexEntryArchived, listCodexDependencies, listEntitiesByBook, type ArcEntity, type CodexEntryEntity, type GenerationContextProfile, type GenerationContextType, type StructuralEntity, type SummaryEntity } from '../../data/persistence'
+import { automaticCodexCandidates, normalizeCodexTriggerList, triggerMatchesText, automaticCodexMatches, type CodexTriggerSceneMatch } from '../../features/codex/codex-trigger-service'
 import { cascadeAutomaticCodexDependencies } from '../../features/codex/codex-dependency-cascade'
 import { codexContextRepresentation, type CodexContextRepresentation } from '../../features/writing/summary-service'
 import type { DynamicContextSource } from '../ai/prompt-composition'
@@ -133,7 +134,14 @@ function additionalContextOrder(a: AdditionalContextSection, b: AdditionalContex
 }
 
 export async function buildContextValues(options: BuildOptions): Promise<PreparedContextValues> {
-  const [rawEntities, contextSettings, dependencyEdges] = await Promise.all([listEntitiesByBook(options.bookId), getBookContextSettings(options.bookId), listCodexDependencies(options.bookId)])
+  const [owner, loadedEntities, loadedSettings, loadedEdges] = await Promise.all([getOwner(options.bookId), listEntitiesByBook(options.bookId), getBookContextSettings(options.bookId), listCodexDependencies(options.bookId)])
+  const world = owner?.type === 'world'
+  const rawEntities = world ? loadedEntities.filter(entity => ['codexEntry', 'summary', 'note'].includes(entity.type) && entityAvailableInOwner(entity, owner)) : loadedEntities
+  const ids = new Set(rawEntities.map(entity => entity.id))
+  const dependencyEdges = world ? loadedEdges.filter(edge => ids.has(edge.sourceId) && ids.has(edge.targetId)) : loadedEdges
+  const worldTriggerText = world ? options.currentSceneText ?? String(rawEntities.find(entity => entity.id === options.currentDocumentId)?.content ?? '') : ''
+  const contextSettings = world ? { ...loadedSettings, lastOpenedSceneId: '' } : loadedSettings
+  if (world) options = { ...options, currentSceneId: undefined, currentSceneText: undefined, profile: { ...options.profile, structuralIds: [], summaryRange: 'none', includeLastScene: false, includePreviousSceneWhenEmpty: false, loreAtCurrentScene: false, codexEntryIds: options.profile.codexEntryIds.filter(id => ids.has(id)), noteIds: options.profile.noteIds.filter(id => ids.has(id)) } }
   const temporalAnchor = options.currentSceneId || contextSettings.lastOpenedSceneId
   const temporal = (options.type === 'scene' || options.profile.loreAtCurrentScene) && temporalAnchor
   const resolved = temporal ? resolveTimelineEntities(rawEntities, { bookId: options.bookId, sceneId: temporalAnchor }, await readTimelineWorld(options.bookId)) : rawEntities
@@ -193,7 +201,7 @@ export async function buildContextValues(options: BuildOptions): Promise<Prepare
       typeRank: 2,
       outlineIndex: Number.MAX_SAFE_INTEGER,
     }))
-  const automaticMatchesIncludingTarget = ['scene', 'codex', 'chat'].includes(options.type) ? automaticCodexMatches({
+  const automaticMatchesIncludingTarget = world ? automaticCodexCandidates(entities.filter((item): item is CodexEntryEntity => item.type === 'codexEntry')).map(entry => ({ entry, matches: normalizeCodexTriggerList(entry.autoIncludeTriggers ?? []).filter(trigger => triggerMatchesText(worldTriggerText, trigger)).map(trigger => ({ trigger, sceneId: options.currentDocumentId ?? '', sceneTitle: options.type === 'chat' ? 'World Chat message' : 'Current World article' })) })).filter(match => match.matches.length > 0) : ['scene', 'codex', 'chat'].includes(options.type) ? automaticCodexMatches({
     entities,
     scenes,
     anchorSceneId,

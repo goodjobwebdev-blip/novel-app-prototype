@@ -1,10 +1,12 @@
-import { database, type ArcEntity, type BookEntity, type CodexDependencyEdge, type CodexEntryEntity, type DocumentSnapshot, type Illustration, type IllustrationUndo, type WorldEntity } from '../../data/persistence.ts'
+import { createBook, database, type ArcEntity, type BookEntity, type CodexDependencyEdge, type CodexEntryEntity, type DocumentSnapshot, type Illustration, type IllustrationUndo, type WorldEntity } from '../../data/persistence.ts'
+import type { AiSettings } from '../../shared/ai/ai-settings'
 import { ensureLoreTypesWithDb, resolveLoreType, storedLoreTypes, type LoreType } from '../codex/lore-types.ts'
 import { documentBlocks, remapDocumentBlocks } from '../editor/document-projection.ts'
 import type { GalleryImage } from '../images/image-generation-types'
 import type Dexie from 'dexie'
 
 export type { WorldEntity } from '../../data/persistence.ts'
+export { getWorld } from '../../data/persistence.ts'
 export type WorldTriggerConflict = { entryId: string; title: string; trigger: string; bookId?: string; bookTitle?: string }
 const triggerKey = (value: string) => value.trim().replace(/\s+/g, ' ').toLocaleLowerCase()
 const id = (prefix: string) => `${prefix}-${crypto.randomUUID()}`
@@ -27,12 +29,17 @@ export function codexTriggerConflicts(entry: CodexEntryEntity, triggers: string[
 
 export function entityAvailableInBook(entity: ArcEntity | undefined, book: BookEntity | undefined): boolean {
   if (!entity || book?.type !== 'book') return false
-  if (!entity.worldId) return entity.bookId === book.id || (entity.type === 'book' && entity.id === book.id)
+  if (entity.worldId === undefined) return entity.bookId === book.id || (entity.type === 'book' && entity.id === book.id)
   if (!book.worldId || entity.worldId !== book.worldId || entity.bookId !== book.worldId || !['codexEntry', 'summary'].includes(entity.type)) return false
   const entryId = entity.type === 'summary' ? String(entity.sourceEntityId ?? entity.parentId ?? '') : entity.id
   return !(book.hiddenWorldEntryIds ?? []).includes(entryId)
 }
 
+export function entityAvailableInOwner(entity: ArcEntity | undefined, owner: BookEntity | WorldEntity | undefined): boolean {
+  if (!entity || !owner) return false
+  if (owner.type === 'book') return entityAvailableInBook(entity, owner)
+  return entity.id === owner.id && entity.type === 'world' || entity.bookId === owner.id && entity.worldId === owner.id && ['codexEntry', 'summary', 'note', 'chat', 'chatMessage', 'settings'].includes(entity.type)
+}
 export function worldTransaction<T>(db: Dexie, action: () => Promise<T>): Promise<T> {
   return db.transaction('rw', ['entities', 'codexDependencies', 'snapshots', 'illustrations', 'illustrationUndo', 'galleryImages', 'imageJobs'].map(name => db.table(name)), action)
 }
@@ -108,11 +115,64 @@ async function pruneUnavailableEdges(db: Dexie, book: BookEntity) {
   const available = new Set(entries.filter(entry => entityAvailableInBook(entry, book)).map(entry => entry.id))
   await db.table('codexDependencies').where('bookId').equals(book.id).filter((edge: CodexDependencyEdge) => !available.has(edge.sourceId) || !available.has(edge.targetId)).delete()
 }
+export type WorldDeletionImpact = { worldId: string; entries: number; notes: number; chats: number; messages: number; linkedBooks: number; canDelete: boolean }
+async function worldDeletionImpactWithDb(db: Dexie, worldId: string): Promise<WorldDeletionImpact> {
+  await requireWorld(db, worldId)
+  const rows = await db.table('entities').where('bookId').equals(worldId).toArray() as ArcEntity[]
+  const count = (type: string) => rows.filter(row => row.type === type).length
+  const entries = count('codexEntry'), notes = count('note'), chats = count('chat'), messages = count('chatMessage')
+  // Summaries may survive a damaged/legacy source tree; never delete authored
+  // content merely because the four navigation counts happen to be zero.
+  const worldRows = await db.table('entities').where('worldId').equals(worldId).toArray() as ArcEntity[]
+  const hasContent = [...rows, ...worldRows].some(row => !['settings', 'book', 'world'].includes(row.type))
+  return { worldId, entries, notes, chats, messages, linkedBooks: (await members(db, worldId)).length, canDelete: !hasContent }
+}
+export async function getWorldDeletionImpact(worldId: string): Promise<WorldDeletionImpact> {
+  const db = await database()
+  return db.transaction('r', db.table('entities'), () => worldDeletionImpactWithDb(db, worldId))
+}
+export type BookWorldChangeOptions = { confirmed?: boolean; expectedWorldId?: string }
+export type BookWorldChangeImpact = {
+  bookId: string; bookTitle: string; previousWorldId: string; previousWorldTitle: string; nextWorldId: string; nextWorldTitle: string;
+  lostEntryIds: string[]; gainedEntryIds: string[]; unavailableDependencies: number; requiresConfirmation: boolean
+}
+export async function getBookWorldChangeImpact(bookId: string, worldId: string): Promise<BookWorldChangeImpact> {
+  const db = await database()
+  return db.transaction('r', db.table('entities'), db.table('codexDependencies'), async () => {
+    const book = await requireBook(db, bookId)
+    const previous = book.worldId ? await requireWorld(db, book.worldId) : undefined
+    const next = worldId ? await requireWorld(db, worldId) : undefined
+    const changed = (book.worldId ?? '') !== worldId
+    const lostEntryIds = changed && previous ? (await ownedEntries(db, previous.id)).filter(entry => entityAvailableInBook(entry, book)).map(entry => entry.id) : []
+    const gainedEntryIds = changed && next ? (await ownedEntries(db, next.id)).map(entry => entry.id) : []
+    const available = new Set([...await ownedEntries(db, book.id), ...(next ? await ownedEntries(db, next.id) : [])].map(entry => entry.id))
+    const edges = await db.table('codexDependencies').where('bookId').equals(book.id).toArray() as CodexDependencyEdge[]
+    return { bookId, bookTitle: book.title, previousWorldId: previous?.id ?? '', previousWorldTitle: previous?.title ?? '', nextWorldId: next?.id ?? '', nextWorldTitle: next?.title ?? '', lostEntryIds, gainedEntryIds, unavailableDependencies: changed ? edges.filter(edge => !available.has(edge.sourceId) || !available.has(edge.targetId)).length : 0, requiresConfirmation: changed && Boolean(previous) }
+  })
+}
+/** Safe interactive boundary. setBookWorld remains the explicit low-level compatibility operation. */
+export async function changeBookWorld(bookId: string, worldId: string, options: BookWorldChangeOptions = {}): Promise<BookEntity> {
+  return setBookWorld(bookId, worldId, options)
+}
+export async function listWorldBooks(worldId: string): Promise<BookEntity[]> {
+  const db = await database()
+  return db.transaction('r', db.table('entities'), async () => { await requireWorld(db, worldId); return members(db, worldId) })
+}
+export async function createBookInWorld(worldId: string, defaults: AiSettings, title = 'Untitled Book'): Promise<Awaited<ReturnType<typeof createBook>>> {
+  const db = await database()
+  return worldTransaction(db, async () => {
+    await requireWorld(db, worldId)
+    const created = await createBook(defaults, title)
+    const book = await setBookWorld(created.book.id, worldId)
+    return { ...created, book }
+  })
+}
 export async function deleteWorld(worldId: string): Promise<void> {
   const db = await database()
   const affected = await worldTransaction(db, async () => {
     await requireWorld(db, worldId)
-    if ((await ownedEntries(db, worldId)).length) throw new Error('Only an empty World can be deleted. Move or remove its Codex entries first.')
+    const impact = await worldDeletionImpactWithDb(db, worldId)
+    if (!impact.canDelete) throw Object.assign(new Error(`Only an empty World can be deleted. Remove its ${impact.entries} Codex entries, ${impact.notes} Notes, ${impact.chats} Chats and ${impact.messages} Chat messages first.`), { impact })
     const books = await members(db, worldId)
     for (const book of books) {
       await localizeWorldTypes(db, book)
@@ -146,12 +206,14 @@ export async function listBookCodexEntries(bookId: string, includeHidden = false
     return [...await ownedEntries(db, bookId), ...(book.worldId ? await ownedEntries(db, book.worldId) : [])].filter(entry => includeHidden || entityAvailableInBook(entry, book))
   })
 }
-export async function setBookWorld(bookId: string, worldId: string): Promise<BookEntity> {
+export async function setBookWorld(bookId: string, worldId: string, options?: BookWorldChangeOptions): Promise<BookEntity> {
   const db = await database()
   const result = await worldTransaction(db, async () => {
     const book = await requireBook(db, bookId)
+    if (options?.expectedWorldId !== undefined && (book.worldId ?? '') !== options.expectedWorldId) throw new Error('The Book World link changed. Read its impact again before confirming.')
     if (worldId) await requireWorld(db, worldId)
     if ((book.worldId ?? '') === worldId) return { book, changed: false }
+    if (options && book.worldId && !options.confirmed) throw new Error('Confirm the loss of shared lore before changing this Book World link.')
     await localizeWorldTypes(db, book)
     const current = await requireBook(db, bookId)
     const { worldId: _old, hiddenWorldEntryIds: _hidden, ...local } = current

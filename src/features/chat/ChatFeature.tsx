@@ -1,4 +1,6 @@
 import { THINKING_EFFORT_OPTIONS, normalizeThinkingEffort, type ThinkingEffort } from '../../shared/ai/thinking-effort'
+import ChatArticleContext from './ChatArticleContext'
+import ArticleAnswerActions from './ArticleAnswerActions'
 import { availableChatTools } from './chat-tool-availability'
 import { captureCharacterFrame, executeCharacterRead, type CharacterFrame, type CharacterBoundary } from './character-chat'
 import { queueRequestedImage } from './chat-direct-images'
@@ -25,7 +27,8 @@ import type { ImageSettings } from '../images/image-generation-types'
 import { SETTINGS_PROFILES_EVENT } from '../settings/settings-profiles'
 import ImageProposalCard from '../images/ImageProposalCard'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
+import { articleLinkTarget } from '../codex/codex-article-links'
 import remarkGfm from 'remark-gfm'
 import MarkdownTable from '../editor/MarkdownTable'
 import {
@@ -138,6 +141,9 @@ type ChatViewProps = {
   chatId: string
   bookPromptValues: BookPromptValues
   currentSceneId?: string | null
+  currentArticleId?: string | null
+  onOpenArticle?: (articleId: string) => void
+  onBeforeArticleAction?: () => Promise<boolean | void>
   onChatChange: (chatId: string) => void
   onToast: (message: string, variant?: ToastVariant) => void
 }
@@ -196,7 +202,7 @@ function messageToolExecutions(message: ChatMessageEntity): ChatToolExecution[] 
   }))
 }
 
-export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onChatChange, onToast }: ChatViewProps) {
+export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, currentArticleId, onOpenArticle, onBeforeArticleAction, onChatChange, onToast }: ChatViewProps) {
   const [chat, setChat] = useState<ChatEntity | null>(null)
   const [messages, setMessages] = useState<ChatMessageEntity[]>([])
   const [draft, setDraft] = useState('')
@@ -369,7 +375,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
             const frame = await captureCharacterFrame(chat, messages)
             return { context: frame.context, skills: [] as CapturedChatSkill[], loreTypes: [] as LoreType[], frame }
           }
-          return { ...(await prepareChatSkillContext(chat, currentSceneId || undefined)), frame: undefined }
+          return { ...(await prepareChatSkillContext(chat, chat.worldId ? undefined : currentSceneId || undefined, chat.worldId ? messages.filter(item => item.role === 'user').at(-1)?.content : undefined)), frame: undefined }
         })(),
       ]).then(([mediaSettings, { context, skills, loreTypes, frame }]) => {
         if (cancelled || captured !== revision || !isCurrentChat(chat)) return
@@ -589,6 +595,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     prepared: PreparedAssistantGeneration,
   ) {
     return assembleChatGenerationRequest({
+      scope: activeChat.worldId ? 'world' : 'book',
       composition: activeChat.promptComposition,
       book: bookPromptValues,
       context: prepared.context,
@@ -597,7 +604,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
       loreTypes: prepared.loreTypes,
       history,
       restrictedInstructions: prepared.character?.instructions,
-      tools: availableChatTools(Boolean(activeChat.character), history),
+      tools: availableChatTools(Boolean(activeChat.character), history, activeChat.worldId ? 'world' : 'book'),
     })
   }
 
@@ -632,7 +639,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
     let context: Awaited<ReturnType<typeof buildContextValues>>
     try {
       if (activeChat.character) { character = await captureCharacterFrame(activeChat, history); context = character.context; skills = []; loreTypes = [] }
-      else ({ context, skills, loreTypes } = await prepareChatSkillContext(activeChat, currentSceneId || undefined))
+      else ({ context, skills, loreTypes } = await prepareChatSkillContext(activeChat, activeChat.worldId ? undefined : currentSceneId || undefined, activeChat.worldId ? history.filter(item => item.role === 'user').at(-1)?.content : undefined))
     } catch (error) {
       assertGenerationOwnerCurrent(owner, activeChat)
       throw new Error(error instanceof Error ? error.message : 'Chat context could not be prepared.')
@@ -1145,6 +1152,8 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
 
   async function applyProposal(message: ChatMessageEntity, proposal: ChatDocumentEditProposal) {
     try {
+      if (await onBeforeArticleAction?.() === false) throw new Error('The current document could not be saved. Retry saving before applying the proposal.')
+      if (!isCurrentChat({ id: message.parentId, bookId: message.bookId })) return
       await applyChatDocumentEdit(message.id, proposal.id)
       await reloadAndContinueAfterProposal(message)
       onToast(`Applied changes to “${proposal.entityTitle}”.`, 'success')
@@ -1165,6 +1174,8 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
 
   async function createCodexProposal(message: ChatMessageEntity, proposal: ChatCodexCreationProposal) {
     try {
+      if (await onBeforeArticleAction?.() === false) throw new Error('The current document could not be saved. Retry saving before creating the article.')
+      if (!isCurrentChat({ id: message.parentId, bookId: message.bookId })) return
       await createChatCodexEntry(message.id, proposal.id)
       await reloadAndContinueAfterProposal(message)
       onToast(`Created Codex entry “${proposal.title}”.`, 'success')
@@ -1297,7 +1308,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   function renderUserMessage(message: ChatMessageEntity) {
     return <article className="message user" key={message.id}>
       {editingId === message.id ? <InlineMessageEdit value={editingValue} onChange={setEditingValue} onCancel={() => setEditingId('')} onSave={() => { void saveEdit(message, false) }} onSaveAndRegenerate={() => { void saveEdit(message, true) }} /> : <>
-        <div className="bubble chat-markdown-bubble"><MarkdownMessage content={message.content} /></div>
+        <div className="bubble chat-markdown-bubble"><MarkdownMessage onArticleLink={onOpenArticle} content={message.content} /></div>
         <div className="message-tools"><Button className="chat-icon-action" size="small" variant="ghost" aria-label={copiedMessageId === message.id ? 'Copied message' : 'Copy message'} title={copiedMessageId === message.id ? 'Copied' : 'Copy'} leadingIcon={copiedMessageId === message.id ? <Check /> : <Copy />} onClick={() => { void copyMessage(message) }} /><Button className="chat-icon-action" size="small" variant="ghost" aria-label="Edit message" disabled={generating || Boolean(summaryProposalId)} title={summaryProposalId ? 'Stop summary generation before changing history' : generating ? 'Stop the current response before editing history' : 'Edit'} leadingIcon={<Pencil />} onClick={() => beginEdit(message)} /><Button className="chat-icon-action" size="small" variant="ghost" aria-label="Delete message and following messages" disabled={generating || Boolean(summaryProposalId)} title={summaryProposalId ? 'Stop summary generation before changing history' : generating ? 'Stop the current response before deleting history' : 'Delete'} leadingIcon={<Trash2 />} onClick={() => { void deleteFrom(message) }} /></div>
       </>}
     </article>
@@ -1326,7 +1337,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
             <header className="chat-round-heading"><strong>Round {message.roundNumber ?? index + 1}</strong><span>{executions.length ? `${executions.length} tool ${executions.length === 1 ? 'call' : 'calls'}` : message.content ? 'Response' : 'Reasoning'}</span></header>
             {editingId === message.id ? <InlineMessageEdit value={editingValue} onChange={setEditingValue} onCancel={() => setEditingId('')} onSave={() => { void saveEdit(message, false) }} /> : <>
               {message.thoughts && <Disclosure className="chat-thoughts" title="Thoughts" open={openThoughtMessageIds.has(message.id)} onToggle={(event) => setPersistedThoughtsOpen(message.id, event.currentTarget.open)}>{message.thoughts}</Disclosure>}
-              {message.content && <div className="chat-assistant-body">{chat?.character ? <CharacterMessage content={message.content} participants={chat.character.participants} render={text => <MarkdownMessage content={text} />} /> : <MarkdownMessage content={message.content} />}</div>}
+              {message.content && <div className="chat-assistant-body">{chat?.character ? <CharacterMessage content={message.content} participants={chat.character.participants} render={text => <MarkdownMessage onArticleLink={onOpenArticle} content={text} />} /> : <MarkdownMessage onArticleLink={onOpenArticle} content={message.content} />}</div>}
             </>}
             {executions.length ? <div className="chat-round-tools" aria-label={`Round ${message.roundNumber ?? index + 1} tool calls`}>{executions.map(execution => <Disclosure className={`chat-tool-execution ${execution.ok === false ? 'failed' : execution.ok === true ? 'succeeded' : ''}`} title={<><code>{execution.name}</code><span>{execution.ok === false ? 'Failed' : execution.ok === true ? 'Succeeded' : 'Result'}</span></>} key={execution.callId}>
               <div>{execution.arguments ? <section><strong>Arguments</strong><pre>{formatToolPayload(execution.arguments)}</pre></section> : null}<section><strong>Result</strong><pre>{formatToolPayload(execution.result)}</pre></section></div>
@@ -1342,6 +1353,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           {waitingForApproval && <p className="chat-approval-wait">The agent is paused. Approve or reject the action above; it will continue with the actual result.</p>}
           {last.continuation && !last.continuedAt && messages.at(-1)?.id === last.id && !waitingForApproval && <Button className="chat-continue" disabled={generating} onClick={() => { void continueResponse(last) }}>Continue</Button>}
           <div className="message-tools chat-answer-tools">
+            {!chat?.character && chat && <ArticleAnswerActions key={last.id} chat={chat} message={last} sourceMessages={answerMessages} content={prose} disabled={generating || Boolean(summaryProposalId)} onBeforeArticleAction={onBeforeArticleAction} onSaved={reloadMessages} />}
             <Button className="chat-icon-action" size="small" variant="ghost" aria-label={copiedMessageId === last.id ? 'Copied answer' : 'Copy answer'} title={copiedMessageId === last.id ? 'Copied' : 'Copy'} leadingIcon={copiedMessageId === last.id ? <Check /> : <Copy />} disabled={!prose} onClick={() => { void copyMessage({ ...last, content: prose }) }} />
             {answerMessages.length === 1 && <Button className="chat-icon-action" size="small" variant="ghost" aria-label="Edit answer" title="Edit" leadingIcon={<Pencil />} disabled={generating || Boolean(summaryProposalId)} onClick={() => beginEdit(last)} />}
             <Button className="chat-icon-action" size="small" variant="ghost" aria-label="Fork from answer" title="Fork" leadingIcon={<GitFork />} onClick={() => { void fork(last) }} />
@@ -1357,9 +1369,10 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
   const previewMediaSettings = chat && isCurrentChat(chat) && promptPreviewMedia?.bookId === bookId && promptPreviewMedia.chatId === chatId ? promptPreviewMedia.settings : undefined
   const previewContext = previewMediaSettings ? promptPreviewContext : null
   const compositionTemplates = [compositionDraft.systemPrompt, ...compositionDraft.predefinedMessages.filter((message) => message.enabled).map((message) => message.template)]
-  const compositionDiagnostics = compositionTemplates.flatMap((template) => promptTemplateDiagnostics(template, 'assistant', previewContext ? chatRequestValues(chat?.character ? emptyCharacterBook : bookPromptValues, previewContext, previewCharacter?.instructions, previewMediaSettings) : bookTemplateValues(bookPromptValues)))
+  const safeBookPromptValues = chat?.character || chat?.worldId ? emptyCharacterBook : bookPromptValues
+  const compositionDiagnostics = compositionTemplates.flatMap((template) => promptTemplateDiagnostics(template, 'assistant', previewContext ? chatRequestValues(safeBookPromptValues, previewContext, previewCharacter?.instructions, previewMediaSettings) : bookTemplateValues(safeBookPromptValues)))
   const draftNormalizedRequest = chat && previewContext
-    ? assembleChatGenerationRequest({ composition: compositionDraft, book: bookPromptValues, context: previewContext, mediaSettings: previewMediaSettings, skills: promptPreviewSkills, loreTypes: promptPreviewTypes, history: messages, restrictedInstructions: previewCharacter?.instructions, tools: availableChatTools(Boolean(chat.character), messages) })
+    ? assembleChatGenerationRequest({ scope: chat.worldId ? 'world' : 'book', composition: compositionDraft, book: safeBookPromptValues, context: previewContext, mediaSettings: previewMediaSettings, skills: promptPreviewSkills, loreTypes: promptPreviewTypes, history: messages, restrictedInstructions: previewCharacter?.instructions, tools: availableChatTools(Boolean(chat.character), messages, chat.worldId ? 'world' : 'book') })
     : null
   const previewRequest = promptOpen ? draftNormalizedRequest : lastNormalizedRequest
   const previewFinalizedRequest = previewRequest ? finalizeChatProviderRequest(previewRequest) : null
@@ -1374,7 +1387,8 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
 
   return <>
     <section className="conversation functional-chat">
-      <header><small>{chat.character ? 'Character chat' : 'Book chat'}</small><h1>{chat.title}</h1></header>
+      <header><small>{chat.character ? 'Character chat' : chat.worldId ? 'World chat' : 'Book chat'}</small><h1>{chat.title}</h1></header>
+      {!chat.character && <ChatArticleContext key={chat.id} chat={chat} currentArticleId={currentArticleId} disabled={generating} onChange={updated => applyIfCurrentChat(chat, () => setChat(updated))} />}
       <CharacterPosition chat={chat} disabled={generating} onOpen={onChatChange} />
       <div className="messages">
         {!messages.length && !generating && <div className="chat-first-message"><Feather aria-hidden="true" /><strong>Start this conversation</strong><p>The model, prompt, and context are saved independently for this chat.</p></div>}
@@ -1382,7 +1396,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
         {generating && <article className={`message assistant streaming ${generationContinuesAnswer ? 'continuing-answer' : ''}`}><div className="chat-message-stack chat-live-generation">
           <header className="chat-round-heading"><strong>Round {roundProgress.round || 1}</strong><span>{generationPhaseLabel(phase)} · {formatElapsed(elapsed)}</span></header>
           {streamedThoughts && <Disclosure className="chat-thoughts" title="Thoughts" open={liveThoughtsOpen} onToggle={(event) => setLiveThoughtsOpen(event.currentTarget.open)}>{streamedThoughts}</Disclosure>}
-          {streamedContent && <div className="chat-assistant-body">{chat.character ? <CharacterMessage content={streamedContent} participants={chat.character.participants} render={text => <MarkdownMessage content={text} />} /> : <MarkdownMessage content={streamedContent} />}</div>}
+          {streamedContent && <div className="chat-assistant-body">{chat.character ? <CharacterMessage content={streamedContent} participants={chat.character.participants} render={text => <MarkdownMessage onArticleLink={onOpenArticle} content={text} />} /> : <MarkdownMessage onArticleLink={onOpenArticle} content={streamedContent} />}</div>}
         </div></article>}
         <div ref={bottomRef} className="chat-scroll-anchor" />
       </div>
@@ -1422,7 +1436,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onC
           <PromptPresetControls scope="chat" composition={compositionDraft} arcDefault={defaultChatPromptComposition} onApply={setCompositionDraft} />
           <h3>System prompt</h3>
           <PromptTemplateEditor value={compositionDraft.systemPrompt} diagnostics={promptTemplateDiagnostics(compositionDraft.systemPrompt, 'assistant')} ariaLabel="Chat system prompt template" onChange={(systemPrompt) => setCompositionDraft((current) => ({ ...current, systemPrompt }))} />
-          <ChatPredefinedMessages messages={compositionDraft.predefinedMessages} previewValues={previewContext ? chatRequestValues(chat?.character ? emptyCharacterBook : bookPromptValues, previewContext, previewCharacter?.instructions, previewMediaSettings) : undefined} onChange={(predefinedMessages) => setCompositionDraft((current) => ({ ...current, predefinedMessages }))} />
+          <ChatPredefinedMessages messages={compositionDraft.predefinedMessages} previewValues={previewContext ? chatRequestValues(safeBookPromptValues, previewContext, previewCharacter?.instructions, previewMediaSettings) : undefined} onChange={(predefinedMessages) => setCompositionDraft((current) => ({ ...current, predefinedMessages }))} />
           {workspaceWarning && <p className="chat-composition-warning" role="status">{workspaceWarning}</p>}
           <Disclosure className="chat-composition-reference" title="Variables & syntax"><div className="chat-composition-variables">{promptVariables.filter((variable) => variable.scopes.includes('assistant')).map((variable) => <code key={variable.name}>{`{{${variable.name}}}`}</code>)}</div></Disclosure>
           <Disclosure className="chat-request-preview" title="Request preview" open>
@@ -1471,8 +1485,11 @@ function ChatPredefinedMessages({ messages, previewValues, onChange }: { message
   </section>
 }
 
-function MarkdownMessage({ content }: { content: string }) {
-  return <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ table: MarkdownTable }}>{content}</ReactMarkdown></div>
+export function MarkdownMessage({ content, onArticleLink }: { content: string; onArticleLink?: (articleId: string) => void }) {
+  return <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={url => articleLinkTarget(url) ? url : defaultUrlTransform(url)} components={{ table: MarkdownTable, a: ({ href, children }) => {
+    const id = articleLinkTarget(href ?? '')
+    return id ? <button type="button" className="cm-live-link" disabled={!onArticleLink} onClick={() => onArticleLink?.(id)}>{children}</button> : <a href={href} rel="noopener noreferrer">{children}</a>
+  } }}>{content}</ReactMarkdown></div>
 }
 
 function ChatModelPicker({ value, models, onChange }: { value: string; models: ChatModel[]; onChange: (modelId: string) => void }) {
@@ -1638,7 +1655,7 @@ function ChatSidebarRow({ chat, selected, onOpen, onRename, onDelete }: { chat: 
   return <ResourceListRow selected={selected} icon={<MessageCircle />} title={chat.title} meta={`${preview} · ${formatChatEdited(chat.updatedAt)}`} onOpen={onOpen} actions={<ActionMenu title={chat.title} open={menuOpen} onToggle={() => setMenuOpen(value => !value)} onClose={() => setMenuOpen(false)} actions={actions} />} />
 }
 
-export function ChatSidebar({ bookId, activeChatId, onOpen, currentSceneId, caret }: { bookId: string; activeChatId: string; onOpen: (chatId: string) => void; currentSceneId?: string; caret?: number }) {
+export function ChatSidebar({ ownerKind = 'book', bookId, activeChatId, onOpen, currentSceneId, caret }: { ownerKind?: 'world' | 'book'; bookId: string; activeChatId: string; onOpen: (chatId: string) => void; currentSceneId?: string; caret?: number }) {
   const [characterSetup, setCharacterSetup] = useState(false)
   const [items, setItems] = useState<ChatEntity[]>([])
   const [query, setQuery] = useState('')
@@ -1715,7 +1732,8 @@ export function ChatSidebar({ bookId, activeChatId, onOpen, currentSceneId, care
     if (bookIdRef.current === sourceBookId && activeChatIdRef.current === chat.id) onOpen('')
   }
 
-  return <section className="chat-sidebar"><PanelHeader eyebrow="Conversations" title="Chats" actions={<><Button size="small" variant="secondary" leadingIcon={<Plus />} onClick={() => { void add() }}>New</Button><Button size="small" variant="secondary" leadingIcon={<MessageCircle />} aria-label="New character chat" onClick={() => setCharacterSetup(true)}>Character</Button></>} />
+  return <section className="chat-sidebar"><PanelHeader eyebrow="Conversations" title="Chats" actions={<><Button size="small" variant="secondary" leadingIcon={<Plus />} onClick={() => { void add() }}>New</Button>{ownerKind === 'book' && <Button size="small" variant="secondary" leadingIcon={<MessageCircle />} aria-label="New character chat" onClick={() => setCharacterSetup(true)}>Character</Button>}</>} />
+    {ownerKind === 'world' && <p>Character chats at a Story position are available only in Books. World Chat does not use Book scenes.</p>}
     {characterSetup && <CharacterChatSetup bookId={bookId} currentSceneId={currentSceneId} caret={caret} onClose={() => setCharacterSetup(false)} onOpen={onOpen} />}
     <SearchField className="chat-sidebar-search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1) }} placeholder="Search chats" aria-label="Search chats" />
     <div className="chat-sidebar-list">{visible.map((chat) => <ChatSidebarRow key={chat.id} chat={chat} selected={activeChatId === chat.id} onOpen={() => { if (chat.bookId === bookIdRef.current) onOpen(chat.id) }} onRename={() => { void rename(chat) }} onDelete={() => { void remove(chat) }} />)}{!visible.length && <p className="content-empty">{query ? 'No matching chats.' : 'No chats yet.'}</p>}</div>
