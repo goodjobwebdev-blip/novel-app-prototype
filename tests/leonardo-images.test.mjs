@@ -43,6 +43,21 @@ test('Leonardo discovery never sends its key to OpenAI and preserves curated con
   await assert.rejects(() => fetchImageModels('leonardo', 'fixture-only-key', async () => response({ data: [] })), /invalid.*catalog/i)
   await assert.rejects(() => fetchImageModels('leonardo', 'fixture-only-key', async () => new Response('private remote error', { status: 401 })), /401/)
 })
+test('Lucid Origin presets resolve exact standard ratios into Leonardo request dimensions', async () => {
+  const { buildLeonardoRequest } = await import('../src/features/images/leonardo-contracts.ts')
+  const model = settings.documentedImageModels.find(m => m.id === 'lucid-origin')
+  const favorite = settings.imageFavorite(model, [])
+  assert.equal(favorite.defaultSize, '1024x1024')
+  const configured = { keys: {}, favorites: [favorite], defaultAlias: favorite.alias }
+  for (const [ratio, width, height] of [['1:1', 1024, 1024], ['9:16', 720, 1280], ['16:9', 1280, 720], ['3:4', 768, 1024], ['4:3', 1024, 768]]) {
+    const spec = settings.resolveImageSpec('A landscape', favorite.alias, undefined, ratio, configured)
+    assert.equal(settings.imageRatio(spec.size), ratio)
+    assert.equal(spec.size.value, `${width}x${height}`)
+    assert.equal(buildLeonardoRequest(spec).parameters.width, width)
+    assert.equal(buildLeonardoRequest(spec).parameters.height, height)
+  }
+  assert.equal(settings.documentedImageModels.find(m => m.id === 'lucid-realism').sizes.length, 1)
+})
 test('Leonardo rejects malformed submission tickets without polling or repeating a paid POST', async () => {
   const { generateLeonardo } = await import('../src/features/images/leonardo-adapter.ts')
   const favorite = settings.imageFavorite(settings.documentedImageModels.find(m => m.id === 'lucid-origin'), [])
