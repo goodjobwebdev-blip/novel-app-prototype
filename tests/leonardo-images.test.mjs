@@ -78,6 +78,21 @@ test('Leonardo explicit Generate persists snapshot and ticket before polling, ke
   assert.equal(posts, 0)
   assert.equal(calls.filter(url => url.endsWith('/v2/generations')).length, 1)
 })
+test('Leonardo kept output survives portable archive round-trip with options but no account identity', async () => {
+  const { encodeBookArchive, decodeBookArchive } = await import('../src/data/book-archive.ts')
+  const favorite = settings.imageFavorite(settings.documentedImageModels.find(m => m.id === 'krea/krea-2'), [])
+  const spec = settings.resolveImageSpec('A fox', favorite.alias, undefined, undefined, { keys: {}, favorites: [favorite], defaultAlias: favorite.alias })
+  const archive = encodeBookArchive({ entities: [{ id: 'archive-book', type: 'book', title: 'Fixture', createdAt: 1, updatedAt: 1 }], snapshots: [], dependencies: [], illustrations: [], galleryImages: [{ id: 'archive-image', bookId: 'archive-book', kept: true, prompt: spec.prompt, provider: 'leonardo', model: spec.model, width: 1, height: 1, createdAt: 1, image: png, thumbnail: png }], imageJobs: [{ ...spec, id: 'archive-job', bookId: 'archive-book', status: 'completed', decision: 'kept', assetId: 'archive-image', createdAt: 1, providerJobId: 'private-ticket', localConnectionFingerprint: 'private-account' }] })
+  const bytes = await archive.text()
+  assert.equal(bytes.includes('private-ticket'), false)
+  assert.equal(bytes.includes('private-account'), false)
+  const decoded = await decodeBookArchive(archive)
+  assert.equal(decoded.galleryImages[0].provider, 'leonardo')
+  assert.deepEqual(decoded.imageJobs[0].leonardoOptions, spec.leonardoOptions)
+  const corrupt = { ...decoded, imageJobs: [{ ...decoded.imageJobs[0], leonardoOptions: { quality: 'LOW' } }] }
+  await assert.rejects(() => decodeBookArchive(encodeBookArchive(corrupt)), /quality|invalid/i)
+})
+
 test('six distinct documented Leonardo models resolve private single-output model-specific requests', async () => {
   const catalog = settings.documentedImageModels.filter(model => model.provider === 'leonardo')
   assert.deepEqual(catalog.map(model => model.id), ids)
