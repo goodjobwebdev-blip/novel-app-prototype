@@ -530,7 +530,8 @@ test('Connection provider selects the complete credential group and keeps naviga
     assertNoActiveTextProvider(panel)
     assert.equal(ai.loadAiSettings().provider, 'nanogpt', 'Editing a group never activates or saves it')
     assert.equal(Boolean(group.querySelector('[aria-label="Fake provider request trace"]')), provider === 'fake')
-    assert.equal(panel.querySelectorAll('input[type="password"]').length, labels.filter(label => label.includes('API key')).length)
+    assert.equal(group.querySelectorAll('input[type="password"]').length, labels.filter(label => label.includes('API key')).length)
+    assert.equal(panel.querySelectorAll('[aria-label="Media-only connections"] input[type="password"]').length, 1)
   }
 })
 
