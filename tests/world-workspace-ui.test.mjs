@@ -512,9 +512,8 @@ test('library archive import opens its canonical World and later Book restore re
   // detached backup copy. Opening it reconciles the pending reference.
   const canonicalRoot = canonicalBookData.entities.find(row => row.id === f.book.id)
   canonicalRoot.title = 'Restored canonical Book'
-  await settle(() => editor()?.getAttribute('data-book-id') === copiedBook.id && Boolean(button('Home')), 'Imported backup finishes opening its Book workspace')
-  await click(button('Home'))
-  await settle(() => document.querySelector('.library-screen'))
+  await settle(() => editor()?.getAttribute('data-book-id') === copiedBook.id, 'Imported backup finishes opening its Book workspace')
+  await homeViaWorldBuilding()
   await act(async () => { await p.writeBookArchive(canonicalBookData) })
   await openBook(canonicalRoot)
   await settle(async () => (await p.getEntity(f.book.id))?.worldId === f.world.id, 'Canonical Book availability reconciles the pending World reference before opening')
