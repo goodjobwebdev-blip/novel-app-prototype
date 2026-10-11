@@ -23,7 +23,16 @@ export function validateLeonardoSize(model: string, size: ImageSize) {
   const c = leonardoContract(model), { width, height } = size
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 64 || height < 64 || width > c.widthMax || height > c.heightMax || width * height > 40_000_000 || width % 8 || height % 8 || size.value !== `${width}x${height}` || (c.dimensions && (!c.dimensions.includes(width) || !c.dimensions.includes(height)))) throw new Error('Unsupported Leonardo image dimensions/size; values are not rounded.')
 }
-export const leonardoModels: ImageModel[] = Object.entries(leonardoContracts).map(([id, c]) => ({ id, name: c.name, provider: 'leonardo', sizes: [{ value: '1024x1024', width: 1024, height: 1024 }], tasks: ['text-to-image'], source: c.source, description: 'Documented; account availability and browser CORS not verified.' }))
+const squareSize: ImageSize = { value: '1024x1024', width: 1024, height: 1024 }
+// Exact aspect ratios; all dimensions stay within the Lucid Origin contract.
+const lucidOriginSizes: ImageSize[] = [
+  squareSize,
+  { value: '720x1280', width: 720, height: 1280 },
+  { value: '1280x720', width: 1280, height: 720 },
+  { value: '768x1024', width: 768, height: 1024 },
+  { value: '1024x768', width: 1024, height: 768 },
+]
+export const leonardoModels: ImageModel[] = Object.entries(leonardoContracts).map(([id, c]) => ({ id, name: c.name, provider: 'leonardo', sizes: id === 'lucid-origin' ? lucidOriginSizes : [squareSize], tasks: ['text-to-image'], source: c.source, description: 'Documented; account availability and browser CORS not verified.' }))
 export function leonardoDefaults(model: string): LeonardoOptions {
   const c = leonardoContract(model)
   return { prompt_enhance: 'OFF', ...(c.modes ? { mode: 'FAST' as const } : {}), ...(c.qualities ? { quality: 'MEDIUM' as const } : {}), ...(c.styles ? { style_ids: [LEONARDO_DYNAMIC] } : {}) }
