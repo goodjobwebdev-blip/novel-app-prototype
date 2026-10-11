@@ -519,6 +519,7 @@ test('Connection provider selects the complete credential group and keeps naviga
     ['openrouter', 'OpenRouter', ['API key for OpenRouter']],
     ['compatible', 'OpenAI-compatible', ['API key for OpenAI-compatible', 'Endpoint URL']],
     ['fake', 'Fake (testing)', []],
+    ['leonardo', 'Leonardo.AI', ['Leonardo.AI media API key']],
   ]
   for (const [provider, name, labels] of cases) {
     await change(field(panel, 'Connection provider'), provider)
@@ -531,7 +532,8 @@ test('Connection provider selects the complete credential group and keeps naviga
     assert.equal(ai.loadAiSettings().provider, 'nanogpt', 'Editing a group never activates or saves it')
     assert.equal(Boolean(group.querySelector('[aria-label="Fake provider request trace"]')), provider === 'fake')
     assert.equal(group.querySelectorAll('input[type="password"]').length, labels.filter(label => label.includes('API key')).length)
-    assert.equal(panel.querySelectorAll('[aria-label="Media-only connections"] input[type="password"]').length, 1)
+    assert.equal(panel.querySelectorAll('.profile-connection-fields').length, 1, 'Only the selected connection is displayed')
+    assert.equal(panel.querySelector('[aria-label="Media-only connections"]'), null)
   }
 })
 
