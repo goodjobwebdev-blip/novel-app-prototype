@@ -22,6 +22,12 @@ const React = await import('react')
 const { act } = React
 const { createRoot } = await import('react-dom/client')
 const { default: MarkdownEditor } = await import(pathToFileURL(`${directory}/editor.mjs`))
+const { EditorView } = await import('@codemirror/view')
+async function measureEditor(view) {
+  // Resolve in CM's write phase, after pending viewport/decorations updates,
+  // rather than depending on whether JSDOM's next animation frame ran in act.
+  await act(async () => new Promise(resolve => view.requestMeasure({ read: () => null, write: () => resolve() })))
+}
 after(() => { dom.window.close(); rmSync(directory, { recursive: true, force: true }) })
 test('escaped article labels navigate permanent IDs on mousedown before CodeMirror removes the preview', async () => {
   const root = createRoot(document.getElementById('root'))
@@ -74,13 +80,22 @@ test('read-only article previews retain keyboard navigation and use the latest c
   try {
     await act(async () => root.render(React.createElement(MarkdownEditor, { ...props, onArticleLink: id => old.push(id) })))
     await act(async () => root.render(React.createElement(MarkdownEditor, { ...props, onArticleLink: id => latest.push(id) })))
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor'))
+    assert.ok(view)
+    await measureEditor(view)
     const link = document.querySelector('[data-article-id]')
     assert.ok(link)
     await act(async () => link.focus())
     assert.equal(document.activeElement, link)
-    await act(async () => link.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })))
+    await measureEditor(view)
+    assert.equal(link.isConnected, true, 'Measurement must not detach the focused preview')
+    assert.equal(document.activeElement, link, 'Keyboard focus survives deferred measurement')
+    const enter = new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    await act(async () => link.dispatchEvent(enter))
+    assert.equal(enter.defaultPrevented, true, 'Activation must not reach editor commands')
     assert.deepEqual(old, [])
     assert.deepEqual(latest, ['stable-id'])
     assert.deepEqual(changes, [])
+    assert.equal(view.state.doc.toString(), props.value, 'Navigation does not alter read-only content')
   } finally { await act(async () => root.unmount()) }
 })

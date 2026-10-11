@@ -142,6 +142,7 @@ async function mount(t) {
   t.after(async () => { await act(async () => root.unmount()) })
   await act(async () => root.render(React.createElement(Workspace)))
   await settle(() => labeledButton('New book') && !labeledButton('New book').disabled, 'Home library finishes startup')
+  return root
 }
 async function openBook(book) {
   const target = () => [...document.querySelectorAll('.library-book')].find(item => item.querySelector('strong')?.textContent === book.title)
@@ -496,7 +497,7 @@ test('library archive import opens its canonical World and later Book restore re
   await db.transaction('rw', db.tables, async () => {
     for (const table of db.tables) if (table.name !== 'meta') await table.clear()
   })
-  await mount(t)
+  const root = await mount(t)
   await uploadArchive('Import World archive', worldFile)
   await settle(() => titleIs(article.title) && editor()?.getAttribute('data-history-key') === `${f.world.id}:${article.id}`, 'World archive imports without an existing owner and opens its canonical article')
   assert.equal((await p.listBooks()).length, 0, 'Pending reference never creates a phantom Book')
@@ -514,7 +515,11 @@ test('library archive import opens its canonical World and later Book restore re
   canonicalRoot.title = 'Restored canonical Book'
   await settle(() => editor()?.getAttribute('data-book-id') === copiedBook.id, 'Imported backup finishes opening its Book workspace')
   await homeViaWorldBuilding()
-  await act(async () => { await p.writeBookArchive(canonicalBookData) })
+  // Raw restoration models a canonical archive becoming available while this
+  // client is closed. Reload so the library discovers it through startup reads.
+  await act(async () => root.unmount())
+  await p.writeBookArchive(canonicalBookData)
+  await mount(t)
   await openBook(canonicalRoot)
   await settle(async () => (await p.getEntity(f.book.id))?.worldId === f.world.id, 'Canonical Book availability reconciles the pending World reference before opening')
   assert.equal((await w.listBookCodexEntries(f.book.id))[0].id, article.id)
