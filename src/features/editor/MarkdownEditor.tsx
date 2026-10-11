@@ -10,7 +10,7 @@ import { dialogueHighlight } from './DialogueHighlight'
 import { autocompleteDecorationField, autocompletePositionBlocked, sameAutocompleteSnapshot, setAutocompleteDecoration } from './autocomplete-decoration'
 import { markdownTableRanges } from './markdown-tables'
 import { syntaxTree } from '@codemirror/language'
-import { Annotation, Compartment, EditorState, StateEffect, StateField, Transaction, type Text } from '@codemirror/state'
+import { Annotation, Compartment, EditorState, Prec, StateEffect, StateField, Transaction, type Text } from '@codemirror/state'
 import { findTriggerRanges, type CodexMentionTerm } from '../codex/codex-trigger-service'
 import { normalizeTranscriptForInsertion } from '../speech/stt-service'
 import {
@@ -813,6 +813,11 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
         EditorState.readOnly.of(readOnly),
         editableCompartmentRef.current.of(EditorView.editable.of(!readOnly)),
         history(),
+        // Keymaps install their own DOM handler and consume Enter before lower
+        // precedence handlers. A focused preview link must navigate, not edit.
+        Prec.highest(EditorView.domEventHandlers({
+          keydown: event => event.key === 'Enter' && !event.isComposing && openPreviewLink(event),
+        })),
         keymap.of([
           { key: 'Tab', run: view => {
             const suggestion = view.state.field(autocompleteDecorationField)
@@ -830,9 +835,6 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
           // Navigate before CodeMirror moves the cursor onto the linked line and
           // removes its preview decoration. Physical clicks are handled here.
           mousedown: event => event.button === 0 && openPreviewLink(event),
-          keydown: event => {
-            return event.key === 'Enter' && openPreviewLink(event)
-          },
           compositionstart: () => {
             cancelCompositionInput()
             composingRef.current = true

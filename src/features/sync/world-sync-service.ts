@@ -1,8 +1,8 @@
 import { database } from '../../data/persistence'
 import {
   decodeWorldArchive, encodeWorldArchive, exportWorldArchiveBlob, getWorldArchiveConflict,
-  importWorldArchiveBlob, listWorldArchiveConflicts, notifyWorldArchive, readWorldArchive,
-  resolveWorldArchiveConflict, WORLD_ARCHIVE_CHANGED,
+  importWorldArchiveBlob, listWorldArchiveConflicts, readWorldArchive,
+  resolveWorldArchiveConflict, assertWorldArchiveConflict,
 } from '../../data/world-archive'
 import {
   createRemoteBook, downloadRemoteBook, getRemoteBook, listRemoteWorlds as providerWorlds,
@@ -13,7 +13,11 @@ import type { SyncStatus } from './sync-persistence'
 import { archiveContentHash } from './sync-hash'
 import { KeyedAsyncQueue } from '../../shared/utils/keyed-async-queue'
 
-export { WORLD_ARCHIVE_CHANGED as WORLD_SYNC_CHANGED, listWorldArchiveConflicts, getWorldArchiveConflict }
+export { listWorldArchiveConflicts, getWorldArchiveConflict }
+export const WORLD_SYNC_CHANGED = 'arc-world-sync-status-changed'
+function notifyStatus(worldId: string) {
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(WORLD_SYNC_CHANGED, { detail: { worldId } }))
+}
 export type WorldSyncState = {
   worldId: string; ownerType: 'world'; status: SyncStatus; endpoint: string; remoteWorldId: string
   remoteETag: string; localContentHash: string; updatedAt: number; lastSyncedAt?: number
@@ -41,7 +45,7 @@ export async function listWorldSyncStates(): Promise<WorldSyncState[]> {
 }
 async function save(state: WorldSyncState) {
   await (await database()).table('meta').put({ key: stateKey(state.worldId), value: { ...state, updatedAt: Date.now() } })
-  notifyWorldArchive(state.worldId)
+  notifyStatus(state.worldId)
 }
 function assertEndpoint(state: WorldSyncState, endpoint: string) {
   if (state.endpoint !== normalizeSyncEndpoint(endpoint)) throw new Error('This World is connected to a different sync server. Restore that URL or disconnect it.')
@@ -140,6 +144,22 @@ export async function enableWorldSync(worldId: string, beforeSync: () => Promise
     return syncConnected(worldId)
   })
 }
+/** Metadata-only check: never downloads, applies, or uploads archive content. */
+export async function checkRemoteWorld(worldId: string): Promise<void> {
+  await locked(worldId, async () => {
+    const state = await getWorldSyncState(worldId)
+    if (!state) return
+    try {
+      const configured = settings(); assertEndpoint(state, configured.endpoint)
+      const remote = await getRemoteBook(configured, state.remoteWorldId); assertIdentity(remote.book, worldId)
+      if ((await listWorldArchiveConflicts(worldId)).length) {
+        await save({ ...state, status: 'conflict' }); return
+      }
+      const hash = await archiveContentHash(await exportWorldArchiveBlob(worldId))
+      await save({ ...state, status: remote.etag !== state.remoteETag ? 'remote-changed' : hash === state.localContentHash ? 'synced' : 'idle', message: undefined })
+    } catch (error) { await failure(state, error); throw error }
+  })
+}
 export async function listCloudWorlds(): Promise<RemoteBook[]> { return providerWorlds(settings()) }
 export async function importCloudWorld(remote: RemoteBook): Promise<WorldSyncResult & { worldId: string }> {
   if (!remote.clientBookId.startsWith(WORLD_REMOTE_PREFIX)) throw new Error('This cloud owner is not a World.')
@@ -165,10 +185,12 @@ export async function resolveWorldSyncConflict(worldId: string, conflictId: stri
   return locked(worldId, async () => {
     await beforeSync()
     const configured = settings(), state = await getWorldSyncState(worldId), conflict = await getWorldArchiveConflict(conflictId)
-    if (!state || !conflict || conflict.worldId !== worldId || conflict.resolution || !conflict.remoteETag) throw new Error('Choose an unresolved cloud conflict for this World.')
+    if (!state || !conflict || conflict.worldId !== worldId || conflict.resolution || conflict.supersededAt || !conflict.remoteETag) throw new Error('Choose an unresolved cloud conflict for this World; this choice may be superseded.')
+    await assertWorldArchiveConflict(conflictId)
     assertEndpoint(state, configured.endpoint)
     try {
       const remote = await getRemoteBook(configured, state.remoteWorldId); assertIdentity(remote.book, worldId)
+      await assertWorldArchiveConflict(conflictId)
       if (remote.etag !== conflict.remoteETag) return await captureRemote(state, undefined, true)
       if (choice === 'incoming') {
         const resolved = await resolveWorldArchiveConflict(conflictId, 'incoming')
@@ -179,7 +201,9 @@ export async function resolveWorldSyncConflict(worldId: string, conflictId: stri
       if (choice !== 'local') throw new Error('Choose local or incoming explicitly.')
       const local = await exportWorldArchiveBlob(worldId), hash = await archiveContentHash(local)
       if (hash !== conflict.localHash) throw new Error('The local World changed after capture. Sync again before resolving it.')
+      await assertWorldArchiveConflict(conflictId)
       const uploaded = await uploadRemoteBook(configured, state.remoteWorldId, local, conflict.remoteETag, deviceId())
+      assertIdentity(uploaded.book, worldId)
       const readback = await downloadRemoteBook(configured, state.remoteWorldId)
       if (readback.etag !== uploaded.etag || await archiveContentHash(encodeWorldArchive(await decodeWorldArchive(readback.archive))) !== hash) return await captureRemote(state, undefined, true)
       await resolveWorldArchiveConflict(conflictId, 'local')
@@ -195,6 +219,6 @@ export async function disconnectWorldSync(worldId: string): Promise<void> {
   await locked(worldId, async () => {
     await (await database()).table('meta').delete(stateKey(worldId))
     // Tombstones and conflict copies deliberately survive disconnection.
-    notifyWorldArchive(worldId)
+    notifyStatus(worldId)
   })
 }

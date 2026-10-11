@@ -50,6 +50,7 @@ From `src/features/sync/sync-service.ts` (also directly from `world-sync-service
 ```ts
 enableWorldSync(worldId: string, beforeSync?: () => Promise<void>): Promise<WorldSyncResult>
 syncWorldNow(worldId: string, beforeSync?: () => Promise<void>): Promise<WorldSyncResult>
+checkRemoteWorld(worldId: string): Promise<void>
 getWorldSyncState(worldId: string): Promise<WorldSyncState | undefined>
 listWorldSyncStates(): Promise<WorldSyncState[]>
 listCloudWorlds(): Promise<RemoteBook[]>
@@ -59,7 +60,7 @@ resolveWorldSyncConflict(worldId: string, conflictId: string,
 disconnectWorldSync(worldId: string): Promise<void>
 listWorldArchiveConflicts(worldId: string, includeResolved?: boolean): Promise<WorldArchiveConflict[]>
 getWorldArchiveConflict(conflictId: string): Promise<WorldArchiveConflict | undefined>
-WORLD_SYNC_CHANGED // 'arc-world-sync-changed'; CustomEvent.detail.worldId
+WORLD_SYNC_CHANGED // 'arc-world-sync-status-changed'; CustomEvent.detail.worldId
 ```
 
 `WorldSyncResult.kind` is `uploaded | pulled | unchanged | conflict`; conflict results include `conflictId`. `WorldSyncState` contains status/message, endpoint, remoteWorldId, remoteETag, localContentHash, timestamps and optional conflictId. Pass the UI's successful-save barrier as `beforeSync`; save failure prevents networking. No title argument is required: enable reads canonical metadata.
@@ -82,25 +83,22 @@ resolvePendingWorldBookReferences(worldId: string): Promise<string[]>
 
 Use the **sync** resolution API for cloud conflicts, not the archive-only resolution API, so remote conditional writes and acknowledgement are coordinated. The archive-only API resolves imported-file conflicts. `expectedLocalHash` is an optimistic replacement baseline, never a force-overwrite option; a mismatch preserves a conflict. The archive API returns `imported | unchanged | deleted | conflict` and the exact transaction's `localContentHash` after application.
 
-## Integration and validation remaining
+## UI and notification integration
 
-UI files and `persistence.ts`/`world-service.ts` are owned by other agents and were not edited here. UI must wire the save barrier, status/retry, explicit conflict choices, preserved-version downloads, deletion wrapper, and World archive file import/export. Book-availability flows must invoke pending-reference resolution. Optional automatic World sync scheduling is not installed; the callable APIs perform actual authenticated network sync.
+`WorldSyncPanel` (default and named export from `src/features/sync/WorldSyncPanel.tsx`) accepts `{ worldId: string, beforeSync: () => Promise<void>, onRemoteApplied: () => Promise<void> }`. It provides enable/manual sync, retry, disconnect, archive import/export, explicit local/incoming conflict choices, and downloads of current/historical preserved archives. Cloud conflicts use cloud-aware resolution; file conflicts use archive-only resolution. Incoming application calls the owner refresh callback. A different archive identity is rejected in the active-owner panel.
 
-`tests/world-sync.test.mjs` uses the mandatory resource-policy header and real fake-indexeddb transactions for archives/conflicts/tombstones; only network transport is faked. The supported command `npm test -- tests/world-sync.test.mjs` was attempted and exited **2** before running assertions: `Tests require Linux systemd/cgroup v2 memory isolation. No unrestricted fallback. See README.md.` No isolation bypass, direct test execution, commit or push was made. Parent must coordinate guarded CI RED/GREEN; the added regression is syntax-checked, not behaviorally verified.
+`CloudWorldImport` (default and named export from `src/features/sync/CloudWorldImport.tsx`) is reusable in the World library, with `{ onImported: (worldId: string) => Promise<void>, beforeImport?: () => Promise<void> }`. It lists authenticated cloud Worlds, imports/connects them, and imports local World archive files. The callback must refresh/open the canonical World and expose its conflict panel if an import preserved a conflict. Parent/UI agent must mount this component in the World library; this agent does not edit those screens.
 
-### Audit blockers (implementation is not yet complete)
+`useWorkspaceSyncStatus(ownerId, ownerType: 'book' | 'world' = 'book')` retains Book behavior and reads World state separately. Subscriptions are owner-scoped, clean up on owner changes/unmount, and reject stale refresh results. `checkRemoteWorld` is a metadata-only check (no download/upload/apply), records error/offline status, and throws failures to its caller.
 
-1. **Superseded local cloud choices can write before rejection.** `resolveWorldSyncConflict` checks `resolution` but not `supersededAt` before the PUT. Archive resolution later rejects superseded conflicts, after the remote archive has already been replaced. The added behavioral regression `superseded cloud conflict cannot authorize a conditional upload` uses real durable conflict records and a coherent revisioned transport; it asserts zero PUTs. Add the superseded check before networking only after guarded CI confirms RED. Also review conflicts superseded during metadata/download awaits, not just at initial lookup.
-2. **Archive replacement can lose inherited Book type metadata during detach.** `apply` overwrites the World root and children before `setBookWorld(book.id, '')` materializes inherited types. If the selected version removed a custom World type, Book-local templates referencing that type can lose its definition. Detach omitted Books against the old World registry before replacing its rows, within the same transaction; add a behavioral regression first.
-3. **Retained Book links can retain dangling dependency edges.** Replacement deletes old World entries but prunes Book dependency edges only for Books detached by `setBookWorld`. Books that remain linked need unavailable source/target edges pruned atomically after replacement. Do not delete Book manuscripts or their still-valid edges.
-4. **Status notifications currently masquerade as content changes.** World sync state `save`/disconnect calls `notifyWorldArchive`, which emits `arc-worlds-changed` and `arc-entity-changed` as well as sync status. Wiring automatic World upload to content events can continually reschedule itself from acknowledgements. Separate sync-state notification from content invalidation before enabling that scheduling.
-5. **World workspace hook/check contract is missing.** `WorkspaceSyncStatus.tsx` exports only `useWorkspaceSyncStatus(bookId)`, backed by Book tables; there is no World status hook or `checkRemoteWorld` export yet. Add World-aware subscription/hook and read-only remote-check exports with owner-scoped events, cleanup, stale-read protection, and observable failures. Do not route World IDs through the Book hook/service.
+`WORLD_SYNC_CHANGED` is now **`arc-world-sync-status-changed`**, separate from `WORLD_ARCHIVE_CHANGED` (`arc-world-sync-changed`). Sync acknowledgement/check/disconnect do not emit entity or library content invalidations. Automatic upload must listen to actual content changes, not status events. Owner routing and successful-save barriers remain required in Workspace scheduling.
 
-### Parent/UI wiring (outside this agent's edit scope)
+Replacement detaches omitted Books against the old registry before replacing canonical rows, within the archive transaction. Retained Books have unavailable dependency edges pruned after replacement; valid edges and private manuscripts/templates remain intact. Conflict resolution checks durable supersession and local hashes initially and again after metadata/export awaits before any PUT. Both preserved blobs survive incoming resolution.
 
-- Current `Workspace.tsx` status hook and focus/online check are Book-only. Wire the future World status hook/check by `currentBook.type`; preserve existing Book behavior.
-- `scheduleAutomaticSync` still invokes `syncBookNow` for the current owner ID regardless of owner type. Either explicitly skip Worlds until the World scheduler is ready or route Worlds to `syncWorldNow(worldId, prepareBookExport)` (the existing save barrier flushes the active document despite its name). Refresh the canonical World, not `importedBook`, after a pull/tombstone.
-- Wire enable/sync/retry, explicit choices, preserved-version downloads, cloud World import, and World archive import/export through the existing exported service/archive APIs. Pass a successful-save barrier before any overwrite-capable operation; `importCloudWorld` currently has no barrier argument, so flush in the caller before invoking it.
-- Use `deleteWorldWithTombstone` for every World deletion action, including World-management/library screens. Never disconnect/drop the state before uploading a deletion tombstone. Invoke `resolvePendingWorldBookReferences` when a matching real Book becomes available.
+## Verified evidence and remaining validation
 
-No production fixes or new hook exports were added in this audit pass: the mandatory test-first workflow is blocked at verified RED. The contract above describes the intended guarantees, not a claim that these blockers have been resolved.
+Guarded CI **38165829587**, test commit **4ba07ad**, ran the behavioral superseded-conflict regression and failed with **one PUT instead of zero**, proving the production defect before the fix. Log: `/opt/data/cache/terminal-output/out-1791746040-167-8050.log`, lines 3226–3242. The same run's purported incoming-content failure occurred at test line 55, before resolution: deterministic archive sorting made `entities[1]` refer to a Chat, not the Codex entry. Tests now select archive rows by stable identity and assert durable applied content, Notes, saved messages, snapshots, and both preserved versions after resolution; the earlier failure was not evidence of data loss.
+
+Additional behavioral regressions cover supersession during metadata I/O, detach type preservation, retained dependency cleanup, and metadata-check/disconnect event isolation. They retain the mandatory resource-policy guard and use real fake-indexeddb transactions; only network transport is mocked. Parent must run these in guarded CI (no local resource-policy bypass). `npm run build`, test syntax checks, and `git diff --check` succeeded locally after production/UI changes. **GREEN behavioral CI is not yet claimed.** No commit or push was made by this agent.
+
+Outside this edit scope, parent/UI integration must mount the library importer, route World focus/online checks and automatic sync correctly, use `deleteWorldWithTombstone` for every World deletion, and resolve pending references when a real Book becomes available. No force-overwrite or automatic conflict-choice control is exposed.

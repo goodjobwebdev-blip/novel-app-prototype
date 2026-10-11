@@ -80,9 +80,13 @@ test('World writes reserve archived triggers, reject private dependencies, and d
   await assert.rejects(() => p.createCodexEntry(world.id, 'reserved'), /reserved/)
   await p.restoreCodexEntry(shared.id)
   await assert.rejects(() => p.createCodexDependency(world.id, shared.id, local.id), /not available/)
-  const saved = await p.saveDocumentContent(shared.id, 'New revision', { bookId: world.id, updatedAt: shared.updatedAt, content: '' })
-  assert.ok(saved.updatedAt > shared.updatedAt)
-  await assert.rejects(() => p.saveDocumentContent(shared.id, 'Stale content', { bookId: world.id, updatedAt: shared.updatedAt, content: '' }), /changed/)
+  // Archive/restore changes the revision too: a proposal made before those writes is stale.
+  await assert.rejects(() => p.saveDocumentContent(shared.id, 'Pre-restore proposal', { bookId: world.id, updatedAt: shared.updatedAt, content: '' }), /changed/)
+  const restored = await p.getEntity(shared.id)
+  const expected = { bookId: world.id, updatedAt: restored.updatedAt, content: restored.content }
+  const saved = await p.saveDocumentContent(shared.id, 'New revision', expected)
+  assert.ok(saved.updatedAt > restored.updatedAt)
+  await assert.rejects(() => p.saveDocumentContent(shared.id, 'Stale content', expected), /changed/)
   assert.equal((await p.getEntity(shared.id)).content, 'New revision')
 })
 
@@ -138,6 +142,9 @@ test('Book messages cannot attach to World Chats through raw persistence writes'
   const message = await chat.createChatMessage(bookChat, 'user', 'Book-only secret')
   const db = await p.database()
   await assert.rejects(() => db.table('entities').update(message.id, { parentId: conversation.id }), /owner|Chat/i)
+  await assert.rejects(() => db.table('entities').put({ ...message, parentId: conversation.id }), /owner|Chat/i)
+  await assert.rejects(() => db.table('entities').bulkAdd([{ ...message, id: 'raw-cross-owner-message', parentId: conversation.id }]), /owner|Chat/i)
+  assert.equal(await p.getEntity('raw-cross-owner-message'), undefined)
   assert.equal((await p.getEntity(message.id)).parentId, bookChat.id)
   await p.deleteEntityTree(conversation.id)
   assert.equal((await p.getEntity(message.id)).content, 'Book-only secret')

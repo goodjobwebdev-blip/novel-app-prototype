@@ -51,7 +51,7 @@ function BookCodexDashboard({ ownerKind = 'book', bookId, entries, activeId, sum
   const { types } = useLoreTypes(bookId)
   useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
   useEffect(() => { try { localStorage.setItem(key, JSON.stringify(prefs)); setSaveError(false) } catch { setSaveError(true) } }, [key, prefs])
-  useEffect(() => { let current = true; setWorld(undefined); if (entries.some(entry => entry.checkpoints?.length)) void readTimelineWorld(bookId).then(world => { if (current) setWorld(world) }).catch(() => {}); return () => { current = false } }, [bookId, entries])
+  useEffect(() => { let current = true; setWorld(undefined); if (ownerKind === 'book' && entries.some(entry => entry.checkpoints?.length)) void readTimelineWorld(bookId).then(world => { if (current) setWorld(world) }).catch(() => {}); return () => { current = false } }, [bookId, entries, ownerKind])
   useEffect(closeActions, [bookId, page, prefs, closeActions])
   useEffect(() => {
     if (ownerKind === 'world') { setBookData(undefined); setLoadError(''); return }

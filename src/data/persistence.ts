@@ -204,8 +204,37 @@ function installWorldPersistenceValidation(db: Dexie) {
   const notifications = new WeakMap<object, { books: Set<string>; worlds: boolean }>()
   const mutations = new WeakMap<object, Promise<unknown>>()
   db.use({ stack: 'dbcore', name: 'world-owner-validation', create(core) {
-    return { ...core, table(name) {
+    return { ...core, transaction(stores, mode, options) {
+      // Raw edge writes must read owners/endpoints inside the same locked transaction.
+      const validatedStores = mode === 'readwrite' && stores.includes('codexDependencies') && !stores.includes('entities') ? [...stores, 'entities'] : stores
+      return core.transaction(validatedStores, mode, options)
+    }, table(name) {
       const table = core.table(name)
+      if (name === 'codexDependencies') return { ...table, async mutate(request) {
+        if (request.type !== 'add' && request.type !== 'put') return table.mutate(request)
+        const execute = async () => {
+          const entities = core.table('entities')
+          for (const edge of request.values as CodexDependencyEdge[]) {
+            const [source, target, owner] = await Promise.all([
+              entities.get({ trans: request.trans, key: edge.sourceId }) as Promise<CodexEntryEntity | undefined>,
+              entities.get({ trans: request.trans, key: edge.targetId }) as Promise<CodexEntryEntity | undefined>,
+              entities.get({ trans: request.trans, key: edge.bookId }) as Promise<BookEntity | WorldEntity | undefined>,
+            ])
+            if (!owner || !['book', 'world'].includes(owner.type) || source?.type !== 'codexEntry' || source.bookId !== edge.bookId || !entityAvailableInOwner(source, owner)) throw new Error('The dependency source must have its canonical owner.')
+            if (target?.type !== 'codexEntry' || source.id === target.id || !entityAvailableInOwner(target, owner) || (owner.type === 'world' && target.worldId !== owner.id)) throw new Error('The dependency target is not available in this Book or World.')
+            // Archive/sync restores may legitimately contain archived endpoints.
+            // Interactive creation rejects archived targets at its service boundary.
+          }
+          return table.mutate(request)
+        }
+        const pending = mutations.get(request.trans) ?? Dexie.Promise.resolve()
+        const operation = pending.then(execute).catch(error => {
+          try { request.trans.abort() } catch { /* A sibling mutation may already have aborted it. */ }
+          throw error
+        })
+        mutations.set(request.trans, operation)
+        return operation
+      } }
       if (name !== 'entities') return table
       return { ...table, async mutate(request) {
         if (request.type !== 'add' && request.type !== 'put') return table.mutate(request)
@@ -224,18 +253,21 @@ function installWorldPersistenceValidation(db: Dexie) {
           const entries = [...next.values()].filter(row => row.type === 'codexEntry') as CodexEntryEntity[]
           for (const row of request.values as ArcEntity[]) {
             if (row.type === 'book' && row.worldId && next.get(row.worldId)?.type !== 'world') throw new Error('This World no longer exists.')
+            if (row.bookId && ['codexEntry', 'summary', 'note', 'chat', 'chatMessage', 'settings'].includes(row.type)) {
+              const owner = next.get(row.bookId)
+              if (!owner || !['book', 'world'].includes(owner.type) || (owner.type === 'world' ? row.worldId !== owner.id : row.worldId !== undefined)) throw new Error('The workspace resource must have a canonical Book or World owner.')
+            }
             if (['note', 'chat', 'chatMessage'].includes(row.type)) {
               const owner = next.get(String(row.bookId))
               if (!owner || !['book', 'world'].includes(owner.type)) throw new Error('This workspace owner no longer exists.')
               const previous = rows.find(item => item.id === row.id)
               if (previous && (previous.bookId !== row.bookId || previous.type !== row.type)) throw new Error('Notes and Chat cannot change owner.')
-              if (row.worldId && (owner.type !== 'world' || row.worldId !== owner.id)) throw new Error('The workspace resource has a different owner.')
+              if (row.type === 'chatMessage') {
+                const parent = next.get(String(row.parentId))
+                if (parent?.type !== 'chat' || parent.bookId !== owner.id || parent.worldId !== row.worldId) throw new Error('The Chat belongs to another owner or no longer exists.')
+              }
               if (owner.type === 'world') {
-                row.worldId = owner.id
-                if (row.type === 'chatMessage') {
-                  const parent = next.get(String(row.parentId))
-                  if (parent?.type !== 'chat' || parent.bookId !== owner.id) throw new Error('The Chat belongs to another owner or no longer exists.')
-                } else if (row.parentId !== owner.id) throw new Error('The resource parent must be its workspace owner.')
+                if (row.type !== 'chatMessage' && row.parentId !== owner.id) throw new Error('The resource parent must be its workspace owner.')
                 if (row.type === 'chat') {
                   if (row.character) throw new Error('Character Chat requires a Book story position.')
                   row.contextProfile = worldContextProfile(row.contextProfile as GenerationContextProfile, [...next.values()], owner.id)
@@ -245,7 +277,7 @@ function installWorldPersistenceValidation(db: Dexie) {
             }
             if (row.type === 'codexEntry') {
               const owner = next.get(String(row.bookId))
-              if (!owner || !['book', 'world'].includes(owner.type) || (owner.type === 'world' ? row.worldId !== owner.id : Boolean(row.worldId))) throw new Error('The Codex entry must have a canonical book or World owner.')
+              if (!owner || !['book', 'world'].includes(owner.type) || (owner.type === 'world' ? row.worldId !== owner.id : row.worldId !== undefined)) throw new Error('The Codex entry must have a canonical book or World owner.')
               const conflicts = codexTriggerConflicts(row as CodexEntryEntity, row.autoIncludeTriggers as string[] ?? [], entries)
               if (conflicts.length) throw Object.assign(new Error(`Automatic trigger “${conflicts[0].trigger}” is already reserved by “${conflicts[0].title}” in this owner.`), { conflicts })
             }
@@ -588,10 +620,10 @@ export async function listEntitiesByParent(parentId: string): Promise<ArcEntity[
 export async function listEntitiesByBook(bookId: string, type?: EntityType): Promise<ArcEntity[]> {
   const db = await database()
   return db.transaction('r', db.table('entities'), async () => {
-    const book = await db.table('entities').get(bookId) as BookEntity | undefined
+    const owner = await db.table('entities').get(bookId) as BookEntity | WorldEntity | undefined
     const locals: ArcEntity[] = await db.table('entities').where('bookId').equals(bookId).toArray()
-    const shared: ArcEntity[] = book?.type === 'book' && book.worldId ? await db.table('entities').where('bookId').equals(book.worldId).toArray() : []
-    return [...locals, ...shared].filter(entity => (!book || book.type !== 'book' ? entity.bookId === bookId : entityAvailableInBook(entity, book)) && (!type || entity.type === type))
+    const shared: ArcEntity[] = owner?.type === 'book' && owner.worldId ? await db.table('entities').where('bookId').equals(owner.worldId).toArray() : []
+    return [...locals, ...shared].filter(entity => (owner && ['book', 'world'].includes(owner.type) ? entityAvailableInOwner(entity, owner) : entity.bookId === bookId) && (!type || entity.type === type))
   })
 }
 
@@ -944,7 +976,7 @@ export async function listEntitiesByOwner(ownerId: string, type?: EntityType): P
 }
 function worldContextProfile(value: Partial<GenerationContextProfile> | undefined, rows: ArcEntity[], ownerId: string): GenerationContextProfile {
   const profile = normalizeContextProfile(value)
-  const available = (id: string, type: EntityType) => rows.some(row => row.id === id && row.type === type && row.bookId === ownerId)
+  const available = (id: string, type: EntityType) => rows.some(row => row.id === id && row.type === type && row.bookId === ownerId && row.worldId === ownerId)
   return { ...profile, includeLastScene: false, includePreviousSceneWhenEmpty: false, loreAtCurrentScene: false, structuralIds: [], summaryRange: 'none', noteIds: profile.noteIds.filter(id => available(id, 'note')), codexEntryIds: profile.codexEntryIds.filter(id => available(id, 'codexEntry')) }
 }
 async function requireWorldOwner(db: any, ownerId: string): Promise<WorldEntity> {

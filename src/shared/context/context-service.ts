@@ -1,8 +1,9 @@
+import { entityAvailableInOwner } from '../../features/worlds/world-service'
 import { resolveTimelineEntities } from '../../features/codex/codex-timeline'
 import { readTimelineWorld } from '../../features/codex/codex-timeline-service'
 import { sceneBeats } from '../../features/writing/scene-beats'
 import { proseText, proseEntities } from '../../features/editor/document-projection.ts'
-import { getEntity, getBookContextSettings, isCodexEntryArchived, listCodexDependencies, listEntitiesByBook, type ArcEntity, type CodexEntryEntity, type GenerationContextProfile, type GenerationContextType, type StructuralEntity, type SummaryEntity } from '../../data/persistence'
+import { getOwner, getBookContextSettings, isCodexEntryArchived, listCodexDependencies, listEntitiesByBook, type ArcEntity, type CodexEntryEntity, type GenerationContextProfile, type GenerationContextType, type StructuralEntity, type SummaryEntity } from '../../data/persistence'
 import { automaticCodexCandidates, normalizeCodexTriggerList, triggerMatchesText, automaticCodexMatches, type CodexTriggerSceneMatch } from '../../features/codex/codex-trigger-service'
 import { cascadeAutomaticCodexDependencies } from '../../features/codex/codex-dependency-cascade'
 import { codexContextRepresentation, type CodexContextRepresentation } from '../../features/writing/summary-service'
@@ -133,9 +134,9 @@ function additionalContextOrder(a: AdditionalContextSection, b: AdditionalContex
 }
 
 export async function buildContextValues(options: BuildOptions): Promise<PreparedContextValues> {
-  const [owner, loadedEntities, loadedSettings, loadedEdges] = await Promise.all([getEntity(options.bookId), listEntitiesByBook(options.bookId), getBookContextSettings(options.bookId), listCodexDependencies(options.bookId)])
+  const [owner, loadedEntities, loadedSettings, loadedEdges] = await Promise.all([getOwner(options.bookId), listEntitiesByBook(options.bookId), getBookContextSettings(options.bookId), listCodexDependencies(options.bookId)])
   const world = owner?.type === 'world'
-  const rawEntities = world ? loadedEntities.filter(entity => entity.bookId === options.bookId && ['codexEntry', 'summary', 'note'].includes(entity.type)) : loadedEntities
+  const rawEntities = world ? loadedEntities.filter(entity => ['codexEntry', 'summary', 'note'].includes(entity.type) && entityAvailableInOwner(entity, owner)) : loadedEntities
   const ids = new Set(rawEntities.map(entity => entity.id))
   const dependencyEdges = world ? loadedEdges.filter(edge => ids.has(edge.sourceId) && ids.has(edge.targetId)) : loadedEdges
   const worldTriggerText = world ? options.currentSceneText ?? String(rawEntities.find(entity => entity.id === options.currentDocumentId)?.content ?? '') : ''

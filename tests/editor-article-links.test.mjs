@@ -46,12 +46,41 @@ test('article preview supports keyboard activation and normal external links wit
     await act(async () => root.render(React.createElement(MarkdownEditor, { value: 'Cursor here\n\n[Article](arc-codex:stable-id) [Website](https://example.com)', onChange: content => changes.push(content), onArticleLink: id => opened.push(id) })))
     const article = document.querySelector('[data-article-id]')
     assert.ok(article)
-    await act(async () => article.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })))
+    assert.equal(article.tabIndex, 0, 'Article previews are in the keyboard tab order')
+    await act(async () => article.focus())
+    assert.equal(document.activeElement, article, 'Keyboard users can focus the article preview')
+    const enter = new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    await act(async () => article.dispatchEvent(enter))
+    assert.equal(enter.defaultPrevented, true, 'Activation must not reach the editor newline command')
     assert.deepEqual(opened, ['stable-id'])
     const website = document.querySelector('[data-link-href]')
     assert.ok(website, 'Normal links retain working navigation')
     await act(async () => website.dispatchEvent(new dom.window.MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 })))
     assert.deepEqual(external, [['https://example.com', '_blank', 'noopener,noreferrer']])
+    await act(async () => website.focus())
+    assert.equal(document.activeElement, website)
+    await act(async () => website.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })))
+    assert.deepEqual(external, [
+      ['https://example.com', '_blank', 'noopener,noreferrer'],
+      ['https://example.com', '_blank', 'noopener,noreferrer'],
+    ])
     assert.deepEqual(changes, [])
   } finally { window.open = originalOpen; await act(async () => root.unmount()) }
+})
+test('read-only article previews retain keyboard navigation and use the latest callback', async () => {
+  const root = createRoot(document.getElementById('root'))
+  const old = [], latest = [], changes = []
+  const props = { value: 'Cursor here\n\n[Article](arc-codex:stable-id)', readOnly: true, onChange: value => changes.push(value) }
+  try {
+    await act(async () => root.render(React.createElement(MarkdownEditor, { ...props, onArticleLink: id => old.push(id) })))
+    await act(async () => root.render(React.createElement(MarkdownEditor, { ...props, onArticleLink: id => latest.push(id) })))
+    const link = document.querySelector('[data-article-id]')
+    assert.ok(link)
+    await act(async () => link.focus())
+    assert.equal(document.activeElement, link)
+    await act(async () => link.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })))
+    assert.deepEqual(old, [])
+    assert.deepEqual(latest, ['stable-id'])
+    assert.deepEqual(changes, [])
+  } finally { await act(async () => root.unmount()) }
 })

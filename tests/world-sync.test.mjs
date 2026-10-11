@@ -23,6 +23,63 @@ const a = await import('../src/data/world-archive.ts')
 const s = await import('../src/features/sync/world-sync-service.ts')
 const worlds = await import('../src/features/worlds/world-service.ts')
 after(async () => (await p.database()).close())
+
+test('archive replacement detaches against old type registry and prunes only unavailable retained Book edges', async () => {
+  const data = fixture('world-detach-regression'), db = await p.database()
+  const custom = { id: 'lore-world-detach-custom', name: 'Inherited definition', ownerId: data.worldId, builtin: false, order: 20 }
+  data.entities[0].loreTypes = [custom]
+  data.bookReferences = ['detach-book', 'retain-book']
+  await a.importWorldArchiveBlob(a.encodeWorldArchive(data))
+  for (const id of data.bookReferences) {
+    await db.table('entities').add({ id, type: 'book', title: id, createdAt: 1, updatedAt: 1 })
+    await worlds.setBookWorld(id, data.worldId)
+  }
+  await db.table('entities').add({ id: 'detach-template', type: 'note', bookId: 'detach-book', parentId: 'detach-book', title: 'Template', content: 'BOOK TEMPLATE', compatibleLoreTypeIds: [custom.id], createdAt: 1, updatedAt: 1 })
+  await db.table('entities').bulkAdd([
+    { id: 'retain-entry-one', type: 'codexEntry', bookId: 'retain-book', parentId: 'retain-book', title: 'One', category: 'Location', content: 'PRIVATE LORE', createdAt: 1, updatedAt: 1 },
+    { id: 'retain-entry-two', type: 'codexEntry', bookId: 'retain-book', parentId: 'retain-book', title: 'Two', category: 'Location', content: 'PRIVATE TWO', createdAt: 1, updatedAt: 1 },
+    { id: 'retain-scene', type: 'scene', bookId: 'retain-book', parentId: 'retain-book', title: 'Scene', content: 'MANUSCRIPT', createdAt: 1, updatedAt: 1 },
+  ])
+  await db.table('codexDependencies').bulkAdd([
+    { id: 'retained-valid-edge', bookId: 'retain-book', sourceId: 'retain-entry-one', targetId: 'retain-entry-two', relationLabel: '', includeWithSource: true, createdAt: 1, updatedAt: 1 },
+    { id: 'retained-removed-edge', bookId: 'retain-book', sourceId: 'retain-entry-one', targetId: data.entities[1].id, relationLabel: '', includeWithSource: true, createdAt: 1, updatedAt: 1 },
+  ])
+  const incoming = await a.readWorldArchive(data.worldId)
+  incoming.bookReferences = ['retain-book']; incoming.entities[0].loreTypes = []
+  incoming.entities = incoming.entities.filter(row => row.type !== 'codexEntry'); incoming.snapshots = []
+  const conflict = await a.importWorldArchiveBlob(a.encodeWorldArchive(incoming))
+  await a.resolveWorldArchiveConflict(conflict.conflictId, 'incoming')
+  const detached = await p.getEntity('detach-book')
+  assert.equal(detached.worldId, undefined)
+  assert.equal(detached.loreTypes.find(row => row.id === custom.id)?.name, custom.name)
+  assert.equal((await p.getEntity('detach-template')).content, 'BOOK TEMPLATE')
+  assert.deepEqual((await p.getEntity('detach-template')).compatibleLoreTypeIds, [custom.id])
+  assert.equal((await p.getEntity('retain-book')).worldId, data.worldId)
+  assert.equal((await p.getEntity('retain-scene')).content, 'MANUSCRIPT')
+  assert.equal(await db.table('codexDependencies').get('retained-removed-edge'), undefined)
+  assert.equal((await db.table('codexDependencies').get('retained-valid-edge')).targetId, 'retain-entry-two')
+})
+
+test('remote World checks and disconnect notify status without emitting content edits', async () => {
+  const settings = await import('../src/features/sync/sync-settings.ts')
+  settings.saveSyncSettings({ endpoint: 'https://sync.example.test', basicUsername: 'writer', basicPassword: 'secret', token: 'x'.repeat(32), automaticUpload: false })
+  const data = fixture('world-status-regression'); await a.importWorldArchiveBlob(a.encodeWorldArchive(data))
+  const hash = await (await import('../src/features/sync/sync-hash.ts')).archiveContentHash(await a.exportWorldArchiveBlob(data.worldId))
+  await (await p.database()).table('meta').put({ key: `world-sync:state:${data.worldId}`, value: { worldId: data.worldId, ownerType: 'world', status: 'idle', endpoint: 'https://sync.example.test', remoteWorldId: 'status-remote', remoteETag: '"rev-1"', localContentHash: hash, updatedAt: 1 } })
+  const original = globalThis.fetch, calls = [], events = []
+  const record = event => events.push(event.type)
+  for (const name of ['arc-entity-changed', 'arc-worlds-changed', s.WORLD_SYNC_CHANGED]) window.addEventListener(name, record)
+  globalThis.fetch = async (url, init) => { calls.push({ url, method: init.method }); return new Response(JSON.stringify({ id: 'status-remote', clientBookId: `arc-world:${data.worldId}`, currentRevision: 2, currentSize: 100 }), { headers: { ETag: '"rev-2"' } }) }
+  try {
+    await s.checkRemoteWorld(data.worldId)
+    assert.equal((await s.getWorldSyncState(data.worldId)).status, 'remote-changed')
+    assert.equal(calls.length, 1); assert.equal(calls[0].method, 'GET'); assert.equal(calls[0].url.endsWith('/state'), false)
+    assert.equal((await p.getEntity(data.entities[1].id)).content, 'Original')
+    await s.disconnectWorldSync(data.worldId)
+    assert.equal(await s.getWorldSyncState(data.worldId), undefined)
+    assert.deepEqual(events, [s.WORLD_SYNC_CHANGED, s.WORLD_SYNC_CHANGED])
+  } finally { globalThis.fetch = original; for (const name of ['arc-entity-changed', 'arc-worlds-changed', s.WORLD_SYNC_CHANGED]) window.removeEventListener(name, record) }
+})
 function fixture(id) {
   return { format: 'arc-world', version: 1, worldId: id, entities: [
     { id, type: 'world', title: 'Canonical world', createdAt: 1, updatedAt: 1 },
@@ -52,11 +109,19 @@ test('different canonical version preserves both copies and requires explicit re
   assert.equal(result.kind, 'conflict')
   assert.equal((await p.getEntity(data.entities[1].id)).content, 'Original')
   const conflict = await a.getWorldArchiveConflict(result.conflictId)
-  assert.equal((await a.decodeWorldArchive(conflict.incoming)).entities[1].content, 'Remote edit')
-  assert.equal((await a.decodeWorldArchive(conflict.local)).entities[1].content, 'Original')
+  assert.equal((await a.decodeWorldArchive(conflict.incoming)).entities.find(row => row.id === data.entities[1].id).content, 'Remote edit')
+  assert.equal((await a.decodeWorldArchive(conflict.local)).entities.find(row => row.id === data.entities[1].id).content, 'Original')
   await a.resolveWorldArchiveConflict(result.conflictId, 'incoming')
   assert.equal((await p.getEntity(data.entities[1].id)).content, 'Remote edit')
   assert.equal((await a.getWorldArchiveConflict(result.conflictId)).resolution, 'incoming')
+  const preserved = await a.getWorldArchiveConflict(result.conflictId)
+  assert.equal((await a.decodeWorldArchive(preserved.local)).entities.find(row => row.id === data.entities[1].id).content, 'Original')
+  assert.equal((await a.decodeWorldArchive(preserved.incoming)).entities.find(row => row.id === data.entities[1].id).content, 'Remote edit')
+  const applied = await a.readWorldArchive(data.worldId)
+  assert.equal(applied.entities.find(row => row.id === data.entities[1].id).content, 'Remote edit')
+  assert.equal(applied.entities.find(row => row.type === 'note').content, 'Private world note')
+  assert.equal(applied.entities.find(row => row.type === 'chatMessage').content, 'History')
+  assert.equal(applied.snapshots[0].content, 'Previous')
 })
 test('stale resolution is rejected without overwriting a subsequent local edit', async () => {
   const data = fixture('world-stale-test')
@@ -145,6 +210,30 @@ test('superseded cloud conflict cannot authorize a conditional upload', async ()
     assert.equal(writes.length, 0, 'stale choices must be rejected BEFORE any cloud write')
     assert.equal((await p.getEntity(data.entities[1].id)).content, 'Original')
     assert.equal((await a.getWorldArchiveConflict(fresh.conflictId)).resolution, undefined)
+  } finally { globalThis.fetch = original }
+})
+
+test('conflict superseded while remote metadata is in flight cannot authorize upload', async () => {
+  const settings = await import('../src/features/sync/sync-settings.ts')
+  settings.saveSyncSettings({ endpoint: 'https://sync.example.test', basicUsername: 'writer', basicPassword: 'secret', token: 'x'.repeat(32), automaticUpload: false })
+  const data = fixture('world-inflight-conflict'); await a.importWorldArchiveBlob(a.encodeWorldArchive(data))
+  const incoming = structuredClone(data); incoming.entities[1].content = 'Remote first'
+  const conflict = await a.importWorldArchiveBlob(a.encodeWorldArchive(incoming), { remoteETag: '"rev-1"' })
+  await (await p.database()).table('meta').put({ key: `world-sync:state:${data.worldId}`, value: { worldId: data.worldId, ownerType: 'world', status: 'conflict', endpoint: 'https://sync.example.test', remoteWorldId: 'inflight-remote', remoteETag: '"rev-0"', localContentHash: '', updatedAt: 1, conflictId: conflict.conflictId } })
+  const original = globalThis.fetch, writes = []
+  globalThis.fetch = async (url, init) => {
+    if (init.method === 'PUT') writes.push(init.body)
+    if (init.method === 'GET') {
+      const later = structuredClone(data); later.entities[1].content = 'Remote newer'
+      await a.importWorldArchiveBlob(a.encodeWorldArchive(later), { remoteETag: '"rev-1"' })
+    }
+    return new Response(JSON.stringify({ id: 'inflight-remote', clientBookId: `arc-world:${data.worldId}`, currentRevision: 1, currentSize: 100 }), { headers: { ETag: '"rev-1"' } })
+  }
+  try {
+    await assert.rejects(s.resolveWorldSyncConflict(data.worldId, conflict.conflictId, 'local'), /superseded/)
+    assert.equal(writes.length, 0)
+    assert.equal((await p.getEntity(data.entities[1].id)).content, 'Original')
+    assert.ok((await a.getWorldArchiveConflict(conflict.conflictId)).supersededAt)
   } finally { globalThis.fetch = original }
 })
 

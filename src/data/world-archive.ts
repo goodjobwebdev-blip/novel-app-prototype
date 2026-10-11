@@ -3,7 +3,7 @@ import { database, type ArcEntity, type WorldEntity, type DocumentSnapshot, type
 import type { GalleryImage, ImageJob } from '../features/images/image-generation-types'
 import { documentBlocks } from '../features/editor/document-projection'
 import { assertImageFile, checkStorageHeadroom } from '../features/images/illustration-image'
-import { deleteWorld, setBookWorld } from '../features/worlds/world-service'
+import { deleteWorld, setBookWorld, entityAvailableInBook } from '../features/worlds/world-service'
 import { archiveContentHash } from '../features/sync/sync-hash'
 
 /** Same binary transport envelope as Book; a distinct canonical manifest contract. */
@@ -207,6 +207,10 @@ async function apply(db: any, data: WorldArchiveData) {
     await db.table('meta').delete(key('references', worldId))
     return
   }
+  // Detach against the OLD registry so inherited custom definitions survive.
+  const wanted = new Set(data.bookReferences)
+  const members = (await db.table('entities').where('worldId').equals(worldId).toArray() as ArcEntity[]).filter(row => row.type === 'book')
+  for (const book of members) if (!wanted.has(book.id)) await setBookWorld(book.id, '')
   // Replace this owner's rows, never delete or import any Book manuscript.
   await db.table('snapshots').where('entityId').anyOf([...ids]).delete()
   for (const table of ['codexDependencies', 'illustrations', 'galleryImages', 'imageJobs', 'illustrationUndo']) await db.table(table).where('bookId').equals(worldId).delete()
@@ -216,9 +220,14 @@ async function apply(db: any, data: WorldArchiveData) {
   const children = data.entities.filter(row => row.id !== worldId)
   if (children.length) await db.table('entities').bulkAdd(children)
   for (const [table, incoming] of rows) if (table !== 'entities' && incoming.length) await db.table(table).bulkAdd(incoming)
-  const wanted = new Set(data.bookReferences)
-  const members = (await db.table('entities').where('worldId').equals(worldId).toArray() as ArcEntity[]).filter(row => row.type === 'book')
-  for (const book of members) if (!wanted.has(book.id)) await setBookWorld(book.id, '')
+  // Retained links must not keep edges to lore removed by the selected version.
+  for (const member of members.filter(book => wanted.has(book.id))) {
+    const book = await db.table('entities').get(member.id)
+    const available = new Set((await db.table('entities').where('bookId').anyOf([member.id, worldId]).toArray() as ArcEntity[])
+      .filter(row => row.type === 'codexEntry' && entityAvailableInBook(row, book)).map(row => row.id))
+    await db.table('codexDependencies').where('bookId').equals(member.id)
+      .filter((edge: CodexDependencyEdge) => !available.has(edge.sourceId) || !available.has(edge.targetId)).delete()
+  }
   const pending: string[] = []
   for (const bookId of data.bookReferences) {
     const book = await db.table('entities').get(bookId)
@@ -251,6 +260,17 @@ export async function getWorldArchiveConflict(id: string): Promise<WorldArchiveC
 }
 export async function listWorldArchiveConflicts(worldId: string, includeResolved = false): Promise<WorldArchiveConflict[]> {
   return (await (await database()).table('meta').toArray()).filter((row: any) => row.key.startsWith('world-archive:conflict:') && row.value.worldId === worldId && (includeResolved || (!row.value.resolution && !row.value.supersededAt))).map((row: any) => row.value)
+}
+/** Read-only preflight, repeated after network awaits before any cloud write. */
+export async function assertWorldArchiveConflict(id: string): Promise<WorldArchiveConflict> {
+  const db = await database()
+  return db.transaction('r', worldArchiveTables.map(name => db.table(name)), async () => {
+    const latest = (await db.table('meta').get(id))?.value as WorldArchiveConflict | undefined
+    if (!latest || latest.resolution || latest.supersededAt) throw new Error('This conflict was already resolved or superseded. Sync again.')
+    const current = await snapshot(db, latest.worldId)
+    if (current.hash !== latest.localHash) throw new Error('The local World changed after capture. Sync again before resolving it.')
+    return latest
+  })
 }
 export async function resolveWorldArchiveConflict(id: string, choice: 'local' | 'incoming'): Promise<WorldImportResult> {
   if (!['local', 'incoming'].includes(choice)) throw new Error('Choose the local or incoming version explicitly.')

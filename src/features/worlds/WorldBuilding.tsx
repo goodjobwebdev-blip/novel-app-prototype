@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, BookOpen, Copy, Globe2, Pencil, Plus, Search, Trash2, WandSparkles } from 'lucide-react'
-import { createBook, listBooks, type BookEntity, type CodexEntryEntity } from '../../data/persistence'
+import { listBooks, type BookEntity, type CodexEntryEntity } from '../../data/persistence'
+import { deleteWorldWithTombstone } from '../../data/world-archive'
+import WorldSyncPanel from '../sync/WorldSyncPanel'
 import { loadAiSettings } from '../../shared/ai/ai-settings'
 import ActionMenu from '../../shared/ui/ActionMenu'
 import Button from '../../shared/ui/Button'
@@ -10,13 +12,13 @@ import ResourceListRow from '../../shared/ui/ResourceListRow'
 import IllustrationModal from '../images/IllustrationModal'
 import { loadSettingsProfiles, resolveProfileSettings } from '../settings/settings-profiles'
 import { generateAutotitleSuggestion, prepareAutotitleRequest, type AutotitleRequest } from '../writing/autotitle-service'
-import { copyWorldEntryToAllBooksAndRemove, createWorld, deleteWorld, listWorldEntries, listWorlds, renameWorld, setBookWorld, worldDemotionConflicts, type WorldEntity, type WorldTriggerConflict } from './world-service'
+import { copyWorldEntryToAllBooksAndRemove, createWorld, createBookInWorld, changeBookWorld, getBookWorldChangeImpact, getWorldDeletionImpact, listWorldEntries, listWorlds, renameWorld, worldDemotionConflicts, type WorldDeletionImpact, type WorldEntity, type WorldTriggerConflict } from './world-service'
 import TriggerConflictsDialog from './TriggerConflictsDialog'
 import '../images/illustrations.css'
 import './worlds.css'
 
 const message = (reason: unknown) => reason instanceof Error ? reason.message : String(reason)
-type WorldRecord = { world: WorldEntity; entries: CodexEntryEntity[]; books: BookEntity[] }
+type WorldRecord = { world: WorldEntity; entries: CodexEntryEntity[]; books: BookEntity[]; impact: WorldDeletionImpact }
 
 export function WorldWorkspacePanel({ world, tab, beforeChange, onOpenBook, onRefresh, onHome }: {
   world: WorldEntity; tab: 'world' | 'books'; beforeChange: () => Promise<void>; onOpenBook: (id: string) => void; onRefresh: () => Promise<void>; onHome: () => void
@@ -39,27 +41,31 @@ export function WorldWorkspacePanel({ world, tab, beforeChange, onOpenBook, onRe
   const attach = () => run(async () => {
     const book = books.find(item => item.id === selectedBook)
     if (!book) throw new Error('Choose an existing Book.')
-    if (book.worldId && book.worldId !== world.id) {
-      const previous = records.find(item => item.world.id === book.worldId)?.world.title ?? book.worldId
-      if (!window.confirm(`Move “${book.title}” from World “${previous}” to “${world.title}”? Its local content stays unchanged; access to the previous shared lore ends.`)) return
-    }
-    await setBookWorld(book.id, world.id)
+    const impact = await getBookWorldChangeImpact(book.id, world.id)
+    if (impact.requiresConfirmation && !window.confirm(`Move “${book.title}” from World “${impact.previousWorldTitle}” to “${world.title}”? Access to ${impact.lostEntryIds.length} shared articles ends; ${impact.unavailableDependencies} unavailable dependencies will be removed. Its local content stays unchanged.`)) return
+    await changeBookWorld(book.id, world.id, { confirmed: true, expectedWorldId: impact.previousWorldId })
   })
-  return <section aria-label={tab === 'world' ? 'World settings' : 'Linked Books'}>
+  return <section className="world-workspace-panel" aria-label={tab === 'world' ? 'World settings' : 'Linked Books'}>
     <PanelHeader title={tab === 'world' ? world.title : 'Books'} eyebrow="World workspace" />
     {(error || loadError) && <p role="alert">{error || loadError}<Button onClick={() => { void reload() }}>Retry</Button></p>}
     {loading && <p role="status">Loading World…</p>}
     {tab === 'world' ? <>
-      {record && <WorldActions record={record} disabled={loading || busy} />}
+      {record && <WorldActions record={record} disabled={loading || busy} beforeChange={beforeChange} onDeleted={onRefresh} />}
+      <WorldSyncPanel worldId={world.id} beforeSync={beforeChange} onRemoteApplied={onRefresh} />
       <p>Articles, Notes and Chat belong to this World. Only an empty World can be deleted; linked Books are disconnected, never deleted.</p>
       <Button onClick={onHome}>Home</Button>
-      {record && record.books.length > 0 && <details><summary>Transfer World entries to all linked Books</summary>{record.entries.map(entry => <WorldEntryRow key={entry.id} entry={entry} worldId={world.id} books={record.books} disabled={busy || loading} />)}</details>}
+      {record && record.books.length > 0 && <details><summary>Transfer World entries to all linked Books</summary>{record.entries.map(entry => <WorldEntryRow key={entry.id} entry={entry} worldId={world.id} books={record.books} disabled={busy || loading} beforeChange={beforeChange} />)}</details>}
     </> : <>
       {!record?.books.length && <p>No Books linked. Codex, Notes and Chat work without a Book.</p>}
-      {record?.books.map(book => <div key={book.id}><ResourceListRow title={book.title} onOpen={() => onOpenBook(book.id)} /><Button disabled={busy} onClick={() => { if (window.confirm(`Disconnect “${book.title}” from “${world.title}”? Local content remains; shared World lore becomes unavailable.`)) void run(async () => { await setBookWorld(book.id, '') }) }}>Disconnect</Button></div>)}
-      <Button disabled={busy} onClick={() => { void run(async () => { const created = await createBook(loadAiSettings()); await setBookWorld(created.book.id, world.id) }) }}>New Book in this World</Button>
-      <label>Connect existing Book<select aria-label="Connect existing Book" value={selectedBook} disabled={busy} onChange={event => setSelectedBook(event.target.value)}><option value="">Choose Book</option>{books.filter(book => book.worldId !== world.id).map(book => <option key={book.id} value={book.id}>{book.title}</option>)}</select></label>
-      <Button disabled={busy || !selectedBook} onClick={() => { void attach() }}>Connect Book</Button>
+      {record?.books.map(book => <div key={book.id}><ResourceListRow title={book.title} onOpen={() => onOpenBook(book.id)} /><Button disabled={busy} onClick={() => { void run(async () => {
+        const impact = await getBookWorldChangeImpact(book.id, '')
+        if (impact.previousWorldId !== world.id) throw new Error('The Book World link changed. Refresh before disconnecting.')
+        if (!window.confirm(`Disconnect “${book.title}” from “${world.title}”? Local content remains; ${impact.lostEntryIds.length} shared articles become unavailable and ${impact.unavailableDependencies} unavailable dependencies will be removed.`)) return
+        await changeBookWorld(book.id, '', { confirmed: true, expectedWorldId: world.id })
+      }) }}>Disconnect</Button></div>)}
+      <Button disabled={busy || loading || Boolean(loadError)} onClick={() => { void run(async () => { await createBookInWorld(world.id, loadAiSettings()) }) }}>New Book in this World</Button>
+      <label>Connect existing Book<select aria-label="Connect existing Book" value={selectedBook} disabled={busy || loading || Boolean(loadError)} onChange={event => setSelectedBook(event.target.value)}><option value="">Choose Book</option>{books.filter(book => book.worldId !== world.id).map(book => <option key={book.id} value={book.id}>{book.title}</option>)}</select></label>
+      <Button disabled={busy || loading || Boolean(loadError) || !selectedBook} onClick={() => { void attach() }}>Connect Book</Button>
     </>}
   </section>
 }
@@ -76,7 +82,7 @@ function useWorldLibrary() {
     setError('')
     try {
       const [worlds, books] = await Promise.all([listWorlds(), listBooks()])
-      const next = await Promise.all(worlds.map(async world => ({ world, entries: await listWorldEntries(world.id), books: books.filter(book => book.worldId === world.id) })))
+      const next = await Promise.all(worlds.map(async world => ({ world, entries: await listWorldEntries(world.id), books: books.filter(book => book.worldId === world.id), impact: await getWorldDeletionImpact(world.id) })))
       if (token === request.current) setRecords(next)
     } catch (reason) {
       if (token === request.current) setError(message(reason))
@@ -141,7 +147,7 @@ export function WorldsHomeSection({ onViewAll, onOpen }: { onViewAll: () => void
   </section>
 }
 
-function WorldTitleDialog({ world, autotitle, onClose }: { world: WorldEntity; autotitle: boolean; onClose: () => void }) {
+function WorldTitleDialog({ world, autotitle, onClose, beforeChange }: { world: WorldEntity; autotitle: boolean; onClose: () => void; beforeChange?: () => Promise<void> }) {
   const [title, setTitle] = useState(world.title)
   const [request, setRequest] = useState<AutotitleRequest>()
   const [suggestion, setSuggestion] = useState('')
@@ -156,6 +162,7 @@ function WorldTitleDialog({ world, autotitle, onClose }: { world: WorldEntity; a
     controller.current = abort
     setGenerating(true); setSuggestion(''); setRequest(undefined); setError('')
     try {
+      await beforeChange?.()
       const settings = resolveProfileSettings(loadSettingsProfiles().defaults)
       const prepared = await prepareAutotitleRequest(world.id, world.id, settings)
       if (!live.current || token !== generation.current || abort.signal.aborted) return
@@ -186,6 +193,7 @@ function WorldTitleDialog({ world, autotitle, onClose }: { world: WorldEntity; a
     if (saveLock.current || generating || !next || (autotitle && !request)) return
     saveLock.current = true; setSaving(true); setError('')
     try {
+      await beforeChange?.()
       await renameWorld(world.id, next, autotitle ? request!.expectedUpdatedAt : world.updatedAt)
       if (live.current) onClose()
     } catch (reason) {
@@ -210,7 +218,7 @@ function WorldTitleDialog({ world, autotitle, onClose }: { world: WorldEntity; a
   </IllustrationModal>
 }
 
-function WorldActions({ record, disabled }: { record: WorldRecord; disabled: boolean }) {
+function WorldActions({ record, disabled, beforeChange, onDeleted }: { record: WorldRecord; disabled: boolean; beforeChange?: () => Promise<void>; onDeleted?: () => Promise<void> }) {
   const { world, books, entries } = record
   const [open, setOpen] = useState(false)
   const [dialog, setDialog] = useState<'rename' | 'autotitle' | 'delete'>()
@@ -221,10 +229,12 @@ function WorldActions({ record, disabled }: { record: WorldRecord; disabled: boo
   useEffect(() => { live.current = true; return () => { live.current = false } }, [])
   const show = (next: typeof dialog) => { setSnapshot(world); setError(''); setDialog(next) }
   const remove = async () => {
-    if (lock.current || disabled || entries.length) return
+    if (lock.current || disabled || !record.impact.canDelete) return
     lock.current = true; setBusy(true); setError('')
     try {
-      await deleteWorld(world.id)
+      await beforeChange?.()
+      await deleteWorldWithTombstone(world.id)
+      await onDeleted?.()
       if (live.current) setDialog(undefined)
     } catch (reason) {
       if (live.current) setError(message(reason))
@@ -237,10 +247,11 @@ function WorldActions({ record, disabled }: { record: WorldRecord; disabled: boo
     <ActionMenu title={world.title} open={open} onToggle={() => setOpen(value => !value)} onClose={() => setOpen(false)} actions={[
       { label: 'Rename', icon: <Pencil />, disabled, onSelect: () => show('rename') },
       { label: 'Autotitle', icon: <WandSparkles />, disabled, onSelect: () => show('autotitle') },
-      { label: 'Delete World', icon: <Trash2 />, danger: true, disabled: disabled || Boolean(entries.length), onSelect: () => show('delete') },
+      { label: 'Delete World', icon: <Trash2 />, danger: true, disabled: disabled || !record.impact.canDelete, onSelect: () => show('delete') },
     ]} />
-    {(dialog === 'rename' || dialog === 'autotitle') && <WorldTitleDialog world={snapshot} autotitle={dialog === 'autotitle'} onClose={() => setDialog(undefined)} />}
-    {dialog === 'delete' && <IllustrationModal title={`Delete World · ${world.title}`} onClose={() => { if (!lock.current) setDialog(undefined) }} footer={<><Button disabled={busy} onClick={() => setDialog(undefined)}>Cancel</Button><Button variant="danger" loading={busy} disabled={disabled || Boolean(entries.length)} onClick={() => { void remove() }}>Delete empty World</Button></>}>
+    {!record.impact.canDelete && <p className="world-help">Only an empty World can be deleted. This World contains {record.impact.entries} articles (including archived), {record.impact.notes} Notes, {record.impact.chats} Chats and {record.impact.messages} messages.</p>}
+    {(dialog === 'rename' || dialog === 'autotitle') && <WorldTitleDialog world={snapshot} autotitle={dialog === 'autotitle'} beforeChange={beforeChange} onClose={() => setDialog(undefined)} />}
+    {dialog === 'delete' && <IllustrationModal title={`Delete World · ${world.title}`} onClose={() => { if (!lock.current) setDialog(undefined) }} footer={<><Button disabled={busy} onClick={() => setDialog(undefined)}>Cancel</Button><Button variant="danger" loading={busy} disabled={disabled || !record.impact.canDelete} onClick={() => { void remove() }}>Delete empty World</Button></>}>
       <p>Delete this empty World and its World-owned history and media? This cannot be undone.</p>
       <p>{books.length ? `${books.length} linked Books will be disconnected: ${books.map(book => book.title).join(', ')}. Their local content will remain.` : 'No Books are linked to this World.'}</p>
       {Boolean(entries.length) && <p>Only an empty World can be deleted. Its Codex entries must be moved first.</p>}
@@ -249,7 +260,7 @@ function WorldActions({ record, disabled }: { record: WorldRecord; disabled: boo
   </>
 }
 
-function WorldEntryRow({ entry, worldId, books, disabled }: { entry: CodexEntryEntity; worldId: string; books: BookEntity[]; disabled: boolean }) {
+function WorldEntryRow({ entry, worldId, books, disabled, beforeChange }: { entry: CodexEntryEntity; worldId: string; books: BookEntity[]; disabled: boolean; beforeChange?: () => Promise<void> }) {
   const [open, setOpen] = useState(false)
   const [conflicts, setConflicts] = useState<WorldTriggerConflict[]>([])
   const [checking, setChecking] = useState(true)
@@ -288,6 +299,7 @@ function WorldEntryRow({ entry, worldId, books, disabled }: { entry: CodexEntryE
     if (lock.current || blocked) return
     lock.current = true; setBusy(true); setError('')
     try {
+      await beforeChange?.()
       const currentBooks = (await listBooks()).filter(book => book.worldId === worldId).map(book => book.id).sort()
       if (currentBooks.join('\n') !== [...approvedBooks].sort().join('\n')) throw new Error('Linked Books changed. Cancel and review the linked Books before confirming again.')
       await copyWorldEntryToAllBooksAndRemove(worldId, entry.id)
@@ -311,6 +323,7 @@ function WorldEntryRow({ entry, worldId, books, disabled }: { entry: CodexEntryE
       <p>Create an independent local copy in every linked Book, including Books that hide this entry, then remove the shared World source. This cannot be undone here.</p>
       <p>{books.length} linked Books: {books.map(book => book.title).join(', ')}.</p>
       <p>Future edits to the copies will no longer be shared. Trigger conflicts are checked again in the transaction; no partial copies are saved if the operation fails.</p>
+      <p>Dependencies referring to the removed World source become unavailable and are removed; dependencies are not silently redirected to the independent copies.</p>
       {reason && <p className="world-help">{reason}</p>}{error && <p className="world-error" role="alert">{error}</p>}
     </IllustrationModal>}
   </article>

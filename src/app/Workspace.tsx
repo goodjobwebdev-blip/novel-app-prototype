@@ -1,4 +1,4 @@
-import { entityAvailableInWorkspace, lastWorldArticleKey, worldPromptValues, type WorkspaceOwner } from './workspace-owner'
+import { entityAvailableInWorkspace, worldPromptValues, type WorkspaceOwner } from './workspace-owner'
 import AuthorGoalsTasks from '../features/author-planning/AuthorGoalsTasks'
 import ArticleLinks from '../features/codex/ArticleLinks'
 import { CharacterChatSetup, RoleplayParticipant } from '../features/chat/CharacterChatControls'
@@ -10,7 +10,7 @@ import CodexTemplates from '../features/codex/CodexTemplates'
 import { LoreTypeSelect, LoreTypesManager } from '../features/codex/LoreTypesControls'
 import WorldBuilding, { WorldsHomeSection, WorldWorkspacePanel } from '../features/worlds/WorldBuilding'
 import BookWorldSelector from '../features/worlds/BookWorldSelector'
-import { codexTriggerConflicts, listWorldEntries, setBookWorld } from '../features/worlds/world-service'
+import { codexTriggerConflicts, listWorldEntries, changeBookWorld as applyBookWorldChange, getBookWorldChangeImpact } from '../features/worlds/world-service'
 import NoteRoleControls from '../features/editor/NoteRoleControls'
 import { useMediaWorkspaceDraft } from '../features/images/useMediaWorkspaceDraft'
 import SynonymsDialog from '../features/writing/SynonymsDialog'
@@ -94,7 +94,7 @@ import BookStorage, { BookBackupImport } from '../data/BookStorage'
 import CloudBookImport from '../features/sync/CloudBookImport'
 import LocalBookSync from '../features/sync/LocalBookSync'
 import { useWorkspaceSyncStatus } from '../features/sync/WorkspaceSyncStatus'
-import { checkRemoteBook, syncBookNow } from '../features/sync/sync-service'
+import { checkRemoteBook, syncBookNow, checkRemoteWorld, syncWorldNow } from '../features/sync/sync-service'
 import { loadSyncSettings } from '../features/sync/sync-settings'
 import { useBookLibrary } from '../data/useBookLibrary'
 import { generationWordDelayMs, loadAiSettings, textAiIsConfigured, type AiSettings } from '../shared/ai/ai-settings'
@@ -139,6 +139,8 @@ import {
   deleteEntityTree,
   ensureBookAiSettings,
   getEntity,
+  getOwnerWorkspaceState,
+  saveOwnerWorkspaceState,
   getBookAiSettings,
   getBookProfileSelections,
   getBookContextSettings,
@@ -311,9 +313,11 @@ export default function Workspace() {
   const reviewImageJobs = visibleImageJobs.filter((job) => job.status === 'completed' && Boolean(job.assetId) && !job.decision).length
   const attentionImageJobs = visibleImageJobs.filter((job) => ['failed', 'interrupted'].includes(job.status)).length
   const [creatingBook, setCreatingBook] = useState(false)
+  const creatingCodexRef = useRef(false)
   const [currentBook, setCurrentBook] = useState<WorkspaceOwner | null>(null)
   const isWorldWorkspace = currentBook?.type === 'world'
-  const syncStatus = useWorkspaceSyncStatus(currentBook?.type === 'book' ? currentBook.id : undefined)
+  const syncStatus = useWorkspaceSyncStatus(currentBook?.id, currentBook?.type)
+  const [currentArticleId, setCurrentArticleId] = useState<string | null>(null)
   const [outlineEntities, setOutlineEntities] = useState<StructuralEntity[]>([])
   const [notes, setNotes] = useState<NoteEntity[]>([])
   const [codexEntries, setCodexEntries] = useState<CodexEntryEntity[]>([])
@@ -405,9 +409,9 @@ export default function Workspace() {
   }, [screen, currentBook?.id, imageReturnScreen, uiKitOpen])
 
   useEffect(() => {
-    const bookId = currentBook?.type === 'book' ? currentBook.id : undefined
-    if (!bookId) return
-    const check = () => { if (navigator.onLine && currentBookIdRef.current === bookId) void checkRemoteBook(bookId) }
+    const owner = currentBook
+    if (!owner) return
+    const check = () => { if (navigator.onLine && currentBookIdRef.current === owner.id) void (owner.type === 'world' ? checkRemoteWorld(owner.id) : checkRemoteBook(owner.id)).catch(() => undefined) }
     check()
     window.addEventListener('focus', check)
     window.addEventListener('online', check)
@@ -472,9 +476,13 @@ export default function Workspace() {
 
   useEffect(() => {
     const handleEntityChanged = (event: Event) => {
-      const detail = (event as CustomEvent<{ bookId?: string; entityId?: string; deletedIds?: string[] }>).detail
-      const expectedBookId = detail?.bookId
+      const detail = (event as CustomEvent<{ bookId?: string; worldId?: string; entityId?: string; deletedIds?: string[] }>).detail
+      const expectedBookId = detail?.worldId === currentBookIdRef.current ? detail.worldId : detail?.bookId
       if (!expectedBookId || !bookScopeMatches(expectedBookId, currentBookIdRef.current)) return
+      if (currentBookRef.current?.type === 'world') {
+        void refreshWorldCodexWorkspace().catch(() => showToast('World data could not be refreshed.'))
+        return
+      }
             if (!detail.entityId) {
               void refreshWorldCodexWorkspace().catch(() => showToast('Book and World data could not be refreshed.'))
               return
@@ -646,13 +654,15 @@ export default function Workspace() {
   }, [])
 
   function scheduleAutomaticSync() {
-    const bookId = currentBookIdRef.current
-    if (!bookId || !loadSyncSettings().automaticUpload) return
+    const owner = currentBookRef.current
+    if (!owner || !loadSyncSettings().automaticUpload) return
     if (autoSyncTimerRef.current) window.clearTimeout(autoSyncTimerRef.current)
     autoSyncTimerRef.current = window.setTimeout(() => {
       autoSyncTimerRef.current = null
-      if (currentBookIdRef.current !== bookId) return
-      void syncBookNow(bookId, prepareBookExport).then((result) => { if (result.kind === 'pulled') return importedBook(bookId) }).catch(() => undefined)
+      if (currentBookIdRef.current !== owner.id) return
+      void (owner.type === 'world' ? syncWorldNow(owner.id, prepareBookExport) : syncBookNow(owner.id, prepareBookExport)).then((result) => {
+        if (result.kind === 'pulled') return owner.type === 'world' ? refreshWorldCodexWorkspace() : importedBook(owner.id)
+      }).catch(error => showToast(error instanceof Error ? error.message : 'Automatic sync failed. Retry from workspace settings.'))
     }, 2 * 60 * 1000)
   }
 
@@ -721,7 +731,7 @@ export default function Workspace() {
       if (closePanel) setRightOpen(false)
       return
     }
-    if (!canUnmountEditor(Boolean(generationAbortRef.current))) {
+    if (!canUnmountEditor(Boolean(generationAbortRef.current || generationPreflightRef.current))) {
       showToast('Stop generation before switching documents.')
       return
     }
@@ -752,8 +762,11 @@ export default function Workspace() {
       if (!documentLoadIntentRef.current.isCurrent(intent) || !bookScopeMatches(expectedBookId, currentBookIdRef.current)) return
     }
 
-    if (currentBookRef.current?.type === 'world' && editableDocument.type === 'codexEntry') {
-      try { localStorage.setItem(lastWorldArticleKey(expectedBookId), editableDocument.id) } catch { showToast('The article opened, but its navigation state could not be saved.') }
+    if (editableDocument.type === 'codexEntry') {
+      try { await saveOwnerWorkspaceState(expectedBookId, { lastOpenedCodexEntryId: editableDocument.id }) }
+      catch { showToast('Article navigation could not be saved. Retry before switching articles.'); return }
+      if (!documentLoadIntentRef.current.isCurrent(intent) || !bookScopeMatches(expectedBookId, currentBookIdRef.current)) return
+      setCurrentArticleId(editableDocument.id)
     }
     activeDocumentIdRef.current = editableDocument.id
     setActiveDocument(editableDocument)
@@ -776,18 +789,32 @@ export default function Workspace() {
     await loadDocument(sceneId, closePanel)
   }
 
+  async function openArticle(articleId: string) {
+    const ownerId = currentBookIdRef.current
+    try {
+      const article = await getEntity<CodexEntryEntity>(articleId)
+      if (currentBookIdRef.current !== ownerId) return
+      if (article?.type !== 'codexEntry' || !entityAvailableInWorkspace(article, currentBookRef.current ?? undefined)) {
+        showToast('That article is unavailable in this workspace.'); return
+      }
+      await loadDocument(articleId)
+    } catch (error) { showToast(error instanceof Error ? error.message : 'The article could not be opened.') }
+  }
+
   async function openWorld(worldId: string) {
     const intent = bookOpenIntentRef.current.begin()
     if (generationAbortRef.current || generationPreflightRef.current) { showToast('Stop generation before switching workspaces.'); return }
     if (!await saveRequiredBeforeNavigation(changedSinceSnapshotRef.current, () => flushDocument('navigation', true))) { showToast('Could not save the current document. Retry before switching workspaces.'); return }
+    if (!bookOpenIntentRef.current.isCurrent(intent)) return
     documentLoadIntentRef.current.invalidate()
     bookRefreshIntentRef.current.invalidate()
     const [world, content] = await Promise.all([getEntity<WorkspaceOwner>(worldId), readBookContent(worldId)])
     if (!bookOpenIntentRef.current.isCurrent(intent)) return
     if (world?.type !== 'world') { showToast('That World is no longer available.'); return }
-    let remembered: string | null = null
-    try { remembered = localStorage.getItem(lastWorldArticleKey(worldId)) } catch { /* Storage can be unavailable; the documents are still durable. */ }
-    const article = content.codexEntries.find(entry => entry.id === remembered) ?? content.codexEntries.find(entry => !isCodexEntryArchived(entry))
+    const navigation = await getOwnerWorkspaceState(worldId)
+    if (!bookOpenIntentRef.current.isCurrent(intent)) return
+    const article = content.codexEntries.find(entry => entry.id === navigation.lastOpenedCodexEntryId) ?? content.codexEntries.find(entry => !isCodexEntryArchived(entry))
+    setCurrentArticleId(article?.id ?? null)
     currentBookIdRef.current = world.id
     currentBookRef.current = world
     setCurrentBook(world)
@@ -809,7 +836,7 @@ export default function Workspace() {
   }
 
   async function openBook(bookId: string, preferredSceneId?: string) {
-    if (!canUnmountEditor(Boolean(generationAbortRef.current))) {
+    if (!canUnmountEditor(Boolean(generationAbortRef.current || generationPreflightRef.current))) {
       showToast('Stop generation before switching books.')
       return
     }
@@ -854,6 +881,8 @@ export default function Workspace() {
 
     currentBookIdRef.current = book.id
     currentBookRef.current = book
+    setCurrentArticleId(null)
+    setActiveChatId('')
     setCurrentBook(book)
     applyBookContent(content)
     setExpandedIds(new Set(content.structural.filter((entity) => entity.type !== 'scene').map((entity) => entity.id)))
@@ -879,7 +908,7 @@ export default function Workspace() {
   }
 
   async function prepareBookExport() {
-    if (generationActive) throw new Error('Stop generation before exporting a backup.')
+    if (generationAbortRef.current || generationPreflightRef.current) throw new Error('Stop generation before exporting or syncing.')
     if (activeDocumentIdRef.current && !await flushDocument('manual', true)) throw new Error('The current document could not be saved. Retry before exporting.')
   }
 
@@ -950,11 +979,8 @@ export default function Workspace() {
     const refresh = () => {
       const bookId = currentBookIdRef.current, documentId = activeDocumentIdRef.current
       if (!bookId || generationActive) return
-      void (async () => {
-        await reloadBookContent(bookId)
-        if (!active || currentBookIdRef.current !== bookId || activeDocumentIdRef.current !== documentId || changedSinceSnapshotRef.current) return
-        if (documentId && activeDocument?.worldId) await refreshWorldCodexWorkspace()
-      })().catch(() => showToast('Shared lore could not be refreshed.'))
+      if (!active || currentBookIdRef.current !== bookId || activeDocumentIdRef.current !== documentId) return
+      void refreshWorldCodexWorkspace().catch(() => showToast('Shared lore could not be refreshed.'))
     }
     window.addEventListener('arc-worlds-changed', refresh); window.addEventListener('focus', refresh)
     return () => { active = false; window.removeEventListener('arc-worlds-changed', refresh); window.removeEventListener('focus', refresh) }
@@ -976,7 +1002,7 @@ export default function Workspace() {
   }, [currentBook?.id, activeDocument?.id])
 
   async function beforeWorldCodexChange() {
-    if (generationActive) throw new Error('Stop generation before changing shared lore.')
+    if (generationAbortRef.current || generationPreflightRef.current) throw new Error('Stop generation before changing shared lore.')
     if (changedSinceSnapshotRef.current && !await flushDocument('navigation', true)) throw new Error('Save the current document before changing shared lore.')
   }
 
@@ -984,19 +1010,37 @@ export default function Workspace() {
     const bookId = currentBookIdRef.current
     if (!bookId) return
     const documentId = activeDocumentIdRef.current
-    const [book, refreshed] = await Promise.all([
+    const [book, refreshed, books] = await Promise.all([
       getEntity<WorkspaceOwner>(bookId),
       documentId ? getEntity<EditableEntity>(documentId) : Promise.resolve(undefined),
+      listBooks(),
     ])
-    if (currentBookIdRef.current !== bookId || !book) return
+    if (currentBookIdRef.current !== bookId) return
+    setBookList(books)
+    if (!book || !['book', 'world'].includes(book.type)) {
+      bookOpenIntentRef.current.invalidate(); documentLoadIntentRef.current.invalidate(); bookRefreshIntentRef.current.invalidate()
+      currentBookIdRef.current = null; currentBookRef.current = null; activeDocumentIdRef.current = null; activeSceneIdRef.current = null
+      setCurrentBook(null); setActiveDocument(null); setActiveSceneId(null); setCurrentArticleId(null); setActiveChatId('')
+      setOutlineEntities([]); setNotes([]); setCodexEntries([]); setCodexDependencies([]); setSummaryStates({})
+      storyRef.current = ''; changedSinceSnapshotRef.current = false; setStoryMarkdown(''); setRightOpen(false); setScreen('home')
+      showToast('This workspace is no longer available.', 'warning')
+      return
+    }
     currentBookRef.current = book
     setCurrentBook(current => JSON.stringify(current) === JSON.stringify(book) ? current : book)
     if (book.type === 'book') setBookList(books => books.map(item => item.id === bookId ? book : item))
     await reloadBookContent(bookId)
     if (currentBookIdRef.current !== bookId || activeDocumentIdRef.current !== documentId || generationAbortRef.current || changedSinceSnapshotRef.current) return
+    if (currentArticleId) {
+      const article = await getEntity<CodexEntryEntity>(currentArticleId)
+      if (currentBookIdRef.current !== bookId || activeDocumentIdRef.current !== documentId) return
+      if (!article || article.type !== 'codexEntry' || !entityAvailableInWorkspace(article, book)) setCurrentArticleId(null)
+    }
     if (!documentId) return
     if (!entityAvailableInWorkspace(refreshed, book)) {
       setActiveDocument(null); activeDocumentIdRef.current = null; setStoryMarkdown(''); storyRef.current = ''
+      if (documentId === currentArticleId) setCurrentArticleId(null)
+      setEditorRevision(value => value + 1); setSaveState('saved')
       return
     }
     if (refreshed) {
@@ -1015,9 +1059,11 @@ export default function Workspace() {
 
   async function changeBookWorld(worldId: string) {
     const bookId = currentBookIdRef.current
-    if (!bookId) return
+    if (!bookId || currentBookRef.current?.type !== 'book') return
     await beforeWorldCodexChange()
-    const updated = await bookMetadataSaveQueueRef.current.run(bookId, () => setBookWorld(bookId, worldId))
+    const impact = await getBookWorldChangeImpact(bookId, worldId)
+    if (impact.requiresConfirmation && !window.confirm(`Change “${impact.bookTitle}” from World “${impact.previousWorldTitle}” to ${impact.nextWorldTitle ? `World “${impact.nextWorldTitle}”` : 'no World'}? Access to ${impact.lostEntryIds.length} shared articles ends; ${impact.unavailableDependencies} unavailable dependencies will be removed. Local content remains unchanged.`)) return
+    const updated = await bookMetadataSaveQueueRef.current.run(bookId, () => applyBookWorldChange(bookId, worldId, { confirmed: true, expectedWorldId: impact.previousWorldId }))
     if (currentBookIdRef.current !== bookId) return
     currentBookRef.current = updated
     setCurrentBook(updated)
@@ -1036,7 +1082,11 @@ export default function Workspace() {
       showToast('Save the current document before opening World Building.')
       return
     }
-    if (worldId) { await openWorld(worldId); return }
+    if (worldId) {
+      try { await openWorld(worldId) }
+      catch (error) { showToast(error instanceof Error ? error.message : 'The World could not be opened. Retry without clearing your data.') }
+      return
+    }
     setSelectedWorldId(undefined)
     setRightOpen(false)
     setScreen('worlds')
@@ -1129,8 +1179,10 @@ export default function Workspace() {
   }
 
   async function openSummary(source: StructuralEntity | CodexEntryEntity) {
-    const sourceBookId = source.bookId
+    const sourceBookId = currentBookIdRef.current
+    if (!sourceBookId || !entityAvailableInWorkspace(source, currentBookRef.current ?? undefined)) return
     try {
+      await beforeWorldCodexChange()
       const summary = await getOrCreateSummary(source)
       if (!bookScopeMatches(sourceBookId, currentBookIdRef.current)) return
       await loadDocument(summary.id)
@@ -1145,6 +1197,8 @@ export default function Workspace() {
   async function addNote() {
     if (!currentBook) return
     try {
+      await beforeWorldCodexChange()
+      if (currentBookIdRef.current !== currentBook.id) return
       const sourceBookId = currentBook.id
       const note = await createNote(sourceBookId)
       if (!await reloadBookContent(sourceBookId)) return
@@ -1155,14 +1209,23 @@ export default function Workspace() {
   }
 
   async function addCodexEntry() {
-    if (!currentBook) return
+    if (!currentBook || creatingCodexRef.current) return
+    creatingCodexRef.current = true
     try {
+      await beforeWorldCodexChange()
+      if (currentBookIdRef.current !== currentBook.id) return
       const sourceBookId = currentBook.id
-      const entry = await createCodexEntry(sourceBookId)
+      const existingTitles = new Set((await listEntitiesByBook(sourceBookId, 'codexEntry')).filter((item): item is CodexEntryEntity => item.type === 'codexEntry' && item.bookId === sourceBookId).flatMap(item => [item.title, ...(item.autoIncludeTriggers ?? [])]).map(value => String(value).trim().replace(/\s+/g, ' ').toLocaleLowerCase()))
+      if (currentBookIdRef.current !== sourceBookId) return
+      let title = 'Untitled Entry', suffix = 2
+      while (existingTitles.has(title.toLocaleLowerCase())) title = `Untitled Entry ${suffix++}`
+      const entry = await createCodexEntry(sourceBookId, title)
       if (!await reloadBookContent(sourceBookId)) return
       await loadDocument(entry.id)
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Could not create the Codex entry.')
+    } finally {
+      creatingCodexRef.current = false
     }
   }
 
@@ -1176,7 +1239,8 @@ export default function Workspace() {
   }
 
   async function removeContentEntity(entity: NoteEntity | CodexEntryEntity) {
-    if (!currentBook || !window.confirm(entity.type === 'codexEntry' && entity.worldId ? `Delete “${entity.title}” from World and every linked Book? This cannot be undone.` : `Delete “${entity.title}”? This cannot be undone.`)) return
+    if (generationAbortRef.current || generationPreflightRef.current) { showToast('Stop generation before deleting content.'); return }
+    if (!currentBook || !window.confirm(entity.type === 'codexEntry' && entity.worldId ? `Delete “${entity.title}” from World and every linked Book? Dependencies referring to this article will be removed. This cannot be undone.` : `Delete “${entity.title}”? This cannot be undone.`)) return
     const removedIds = await deleteWithSaveBarrier(entity.id)
     await reloadBookContent(currentBook.id)
     if (activeDocumentIdRef.current && removedIds.includes(activeDocumentIdRef.current)) {
@@ -1257,6 +1321,7 @@ export default function Workspace() {
 
   async function archiveCodex(entity: CodexEntryEntity) {
     if (!currentBook || isCodexEntryArchived(entity)) return
+    if (entity.worldId && !window.confirm(`Archive “${entity.title}” in World and every linked Book? It will be excluded from AI context until restored.`)) return
     try {
       if (activeDocumentIdRef.current === entity.id && changedSinceSnapshotRef.current && !await flushDocument('navigation', true)) throw new Error('Save the entry before archiving it.')
       const updated = await archiveCodexEntry(entity.id)
@@ -1293,7 +1358,7 @@ export default function Workspace() {
   }
 
   async function openImages(from: ContentScreen) {
-    if (from === 'editor' && !canUnmountEditor(Boolean(generationAbortRef.current))) {
+    if (from === 'editor' && !canUnmountEditor(Boolean(generationAbortRef.current || generationPreflightRef.current))) {
       showToast('Stop generation before opening Images.')
       return
     }
@@ -1318,7 +1383,7 @@ export default function Workspace() {
   }
 
   async function openSettings(from: Screen, tab?: 'ai' | 'profiles' | 'images' | 'sync', mediaKind?: 'image' | 'video') {
-    if (from === 'editor' && !canUnmountEditor(Boolean(generationAbortRef.current))) {
+    if (from === 'editor' && !canUnmountEditor(Boolean(generationAbortRef.current || generationPreflightRef.current))) {
       showToast('Stop generation before opening Settings.')
       return
     }
@@ -1381,7 +1446,11 @@ export default function Workspace() {
   }
 
   async function openChat(chatId: string) {
-    if (screen === 'editor' && !canUnmountEditor(Boolean(generationAbortRef.current))) {
+    const ownerId = currentBookIdRef.current
+    const chat = await getChat(chatId)
+    if (!ownerId || ownerId !== currentBookIdRef.current) return
+    if (!chat || chat.bookId !== ownerId) { showToast('That chat is unavailable in this workspace.'); return }
+    if (screen === 'editor' && !canUnmountEditor(Boolean(generationAbortRef.current || generationPreflightRef.current))) {
       showToast('Stop generation before opening Chat.')
       return
     }
@@ -1389,6 +1458,7 @@ export default function Workspace() {
       screen === 'editor' && changedSinceSnapshotRef.current,
       () => flushDocument('navigation', true),
       () => {
+        if (currentBookIdRef.current !== ownerId) return
         setActiveChatId(chatId)
         setChatPanel('list')
         setScreen('chat')
@@ -1405,20 +1475,21 @@ export default function Workspace() {
   }
 
   async function startAutotitle(entity: AutotitleEntity) {
-    if (!currentBook) return
+    const requestOwnerId = entity.type === 'book' ? entity.id : currentBook?.id
+    if (!requestOwnerId) return
     if (autotitleAbortRef.current) {
       showToast('Finish or cancel the current autotitle request first.')
       return
     }
-    if (entity.type !== 'book' && !entityAvailableInWorkspace(entity, currentBook)) return
+    if (entity.type !== 'book' && (!currentBook || !entityAvailableInWorkspace(entity, currentBook))) return
     try {
-      if (activeDocumentIdRef.current === entity.id && changedSinceSnapshotRef.current) await flushDocument('navigation', true)
+      if (activeDocumentIdRef.current === entity.id && changedSinceSnapshotRef.current && !await flushDocument('navigation', true)) throw new Error('Save the current document before generating a title.')
       const defaults = loadAiSettings()
-      const settings = await getBookAiSettings(currentBook.id, defaults.favorites)
+      const settings = await getBookAiSettings(requestOwnerId, defaults.favorites)
       const controller = new AbortController()
       autotitleAbortRef.current = controller
       setAutotitle({ targetId: entity.id, targetType: entity.type as AutotitleTargetType, targetTitle: entity.title, status: 'loading' })
-      const request = await prepareAutotitleRequest(currentBook.id, entity.id, settings)
+      const request = await prepareAutotitleRequest(requestOwnerId, entity.id, settings)
       setAutotitle((current) => current?.targetId === entity.id ? { ...current, request, targetTitle: request.targetTitle } : current)
       const suggestion = await generateAutotitleSuggestion(settings, request, controller.signal)
       setAutotitle((current) => current?.targetId === entity.id ? { ...current, request, suggestion, status: 'ready', error: undefined } : current)
@@ -1660,21 +1731,21 @@ export default function Workspace() {
       const defaults = loadAiSettings()
       settings = await getBookAiSettings(currentBook.id, defaults.favorites)
     } catch {
-      showToast('This book’s AI settings could not be loaded. Open Book settings and try again.')
+      showToast('This workspace’s AI settings could not be loaded. Open workspace settings and try again.')
       return
     }
     if (activeDocumentIdRef.current !== activeDocument.id || currentBookIdRef.current !== currentBook.id) return
     if (!['nanogpt', 'litellm', 'fake'].includes(settings.provider)) {
-      showToast('Text generation currently supports NanoGPT, LiteLLM, or Fake (testing). Choose one in Book settings.')
+      showToast('Text generation currently supports NanoGPT, LiteLLM, or Fake (testing). Choose one in workspace settings.')
       return
     }
     if (settings.provider !== 'fake' && !settings.apiKey.trim()) {
-      showToast(`Add your ${settings.provider === 'litellm' ? 'LiteLLM' : 'NanoGPT'} API key in Book settings before generating.`)
+      showToast(`Add your ${settings.provider === 'litellm' ? 'LiteLLM' : 'NanoGPT'} API key in workspace settings before generating.`)
       return
     }
     const selectedModel = isCodex ? settings.codexModel.trim() || settings.mainModel.trim() : settings.mainModel.trim()
     if (!selectedModel) {
-      showToast('Choose a Main model in Book settings before generating.')
+      showToast('Choose a Main model in workspace settings before generating.')
       return
     }
     try {
@@ -1745,7 +1816,7 @@ export default function Workspace() {
         const contextSettings = await getBookContextSettings(currentBook.id)
         const contextType: GenerationContextType = isCodex ? 'codex' : 'scene'
         const profile = await getGenerationContextProfile(currentBook.id, contextType)
-        const currentSceneId = isCodex ? contextSettings.lastOpenedSceneId || undefined : activeDocument.id
+        const currentSceneId = currentBook.type === 'world' ? undefined : isCodex ? contextSettings.lastOpenedSceneId || undefined : activeDocument.id
         const prepared = await buildContextValues({
           bookId: currentBook.id,
           type: contextType,
@@ -1949,7 +2020,7 @@ export default function Workspace() {
 
     try {
       if (changedSinceSnapshotRef.current) {
-        await flushDocument('manual', true)
+        if (!await flushDocument('manual', true)) throw new Error('Save the current document before generating its summary.')
         if (cancelledDuringPreflight()) return
       }
 
@@ -2270,12 +2341,12 @@ export default function Workspace() {
         {activeDocument?.type === 'codexEntry' && <section className={`document-metadata codex-document-metadata ${activeCodexArchived ? 'archived' : ''}`} aria-label="Codex metadata"><LoreTypeSelect label="Category" ownerId={activeDocument.bookId} disabled={activeCodexArchived} value={activeDocument.typeId ?? activeDocument.category} onChange={id => { void changeCodexCategory(id) }} />{!activeCodexArchived && <Checkbox className="codex-summary-preference" label="Prefer summary for AI context" description={codexSummaryPolicyText(activeDocument, summaryStates[activeDocument.id] ?? 'missing')} disabled={generationActive} checked={activeDocument.preferSummaryForContext === true} onChange={(event) => { void changeCodexSummaryPreference(event.target.checked) }} />}{!activeCodexArchived && <label className="codex-trigger-editor"><span>Auto include when text contains</span><ExpandableTextInput disabled={generationActive} value={codexTriggerDraft} onChange={value => { setCodexTriggerDraft(value); setCodexTriggerError('') }} onBlur={() => { void saveCodexTriggers() }} aria-invalid={Boolean(triggerValidationMessage)} aria-describedby={triggerValidationMessage ? 'codex-trigger-validation' : undefined} aria-label="Automatic Codex triggers" dialogTitle="Edit automatic Codex triggers" placeholder="One literal trigger per line" /><small>One name, alias, phrase, or #tag per line. New entries start with their title; removing it keeps it removed, and renaming the entry does not rewrite triggers.</small>{triggerValidationMessage && <span id="codex-trigger-validation" className="codex-trigger-error" role="alert">{triggerValidationMessage}</span>}</label>}{activeCodexArchived && <p className="archived-document-note"><Archive aria-hidden="true" /><span><strong>Archived lore</strong><small>Readable here, but excluded from AI context, Chat discovery, and normal Codex search until restored.</small></span></p>}</section>}
         {activeDocument?.type === 'codexEntry' && !activeCodexArchived && <CodexTemplates key={`templates-${activeDocument.id}`} bookId={currentBook?.id ?? ''} targetId={activeDocument.id} typeId={activeDocument.typeId ?? activeDocument.category} body={storyMarkdown} editor={editorRef} disabled={generationActive} />}
         {activeDocument?.type === 'codexEntry' && <CodexDependenciesMetadata key={`dependencies-${activeDocument.id}`} source={activeDocument} entries={codexEntries} edges={codexDependencies} readOnly={activeCodexArchived} onAdd={(targetId) => addCodexDependency(activeDocument.id, targetId)} onUpdate={changeCodexDependency} onRemove={deleteCodexDependency} onOpen={(entryId) => { void loadDocument(entryId) }} />}
-        {activeDocument?.type === 'codexEntry' && <ArticleLinks key={activeDocument.id} entry={activeDocument} content={storyMarkdown} entries={codexEntries} disabled={generationActive || activeCodexArchived} onOpen={id => { void loadDocument(id) }} onInsert={markdown => { const selection = editorRef.current?.captureSelection?.(); if (selection) { editorRef.current?.replaceRange(selection, markdown); return } handleStoryChange(storyRef.current + markdown) }} />}
+        {activeDocument?.type === 'codexEntry' && <ArticleLinks key={activeDocument.id} entry={activeDocument} content={storyMarkdown} entries={codexEntries} disabled={generationActive || activeCodexArchived} onOpen={id => { void openArticle(id) }} onInsert={markdown => { const selection = editorRef.current?.captureSelection?.(); if (selection) { editorRef.current?.replaceRange(selection, markdown); return } handleStoryChange(storyRef.current + markdown) }} />}
         {activeDocument?.type === 'summary' && summaryContextIndicator && <div className="summary-context-indicator">{summaryContextIndicator}</div>}
         {activeDocument && currentBook && ['scene', 'note', 'codexEntry'].includes(activeDocument.type) && !activeCodexArchived && <EditorBlocks key={`blocks-${activeDocument.id}`} bookId={activeDocument.bookId} editor={editorRef} disabled={generationActive} onEditRequestHandled={() => setBlockEditRequest(null)} insertImage={imageInsertRequest === activeDocument.id} onInsertHandled={() => setImageInsertRequest(null)} editRequest={blockEditRequest?.documentId === activeDocument.id && blockEditRequest.snapshot.document === storyMarkdown ? blockEditRequest : null} />}
-        <div hidden={timelineView?.entryId === activeDocument?.id && timelineView?.nonBaseline}>{activeDocument ? <MarkdownEditor key={`${activeDocument.id}-${editorRevision}`} ref={editorRef} historyKey={`${currentBook?.id}:${activeDocument.id}`} onArticleLink={id => { const entry = codexEntries.find(item => item.id === id); if (!entry) { showToast('That article is unavailable in this workspace.'); return } void loadDocument(id) }} onAutocompleteInput={snapshot => { if (!generationPreflightRef.current && !generationAbortRef.current) void autocomplete.onInput(snapshot) }} onAutocompleteInvalidate={autocomplete.cancel} onAutocompleteAccept={autocomplete.accept} onSelectionChange={(selection) => setSelectedProse(selection ? { documentId: activeDocument.id, selection } : null)} bookId={activeDocument.bookId} showBeats={showBeats} highlightDialogue={activeDocument.type === 'scene' && highlightDialogue} onBeatAction={actOnBeat} onEditBlock={(item) => { const snapshot = editorRef.current?.captureSelection(item.from, item.to); if (snapshot) setBlockEditRequest({ documentId: activeDocument.id, item, snapshot }) }} value={storyMarkdown} onChange={handleStoryChange} onHistoryChange={setEditorHistory} ariaLabel={`${activeDocument.title} Markdown editor`} readOnly={activeCodexArchived || activeSummarySourceArchived} mentionTerms={activeDocument.type === 'scene' ? codexMentionIndex : []} onMentionClick={activeDocument.type === 'scene' ? openLoreMention : undefined} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No document selected</strong><p>{isWorldWorkspace ? 'Create a Codex article to start building this World. Books are optional.' : 'Choose a Scene, Note, Codex entry, or Summary from the book workspace.'}</p>{isWorldWorkspace && <Button onClick={() => { void addCodexEntry() }}>Create first article</Button>}<button type="button" onClick={() => setRightOpen(true)}>Open Book Workspace</button></div>}</div>
+        <div hidden={timelineView?.entryId === activeDocument?.id && timelineView?.nonBaseline}>{activeDocument ? <MarkdownEditor key={`${activeDocument.id}-${editorRevision}`} ref={editorRef} historyKey={`${currentBook?.id}:${activeDocument.id}`} onArticleLink={id => { void openArticle(id) }} onAutocompleteInput={snapshot => { if (!generationPreflightRef.current && !generationAbortRef.current) void autocomplete.onInput(snapshot) }} onAutocompleteInvalidate={autocomplete.cancel} onAutocompleteAccept={autocomplete.accept} onSelectionChange={(selection) => setSelectedProse(selection ? { documentId: activeDocument.id, selection } : null)} bookId={activeDocument.bookId} showBeats={showBeats} highlightDialogue={activeDocument.type === 'scene' && highlightDialogue} onBeatAction={actOnBeat} onEditBlock={(item) => { const snapshot = editorRef.current?.captureSelection(item.from, item.to); if (snapshot) setBlockEditRequest({ documentId: activeDocument.id, item, snapshot }) }} value={storyMarkdown} onChange={handleStoryChange} onHistoryChange={setEditorHistory} ariaLabel={`${activeDocument.title} Markdown editor`} readOnly={activeCodexArchived || activeSummarySourceArchived} mentionTerms={activeDocument.type === 'scene' ? codexMentionIndex : []} onMentionClick={activeDocument.type === 'scene' ? openLoreMention : undefined} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No document selected</strong><p>{isWorldWorkspace ? 'Create a Codex article to start building this World. Books are optional.' : 'Choose a Scene, Note, Codex entry, or Summary from the book workspace.'}</p>{isWorldWorkspace && <Button onClick={() => { void addCodexEntry() }}>Create first article</Button>}<button type="button" onClick={() => setRightOpen(true)}>Open Book Workspace</button></div>}</div>
         {characterSetupEntry && currentBook && <CharacterChatSetup bookId={currentBook.id} initialEntryId={characterSetupEntry} currentSceneId={activeSceneId || undefined} onClose={() => setCharacterSetupEntry(null)} onOpen={openChat} />}
-      </article> : currentBook ? <ChatView bookId={currentBook.id} chatId={activeChatId} bookPromptValues={toBookPromptValues(currentBook, seriesList)} currentSceneId={activeSceneId} onChatChange={openChat} onToast={showToast} /> : <section className="conversation chat-empty"><MessageCircle aria-hidden="true" /><p>Open a book before starting a chat.</p></section>}
+      </article> : currentBook ? <ChatView key={`${currentBook.type}:${currentBook.id}`} bookId={currentBook.id} chatId={activeChatId} bookPromptValues={toBookPromptValues(currentBook, seriesList)} currentSceneId={isWorldWorkspace ? null : activeSceneId} currentArticleId={currentArticleId} onOpenArticle={id => { void openArticle(id) }} onBeforeArticleAction={beforeWorldCodexChange} onChatChange={openChat} onToast={showToast} /> : <section className="conversation chat-empty"><MessageCircle aria-hidden="true" /><p>Open a workspace before starting a chat.</p></section>}
 
 
       {screen === 'editor' && activeDocument?.type === 'note' && <div className="note-editor-actions"><GenerationActions label="Editor actions" menuOnly onGenerate={() => {}} actions={[{ id: 'image', label: 'Insert image', icon: <ImagePlus aria-hidden="true" />, onSelect: () => setImageInsertRequest(activeDocument.id) }]} /></div>}
@@ -2292,7 +2363,11 @@ export default function Workspace() {
       {rightOpen && <aside className="book-panel">
         <header><div><small>{formatSeries(currentBook, seriesList)}</small><strong>{currentBook?.title ?? 'Untitled Book'}</strong></div><div className="book-panel-header-actions">{activeSceneId && <button type="button" onClick={() => { void loadScene(activeSceneId) }} aria-label="Return to Scene" title="Return to Scene"><CornerUpLeft aria-hidden="true" /></button>}<button type="button" onClick={() => setRightOpen(false)} aria-label="Close book workspace" title="Close book workspace"><X aria-hidden="true" /></button></div></header>
         <nav>{([['book', Settings2], ['outline', BookOpenText], ['notes', NotebookPen], ['codex', WandSparkles], ['chat', MessageCircle]] as const).map(([tab, Icon]) => <button type="button" className={rightTab === tab ? 'active' : ''} onClick={() => { setRightTab(tab); if (tab === 'chat') setChatPanel(screen === 'chat' ? 'settings' : 'list') }} key={tab}><Icon aria-hidden="true" /><span>{isWorldWorkspace ? tab === 'book' ? 'World' : tab === 'outline' ? 'Books' : tab[0].toUpperCase() + tab.slice(1) : tab}</span></button>)}</nav>
-        <div className="panel-content">{isWorldWorkspace && currentBook?.type === 'world' && (rightTab === 'book' || rightTab === 'outline') ? <WorldWorkspacePanel world={currentBook} tab={rightTab === 'book' ? 'world' : 'books'} beforeChange={beforeWorldCodexChange} onOpenBook={id => { void openBook(id) }} onRefresh={refreshWorldCodexWorkspace} onHome={() => { void goHome() }} /> : rightTab === 'book' ? <BookSettings planning={<AuthorGoalsTasks key={`planning-${currentBook?.id}`} bookId={currentBook?.id ?? ''} liveScene={activeDocument?.type === 'scene' ? { id: activeDocument.id, content: storyMarkdown } : undefined} onOpen={id => { void getEntity<EditableEntity>(id).then(entity => { if (!entity) return; if (entity.type === 'chapter') void openSummary(entity as unknown as StructuralEntity); else void loadDocument(id) }) }} />} onBeforeExport={prepareBookExport} onImported={importedBook} book={currentBook?.type === 'book' ? currentBook : null} books={bookList} series={seriesList} onSave={saveBookMetadata} onWorldChange={changeBookWorld} onOpenWorld={worldId => { void openWorldBuilding(worldId) }} onCreateSeries={addSeries} onRenameSeries={renameSeries} onDelete={removeCurrentBookFromSettings} /> : rightTab === 'outline' ? <Outline book={currentBook?.type === 'book' ? currentBook : null} entities={outlineEntities} activeSceneId={activeSceneId} summaryStates={summaryStates} expandedIds={expandedIds} onToggle={(id) => setExpandedIds((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })} onOpenScene={(id) => { void loadScene(id) }} onOpenSummary={(entity) => { void openSummary(entity) }} onCreate={(type, parentId) => { void addOutlineEntity(type, parentId) }} onAutotitle={(entity) => { void startAutotitle(entity) }} onRead={(entity) => { void readOutline(entity) }} onRename={(entity) => { void editOutlineTitle(entity) }} onMove={(entity, direction) => { void moveOutlineEntity(entity, direction) }} onDelete={(entity) => { void removeOutlineEntity(entity) }} /> : rightTab === 'notes' ? <Notes notes={notes} activeId={activeDocument?.type === 'note' ? activeDocument.id : null} onCreate={() => { void addNote() }} onOpen={(id) => { void loadDocument(id) }} onAutotitle={(entity) => { void startAutotitle(entity) }} onRead={(entity) => { void readNote(entity) }} onRename={(entity) => { void renameContentEntity(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> : rightTab === 'codex' ? <CodexDashboard ownerKind={isWorldWorkspace ? 'world' : 'book'} key={currentBook?.id} management={<LoreTypesManager key={currentBook?.id} bookId={currentBook?.id ?? ''} />} dependencies={codexDependencies} onBeforeChange={beforeWorldCodexChange} onRefresh={refreshWorldCodexWorkspace} bookId={currentBook?.id ?? ''} entries={codexEntries} activeId={activeDocument?.type === 'codexEntry' ? activeDocument.id : null} summaryStates={summaryStates} onCreate={() => { void addCodexEntry() }} onOpen={(id) => { void loadDocument(id) }} onAutotitle={(entity) => { void startAutotitle(entity) }} onRename={(entity) => { void renameContentEntity(entity) }} onArchive={(entity) => { void archiveCodex(entity) }} onRestore={(entity) => { void restoreCodex(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> : <ChatSidebar ownerKind={isWorldWorkspace ? 'world' : 'book'} currentSceneId={activeSceneId || undefined} bookId={currentBook?.id ?? ''} activeChatId={screen === 'chat' ? activeChatId : ''} onOpen={openChat} />}</div>
+        <div className="panel-content">{isWorldWorkspace && currentBook?.type === 'world' && (rightTab === 'book' || rightTab === 'outline') ? <WorldWorkspacePanel world={currentBook} tab={rightTab === 'book' ? 'world' : 'books'} beforeChange={beforeWorldCodexChange} onOpenBook={id => { void openBook(id) }} onRefresh={refreshWorldCodexWorkspace} onHome={() => { void goHome() }} /> :
+          rightTab === 'book' ? <BookSettings planning={<AuthorGoalsTasks key={`planning-${currentBook?.id}`} bookId={currentBook?.id ?? ''} liveScene={activeDocument?.type === 'scene' ? { id: activeDocument.id, content: storyMarkdown } : undefined} onOpen={id => { void getEntity<EditableEntity>(id).then(entity => { if (!entity) return; if (entity.type === 'chapter') void openSummary(entity as unknown as StructuralEntity); else void loadDocument(id) }) }} />} onBeforeExport={prepareBookExport} onImported={importedBook} book={currentBook?.type === 'book' ? currentBook : null} books={bookList} series={seriesList} onSave={saveBookMetadata} onWorldChange={changeBookWorld} onOpenWorld={worldId => { void openWorldBuilding(worldId) }} onCreateSeries={addSeries} onRenameSeries={renameSeries} onDelete={removeCurrentBookFromSettings} /> :
+          rightTab === 'outline' ? <Outline book={currentBook?.type === 'book' ? currentBook : null} entities={outlineEntities} activeSceneId={activeSceneId} summaryStates={summaryStates} expandedIds={expandedIds} onToggle={(id) => setExpandedIds((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })} onOpenScene={(id) => { void loadScene(id) }} onOpenSummary={(entity) => { void openSummary(entity) }} onCreate={(type, parentId) => { void addOutlineEntity(type, parentId) }} onAutotitle={(entity) => { void startAutotitle(entity) }} onRead={(entity) => { void readOutline(entity) }} onRename={(entity) => { void editOutlineTitle(entity) }} onMove={(entity, direction) => { void moveOutlineEntity(entity, direction) }} onDelete={(entity) => { void removeOutlineEntity(entity) }} /> :
+          rightTab === 'notes' ? <Notes notes={notes} activeId={activeDocument?.type === 'note' ? activeDocument.id : null} onCreate={() => { void addNote() }} onOpen={(id) => { void loadDocument(id) }} onAutotitle={(entity) => { void startAutotitle(entity) }} onRead={(entity) => { void readNote(entity) }} onRename={(entity) => { void renameContentEntity(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> :
+          rightTab === 'codex' ? <CodexDashboard ownerKind={isWorldWorkspace ? 'world' : 'book'} key={currentBook?.id} management={<LoreTypesManager key={currentBook?.id} bookId={currentBook?.id ?? ''} />} dependencies={codexDependencies} onBeforeChange={beforeWorldCodexChange} onRefresh={refreshWorldCodexWorkspace} bookId={currentBook?.id ?? ''} entries={codexEntries} activeId={activeDocument?.type === 'codexEntry' ? activeDocument.id : null} summaryStates={summaryStates} onCreate={() => { void addCodexEntry() }} onOpen={(id) => { void loadDocument(id) }} onAutotitle={(entity) => { void startAutotitle(entity) }} onRename={(entity) => { void renameContentEntity(entity) }} onArchive={(entity) => { void archiveCodex(entity) }} onRestore={(entity) => { void restoreCodex(entity) }} onDelete={(entity) => { void removeContentEntity(entity) }} /> : <ChatSidebar ownerKind={isWorldWorkspace ? 'world' : 'book'} currentSceneId={activeSceneId || undefined} bookId={currentBook?.id ?? ''} activeChatId={screen === 'chat' ? activeChatId : ''} onOpen={openChat} />}</div>
       </aside>}
     </main>
   )
@@ -2927,6 +3002,7 @@ function CodexDependenciesMetadata({ source, entries, edges, readOnly, onAdd, on
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const candidates = entries
     .filter((entry) => entry.id !== source.id && !linkedIds.has(entry.id) && !isCodexEntryArchived(entry))
+    .filter((entry) => !source.worldId || entry.worldId === source.worldId && entry.bookId === source.bookId)
     .filter((entry) => !normalizedQuery || `${entry.title} ${entry.category}`.toLocaleLowerCase().includes(normalizedQuery))
     .sort((a, b) => a.title.localeCompare(b.title))
 

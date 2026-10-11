@@ -29,7 +29,7 @@ export function codexTriggerConflicts(entry: CodexEntryEntity, triggers: string[
 
 export function entityAvailableInBook(entity: ArcEntity | undefined, book: BookEntity | undefined): boolean {
   if (!entity || book?.type !== 'book') return false
-  if (!entity.worldId) return entity.bookId === book.id || (entity.type === 'book' && entity.id === book.id)
+  if (entity.worldId === undefined) return entity.bookId === book.id || (entity.type === 'book' && entity.id === book.id)
   if (!book.worldId || entity.worldId !== book.worldId || entity.bookId !== book.worldId || !['codexEntry', 'summary'].includes(entity.type)) return false
   const entryId = entity.type === 'summary' ? String(entity.sourceEntityId ?? entity.parentId ?? '') : entity.id
   return !(book.hiddenWorldEntryIds ?? []).includes(entryId)
@@ -121,7 +121,11 @@ async function worldDeletionImpactWithDb(db: Dexie, worldId: string): Promise<Wo
   const rows = await db.table('entities').where('bookId').equals(worldId).toArray() as ArcEntity[]
   const count = (type: string) => rows.filter(row => row.type === type).length
   const entries = count('codexEntry'), notes = count('note'), chats = count('chat'), messages = count('chatMessage')
-  return { worldId, entries, notes, chats, messages, linkedBooks: (await members(db, worldId)).length, canDelete: entries + notes + chats + messages === 0 }
+  // Summaries may survive a damaged/legacy source tree; never delete authored
+  // content merely because the four navigation counts happen to be zero.
+  const worldRows = await db.table('entities').where('worldId').equals(worldId).toArray() as ArcEntity[]
+  const hasContent = [...rows, ...worldRows].some(row => !['settings', 'book', 'world'].includes(row.type))
+  return { worldId, entries, notes, chats, messages, linkedBooks: (await members(db, worldId)).length, canDelete: !hasContent }
 }
 export async function getWorldDeletionImpact(worldId: string): Promise<WorldDeletionImpact> {
   const db = await database()

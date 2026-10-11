@@ -25,6 +25,64 @@ const ai = await import('../src/shared/ai/ai-settings.ts')
 const { buildContextValues } = await import('../src/shared/context/context-service.ts')
 after(async () => (await p.database()).close())
 
+const { entityAvailableInWorkspace } = await import('../src/app/workspace-owner.ts')
+
+test('canonical World ownership is required by reads and raw resource writes', async () => {
+  const world = await w.createWorld('Canonical resources'), other = await w.createWorld('Other canonical owner')
+  const { book } = await p.createBook(ai.initialAiSettings)
+  const note = await p.createNote(world.id)
+  const db = await p.database()
+  for (const worldId of [undefined, '', other.id]) {
+    const malformed = { ...note, worldId }
+    assert.equal(w.entityAvailableInOwner(malformed, world), false)
+    assert.equal(entityAvailableInWorkspace(malformed, world), false)
+    await assert.rejects(() => db.table('entities').put(malformed), /canonical|owner/i)
+  }
+  const bookNote = await p.createNote(book.id)
+  await assert.rejects(() => db.table('entities').update(bookNote.id, { worldId: '' }), /canonical|owner/i)
+  assert.deepEqual(await p.getEntity(note.id), note)
+})
+
+test('raw dependency writes reject private endpoints and preserve already archived edges', async () => {
+  const world = await w.createWorld('Raw dependency owner'), other = await w.createWorld('Foreign dependency owner')
+  const { book } = await p.createBook(ai.initialAiSettings)
+  await w.setBookWorld(book.id, world.id)
+  const source = await p.createCodexEntry(world.id, 'Raw source')
+  const target = await p.createCodexEntry(world.id, 'Raw target')
+  const privateEntry = await p.createCodexEntry(book.id, 'Raw private target')
+  const foreign = await p.createCodexEntry(other.id, 'Raw foreign target')
+  const edge = await p.createCodexDependency(world.id, source.id, target.id)
+  const db = await p.database()
+  for (const targetId of [privateEntry.id, foreign.id, source.id, 'missing-target']) {
+    await assert.rejects(() => db.table('codexDependencies').update(edge.id, { targetId }), /dependency|owner|available/i)
+    await assert.rejects(() => db.table('codexDependencies').add({ ...edge, id: `invalid-${targetId}`, targetId }), /dependency|owner|available/i)
+  }
+  await assert.rejects(() => db.table('codexDependencies').put({ ...edge, bookId: book.id }), /canonical|owner/i)
+  await assert.rejects(() => db.table('codexDependencies').bulkPut([{ ...edge, id: 'raw-bulk-valid' }, { ...edge, id: 'raw-bulk-private', targetId: privateEntry.id }]), /dependency|owner|available/i)
+  assert.equal(await db.table('codexDependencies').get('raw-bulk-valid'), undefined)
+  await p.archiveCodexEntry(target.id)
+  await db.table('codexDependencies').put({ ...edge, relationLabel: 'Retained archived relation' })
+  assert.equal((await db.table('codexDependencies').get(edge.id)).relationLabel, 'Retained archived relation')
+  // Raw archive restoration preserves archived endpoints; UI creation still rejects them.
+  await db.table('codexDependencies').bulkAdd([{ ...edge, id: 'restored-archived-edge' }])
+  assert.equal((await db.table('codexDependencies').get('restored-archived-edge')).targetId, target.id)
+  await assert.rejects(() => p.createCodexDependency(world.id, source.id, target.id), /archived|Restore/i)
+})
+
+test('an orphan World summary blocks empty-World deletion without discarding content', async () => {
+  const world = await w.createWorld('Orphan summary owner')
+  const source = await p.createCodexEntry(world.id, 'Summary source')
+  const summary = await p.getOrCreateSummary(source)
+  await p.saveDocumentContent(summary.id, 'Orphan summary survives')
+  const db = await p.database()
+  // Simulate legacy damage: deleting a source directly leaves its persisted summary.
+  await db.table('entities').delete(source.id)
+  assert.equal((await w.getWorldDeletionImpact(world.id)).canDelete, false)
+  await assert.rejects(() => w.deleteWorld(world.id), /empty World/)
+  assert.equal((await p.getEntity(summary.id)).content, 'Orphan summary survives')
+  assert.ok(await p.getWorld(world.id))
+})
+
 test('World context uses only selected and automatically available World sources despite linked Book selections', async () => {
   const world = await w.createWorld('Isolated context'), other = await w.createWorld('Foreign context')
   const { book, scene } = await p.createBook(ai.initialAiSettings)
