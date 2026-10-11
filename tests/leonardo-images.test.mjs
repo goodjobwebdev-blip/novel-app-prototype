@@ -71,6 +71,44 @@ test('Leonardo polling retries transient GETs with Retry-After but never repeats
   await assert.rejects(() => generateLeonardo(job, 'fixture-only-key', new AbortController().signal, async () => {}, async () => { unavailable++; return new Response('', { status: 503 }) }, async () => {}), /503/)
   assert.ok(unavailable <= 5)
 })
+test('Leonardo polling retries a disconnected GET body but not malformed JSON', async () => {
+  const { generateLeonardo } = await import('../src/features/images/leonardo-adapter.ts')
+  const job = { providerJobId: 'saved-ticket' }
+  let gets = 0
+  const sleeps = []
+  const complete = () => response({ generations_by_pk: { status: 'COMPLETE', generated_images: [{ id: 'output', url: 'https://cdn.example.org/output.png' }] } })
+  const url = await generateLeonardo(job, 'fixture-only-key', new AbortController().signal, async () => assert.fail('no POST'), async () => {
+    gets++
+    return gets === 1 ? new Response(new ReadableStream({ start(controller) { controller.error(new TypeError('body disconnected')) } })) : complete()
+  }, async ms => { sleeps.push(ms) })
+  assert.equal(url, 'https://cdn.example.org/output.png')
+  assert.equal(gets, 2)
+  assert.deepEqual(sleeps, [2000])
+  let malformed = 0
+  await assert.rejects(() => generateLeonardo(job, 'fixture-only-key', new AbortController().signal, async () => assert.fail('no POST'), async () => { malformed++; return new Response('{') }, async () => assert.fail('invalid JSON must not retry')), /invalid JSON/i)
+  assert.equal(malformed, 1)
+})
+test('Leonardo polling bounds backoff and stops on cancellation and exhausted GET retries', async () => {
+  const { generateLeonardo } = await import('../src/features/images/leonardo-adapter.ts')
+  const job = { providerJobId: 'saved-ticket' }
+  const complete = () => response({ generations_by_pk: { status: 'COMPLETE', generated_images: [{ id: 'output', url: 'https://cdn.example.org/output.png' }] } })
+  for (const [header, delay] of [['999999', 30000], ['not-a-date', 2000], ['0', 2000], [new Date(Date.now() + 3600000).toUTCString(), 30000]]) {
+    let gets = 0
+    const sleeps = []
+    await generateLeonardo(job, 'fixture-only-key', new AbortController().signal, async () => assert.fail('no POST'), async () => ++gets === 1 ? new Response('', { status: 429, headers: { 'Retry-After': header } }) : complete(), async ms => { sleeps.push(ms) })
+    assert.equal(gets, 2)
+    assert.deepEqual(sleeps, [delay])
+  }
+  const controller = new AbortController()
+  let cancelled = 0
+  await assert.rejects(() => generateLeonardo(job, 'fixture-only-key', controller.signal, async () => assert.fail('no POST'), async () => { cancelled++; return new Response('', { status: 503 }) }, async () => { controller.abort() }), { name: 'AbortError' })
+  assert.equal(cancelled, 1)
+  let exhausted = 0
+  const sleeps = []
+  await assert.rejects(() => generateLeonardo(job, 'fixture-only-key', new AbortController().signal, async () => assert.fail('no POST'), async () => { exhausted++; throw new TypeError('network down') }, async ms => { sleeps.push(ms) }), /polling.*network/i)
+  assert.equal(exhausted, 5)
+  assert.deepEqual(sleeps, [2000, 4000, 8000, 16000])
+})
 test('Leonardo explicit Generate persists snapshot and ticket before polling, keeps Gallery output, and resumes GET-only', async () => {
   const profiles = await import('../src/features/settings/settings-profiles.ts')
   const store = await import('../src/features/images/image-store.ts')
