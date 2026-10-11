@@ -1,4 +1,5 @@
-export type ImageProvider = 'nanogpt' | 'openai' | 'pruna'
+import type { LeonardoOptions } from './leonardo-contracts'
+export type ImageProvider = 'nanogpt' | 'openai' | 'pruna' | 'leonardo'
 export const IMAGE_QUEUE_CONCURRENCY = 3
 export type GenerationTask = 'text-to-image' | 'image-to-image' | 'text-to-video' | 'image-to-video'
 export type MediaKind = 'image' | 'video'
@@ -38,7 +39,7 @@ export type ImageModel = {
   videoDurations?: number[]
   aspectRatios?: string[]
 }
-export type FavoriteImageModel = ImageModel & OpenAIImageOptions & { alias: string; enabledSizes: string[]; defaultSize: string }
+export type FavoriteImageModel = ImageModel & OpenAIImageOptions & { alias: string; enabledSizes: string[]; defaultSize: string; leonardoOptions?: LeonardoOptions }
 export type ImageSettings = {
   keys: Record<ImageProvider, string>
   favorites: FavoriteImageModel[]
@@ -46,6 +47,8 @@ export type ImageSettings = {
   defaultAliases?: Partial<Record<GenerationTask, string>>
 }
 export type ImageGenerationSpec = OpenAIImageOptions & {
+  leonardoOptions?: LeonardoOptions
+  leonardoContractVersion?: number
   prompt: string
   modelAlias: string
   provider: ImageProvider

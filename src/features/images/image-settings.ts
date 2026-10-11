@@ -1,9 +1,10 @@
 import { loadAiSettings, type AiSettings } from '../../shared/ai/ai-settings'
+import { leonardoModels, leonardoDefaults, LEONARDO_CONTRACT_VERSION } from './leonardo-contracts'
 import { generationTask, modelTasks, type FavoriteImageModel, type GenerationSource, type GenerationTask, type ImageGenerationSpec, type ImageModel, type ImageProvider, type ImageSettings, type ImageSize, type VideoGenerationOptions } from './image-generation-types'
 export const IMAGE_SETTINGS_KEY = 'arc-image-settings-v1'
 export const IMAGE_SETTINGS_CHANGED = 'arc-image-settings-changed'
-export const IMAGE_PROVIDERS: ImageProvider[] = ['nanogpt', 'pruna', 'openai']
-export const imageProviderNames = { nanogpt: 'NanoGPT', pruna: 'Pruna', openai: 'OpenAI' }
+export const IMAGE_PROVIDERS: ImageProvider[] = ['nanogpt', 'pruna', 'openai', 'leonardo']
+export const imageProviderNames = { nanogpt: 'NanoGPT', pruna: 'Pruna', openai: 'OpenAI', leonardo: 'Leonardo.AI' }
 export const generationTaskNames: Record<GenerationTask, string> = {
   'text-to-image': 'Text to image',
   'image-to-image': 'Image to image',
@@ -48,13 +49,14 @@ export const prunaImageModels: PrunaImageModel[] = [
 ]
 const openAISizes = sizes('1024x1024', '1536x1024', '1024x1536')
 export const documentedImageModels: ImageModel[] = [
+  ...leonardoModels,
   ...['gpt-image-2.5-sunburst', 'gpt-image-2.5-flare'].map((id): ImageModel => ({ id, name: id, provider: 'openai', sizes: openAISizes, tasks: ['text-to-image', 'image-to-image'], maxSourceImages: 4, source: 'https://platform.openai.com/docs/guides/images/image-generation', description: id.endsWith('sunburst') ? 'Highest editing precision and image quality.' : 'Fast, high-quality everyday image generation.' })),
   ...['gpt-image-2', 'gpt-image-1.5', 'gpt-image-1', 'gpt-image-1-mini'].map((id): ImageModel => ({ id, name: id, provider: 'openai', sizes: openAISizes, tasks: ['text-to-image', 'image-to-image'], maxSourceImages: 4, source: 'https://platform.openai.com/docs/guides/images/image-generation' })),
   ...prunaImageModels,
 ]
 function normalizedTasks(model: ImageModel) { return modelTasks(model).filter((task, index, all) => all.indexOf(task) === index) }
 export function loadImageSettings(): ImageSettings {
-  const empty: ImageSettings = { keys: { nanogpt: '', openai: '', pruna: '' }, favorites: [], defaultAlias: '', defaultAliases: {} }
+  const empty: ImageSettings = { keys: { nanogpt: '', openai: '', pruna: '', leonardo: '' }, favorites: [], defaultAlias: '', defaultAliases: {} }
   try {
     const parsed = JSON.parse(localStorage.getItem(IMAGE_SETTINGS_KEY) || 'null')
     if (!parsed) return empty
@@ -104,6 +106,7 @@ function providerProfile(ai: AiSettings, provider: AiSettings['provider']) {
 
 export function resolveImageKey(provider: ImageProvider, settings = loadImageSettings(), ai: AiSettings = loadAiSettings()): string {
   if (settings.keys[provider]) return settings.keys[provider]
+  if (provider === 'leonardo') return ''
   const profileProvider = provider === 'pruna' ? 'litellm' : provider
   const key = providerProfile(ai, profileProvider)?.apiKey
   if (key?.trim()) return key.trim()
@@ -144,14 +147,14 @@ export function resolveImageSpec(prompt: string, alias?: string, size?: string, 
     ...(Number.isFinite(video.seed) ? { seed: Math.round(video.seed!) } : {}),
     ...(video.draft !== undefined ? { draft: Boolean(video.draft) } : {}),
   } : undefined
-  return { prompt, modelAlias: model.alias, provider: model.provider, model: model.id, size: { ...chosen }, task, sources: sources.map((source) => ({ ...source })), ...(cleanVideo ? { video: cleanVideo } : {}), ...(model.provider === 'openai' ? { quality: model.quality ?? (/^gpt-image-2\.5-/.test(model.id) ? 'auto' : 'low'), moderation: model.moderation ?? 'low' } : {}) }
+  return { prompt, modelAlias: model.alias, provider: model.provider, model: model.id, size: { ...chosen }, task, sources: sources.map((source) => ({ ...source })), ...(cleanVideo ? { video: cleanVideo } : {}), ...(model.provider === 'leonardo' ? { leonardoOptions: structuredClone(model.leonardoOptions ?? leonardoDefaults(model.id)), leonardoContractVersion: LEONARDO_CONTRACT_VERSION } : {}), ...(model.provider === 'openai' ? { quality: model.quality ?? (/^gpt-image-2\.5-/.test(model.id) ? 'auto' : 'low'), moderation: model.moderation ?? 'low' } : {}) }
 }
 export function imageFavorite(model: ImageModel, used: FavoriteImageModel[]): FavoriteImageModel {
   const base = `${model.provider}/${model.id}`.slice(0, 58)
   let alias = base, suffix = 2
   while (used.some((favorite) => favorite.alias.toLowerCase() === alias.toLowerCase())) alias = `${base}-${suffix++}`
   const defaultSize = model.sizes.find((size) => size.value === '1024x1024')?.value ?? model.sizes[0]?.value ?? ''
-  return { ...model, tasks: normalizedTasks(model), alias, enabledSizes: model.sizes.map((size) => size.value), defaultSize, ...(model.provider === 'openai' ? { quality: /^gpt-image-2\.5-/.test(model.id) ? 'auto' : 'low', moderation: 'low' } : {}) }
+  return { ...model, tasks: normalizedTasks(model), alias, enabledSizes: model.sizes.map((size) => size.value), defaultSize, ...(model.provider === 'leonardo' ? { leonardoOptions: leonardoDefaults(model.id) } : {}), ...(model.provider === 'openai' ? { quality: /^gpt-image-2\.5-/.test(model.id) ? 'auto' : 'low', moderation: 'low' } : {}) }
 }
 export function imageModelInstructions(settings: ImageSettings = loadImageSettings()) {
   return `\n\nVisual generation proposals never contact a provider or incur a charge. The user must press Generate to approve the shown draft and queue a request. Use only configured favorite aliases and supported tasks. If none exist, ask the user to configure Image and Video profiles in global Settings. Favorites: ${JSON.stringify(settings.favorites.map((favorite) => ({ alias: favorite.alias, tasks: modelTasks(favorite), maxSourceImages: favorite.maxSourceImages ?? 0, sizes: favorite.sizes.filter((size) => favorite.enabledSizes.includes(size.value)).map((size) => ({ size: size.value, ratio: imageRatio(size) })), defaultSize: favorite.defaultSize })))} `
