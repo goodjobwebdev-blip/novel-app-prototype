@@ -582,3 +582,35 @@ test('Generate approves once and keeps the popup open for parallel jobs, edited 
     await act(async () => root.unmount())
   }
 })
+
+test('Leonardo media-only Connections and six profile option controls never change text routing or generate', async t => {
+  const root = testRoot(t)
+  const originalFetch = globalThis.fetch
+  let requests = 0
+  globalThis.fetch = async () => { requests++; throw new Error('No network authorized in this UI fixture') }
+  t.after(() => { globalThis.fetch = originalFetch })
+  const before = aiSettings.loadAiSettings().provider
+  const field = label => [...document.querySelectorAll('label')].find(item => item.textContent.includes(label))?.querySelector('input, select')
+  await act(async () => root.render(h(ConnectionsPanel, { section: 'ai', renderEditor: () => null, application: null, sync: null })))
+  await click('Connections')
+  assert.ok(field('Leonardo.AI media API key'), 'Leonardo has a separate media-only connection')
+  await input(field('Leonardo.AI media API key'), 'fixture-only-leonardo-key')
+  assert.equal(settings.loadImageSettings().keys.leonardo, '', 'Editing does not save credentials')
+  await click('Save connections')
+  await settle(() => button('Save connections').disabled)
+  assert.equal(settings.loadImageSettings().keys.leonardo, 'fixture-only-leonardo-key')
+  assert.equal(aiSettings.loadAiSettings().provider, before)
+  for (const model of settings.documentedImageModels.filter(m => m.provider === 'leonardo')) {
+    const favorite = settings.imageFavorite(model, [])
+    const value = { keys: settings.loadImageSettings().keys, favorites: [favorite], defaultAlias: favorite.alias }
+    await act(async () => root.render(h(SettingsPanel, { key: model.id, ai: initialAiSettings, value, onChange: () => {}, mediaKind: 'image', hideCredentials: true })))
+    assert.ok(field('Leonardo prompt enhancement'), model.id + ' prompt enhancement control')
+    assert.equal(Boolean(field('Leonardo mode')), model.id.startsWith('lucid-'))
+    assert.equal(Boolean(field('Leonardo quality')), ['ideogram/p-image-ideogram', 'krea/krea-2'].includes(model.id))
+    assert.equal(Boolean(field('Leonardo seed')), ['lucid-origin', 'lucid-realism', 'flux-schnell', 'krea/krea-2'].includes(model.id))
+    assert.equal(Boolean(field('Leonardo style')), ['lucid-origin', 'lucid-realism', 'flux-schnell'].includes(model.id))
+    assert.equal([...document.querySelectorAll('select')].find(s => s.closest('label')?.textContent.includes('Provider'))?.querySelector('option[value="leonardo"]')?.textContent, 'Leonardo.AI')
+    assert.match(document.body.textContent, /not verified|unverified/i)
+  }
+  assert.equal(requests, 0)
+})
