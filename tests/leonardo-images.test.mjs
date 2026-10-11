@@ -1,6 +1,10 @@
 import { assertTestResourceLimits } from './test-resource-policy.mjs'
 assertTestResourceLimits()
-import test from 'node:test'
+import test, { after } from 'node:test'
+import 'fake-indexeddb/auto'
+const storage = new Map()
+globalThis.localStorage = { getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, String(v)), removeItem: k => storage.delete(k) }
+globalThis.window = new EventTarget()
 import assert from 'node:assert/strict'
 import { registerHooks } from 'node:module'
 import { existsSync } from 'node:fs'
@@ -14,6 +18,66 @@ registerHooks({ resolve(s, context, next) {
 } })
 const settings = await import('../src/features/images/image-settings.ts')
 const ids = ['lucid-origin', 'lucid-realism', 'flux-schnell', 'ideogram/p-image-ideogram', 'krea/krea-2', 'krea-2-turbo']
+const persistence = await import('../src/data/persistence.ts')
+after(async () => (await persistence.database()).close())
+const png = new Blob([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6AAAAAElFTkSuQmCC', 'base64')], { type: 'image/png' })
+const response = data => new Response(JSON.stringify(data), { headers: { 'content-type': 'application/json' } })
+test('Leonardo explicit Generate persists snapshot and ticket before polling, keeps Gallery output, and resumes GET-only', async () => {
+  const profiles = await import('../src/features/settings/settings-profiles.ts')
+  const store = await import('../src/features/images/image-store.ts')
+  const { runImageQueue } = await import('../src/features/images/image-queue.ts')
+  const { generateProviderImage } = await import('../src/features/images/image-providers.ts')
+  const { assertImageJobConnection } = await import('../src/features/images/image-connection.ts')
+  const { buildLeonardoRequest } = await import('../src/features/images/leonardo-contracts.ts')
+  const favorite = settings.imageFavorite(settings.documentedImageModels.find(m => m.id === 'krea/krea-2' && m.provider === 'leonardo'), [])
+  favorite.leonardoOptions = { prompt_enhance: 'OFF', quality: 'HIGH', seed: 0 }
+  const configured = settings.saveImageSettings({ keys: { leonardo: 'fixture-only-key' }, favorites: [favorite], defaultAlias: favorite.alias })
+  const library = profiles.loadSettingsProfiles()
+  const { keys, ...media } = configured
+  profiles.saveSettingsProfile({ ...library.profiles.find(p => p.id === library.defaults.image), media })
+  const spec = settings.resolveImageSpec('A private fox', favorite.alias, undefined, undefined, configured)
+  const queued = await store.enqueueImageJob(spec)
+  assert.deepEqual(queued.leonardoOptions, spec.leonardoOptions)
+  assert.equal(queued.leonardoContractVersion, 1)
+  const calls = []
+  let polls = 0
+  const fetcher = async (url, init) => {
+    calls.push(String(url))
+    assert.equal(init.credentials, 'omit')
+    assert.equal(init.redirect, 'error')
+    if (String(url).endsWith('/v2/generations')) {
+      assert.equal(init.method, 'POST')
+      assert.equal(init.headers.Authorization, 'Bearer fixture-only-key')
+      assert.equal(init.headers.Accept, 'application/json')
+      assert.deepEqual(JSON.parse(init.body), buildLeonardoRequest(queued))
+      return response({ generationId: 'fixture-ticket-123', apiCreditCost: 17 })
+    }
+    if (String(url).includes('/v1/generations/')) {
+      assert.equal((await store.listImageJobs()).find(j => j.id === queued.id).providerJobId, 'fixture-ticket-123')
+      assert.equal(init.headers.Authorization, 'Bearer fixture-only-key')
+      return response({ generations_by_pk: { status: polls++ ? 'COMPLETE' : 'PENDING', generated_images: polls > 1 ? [{ id: 'image', url: 'https://cdn.example.org/output.png' }] : [] } })
+    }
+    assert.equal(init.headers?.Authorization, undefined)
+    assert.equal(init.referrerPolicy, 'no-referrer')
+    return new Response(png)
+  }
+  await runImageQueue('leonardo', { key: async () => 'fixture-only-key', generate: (job, key, signal, submitted) => generateProviderImage(job, key, signal, submitted, fetcher, async () => {}), prepare: async output => ({ ...output, width: 1, height: 1, thumbnail: png }) })
+  const completed = (await store.listImageJobs()).find(j => j.id === queued.id)
+  assert.equal(completed.status, 'completed')
+  assert.equal((await store.getGalleryImage(completed.assetId)).cost, undefined)
+  await store.decideImageJob(queued.id, true)
+  assert.equal((await store.listGalleryImages()).some(i => i.id === completed.assetId), true)
+  assert.throws(() => assertImageJobConnection(completed, 'different-account'), /changed/)
+  assert.doesNotThrow(() => assertImageJobConnection(completed, completed.localConnectionFingerprint))
+  let posts = 0
+  const output = await generateProviderImage(completed, 'fixture-only-key', new AbortController().signal, async () => assert.fail('resume must not submit'), async (url, init) => {
+    if (init.method === 'POST') posts++
+    return String(url).includes('/v1/generations/') ? response({ generations_by_pk: { status: 'COMPLETE', generated_images: [{ id: 'image', url: 'https://cdn.example.org/output.png' }] } }) : new Response(png)
+  }, async () => {})
+  assert.equal(output.image.size, png.size)
+  assert.equal(posts, 0)
+  assert.equal(calls.filter(url => url.endsWith('/v2/generations')).length, 1)
+})
 test('six distinct documented Leonardo models resolve private single-output model-specific requests', async () => {
   const catalog = settings.documentedImageModels.filter(model => model.provider === 'leonardo')
   assert.deepEqual(catalog.map(model => model.id), ids)
