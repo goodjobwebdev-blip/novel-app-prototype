@@ -68,7 +68,7 @@ const ImageSettingsPanel = forwardRef<ImageSettingsPanelRef, ImageSettingsPanelP
       const next = { ...catalogs, [selectedProvider]: models }
       setCatalogs(next)
       try { localStorage.setItem('arc-image-catalog-v1', JSON.stringify(next)) } catch { /* Favorites can still be saved separately. */ }
-      setMessage(`${models.length} generation models with verified capabilities loaded.`)
+      setMessage(selectedProvider === 'leonardo' ? `${models.length} documented Leonardo models loaded. Account access and live transport are not verified; see per-model discovery status.` : `${models.length} generation models with verified capabilities loaded.`)
     } catch (e) { setError(e instanceof Error ? e.message : 'Models could not be loaded.') }
     finally { setBusy(false) }
   }

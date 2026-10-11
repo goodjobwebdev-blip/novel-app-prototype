@@ -60,6 +60,21 @@ export function normalizeNanoVideoModels(payload: any): ImageModel[] {
 }
 export async function fetchImageModels(provider: ImageProvider, key: string, fetcher = fetch): Promise<ImageModel[]> {
   if (provider === 'pruna') return documentedImageModels.filter((model) => model.provider === provider)
+  if (provider === 'leonardo') {
+    const curated = documentedImageModels.filter(model => model.provider === provider)
+    if (!key) return curated
+    const response = await fetcher('https://cloud.leonardo.ai/api/rest/v2/models', { headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' }, credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(30000) })
+    if (!response.ok) throw new Error(`Leonardo catalog request failed (${response.status}).`)
+    const data = await response.json().catch(() => null)
+    const records = data?.productionApiAvailableModels
+    if (!Array.isArray(records) || records.some(record => !record || typeof record.id !== 'string' || typeof record.name !== 'string' || !record.parameters || typeof record.parameters !== 'object' || Array.isArray(record.parameters))) throw new Error('Leonardo returned an invalid model catalog. Saved favorites were not changed.')
+    const checkedAt = new Date().toISOString()
+    // Only exact, explicitly returned generation IDs can be matched. Never infer
+    // a slug from display names or execute/merge remote parameter schemas.
+    return curated.map(model => ({ ...model, description: records.some(record => record.id === model.id)
+      ? `Discovery ID confirmed at ${checkedAt}; local documented contract retained. Live generation and browser CORS not verified.`
+      : `Account availability not confirmed at ${checkedAt}: discovery ID mapping or model access requires verification. Local documented contract retained.` }))
+  }
   if (provider === 'nanogpt') {
     const imagePromise = jsonResponse(await fetcher(`${NANO}/api/v1/image-models?detailed=true`, { credentials: 'omit', signal: AbortSignal.timeout(30000) }))
     const videoPromise = key ? fetcher(`${NANO}/api/v1/video-models?detailed=true`, { headers: { Authorization: `Bearer ${key}` }, credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(30000) }).then((response) => jsonResponse(response, key)).catch(() => ({ data: [] })) : Promise.resolve({ data: [] })
