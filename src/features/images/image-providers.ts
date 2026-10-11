@@ -1,6 +1,7 @@
 import { documentedImageModels, imageRatio, imageSize, prunaImageModels } from './image-settings'
 import { generationTask, modelTasks, outputKind, type GenerationSource, type ImageJob, type ImageModel, type ImageProvider, type ImageSize } from './image-generation-types'
 import { assertImageFile, makeThumbnail } from './illustration-image'
+import { generateLeonardo } from './leonardo-adapter'
 export type ImageOutput = { image: Blob; thumbnail: Blob; width: number; height: number; kind?: 'image' | 'video'; mediaDurationMs?: number; seed?: number; cost?: number; revisedPrompt?: string }
 export type ProviderResult = { image: Blob; kind?: 'image' | 'video'; seed?: number; cost?: number; revisedPrompt?: string }
 export type ImageProviderCredentials = string | { key: string; gatewayUrl: string }
@@ -135,7 +136,7 @@ async function decodeOutput(data: any, provider: ImageProvider, key: string, sig
     const rawUrl = outputUrl(data, kind, provider)
     if (typeof rawUrl !== 'string') throw new Error(`The provider returned no downloadable ${kind}.`)
     const url = deliveryUrl(rawUrl, provider)
-    media = await boundedResponse(await fetcher(provider === 'pruna' ? prunaRequestUrl(url, gatewayUrl) : url, { headers: provider === 'pruna' ? prunaHeaders(key) : provider === 'nanogpt' && kind === 'video' ? { 'x-api-key': key } : {}, signal, credentials: 'omit', referrerPolicy: 'no-referrer', redirect: provider === 'pruna' ? 'error' : 'follow' }), kind)
+    media = await boundedResponse(await fetcher(provider === 'pruna' ? prunaRequestUrl(url, gatewayUrl) : url, { headers: provider === 'pruna' ? prunaHeaders(key) : provider === 'nanogpt' && kind === 'video' ? { 'x-api-key': key } : {}, signal, credentials: 'omit', referrerPolicy: 'no-referrer', redirect: provider === 'pruna' || provider === 'leonardo' ? 'error' : 'follow' }), kind)
   }
   if (kind === 'image') {
     await assertImageFile(media)
@@ -244,6 +245,10 @@ export async function generateProviderImage(job: ImageJob, credentials: ImagePro
   if (!key.trim()) throw new Error(`Add a ${job.provider === 'pruna' ? 'LiteLLM' : job.provider} media key or configure its AI-settings key first.`)
   signal.throwIfAborted()
   const kind = outputKind(job)
+  if (job.provider === 'leonardo') {
+    const url = await generateLeonardo(job, key, signal, onSubmitted, fetcher, pause)
+    return decodeOutput({ data: [{ url }] }, 'leonardo', key, signal, fetcher, 'image')
+  }
   if (job.provider === 'openai') {
     if (kind === 'video') throw new Error('OpenAI video generation is not configured in this product.')
     return decodeOutput(await openAI(job, key, signal, fetcher), 'openai', key, signal, fetcher, 'image')

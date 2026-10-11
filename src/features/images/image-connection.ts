@@ -13,14 +13,14 @@ export function captureImageCredentials(provider: ImageProvider): ImageProviderC
 export async function imageConnectionFingerprint(provider: ImageProvider, credentials: ImageProviderCredentials): Promise<string> {
   const key = typeof credentials === 'string' ? credentials : credentials.key
   const gatewayUrl = typeof credentials === 'string' ? '' : credentials.gatewayUrl
-  const endpoint = provider === 'pruna' ? (gatewayUrl ? new URL(gatewayUrl).href.replace(/\/$/, '') : '') : provider === 'openai' ? 'https://api.openai.com/v1' : 'https://nano-gpt.com'
+  const endpoint = provider === 'pruna' ? (gatewayUrl ? new URL(gatewayUrl).href.replace(/\/$/, '') : '') : provider === 'openai' ? 'https://api.openai.com/v1' : provider === 'leonardo' ? 'https://cloud.leonardo.ai/api/rest' : 'https://nano-gpt.com'
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([provider, endpoint, key])))
   return `sha256:${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')}`
 }
 
 export function assertImageJobConnection(job: ImageJob, fingerprint: string) {
   if (job.providerJobId) {
-    const resumable = job.provider === 'pruna' || (job.provider === 'nanogpt' && generationTask(job).endsWith('video'))
+    const resumable = job.provider === 'pruna' || job.provider === 'leonardo' || (job.provider === 'nanogpt' && generationTask(job).endsWith('video'))
     if (!resumable || !job.localConnectionFingerprint) throw new Error('This provider ticket has no verified local connection. Review the provider history before restarting a new paid generation.')
   }
   // Only legacy jobs without a ticket may acquire their first connection at execution.
