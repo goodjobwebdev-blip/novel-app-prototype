@@ -22,6 +22,27 @@ const persistence = await import('../src/data/persistence.ts')
 after(async () => (await persistence.database()).close())
 const png = new Blob([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6AAAAAElFTkSuQmCC', 'base64')], { type: 'image/png' })
 const response = data => new Response(JSON.stringify(data), { headers: { 'content-type': 'application/json' } })
+test('Leonardo discovery never sends its key to OpenAI and preserves curated contracts without guessing discovery IDs', async () => {
+  const { fetchImageModels } = await import('../src/features/images/image-providers.ts')
+  let calls = 0
+  const offline = await fetchImageModels('leonardo', '', async () => assert.fail('no key means no discovery network'))
+  assert.deepEqual(offline.map(m => m.id), ids)
+  const models = await fetchImageModels('leonardo', 'fixture-only-key', async (url, init) => {
+    calls++
+    assert.equal(String(url), 'https://cloud.leonardo.ai/api/rest/v2/models')
+    assert.equal(init.headers.Authorization, 'Bearer fixture-only-key')
+    assert.equal(init.credentials, 'omit')
+    assert.equal(init.redirect, 'error')
+    return response({ productionApiAvailableModels: [{ id: 'lucid-origin', name: 'Lucid Origin', parameters: { type: 'object' } }, { id: 'UNPROVEN_KREA_ID', name: 'Krea 2', parameters: {} }] })
+  })
+  assert.equal(calls, 1)
+  assert.deepEqual(models.map(m => m.id), ids)
+  assert.match(models[0].description, /discovery.*confirmed/i)
+  assert.match(models.find(m => m.id === 'krea/krea-2').description, /not confirmed/i)
+  assert.deepEqual(models.map(m => m.sizes), offline.map(m => m.sizes))
+  await assert.rejects(() => fetchImageModels('leonardo', 'fixture-only-key', async () => response({ data: [] })), /invalid.*catalog/i)
+  await assert.rejects(() => fetchImageModels('leonardo', 'fixture-only-key', async () => new Response('private remote error', { status: 401 })), /401/)
+})
 test('Leonardo explicit Generate persists snapshot and ticket before polling, keeps Gallery output, and resumes GET-only', async () => {
   const profiles = await import('../src/features/settings/settings-profiles.ts')
   const store = await import('../src/features/images/image-store.ts')
