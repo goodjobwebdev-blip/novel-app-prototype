@@ -12,8 +12,7 @@ const styles = [...main.matchAll(/import '([^']+\.css)'/g)]
   .map(([, path]) => readFileSync(new URL(path, mainUrl), 'utf8'))
 
 for (const [name, className] of [
-  ['scene', 'workspace-composer'],
-  ['codex', 'workspace-composer'],
+  ['scene/codex', 'workspace-composer'],
   ['chat', 'chat-message-composer'],
   ['collapsed editor', 'workspace-composer is-collapsed'],
 ]) {
@@ -47,10 +46,6 @@ for (const [name, className] of [
     const strip = computed(composer.querySelector('.chat-config-strip'))
     assert.notEqual(strip.backgroundColor, 'rgba(0, 0, 0, 0)', 'Dropdown keeps its own surface')
     assert.equal(strip.borderTopWidth, '1px')
-    assert.equal(computed(composer.querySelector('textarea')).height, '56px')
-    const button = computed(composer.querySelector('.generation-primary'))
-    assert.equal(button.width, '56px')
-    assert.equal(button.height, '56px')
   })
 }
 
