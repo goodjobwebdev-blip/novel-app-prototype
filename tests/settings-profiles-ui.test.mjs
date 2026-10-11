@@ -174,6 +174,19 @@ test('global App navigation, last-book return, and prompt deep links select the 
   await mounted.close()
 })
 
+test('Settings breadcrumb text and separators use the defined secondary theme color', () => {
+  const css = readFileSync(new URL('../src/features/settings/settings-profiles.css', import.meta.url), 'utf8')
+  const theme = readFileSync(new URL('../src/app/styles.css', import.meta.url), 'utf8')
+  assert.match(theme, /--soft\s*:/, 'The secondary color token must exist in the theme')
+  const stylesheet = new JSDOM(`<style>${css}</style>`).window.document.styleSheets[0]
+  const rules = [...stylesheet.cssRules]
+  const breadcrumbs = rules.find(rule => rule.selectorText === '.settings-breadcrumbs')
+  const separator = rules.find(rule => rule.selectorText === '.settings-breadcrumbs li + li::before')
+  assert.equal(breadcrumbs.style.getPropertyValue('color'), 'var(--soft)')
+  assert.equal(separator.style.getPropertyValue('border-block-start'), '1px solid var(--soft)')
+  assert.equal(separator.style.getPropertyValue('border-inline-end'), '1px solid var(--soft)')
+})
+
 test('model and prompt type selectors retain spacing above the profile editor inside the inert wrapper', async (t) => {
   const style = document.createElement('style')
   t.after(() => style.remove())
