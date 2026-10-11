@@ -1,6 +1,6 @@
-import { database, isCodexEntryArchived, listEntitiesByBook, type BookEntity, type CodexEntryEntity, type NoteEntity } from '../../data/persistence'
+import { database, isCodexEntryArchived, listEntitiesByBook, type CodexEntryEntity, type NoteEntity } from '../../data/persistence'
 import { ensureLoreTypesWithDb, resolveLoreType } from './lore-types'
-import { entityAvailableInBook } from '../worlds/world-service'
+import { entityAvailableInWorkspace as entityAvailableInBook, type WorkspaceOwner } from '../../app/workspace-owner'
 import { protectedRanges } from '../editor/document-projection'
 import type { MarkdownEditorHandle } from '../editor/MarkdownEditor'
 export function codexTemplateCompatible(note: NoteEntity, typeId: string) {
@@ -36,10 +36,10 @@ export type TemplateTarget = { bookId: string; noteId: string; targetId: string;
 export async function prepareCodexTemplate(input: TemplateTarget) {
   const db = await database()
   return db.transaction('rw', db.table('entities'), async () => {
-    const book = await db.table('entities').get(input.bookId) as BookEntity | undefined
+    const book = await db.table('entities').get(input.bookId) as WorkspaceOwner | undefined
     const note = await db.table('entities').get(input.noteId) as NoteEntity | undefined
     const target = await db.table('entities').get(input.targetId) as CodexEntryEntity | undefined
-    if (book?.type !== 'book' || note?.type !== 'note' || note.bookId !== book.id) throw new Error('This template Note is no longer available in the current book.')
+    if (!book || !['book', 'world'].includes(book.type) || note?.type !== 'note' || note.bookId !== book.id) throw new Error('This template Note is no longer available in the current workspace.')
     if (target?.type !== 'codexEntry' || !entityAvailableInBook(target, book) || isCodexEntryArchived(target)) throw new Error('The target Codex entry is unavailable or archived.')
     const type = resolveLoreType(await ensureLoreTypesWithDb(db, target.bookId), input.typeId)
     const currentTarget = await db.table('entities').get(input.targetId) as CodexEntryEntity

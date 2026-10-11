@@ -2,7 +2,7 @@ import { proseEntities } from '../editor/document-projection.ts'
 import { listEntitiesByBook } from '../../data/persistence'
 import { loadAiSettings } from '../../shared/ai/ai-settings'
 import { database, getBookAiSettings, getEntity, getOrCreateSummary, isCodexEntryArchived, listSeries, saveBookAiSettings, saveSummaryContent, createSnapshot, type BookEntity, type SummaryEntity } from '../../data/persistence'
-import { entityAvailableInBook } from '../worlds/world-service'
+import { entityAvailableInWorkspace as entityAvailableInBook, worldPromptValues, type WorkspaceOwner } from '../../app/workspace-owner'
 import type { ChatMessageEntity } from '../chat/chat-service'
 import { assertPromptTemplateValid, type BookPromptValues } from '../../shared/ai/prompt-template'
 import { buildSummarySource, type SummarySourceEntity } from './summary-service'
@@ -13,17 +13,18 @@ import { fetchTextProviderModelContextLength, streamTextProviderCompletion, text
 async function summaryAccess(bookId: string, summary: SummaryEntity) {
   const db = await database()
   return db.transaction('r', db.table('entities'), async () => {
-    const book = await getEntity<BookEntity>(bookId)
+    const book = await getEntity<WorkspaceOwner>(bookId)
     const current = await getEntity<SummaryEntity>(summary.id)
     const entity = await getEntity<SummarySourceEntity>(summary.sourceEntityId)
-    if (book?.type !== 'book' || current?.type !== 'summary' || current.sourceEntityId !== summary.sourceEntityId || current.bookId !== summary.bookId || current.worldId !== summary.worldId || !entityAvailableInBook(current, book) || !entity || !['act', 'chapter', 'scene', 'codexEntry'].includes(entity.type) || !entityAvailableInBook(entity, book) || isCodexEntryArchived(entity) || current.bookId !== entity.bookId || current.worldId !== entity.worldId) throw new Error('The summary source is unavailable or archived in this book.')
+    if (!book || !['book', 'world'].includes(book.type) || current?.type !== 'summary' || current.sourceEntityId !== summary.sourceEntityId || current.bookId !== summary.bookId || current.worldId !== summary.worldId || !entityAvailableInBook(current, book) || !entity || !['act', 'chapter', 'scene', 'codexEntry'].includes(entity.type) || !entityAvailableInBook(entity, book) || isCodexEntryArchived(entity) || current.bookId !== entity.bookId || current.worldId !== entity.worldId) throw new Error('The summary source is unavailable or archived in this workspace.')
     return book
   })
 }
 
-export async function prepareSummaryGeneration(book: BookEntity, summary: SummaryEntity, signal: AbortSignal, bookValues?: BookPromptValues) {
+export async function prepareSummaryGeneration(book: WorkspaceOwner, summary: SummaryEntity, signal: AbortSignal, bookValues?: BookPromptValues) {
   signal.throwIfAborted()
   book = await summaryAccess(book.id, summary)
+  if (book.type === 'world') bookValues = worldPromptValues(book)
   const defaults = loadAiSettings()
   const settings = await getBookAiSettings(book.id, defaults.favorites)
   signal.throwIfAborted()
@@ -45,7 +46,7 @@ export async function prepareSummaryGeneration(book: BookEntity, summary: Summar
   const action = summary.content.trim() ? 'resummarize' : 'summarize'
   const normalizedRequest = assembleSummaryGenerationRequest({
     composition,
-    book: { ...(bookValues ?? { title: book.title, series: seriesTitle, seriesOrder: seriesTitle ? book.seriesOrder ?? '' : '', overview: book.overview ?? '', genre: book.genre ?? '', style: book.writingStyle ?? '', pov: book.pointOfView ?? '', tense: book.tense ?? '', language: book.language ?? '' }), responseLength },
+    book: { ...(bookValues ?? (book.type === 'world' ? worldPromptValues(book) : { title: book.title, series: seriesTitle, seriesOrder: seriesTitle ? book.seriesOrder ?? '' : '', overview: book.overview ?? '', genre: book.genre ?? '', style: book.writingStyle ?? '', pov: book.pointOfView ?? '', tense: book.tense ?? '', language: book.language ?? '' })), responseLength },
     responseLength, summary: { id: summary.id, content: proseEntities(await listEntitiesByBook(book.id)).find((entity) => entity.id === summary.id)?.content ?? '' },
     target: { id: source.source.id, type: source.source.type, title: source.source.title, source: source.content },
     sourceDiagnostics: source.diagnostics, action,

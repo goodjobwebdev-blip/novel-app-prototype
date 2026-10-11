@@ -1,5 +1,5 @@
 import { BUILTIN_LORE_TYPES } from '../codex/lore-types'
-import { entityAvailableInBook } from '../worlds/world-service'
+import { entityAvailableInWorkspace as entityAvailableInBook, type WorkspaceOwner } from '../../app/workspace-owner'
 import { requireLoreType } from '../codex/lore-types-service'
 import { sceneBeats } from '../writing/scene-beats'
 import { proseText, protectedRanges, rangeTouchesProtected } from '../editor/document-projection.ts'
@@ -26,7 +26,7 @@ import {
   listCodexDependencies,
   saveDocumentContent,
   type ArcEntity,
-  type BookEntity,
+
 } from '../../data/persistence'
 
 const editableTypes = ['scene', 'note', 'codexEntry'] as const
@@ -157,7 +157,7 @@ function titleFor(entity: ArcEntity) {
 
 async function editableEntity(bookId: string, entityId: string) {
   const entity = await getEntity<ArcEntity>(entityId)
-  const book = await getEntity<BookEntity>(bookId)
+  const book = await getEntity<WorkspaceOwner>(bookId)
   if (!entity || !entityAvailableInBook(entity, book) || !editableTypeSet.has(entity.type) || isCodexEntryArchived(entity)) {
     throw new Error('That editable document was not found in the current book.')
   }
@@ -324,8 +324,8 @@ export async function executeChatWorkspaceTool(bookId: string, call: ChatToolCal
   }
 }
 
-async function setProposalStatus(messageId: string, proposalId: string, status: ChatDocumentEditProposal['status'], appliedAt?: number) {
-  return transitionChatMessageProposal(messageId, 'documentEdits', proposalId, ['applying'], { status, ...(appliedAt ? { appliedAt } : {}) })
+async function setProposalStatus(messageId: string, proposalId: string, status: ChatDocumentEditProposal['status'], appliedAt?: number, touchChat = true) {
+  return transitionChatMessageProposal(messageId, 'documentEdits', proposalId, ['applying'], { status, ...(appliedAt ? { appliedAt } : {}) }, touchChat)
 }
 
 export async function applyChatDocumentEdit(messageId: string, proposalId: string) {
@@ -353,6 +353,7 @@ export async function applyChatDocumentEdit(messageId: string, proposalId: strin
     throw error
   }
 
+  const appliedAt = Date.now()
   try {
     const db = await database()
     await db.transaction('rw', db.table('entities'), db.table('snapshots'), async () => {
@@ -363,10 +364,9 @@ export async function applyChatDocumentEdit(messageId: string, proposalId: strin
         // The requesting Book authorizes access; the optimistic write retains the canonical owner.
         await saveDocumentContent(entity.id, nextContent, { bookId: current.bookId, updatedAt: current.updatedAt, content: currentContent })
       }
+      await setProposalStatus(message.id, proposal.id, 'applied', appliedAt, false)
     })
   } catch (error) { await setProposalStatus(message.id, proposal.id, 'stale'); throw error }
-  const appliedAt = Date.now()
-  await setProposalStatus(message.id, proposal.id, 'applied', appliedAt)
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('arc-entity-changed', { detail: { bookId: message.bookId, entityId: entity.id } }))
   return { entityId: entity.id, appliedAt }
 }
@@ -375,8 +375,8 @@ export async function rejectChatDocumentEdit(messageId: string, proposalId: stri
   await transitionChatMessageProposal(messageId, 'documentEdits', proposalId, ['proposed'], { status: 'rejected' })
 }
 
-async function setCodexCreationStatus(messageId: string, proposalId: string, patch: Partial<ChatCodexCreationProposal>) {
-  return transitionChatMessageProposal(messageId, 'codexCreations', proposalId, ['applying'], patch)
+async function setCodexCreationStatus(messageId: string, proposalId: string, patch: Partial<ChatCodexCreationProposal>, touchChat = true) {
+  return transitionChatMessageProposal(messageId, 'codexCreations', proposalId, ['applying'], patch, touchChat)
 }
 
 export async function createChatCodexEntry(messageId: string, proposalId: string) {
@@ -391,14 +391,23 @@ export async function createChatCodexEntry(messageId: string, proposalId: string
     throw new Error('A Codex entry with this title now exists. The proposal was not created again.')
   }
 
-  let created
-  try { created = await createCodexEntry(message.bookId, proposal.title, proposal.typeId ?? proposal.category) }
-  catch (error) { await setCodexCreationStatus(message.id, proposal.id, { status: 'stale' }); throw error }
-  if (proposal.content) await saveDocumentContent(created.id, proposal.content)
+  let entityId: string
   const appliedAt = Date.now()
-  await setCodexCreationStatus(message.id, proposal.id, { status: 'created', entityId: created.id, appliedAt })
-  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('arc-entity-changed', { detail: { bookId: message.bookId, entityId: created.id } }))
-  return { entityId: created.id, appliedAt }
+  try {
+    const db = await database()
+    entityId = await db.transaction('rw', db.table('entities'), db.table('codexDependencies'), async () => {
+      // Creation, its initial body, and proposal approval are one durable change.
+      // A body write failure must not leave an empty orphan article behind.
+      const currentEntries = await listEntitiesByBook(message.bookId, 'codexEntry')
+      if (currentEntries.some(entity => isActiveCodexTitleDuplicate(entity, proposal.title))) throw new Error('A Codex entry with this title now exists. The proposal was not created again.')
+      const created = await createCodexEntry(message.bookId, proposal.title, proposal.typeId ?? proposal.category)
+      if (proposal.content) await saveDocumentContent(created.id, proposal.content)
+      await setCodexCreationStatus(message.id, proposal.id, { status: 'created', entityId: created.id, appliedAt }, false)
+      return created.id
+    })
+  } catch (error) { await setCodexCreationStatus(message.id, proposal.id, { status: 'stale' }); throw error }
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('arc-entity-changed', { detail: { bookId: message.bookId, entityId } }))
+  return { entityId, appliedAt }
 }
 
 export async function rejectChatCodexEntry(messageId: string, proposalId: string) {

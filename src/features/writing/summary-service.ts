@@ -3,14 +3,14 @@ import {
   getEntity,
   listEntitiesByBook,
   type ArcEntity,
-  type BookEntity,
+
   type CodexEntryEntity,
   type StructuralEntity,
   type StructuralEntityType,
   type SummaryEntity,
   type SummarySourceType,
 } from '../../data/persistence'
-import { entityAvailableInBook } from '../worlds/world-service'
+import { entityAvailableInWorkspace as entityAvailableInBook, type WorkspaceOwner } from '../../app/workspace-owner'
 import { bookTemplateValues, renderPromptTemplate, type BookPromptValues } from '../../shared/ai/prompt-template'
 import type { DynamicContextSource } from '../../shared/ai/prompt-composition'
 
@@ -125,7 +125,7 @@ function chapterSource(chapter: StructuralEntity, entities: ArcEntity[], summari
 export async function buildSummarySource(sourceId: string, bookId?: string): Promise<SummarySource> {
   const source = await getEntity<ArcEntity>(sourceId)
   if (!source || !isSummarySource(source)) throw new Error('The summary source is no longer available.')
-  if (bookId !== undefined && !entityAvailableInBook(source, await getEntity<BookEntity>(bookId))) throw new Error('The summary source is unavailable in this book.')
+  if (bookId !== undefined && !entityAvailableInBook(source, await getEntity<WorkspaceOwner>(bookId))) throw new Error('The summary source is unavailable in this workspace.')
   const entities = proseEntities(await listEntitiesByBook(bookId ?? source.bookId))
   if (bookId !== undefined && !entities.some(entity => entity.id === source.id && isSummarySource(entity))) throw new Error('The summary source is unavailable in this book.')
   const summaries = summariesBySource(entities)

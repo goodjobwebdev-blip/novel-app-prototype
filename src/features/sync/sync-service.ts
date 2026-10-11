@@ -183,3 +183,11 @@ export async function checkRemoteBook(bookId: string): Promise<void> {
 }
 
 export { disconnectBookSync }
+
+// Explicit canonical World scope; Book functions above retain detached snapshots.
+export {
+  enableWorldSync, syncWorldNow, getWorldSyncState, listWorldSyncStates,
+  listCloudWorlds, importCloudWorld, resolveWorldSyncConflict, disconnectWorldSync,
+  listWorldArchiveConflicts, getWorldArchiveConflict, WORLD_SYNC_CHANGED,
+} from './world-sync-service'
+export type { WorldSyncResult, WorldSyncState } from './world-sync-service'

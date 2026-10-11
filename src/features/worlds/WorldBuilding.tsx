@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, BookOpen, Copy, Globe2, Pencil, Plus, Search, Trash2, WandSparkles } from 'lucide-react'
-import { listBooks, type BookEntity, type CodexEntryEntity } from '../../data/persistence'
+import { createBook, listBooks, type BookEntity, type CodexEntryEntity } from '../../data/persistence'
+import { loadAiSettings } from '../../shared/ai/ai-settings'
 import ActionMenu from '../../shared/ui/ActionMenu'
 import Button from '../../shared/ui/Button'
 import Input from '../../shared/ui/Input'
@@ -9,13 +10,59 @@ import ResourceListRow from '../../shared/ui/ResourceListRow'
 import IllustrationModal from '../images/IllustrationModal'
 import { loadSettingsProfiles, resolveProfileSettings } from '../settings/settings-profiles'
 import { generateAutotitleSuggestion, prepareAutotitleRequest, type AutotitleRequest } from '../writing/autotitle-service'
-import { copyWorldEntryToAllBooksAndRemove, createWorld, deleteWorld, listWorldEntries, listWorlds, renameWorld, worldDemotionConflicts, type WorldEntity, type WorldTriggerConflict } from './world-service'
+import { copyWorldEntryToAllBooksAndRemove, createWorld, deleteWorld, listWorldEntries, listWorlds, renameWorld, setBookWorld, worldDemotionConflicts, type WorldEntity, type WorldTriggerConflict } from './world-service'
 import TriggerConflictsDialog from './TriggerConflictsDialog'
 import '../images/illustrations.css'
 import './worlds.css'
 
 const message = (reason: unknown) => reason instanceof Error ? reason.message : String(reason)
 type WorldRecord = { world: WorldEntity; entries: CodexEntryEntity[]; books: BookEntity[] }
+
+export function WorldWorkspacePanel({ world, tab, beforeChange, onOpenBook, onRefresh, onHome }: {
+  world: WorldEntity; tab: 'world' | 'books'; beforeChange: () => Promise<void>; onOpenBook: (id: string) => void; onRefresh: () => Promise<void>; onHome: () => void
+}) {
+  const { records, loading, error: loadError, reload } = useWorldLibrary()
+  const record = records.find(item => item.world.id === world.id)
+  const [books, setBooks] = useState<BookEntity[]>([])
+  const [selectedBook, setSelectedBook] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const lock = useRef(false)
+  useEffect(() => { let live = true; void listBooks().then(items => { if (live) setBooks(items) }).catch(reason => { if (live) setError(message(reason)) }); return () => { live = false } }, [world.id, record])
+  const run = async (action: () => Promise<void>) => {
+    if (lock.current) return
+    lock.current = true; setBusy(true); setError('')
+    try { await beforeChange(); await action(); await reload(); await onRefresh() }
+    catch (reason) { setError(message(reason)) }
+    finally { lock.current = false; setBusy(false) }
+  }
+  const attach = () => run(async () => {
+    const book = books.find(item => item.id === selectedBook)
+    if (!book) throw new Error('Choose an existing Book.')
+    if (book.worldId && book.worldId !== world.id) {
+      const previous = records.find(item => item.world.id === book.worldId)?.world.title ?? book.worldId
+      if (!window.confirm(`Move “${book.title}” from World “${previous}” to “${world.title}”? Its local content stays unchanged; access to the previous shared lore ends.`)) return
+    }
+    await setBookWorld(book.id, world.id)
+  })
+  return <section aria-label={tab === 'world' ? 'World settings' : 'Linked Books'}>
+    <PanelHeader title={tab === 'world' ? world.title : 'Books'} eyebrow="World workspace" />
+    {(error || loadError) && <p role="alert">{error || loadError}<Button onClick={() => { void reload() }}>Retry</Button></p>}
+    {loading && <p role="status">Loading World…</p>}
+    {tab === 'world' ? <>
+      {record && <WorldActions record={record} disabled={loading || busy} />}
+      <p>Articles, Notes and Chat belong to this World. Only an empty World can be deleted; linked Books are disconnected, never deleted.</p>
+      <Button onClick={onHome}>Home</Button>
+      {record && record.books.length > 0 && <details><summary>Transfer World entries to all linked Books</summary>{record.entries.map(entry => <WorldEntryRow key={entry.id} entry={entry} worldId={world.id} books={record.books} disabled={busy || loading} />)}</details>}
+    </> : <>
+      {!record?.books.length && <p>No Books linked. Codex, Notes and Chat work without a Book.</p>}
+      {record?.books.map(book => <div key={book.id}><ResourceListRow title={book.title} onOpen={() => onOpenBook(book.id)} /><Button disabled={busy} onClick={() => { if (window.confirm(`Disconnect “${book.title}” from “${world.title}”? Local content remains; shared World lore becomes unavailable.`)) void run(async () => { await setBookWorld(book.id, '') }) }}>Disconnect</Button></div>)}
+      <Button disabled={busy} onClick={() => { void run(async () => { const created = await createBook(loadAiSettings()); await setBookWorld(created.book.id, world.id) }) }}>New Book in this World</Button>
+      <label>Connect existing Book<select aria-label="Connect existing Book" value={selectedBook} disabled={busy} onChange={event => setSelectedBook(event.target.value)}><option value="">Choose Book</option>{books.filter(book => book.worldId !== world.id).map(book => <option key={book.id} value={book.id}>{book.title}</option>)}</select></label>
+      <Button disabled={busy || !selectedBook} onClick={() => { void attach() }}>Connect Book</Button>
+    </>}
+  </section>
+}
 
 // These views are mounted only after the parent has finished main-library startup.
 function useWorldLibrary() {
@@ -269,14 +316,14 @@ function WorldEntryRow({ entry, worldId, books, disabled }: { entry: CodexEntryE
   </article>
 }
 
-function WorldDetail({ record, disabled }: { record: WorldRecord; disabled: boolean }) {
+function WorldDetail({ record, disabled, onOpen }: { record: WorldRecord; disabled: boolean; onOpen: (id: string) => void }) {
   const [query, setQuery] = useState('')
   const normalized = query.trim().toLocaleLowerCase()
   const entries = record.entries.filter(entry => !normalized || `${entry.title} ${entry.category}`.toLocaleLowerCase().includes(normalized)).sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id))
   return <section className="world-detail" aria-label={`World Codex · ${record.world.title}`}>
     <PanelHeader eyebrow="World Building" title={record.world.title} actions={<WorldActions record={record} disabled={disabled} />} />
     <p className="world-help">{counts(record)}{record.books.length > 0 && `: ${record.books.map(book => book.title).join(', ')}`}</p>
-    <p className="world-help">Read-only Codex list. Manage entry content from a linked Book; no entry editor or body viewer is available here.</p>
+    <Button disabled={disabled} onClick={() => onOpen(record.world.id)}>Open World workspace</Button>
     {record.entries.length > 0 && <p className="world-help">Delete World is unavailable: only an empty World can be deleted.</p>}
     <Input type="search" leadingIcon={<Search />} aria-label="Search World Codex" placeholder="Search title or type" value={query} onChange={event => setQuery(event.target.value)} />
     <div className="world-entry-list" aria-label="World Codex entries">
@@ -286,7 +333,7 @@ function WorldDetail({ record, disabled }: { record: WorldRecord; disabled: bool
   </section>
 }
 
-export default function WorldBuilding({ initialWorldId, onHome }: { initialWorldId?: string; onHome: () => void }) {
+export default function WorldBuilding({ initialWorldId, onHome, onOpen }: { initialWorldId?: string; onHome: () => void; onOpen: (id: string) => void }) {
   const { records, loading, error, reload } = useWorldLibrary()
   const [selectedId, setSelectedId] = useState(initialWorldId ?? '')
   useEffect(() => { setSelectedId(initialWorldId ?? '') }, [initialWorldId])
@@ -295,13 +342,13 @@ export default function WorldBuilding({ initialWorldId, onHome }: { initialWorld
     <header className="world-building-header"><Button leadingIcon={<ArrowLeft />} onClick={onHome}>Home</Button><h1>World Building</h1></header>
     <div className="world-building-layout">
       <section className="world-library" aria-label="World library">
-        <PanelHeader eyebrow="Library" title="Worlds" actions={<NewWorldButton disabled={loading || Boolean(error)} onOpen={setSelectedId} />} />
+        <PanelHeader eyebrow="Library" title="Worlds" actions={<NewWorldButton disabled={loading || Boolean(error)} onOpen={onOpen} />} />
         {loading && <p role="status">Loading Worlds…</p>}
         {error && <p className="world-error" role="alert">{error} <Button size="small" onClick={() => { void reload() }}>Retry</Button></p>}
         {!loading && !error && !records.length && <p className="world-empty">No Worlds yet.</p>}
-        {records.map(record => <ResourceListRow key={record.world.id} icon={<Globe2 />} title={record.world.title} meta={counts(record)} selected={record.world.id === selectedId} onOpen={() => setSelectedId(record.world.id)} />)}
+        {records.map(record => <ResourceListRow key={record.world.id} icon={<Globe2 />} title={record.world.title} meta={counts(record)} selected={record.world.id === selectedId} onOpen={() => onOpen(record.world.id)} />)}
       </section>
-      {selected ? <WorldDetail key={selected.world.id} record={selected} disabled={loading || Boolean(error)} /> : <section className="world-detail world-empty"><p>{loading ? 'Loading World…' : selectedId ? 'This World is no longer available. Select another World.' : 'Select a World to browse its Codex entries.'}</p></section>}
+      {selected ? <WorldDetail key={selected.world.id} record={selected} disabled={loading || Boolean(error)} onOpen={onOpen} /> : <section className="world-detail world-empty"><p>{loading ? 'Loading World…' : selectedId ? 'This World is no longer available. Select another World.' : 'Select a World to browse its Codex entries.'}</p></section>}
     </div>
   </main>
 }

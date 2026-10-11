@@ -141,6 +141,7 @@ function isAbortError(error: unknown) {
   return error instanceof Error && error.name === 'AbortError'
 }
 type AiSettingsProps = {
+  ownerKind?: 'world' | 'book'
   initialTab?: SettingsTab
   onGlobalSettings?: () => void
   onLastBook?: () => void
@@ -163,7 +164,7 @@ export default function App(props: AiSettingsProps) {
   return <SettingsApp {...props} initialLibrary={loaded.library} />
 }
 
-function SettingsApp({ onHome, onBack, onSaved, onGlobalSettings, onLastBook, lastBookTitle, initialProfileId, book, initialTab = 'ai', initialLibrary }: AiSettingsProps & { initialLibrary: SettingsProfileLibrary }) {
+function SettingsApp({ ownerKind = 'book', onHome, onBack, onSaved, onGlobalSettings, onLastBook, lastBookTitle, initialProfileId, book, initialTab = 'ai', initialLibrary }: AiSettingsProps & { initialLibrary: SettingsProfileLibrary }) {
   const [settings, setSettings] = useState<AiSettings>(initialAiSettings)
   const [library, setLibrary] = useState(initialLibrary)
   const [selections, setSelections] = useState<BookProfileSelections | null>(null)
@@ -177,7 +178,7 @@ function SettingsApp({ onHome, onBack, onSaved, onGlobalSettings, onLastBook, la
   const profileSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const initialKind = initialLibrary.profiles.find(profile => profile.id === initialProfileId)?.kind
   const [settingsTab, setSettingsTab] = useState<SettingsTab>(book && !initialProfileId ? initialTab === 'context' ? 'context' : 'profiles' : initialKind === 'ui' ? 'appearance' : initialTab === 'context' ? 'application' : initialTab === 'speech' || initialTab === 'images' ? 'ai' : initialTab)
-  const [contextSection, setContextSection] = useState<ContextSection>(() => book?.contextType === 'codex' || book?.contextType === 'chat' ? book.contextType : 'scene')
+  const [contextSection, setContextSection] = useState<ContextSection>(() => book?.contextType === 'codex' || book?.contextType === 'chat' ? book.contextType : ownerKind === 'world' ? 'codex' : 'scene')
   const [contextSettings, setContextSettings] = useState<BookContextSettings>(defaultBookContextSettings)
   const [applicationContext, setApplicationContext] = useState(loadDefaultBookContextSettings)
   const [applicationContextError, setApplicationContextError] = useState('')
@@ -420,7 +421,8 @@ function SettingsApp({ onHome, onBack, onSaved, onGlobalSettings, onLastBook, la
       {isBookSettings ? settingsTab === 'context' ? <>
         {profileError && selections && <p className="status error" role="alert">{profileError}<Button size="small" onClick={() => setProfileLoadVersion(version => version + 1)}>Retry profiles</Button></p>}
         {!contextReady || !selections ? <section className="settings-card"><h1 id="page-title">Context</h1><p role="status">{contextSaveError || profileError || 'Loading context and profiles…'}</p>{(contextSaveError || profileError) && <Button onClick={() => { setContextLoadVersion(version => version + 1); setProfileLoadVersion(version => version + 1) }}>Retry loading</Button>}</section> : book && <>
-          <SettingsSectionTabs tabs={contextSections} active={contextSection} onChange={setContextSection} idPrefix="context" label="Context type" />
+          {ownerKind === 'world' && <div><button disabled aria-describedby="world-story-settings-disabled">Story</button><p id="world-story-settings-disabled">Story settings are available only in Books · Настройки истории доступны только в книгах</p></div>}
+          <SettingsSectionTabs tabs={ownerKind === 'world' ? contextSections.filter(([id]) => id !== 'scene') : contextSections} active={contextSection} onChange={setContextSection} idPrefix="context" label="Context type" />
           <div role="tabpanel" id={`context-panel-${contextSection}`} aria-labelledby={`context-tab-${contextSection}`}>
             <ContextSettings bookId={book.id} bookTitle={book.title} bookPromptValues={book.promptValues} type={contextSection} currentDocumentId={(book.contextType ?? 'scene') === contextSection ? book.currentDocumentId : undefined} currentDocumentText={(book.contextType ?? 'scene') === contextSection ? book.currentDocumentText : undefined} insertionPosition={(book.contextType ?? 'scene') === contextSection ? book.insertionPosition : undefined} chatId={contextSection === 'chat' ? book.chatId : undefined} settings={settings} value={visibleContextSettings} sources={contextSources} saved={contextSaved} saveError={contextSaveError} onRetry={() => { void saveContextDefaults() }} onChange={(value) => updateContextDefaults(value, contextSection)} />
           </div>
