@@ -517,6 +517,25 @@ for (const collision of ['running job', 'unreviewed asset', 'foreign job', 'fore
   })
 }
 
+test('B3: incoming Series cannot overwrite a foreign Note and replacement rolls back', async t => {
+  const f = await fixture(t)
+  const other = await p.createBook(initialAiSettings, 'Other owner')
+  cleanup(t, () => p.deleteEntityTree(other.book.id))
+  const note = await p.createNote(other.book.id, 'Must survive')
+  await p.saveDocumentContent(note.id, 'Foreign note body')
+  const original = await p.getEntity(note.id)
+  const snapshot = await p.createSnapshot(f.scene.id, 'manual')
+  const data = await archives.decodeBookArchive(await incomingArchive(f))
+  data.entities.find(row => row.id === f.book.id).seriesId = note.id
+  data.entities.push({ id: note.id, type: 'series', title: 'Incoming Series', createdAt: 1, updatedAt: 2 })
+  await control.saveSyncConnection(f.link, f.state)
+  await assert.rejects(control.replaceConnectedBookArchive(f.book.id, data, { ...f.state, remoteETag: '"rev-2"' }), /series.*identity|series.*conflict/i)
+  assert.deepEqual(await p.getEntity(note.id), original)
+  assert.equal((await p.getEntity(f.scene.id)).content, 'BASELINE manuscript')
+  assert.equal((await p.readSnapshot(snapshot.id)).content, 'BASELINE manuscript')
+  assert.deepEqual(await control.getBookSyncState(f.book.id), f.state)
+})
+
 test('Book sync still pulls a clean newer cloud archive', async t => {
   const f = await fixture(t)
   await control.saveSyncConnection(f.link, f.state)
