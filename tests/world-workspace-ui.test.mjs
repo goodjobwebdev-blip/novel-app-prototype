@@ -30,6 +30,7 @@ export default forwardRef(function Editor({ value, onChange, ariaLabel, bookId, 
   useImperativeHandle(ref, () => ({
     getMarkdown: () => value,
     getInsertionPosition: () => value.length,
+    captureGenerationContext: () => ({ sceneText: value, insertionPosition: value.length }),
     captureAutocompleteSnapshot: () => null,
     isAutocompleteSnapshotCurrent: () => false,
     setAutocompleteSuggestion: () => false,
@@ -150,14 +151,32 @@ async function openBook(book) {
   await click(target())
   await settle(() => editor()?.getAttribute('data-book-id') === book.id && Boolean(document.querySelector('.scene-title')), 'Book opens its scene')
 }
+async function homeViaSidebar() {
+  await click(labeledButton('Open current World settings') ?? labeledButton('Open current book settings'))
+  await settle(() => labeledButton('Back to library'), 'The left sidebar exposes Home')
+  await click(labeledButton('Back to library'))
+  await settle(() => document.querySelector('.library-screen'))
+}
 async function homeViaWorldBuilding() {
   await panelTab('book')
   await settle(() => button('Open World Building') && !button('Open World Building').disabled)
   await click(button('Open World Building'))
   await settle(() => document.querySelector('.world-building'))
-  await click(button('Home'))
+  if (document.querySelector('.workspace-screen.world-building')) await homeViaSidebar()
+  else await click(button('Home'))
   await settle(() => document.querySelector('.library-screen'))
 }
+test('empty World has no Home or unavailable Story banner and returns Home through the sidebar', async t => {
+  const world = await w.createWorld('Banner-free World')
+  await mount(t)
+  await openWorldRow(world)
+  assert.ok(!document.querySelector('[aria-label="World navigation"]'), 'World has no redundant navigation banner')
+  assert.ok(!document.getElementById('world-story-unavailable'))
+  assert.ok(!button('Home'))
+  assert.ok(button('Create first article'))
+  await homeViaSidebar()
+})
+
 async function fixture({ linked = true, books = 1 } = {}) {
   const world = await w.createWorld('Shared skies')
   const created = []
@@ -364,7 +383,7 @@ test('World article navigation is durable independently of localStorage and hand
   await mount(t)
   await openWorldRow(world)
   await settle(() => titleIs(last.title), 'Durable owner state restores the last article')
-  await click(button('Home'))
+  await homeViaSidebar()
   await settle(() => document.querySelector('.library-screen'))
   await p.deleteEntityTree(last.id)
   await openWorldRow(world)
@@ -392,7 +411,7 @@ async function worldTab(label) {
   await click([...document.querySelectorAll('.book-panel nav button')].find(item => item.textContent.trim() === label))
 }
 
-test('World tabs reuse editor tools, disable Story and restore each World’s last canonical article', async t => {
+test('World tabs reuse editor tools without a navigation banner and restore each World’s last canonical article', async t => {
   const first = await w.createWorld('First World')
   const second = await w.createWorld('Second World')
   await addEntry(first.id, 'First article')
@@ -402,17 +421,18 @@ test('World tabs reuse editor tools, disable Story and restore each World’s la
   await openWorldRow(first)
   await worldTab('Codex')
   assert.deepEqual([...document.querySelectorAll('.book-panel nav button span')].map(item => item.textContent), ['World', 'Books', 'Notes', 'Codex', 'Chat'])
-  assert.equal(button('Story').disabled, true)
-  assert.match(document.getElementById('world-story-unavailable').textContent, /available only in Books/)
+  assert.ok(!document.querySelector('[aria-label="World navigation"]'), 'World has no redundant navigation banner')
+  assert.ok(!document.getElementById('world-story-unavailable'), 'World editor has no unavailable Story notice')
+  assert.ok(!button('Home'), 'Home is available through the sidebar, not duplicated in the editor')
   await click(codexRow(last.title).querySelector('.arc-resource-row__open'))
   await settle(() => titleIs(last.title))
   await setTextarea(editor(), 'Saved before switching Worlds')
-  await click(button('Home'))
+  await homeViaSidebar()
   await settle(() => Boolean(document.querySelector('.library-screen')))
   await openWorldRow(second)
   await settle(() => titleIs(other.title))
   assert.equal(editor().value, other.content)
-  await click(button('Home'))
+  await homeViaSidebar()
   await settle(() => Boolean(document.querySelector('.library-screen')))
   await openWorldRow(first)
   await settle(() => titleIs(last.title))
@@ -501,7 +521,7 @@ test('library archive import opens its canonical World and later Book restore re
   await uploadArchive('Import World archive', worldFile)
   await settle(() => titleIs(article.title) && editor()?.getAttribute('data-history-key') === `${f.world.id}:${article.id}`, 'World archive imports without an existing owner and opens its canonical article')
   assert.equal((await p.listBooks()).length, 0, 'Pending reference never creates a phantom Book')
-  await click(button('Home'))
+  await homeViaSidebar()
   await settle(() => document.querySelector('.library-screen'))
   await uploadArchive('Import book backup file', bookFile)
   await settle(async () => Boolean(document.querySelector('.scene-title')) && (await p.listBooks()).length === 1)
@@ -635,7 +655,7 @@ test('empty World creates articles, Notes and a summary through the shared edito
   assert.equal(note.worldId, world.id)
   assert.equal((await p.getEntity(summary.id)).content, 'Independent World summary')
   await setTextarea(editor(), 'World-owned note body')
-  await click(button('Home'))
+  await homeViaSidebar()
   await settle(() => document.querySelector('.library-screen'))
   assert.equal((await p.getEntity(note.id)).content, 'World-owned note body')
   assert.equal((await p.listBooks()).length, 0)
@@ -651,7 +671,7 @@ test('World creates a linked Book and the Home library refreshes without a reloa
   await settle(async () => (await p.listBooks()).length === 1 && document.querySelector('[aria-label="Linked Books"] .arc-resource-row'))
   const [book] = await p.listBooks()
   assert.equal(book.worldId, world.id)
-  await click(button('Home'))
+  await homeViaSidebar()
   await settle(() => document.querySelector('.library-book strong')?.textContent === book.title)
   await openBook(book)
   assert.equal(editor().getAttribute('data-book-id'), book.id)

@@ -29,6 +29,7 @@ export default forwardRef(function Editor({ value, onChange, ariaLabel, bookId, 
   useImperativeHandle(ref, () => ({
     getMarkdown: () => value,
     getInsertionPosition: () => value.length,
+    captureGenerationContext: () => ({ sceneText: value, insertionPosition: value.length }),
     captureAutocompleteSnapshot: () => null,
     isAutocompleteSnapshotCurrent: () => false,
     setAutocompleteSuggestion: () => false,
@@ -102,7 +103,9 @@ async function home() {
   await settle(() => button('Open World Building') && !button('Open World Building').disabled)
   await click(button('Open World Building'))
   await settle(() => document.querySelector('.world-building'))
-  await click(button('Home'))
+  await click(labeledButton('Open current World settings'))
+  await settle(() => labeledButton('Back to library'))
+  await click(labeledButton('Back to library'))
   await settle(() => document.querySelector('.library-screen'))
 }
 test('Workspace moves and edits World canon directly, copies independently, and hides only in the viewing Book; Series stays organizational', async t => {
