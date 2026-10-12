@@ -213,8 +213,24 @@ export async function replaceConnectedBookArchive(bookId: string, data: BookArch
     await db.table('codexDependencies').where('bookId').equals(bookId).delete()
     await db.table('illustrations').where('bookId').equals(bookId).delete()
     await db.table('illustrationUndo').where('bookId').equals(bookId).delete()
-    await db.table('galleryImages').where('bookId').equals(bookId).delete()
-    await db.table('imageJobs').where('bookId').equals(bookId).delete()
+    // Pending/retryable work and unreviewed results are deliberately absent
+    // from the portable hash. Read them under the replacement lock, not before
+    // downloading, and leave their original IDs/worker ownership untouched.
+    const localJobs = await db.table('imageJobs').where('bookId').equals(bookId).toArray() as ImageJob[]
+    const preservedJobs = localJobs.filter(job => job.status !== 'completed' || !job.decision)
+    const preservedJobIds = new Set(preservedJobs.map(job => job.id))
+    const preservedAssetIds = new Set(preservedJobs.flatMap(job => job.assetId ? [job.assetId] : []))
+    const localAssets = await db.table('galleryImages').where('bookId').equals(bookId).toArray() as GalleryImage[]
+    await db.table('galleryImages').bulkDelete(localAssets.filter(asset => asset.kept && !preservedAssetIds.has(asset.id)).map(asset => asset.id))
+    await db.table('imageJobs').bulkDelete(localJobs.filter(job => !preservedJobIds.has(job.id)).map(job => job.id))
+    if ((data.galleryImages ?? []).some(asset => asset.bookId !== bookId) || (data.imageJobs ?? []).some(job => job.bookId !== bookId)) {
+      throw new Error('The remote media belongs to a different book. Nothing was overwritten.')
+    }
+    // A cloud row cannot replace a preserved local job/result (even under the
+    // same book ID), nor media owned by another book. Failure rolls back all
+    // archive deletions and leaves the old sync baseline intact.
+    await assertNoTableCollisions(db.table('galleryImages'), data.galleryImages ?? [], 'gallery media')
+    await assertNoTableCollisions(db.table('imageJobs'), data.imageJobs ?? [], 'media history')
     await db.table('entities').bulkDelete([...ids])
     const ordinaryEntities = data.entities.filter(entity => entity.id !== incomingSeries?.id)
     if (incomingSeries) await db.table('entities').put(incomingSeries)

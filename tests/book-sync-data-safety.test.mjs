@@ -323,6 +323,135 @@ test('Book sync clean pull preserves an unreviewed local result that existed bef
   await assertLocalMediaPreserved(f, expected, await service.syncBookNow(f.book.id, noPendingSave), transport)
 })
 
+test('Book sync preserves a running worker so its original ticket can complete after pull', async t => {
+  const f = await fixture(t)
+  const job = await runningLocalMedia(await queuedLocalMedia(f))
+  const expected = await localMediaSnapshot(job.id)
+  await control.saveSyncConnection(f.link, f.state)
+  const transport = await bookTransport(f, { archive: await incomingArchive(f) })
+  installTransport(t, transport)
+  const result = await service.syncBookNow(f.book.id, noPendingSave)
+  await assertLocalMediaPreserved(f, expected, result, transport)
+  assert.equal(result.kind, 'pulled')
+  assert.equal(await mediaStore.patchOwnedImageJob(job.id, job.owner, { heartbeat: 123 }), true)
+  const completed = await completeLocalMedia(job)
+  assert.equal(completed.id, job.id)
+  assert.equal(completed.providerJobId, job.providerJobId)
+  const portable = await p.readBookArchive(f.book.id)
+  assert.equal(portable.imageJobs.some(row => row.id === job.id), false)
+  assert.equal(portable.galleryImages.some(row => row.id === completed.assetId), false,
+    'preservation must not implicitly Keep the worker output or export pending work')
+})
+
+for (const status of ['interrupted', 'failed', 'cancelled']) {
+  test(`Book sync clean pull preserves device-local ${status} work and retry bytes`, async t => {
+    const f = await fixture(t)
+    const job = await queuedLocalMedia(f)
+    await (await p.database()).table('imageJobs').update(job.id, {
+      status, providerJobId: `retry-ticket-${job.id}`, error: 'Device-local retry state', hiddenInQueue: true,
+    })
+    const expected = await localMediaSnapshot(job.id)
+    await control.saveSyncConnection(f.link, f.state)
+    const transport = await bookTransport(f, { archive: await incomingArchive(f) })
+    installTransport(t, transport)
+    await assertLocalMediaPreserved(f, expected, await service.syncBookNow(f.book.id, noPendingSave), transport)
+  })
+}
+
+async function incomingKeptMedia(f) {
+  const data = await archives.decodeBookArchive(await incomingArchive(f))
+  const png = new Blob([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6AAAAAElFTkSuQmCC', 'base64')], { type: 'image/png' })
+  const asset = {
+    id: `cloud-asset-${f.book.id}`, bookId: f.book.id, prompt: 'Cloud kept output',
+    width: 1, height: 1, createdAt: 2, kept: true, image: png, thumbnail: png,
+  }
+  const job = {
+    id: `cloud-job-${f.book.id}`, bookId: f.book.id, prompt: asset.prompt,
+    provider: 'pruna', model: 'synthetic-model', modelAlias: 'synthetic',
+    size: { value: '1x1', width: 1, height: 1 }, status: 'completed', decision: 'kept',
+    createdAt: 1, completedAt: 2, assetId: asset.id,
+  }
+  data.galleryImages = [asset]
+  data.imageJobs = [job]
+  return { data, asset, job }
+}
+
+test('Book sync restores incoming kept media alongside preserved local pending work', async t => {
+  const f = await fixture(t)
+  const local = await queuedLocalMedia(f)
+  const expected = await localMediaSnapshot(local.id)
+  const incoming = await incomingKeptMedia(f)
+  await control.saveSyncConnection(f.link, f.state)
+  const archive = archives.encodeBookArchive(incoming.data)
+  const transport = await bookTransport(f, { archive })
+  installTransport(t, transport)
+  const result = await service.syncBookNow(f.book.id, noPendingSave)
+  await assertLocalMediaPreserved(f, expected, result, transport)
+  assert.equal(result.kind, 'pulled')
+  const stored = await localMediaSnapshot(incoming.job.id)
+  assert.equal(stored.job.decision, 'kept')
+  assert.equal(stored.asset.kept, true)
+  assert.deepEqual(stored.asset.image, [...new Uint8Array(await incoming.asset.image.arrayBuffer())])
+  const portable = await p.readBookArchive(f.book.id)
+  assert.deepEqual(portable.imageJobs.map(row => row.id), [incoming.job.id])
+  assert.deepEqual(portable.galleryImages.map(row => row.id), [incoming.asset.id])
+})
+
+test('Book sync replaces existing reviewed kept media at the same IDs normally', async t => {
+  const f = await fixture(t)
+  const incoming = await incomingKeptMedia(f)
+  const db = await p.database()
+  await db.table('galleryImages').add({ ...incoming.asset, prompt: 'Old kept output' })
+  await db.table('imageJobs').add({ ...incoming.job, prompt: 'Old kept output' })
+  const hash = await archiveContentHash(await capture(f.book.id))
+  await control.saveSyncConnection(f.link, { ...f.state, localContentHash: hash })
+  const archive = archives.encodeBookArchive(incoming.data)
+  const transport = await bookTransport(f, { archive })
+  installTransport(t, transport)
+  assert.equal((await service.syncBookNow(f.book.id, noPendingSave)).kind, 'pulled')
+  assert.equal((await db.table('imageJobs').get(incoming.job.id)).prompt, incoming.job.prompt)
+  assert.equal((await db.table('galleryImages').get(incoming.asset.id)).prompt, incoming.asset.prompt)
+  assert.equal((await control.getBookSyncState(f.book.id)).localContentHash, await archiveContentHash(archive))
+})
+
+for (const collision of ['running job', 'unreviewed asset', 'foreign job', 'foreign asset', 'wrong media owner']) {
+  test(`Book sync rejects ${collision} collisions and rolls replacement back atomically`, async t => {
+    const f = await fixture(t)
+    const local = await runningLocalMedia(await queuedLocalMedia(f))
+    const completed = collision === 'unreviewed asset' ? await completeLocalMedia(local) : local
+    const expected = await localMediaSnapshot(local.id)
+    const incoming = await incomingKeptMedia(f)
+    const db = await p.database()
+    let foreignTable, foreignRow
+    if (collision === 'running job') incoming.job.id = local.id
+    if (collision === 'unreviewed asset') {
+      incoming.asset.id = completed.assetId
+      incoming.job.assetId = completed.assetId
+    }
+    if (collision === 'foreign job' || collision === 'foreign asset') {
+      foreignTable = db.table(collision === 'foreign job' ? 'imageJobs' : 'galleryImages')
+      foreignRow = { ...(collision === 'foreign job' ? incoming.job : incoming.asset), bookId: 'other-device-owner' }
+      await foreignTable.add(foreignRow)
+      cleanup(t, () => foreignTable.delete(foreignRow.id))
+    }
+    if (collision === 'wrong media owner') incoming.asset.bookId = 'other-device-owner'
+    await control.saveSyncConnection(f.link, f.state)
+    const snapshot = await p.createSnapshot(f.scene.id, 'manual')
+    const nextState = { ...f.state, remoteETag: '"rev-2"', localContentHash: 'incoming-hash' }
+    await assert.rejects(control.replaceConnectedBookArchive(f.book.id, incoming.data, nextState),
+      /conflicts with data already stored|media belongs to a different book/)
+    assert.deepEqual(await localMediaSnapshot(local.id), expected)
+    assert.equal((await p.getEntity(f.scene.id)).content, 'BASELINE manuscript')
+    assert.equal((await p.readSnapshot(snapshot.id)).content, 'BASELINE manuscript')
+    assert.deepEqual(await control.getBookSyncState(f.book.id), f.state)
+    assert.deepEqual(await control.getSyncLink(f.book.id), f.link)
+    if (foreignRow) assert.deepEqual(await foreignTable.get(foreignRow.id), foreignRow)
+    if (!['foreign asset', 'unreviewed asset'].includes(collision)) {
+      assert.equal(await db.table('galleryImages').get(incoming.asset.id), undefined)
+    }
+  })
+}
+
 test('Book sync still pulls a clean newer cloud archive', async t => {
   const f = await fixture(t)
   await control.saveSyncConnection(f.link, f.state)
