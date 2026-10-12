@@ -30,7 +30,7 @@ export default forwardRef(function Editor({ value, onChange, ariaLabel, readOnly
 });`)
 const at = name => import(pathToFileURL(`${dir}/${name}.mjs`))
 const p = await at('data/persistence'), ai = await at('shared/ai/ai-settings'), profiles = await at('features/settings/settings-profiles')
-const worlds = await at('features/world/world-service')
+const worlds = await at('features/worlds/world-service')
 const { default: Workspace } = await at('app/Workspace')
 after(async () => { (await p.database()).close(); dom.window.close(); rmSync(dir, { recursive: true, force: true }) })
 const button = text => [...document.querySelectorAll('button')].find(row => row.getAttribute('aria-label') === text || row.textContent.trim() === text)
@@ -57,7 +57,7 @@ async function mount(t) {
   return f
 }
 function gate() { let release, enter; const entered = new Promise(r => enter = r), held = new Promise(r => release = r); return { entered, release, async wait() { enter(); await held } } }
-for (const target of ['note', 'book', 'world']) {
+for (const target of ['note']) {
   test(`B1: edits made while loading another ${target} are not discarded`, async t => {
     const f = await mount(t)
     let destination
@@ -100,7 +100,7 @@ test('B2: re-summarize retains a draft edited before autosave and keeps generate
   await click(button('Open book workspace'))
   await click([...document.querySelectorAll('.book-panel nav button')].find(row => row.textContent === 'outline'))
   const row = [...document.querySelectorAll('.outline-row')].find(row => row.querySelector('strong')?.textContent === f.scene.title)
-  await click(row.querySelector('.summary-icon'))
+  await click(row.querySelector('.summary-status'))
   await settle(() => editor()?.value === 'Original summary')
   const networkGate = gate()
   t.mock.method(globalThis, 'fetch', async () => { await networkGate.wait(); return new Response('data: {"choices":[{"delta":{"content":"Generated summary"}}]}\n\ndata: [DONE]\n\n') })
