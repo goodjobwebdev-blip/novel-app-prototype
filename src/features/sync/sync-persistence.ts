@@ -198,6 +198,22 @@ export async function replaceConnectedBookArchive(bookId: string, data: BookArch
       await db.table('syncState').put({ ...currentState, status: 'conflict', unresolvedConflict: true, message: 'Local content or the sync baseline changed while downloading. Nothing was overwritten. Choose a recovery action.', lastCheckedAt: Date.now(), updatedAt: Date.now() })
       return 'conflict' as const
     }
+    const localJobs = await db.table('imageJobs').where('bookId').equals(bookId).toArray() as ImageJob[]
+    const preservedJobs = localJobs.filter(job => job.status !== 'completed' || !job.decision)
+    const incomingById = new Map(data.entities.map(entity => [entity.id, entity]))
+    const originIds = [...new Set(preservedJobs.flatMap(job => [job.chatId, job.messageId, job.directUserMessageId].filter((value): value is string => Boolean(value))))]
+    const originRows = await db.table('entities').bulkGet(originIds) as Array<ArcEntity | undefined>
+    const originChanged = originRows.some((local, index) => {
+      const incoming = incomingById.get(originIds[index])
+      if (!local || !incoming || local.type !== incoming.type || local.bookId !== incoming.bookId || local.parentId !== incoming.parentId) return true
+      if (local.type !== 'chatMessage') return false
+      return local.content !== incoming.content || JSON.stringify(local.directImageClaim) !== JSON.stringify(incoming.directImageClaim) || JSON.stringify(local.directImageRequest) !== JSON.stringify(incoming.directImageRequest)
+    })
+    if (originChanged) {
+      if (!currentState) throw new Error('The sync baseline disappeared. Nothing was overwritten.')
+      await db.table('syncState').put({ ...currentState, status: 'conflict', unresolvedConflict: true, message: 'The cloud changed the Chat origin of local media work. Nothing was overwritten. Review the local generation and choose a recovery action.', lastCheckedAt: Date.now(), updatedAt: Date.now() })
+      return 'conflict' as const
+    }
     const incomingSeries = data.entities.find(entity => entity.type === 'series' && entity.id === incomingBook.seriesId)
     if (incomingSeries) {
       const existingSeries = await db.table('entities').get(incomingSeries.id)
@@ -214,10 +230,8 @@ export async function replaceConnectedBookArchive(bookId: string, data: BookArch
     await db.table('illustrations').where('bookId').equals(bookId).delete()
     await db.table('illustrationUndo').where('bookId').equals(bookId).delete()
     // Pending/retryable work and unreviewed results are deliberately absent
-    // from the portable hash. Read them under the replacement lock, not before
-    // downloading, and leave their original IDs/worker ownership untouched.
-    const localJobs = await db.table('imageJobs').where('bookId').equals(bookId).toArray() as ImageJob[]
-    const preservedJobs = localJobs.filter(job => job.status !== 'completed' || !job.decision)
+    // from the portable hash. They were read under the replacement lock above;
+    // leave their original IDs/worker ownership untouched.
     const preservedJobIds = new Set(preservedJobs.map(job => job.id))
     const preservedAssetIds = new Set(preservedJobs.flatMap(job => job.assetId ? [job.assetId] : []))
     const localAssets = await db.table('galleryImages').where('bookId').equals(bookId).toArray() as GalleryImage[]
