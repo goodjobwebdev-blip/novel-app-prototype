@@ -8,11 +8,11 @@
 
 .arc-disclosure > summary {
   min-height: 52px;
-  padding: 10px 12px;
+  padding: var(--space-2) var(--space-3);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--control-gap);
   list-style: none;
   cursor: pointer;
 }
@@ -34,12 +34,12 @@
 
 .arc-disclosure__body {
   min-width: 0;
-  padding: 12px;
+  padding: var(--card-padding);
   border-top: 1px solid var(--line);
 }
 
 @media (max-width: 720px) {
-  .arc-disclosure > summary { min-height: 56px; padding: 11px 12px; }
+  .arc-disclosure > summary { min-height: 56px; padding: var(--space-2) var(--space-3); }
 }
 
 @media (prefers-reduced-motion: reduce) {

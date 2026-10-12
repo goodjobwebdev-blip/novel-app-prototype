@@ -1,0 +1,35 @@
+/* UI density is independent of manuscript typography and theme palettes. */
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --field-gap: var(--space-1);
+  --control-gap: var(--space-2);
+  --field-stack-gap: var(--space-3);
+  --card-padding: var(--space-3);
+  --group-gap: var(--space-4);
+  --section-gap: var(--space-6);
+  --page-padding: var(--space-4);
+  --control-height-small: 32px;
+  --control-height: 36px;
+  --control-height-large: 44px;
+  --touch-target: 44px;
+}
+
+@media (min-width: 760px) {
+  :root { --page-padding: var(--space-8); }
+}
+
+/* Touch size is not a reason to inflate card padding or inter-field gaps. */
+@media (max-width: 720px), (pointer: coarse) {
+  :root {
+    --field-gap: 6px;
+    --control-height-small: var(--touch-target);
+    --control-height: var(--touch-target);
+    --control-height-large: 48px;
+  }
+}

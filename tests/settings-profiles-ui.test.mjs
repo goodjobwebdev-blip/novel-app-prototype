@@ -1190,7 +1190,7 @@ test('Create new profile reveals inline creation fields; Cancel creates nothing 
   const beforeDefaults = JSON.stringify(library().defaults)
   const beforeIds = JSON.stringify(library().profiles.map(item => item.id))
   const mounted = await mount(t, Panel, panelProps({ initialProfileId: source.id }))
-  const picker = mounted.host.querySelector('.profile-header-main select')
+  const picker = mounted.host.querySelector('.profile-header-main .profile-selection select')
   assert.ok(picker)
   await profileAction(mounted.host, 'Create new profile')
   const management = mounted.host.querySelector('.profile-management-fields')
@@ -1303,7 +1303,7 @@ for (const choice of ['Save and continue', 'Discard and continue']) {
     const beforeCount = library().profiles.length
     let editor
     const mounted = await mount(t, Panel, panelProps({ initialProfileId: source.id, renderEditor: props => { editor = props; return null } }))
-    const picker = mounted.host.querySelector('.profile-header-main select')
+    const picker = mounted.host.querySelector('.profile-header-main .profile-selection select')
     assert.ok(picker)
     await openRename(mounted.host)
     await change(field(mounted.host, 'Profile name'), 'Duplicate edited source')

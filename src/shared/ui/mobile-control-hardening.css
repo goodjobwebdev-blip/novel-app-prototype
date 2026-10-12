@@ -63,7 +63,7 @@ input[type="range"] {
   min-height: 36px;
   padding: 0 10px;
   border: 1px solid var(--line, var(--border));
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: rgba(255, 255, 255, .035);
   color: var(--soft, var(--ink));
   display: inline-flex;
@@ -201,7 +201,7 @@ input[type="range"] {
   height: auto;
   min-height: 44px;
   padding: .5rem .75rem;
-  border-radius: .65rem;
+  border-radius: var(--radius);
 }
 
 .functional-chat-composer .chat-system-prompt-button span { display: inline; }

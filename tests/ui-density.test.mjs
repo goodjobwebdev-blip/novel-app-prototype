@@ -22,7 +22,7 @@ const { Input, Select, Checkbox, Choice, ui } = module.exports
 async function styledDom(t, content) {
   const dom = new JSDOM(`<html><head></head><body><div class="ai-settings-shell"><section class="settings-card">${content}</section></div></body></html>`)
   t.after(() => dom.window.close())
-  for (const path of ['src/shared/ui/primitives.css', 'src/shared/ui/choice.css', 'src/app/styles.css', 'src/features/settings/ai-settings-ux.css']) {
+  for (const path of ['src/shared/ui/primitives.css', 'src/shared/ui/choice.css', 'src/app/styles.css', 'src/shared/ui/density.css', 'src/features/settings/ui-settings.css', 'src/features/settings/ai-settings-ux.css']) {
     const style = dom.window.document.createElement('style')
     style.textContent = await readFile(new URL(`../${path}`, import.meta.url), 'utf8')
     dom.window.document.head.append(style)
@@ -33,6 +33,7 @@ async function styledDom(t, content) {
 test('shared fields own their spacing and descriptions inside legacy settings', async t => {
   const content = renderToStaticMarkup(React.createElement(React.Fragment, null,
     React.createElement(Input, { label: 'Name', description: 'Input help', error: 'Input error' }),
+    React.createElement(Input, { className: 'ui-theme-name', label: 'Theme name' }),
     React.createElement(Select, { label: 'Role', description: 'Select help', error: 'Select error' }, React.createElement('option', null, 'Main')),
     React.createElement(Checkbox, { label: 'Enabled', description: 'Checkbox help' }),
     React.createElement(Choice, { title: 'Context', description: 'Choice help', type: 'checkbox' }),
@@ -64,9 +65,15 @@ test('shared density and surface tokens govern settings without changing manuscr
   const previous = globalThis.document
   globalThis.document = document
   try {
-    for (const theme of ['very-dark', 'light']) {
+    for (const theme of ['very-dark', 'very-white']) {
       ui.applyUiSettings({ ...ui.defaultUiSettings, activeThemeId: theme })
-      assert.equal(root.getPropertyValue('--muted').trim(), 'var(--soft)', 'Muted text uses the active theme secondary color')
+      assert.equal(document.documentElement.dataset.uiTheme, theme, 'Both dark and light palettes are exercised')
+      const themedRoot = dom.window.getComputedStyle(document.documentElement)
+      const palette = ui.builtInThemes.find(item => item.id === theme).palette
+      assert.equal(themedRoot.getPropertyValue('--muted').trim(), 'var(--soft)', 'Muted text aliases the active secondary color')
+      assert.equal(themedRoot.getPropertyValue('--soft').trim(), palette.muted, 'The secondary color changes with the palette')
+      assert.equal(themedRoot.getPropertyValue('--border').trim(), 'var(--line)', 'Legacy border consumers share the active line color')
+      assert.equal(themedRoot.getPropertyValue('--line').trim(), palette.border, 'The line color changes with the palette')
       assert.equal(document.documentElement.style.getPropertyValue('--editor-font-size'), `${ui.defaultUiSettings.editor.fontSize}px`)
       assert.equal(document.documentElement.style.getPropertyValue('--editor-line-height'), String(ui.defaultUiSettings.editor.lineHeight))
     }
