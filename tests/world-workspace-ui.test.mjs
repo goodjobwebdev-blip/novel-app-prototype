@@ -757,6 +757,132 @@ test('Chat retains the current World article as an explicit selectable source', 
   assert.equal((await p.listBooks()).length, 0)
 })
 
+// QUESTION-01 contract: revision conflict, draft recovery and explicit reload.
+// The two roots have independent Workspace save queues/baselines, but share real
+// IndexedDB. Only the first write is held, BEFORE its transaction lock is acquired.
+function pauseNextDocumentWrite(t) {
+  const original = db.transaction
+  let entered = false, release
+  const gate = new Promise(resolve => { release = resolve })
+  db.transaction = function (...args) {
+    const tables = args.slice(1, -1).flat()
+    if (!entered && args[0] === 'rw' && tables.some(table => table?.name === 'entities')) {
+      entered = true
+      db.transaction = original
+      return gate.then(() => original.apply(this, args))
+    }
+    return original.apply(this, args)
+  }
+  t.after(() => { db.transaction = original; release() })
+  return { entered: () => entered, release, restore: () => { db.transaction = original } }
+}
+const scopedButton = (container, label) => [...container.querySelectorAll('button')].find(item => item.textContent.trim() === label || item.getAttribute('aria-label') === label)
+const scopedEditor = container => container.querySelector('textarea[data-workspace-editor]')
+async function mountArticleTab(t, owner, article, mode) {
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  t.after(async () => { await act(async () => root.unmount()); container.remove() })
+  await act(async () => root.render(React.createElement(Workspace)))
+  const ownerRow = () => [...container.querySelectorAll(mode === 'world' ? '.worlds-home-section .arc-resource-row' : '.library-book')].find(row => row.querySelector('strong')?.textContent === owner.title)
+  await settle(ownerRow, `${mode} tab discovers its owner`)
+  await click(mode === 'world' ? ownerRow().querySelector('.arc-resource-row__open') : ownerRow())
+  if (mode === 'book') {
+    await settle(() => scopedEditor(container)?.getAttribute('data-book-id') === owner.id)
+    await click(scopedButton(container, 'Open book workspace'))
+    await click([...container.querySelectorAll('.book-panel nav button')].find(item => item.textContent.trim().toLowerCase() === 'codex'))
+    const row = () => [...container.querySelectorAll('.codex-dashboard-entry')].find(item => item.querySelector('strong')?.textContent === article.title)
+    await settle(row)
+    await click(row().querySelector('.arc-resource-row__open, .codex-dashboard-open'))
+  }
+  await settle(() => scopedEditor(container)?.getAttribute('data-history-key') === `${owner.id}:${article.id}` && scopedEditor(container)?.value === article.content, `${mode} tab opens the same canonical baseline`)
+  return container
+}
+async function lifecycleSave() {
+  await act(async () => window.dispatchEvent(new Event('pagehide')))
+}
+async function storageBarrier() {
+  await act(async () => { await db.transaction('rw', db.table('entities'), async () => {}) })
+}
+async function recoverDraft(container, draft) {
+  await click(scopedButton(container, 'Recover draft'), 'Conflict provides explicit draft recovery')
+  await settle(() => document.querySelector('textarea[aria-label="Unsaved article draft"]')?.value === draft, 'Recovery exposes the exact unsaved Markdown for copying')
+}
+
+for (const modes of [['world', 'book'], ['book', 'world']]) {
+  test(`QUESTION-01 ${modes[0]} and ${modes[1]} simultaneous canonical editors reject the stale save and preserve draft until explicit reload`, async t => {
+    const f = await fixture()
+    const article = await addEntry(f.world.id, 'Concurrent canonical article', [], 'BASELINE')
+    const firstOwner = modes[0] === 'world' ? f.world : f.book
+    const secondOwner = modes[1] === 'world' ? f.world : f.book
+    const loser = await mountArticleTab(t, firstOwner, article, modes[0])
+    const winner = await mountArticleTab(t, secondOwner, article, modes[1])
+    const draft = `${modes[0]} UNSAVED DRAFT`
+    const authoritative = `${modes[1]} COMMITTED ARTICLE`
+    const pause = pauseNextDocumentWrite(t)
+    try {
+      await setTextarea(scopedEditor(loser), draft)
+      await lifecycleSave()
+      await settle(pause.entered, 'First editor reaches its save before acquiring the IndexedDB lock')
+      await setTextarea(scopedEditor(winner), authoritative)
+      await lifecycleSave()
+      await settle(async () => (await p.getEntity(article.id))?.content === authoritative && winner.querySelector('.save-state')?.textContent.trim() === 'Saved', 'Competing editor commits its real save first')
+      await act(async () => pause.release())
+      await settle(() => loser.querySelector('[role="alert"][aria-label="Article save conflict"]') || ['Saved', 'Save failed'].includes(loser.querySelector('.save-state')?.textContent.trim()), 'The released stale save finishes or reports conflict')
+      assert.equal((await p.getEntity(article.id)).content, authoritative, 'Stale autosave cannot overwrite canonical content')
+      await settle(() => loser.querySelector('[role="alert"][aria-label="Article save conflict"]'), 'Stale editor reports a revision conflict, not Saved or a silent overwrite')
+      assert.equal(scopedEditor(loser).value, draft, 'Incoming refresh does not replace the unsaved draft')
+      assert.notEqual(loser.querySelector('.save-state')?.textContent.trim(), 'Saved')
+      await lifecycleSave()
+      await storageBarrier()
+      assert.equal((await p.getEntity(article.id)).content, authoritative, 'Lifecycle retries do not implicitly rebase/overwrite a conflict')
+      await recoverDraft(loser, draft)
+      assert.equal((await p.getEntity(article.id)).content, authoritative, 'Recovery is not a save choice')
+      await click(scopedButton(loser, 'Reload latest article'), 'Reload requires a deliberate choice')
+      await settle(() => scopedEditor(loser)?.value === authoritative && !loser.querySelector('[aria-label="Article save conflict"]'), 'Explicit reload installs the latest baseline')
+      // Reload is read-only with respect to canonical storage. The recovered text
+      // was presented before that deliberate discard, never silently lost.
+      assert.equal((await p.getEntity(article.id)).content, authoritative)
+      await setTextarea(scopedEditor(loser), 'Edit made after explicit reload')
+      await lifecycleSave()
+      await settle(async () => (await p.getEntity(article.id))?.content === 'Edit made after explicit reload' && loser.querySelector('.save-state')?.textContent.trim() === 'Saved', 'Reload rebases future edits onto the accepted revision')
+    } finally { pause.restore(); pause.release(); await storageBarrier() }
+  })
+}
+
+for (const loss of ['disconnect', 'hide', 'change World']) {
+  test(`QUESTION-01 dirty canonical draft survives linked Book ${loss} without saving through lost access`, async t => {
+    const f = await fixture()
+    const article = await addEntry(f.world.id, 'Article losing Book context', [], 'CANONICAL BEFORE ACCESS LOSS')
+    const replacement = loss === 'change World' ? await w.createWorld('Replacement context') : null
+    await mount(t)
+    await openBook(f.book)
+    await openEntry(article)
+    const draft = `LOCAL DRAFT DURING ${loss}`
+    const pause = pauseNextDocumentWrite(t)
+    try {
+      await setTextarea(editor(), draft)
+      await lifecycleSave()
+      await settle(pause.entered, 'Save waits before entering its write transaction')
+      await act(async () => {
+        if (loss === 'hide') await w.setWorldEntryHidden(f.book.id, article.id, true)
+        else await w.setBookWorld(f.book.id, replacement?.id ?? '')
+      })
+      await act(async () => pause.release())
+      await settle(() => document.querySelector('[role="alert"][aria-label="Article access lost"]') || ['Saved', 'Save failed'].includes(document.querySelector('.save-state')?.textContent.trim()), 'The queued lost-access save finishes or reports unavailable')
+      assert.equal((await p.getEntity(article.id)).content, article.content, 'Commit-time Book access check blocks the queued canonical write')
+      await settle(() => document.querySelector('[role="alert"][aria-label="Article access lost"]'), 'Availability is checked even while the document is dirty')
+      assert.ok(!editor() || editor().readOnly, 'Lost-context canonical editor cannot continue accepting editable input')
+      await recoverDraft(document, draft)
+      assert.equal((await p.getEntity(article.id)).content, article.content)
+      assert.ok(!button('Overwrite latest article'), 'Lost Book access must not offer a force-overwrite escape hatch')
+      await lifecycleSave()
+      await storageBarrier()
+      assert.equal((await p.getEntity(article.id)).content, article.content, 'Further lifecycle saves remain blocked after context loss')
+    } finally { pause.restore(); pause.release(); await storageBarrier() }
+  })
+}
+
 test('World Notes and Chat remain owner-local and World context rejects explicit private Book IDs', async t => {
   const f = await fixture()
   const privateLore = await addEntry(f.book.id, 'PRIVATE_BOOK_LORE', [], 'PRIVATE_BOOK_SECRET')
