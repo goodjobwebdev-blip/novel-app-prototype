@@ -30,6 +30,7 @@ export default forwardRef(function Editor({ value, onChange, ariaLabel, bookId, 
   useImperativeHandle(ref, () => ({
     getMarkdown: () => value,
     getInsertionPosition: () => value.length,
+    captureGenerationContext: () => ({ sceneText: value, insertionPosition: value.length }),
     captureAutocompleteSnapshot: () => null,
     isAutocompleteSnapshotCurrent: () => false,
     setAutocompleteSuggestion: () => false,
@@ -164,6 +165,17 @@ async function homeViaWorldBuilding() {
   await homeViaSidebar()
   await settle(() => document.querySelector('.library-screen'))
 }
+test('empty World has no Home or unavailable Story banner and returns Home through the sidebar', async t => {
+  const world = await w.createWorld('Banner-free World')
+  await mount(t)
+  await openWorldRow(world)
+  assert.ok(!document.querySelector('[aria-label="World navigation"]'), 'World has no redundant navigation banner')
+  assert.ok(!document.getElementById('world-story-unavailable'))
+  assert.ok(!button('Home'))
+  assert.ok(button('Create first article'))
+  await homeViaSidebar()
+})
+
 async function fixture({ linked = true, books = 1 } = {}) {
   const world = await w.createWorld('Shared skies')
   const created = []
