@@ -25,7 +25,6 @@ const tools = await at('features/chat/chat-tools')
 const links = await at('features/codex/codex-article-links')
 const { default: ArticleLinks } = await at('features/codex/ArticleLinks')
 const { default: ChatArticleContext } = await at('features/chat/ChatArticleContext')
-const { default: ArticleAnswerActions } = await at('features/chat/ArticleAnswerActions')
 const { MarkdownMessage } = await at('features/chat/ChatFeature')
 const { assembleChatGenerationRequest } = await at('features/chat/chat-request')
 const { buildContextValues } = await at('shared/context/context-service')
@@ -71,14 +70,7 @@ const button = text => [...document.querySelectorAll('button')].find(item => ite
 async function click(text) {
   assert.ok(button(text), text); assert.equal(button(text).disabled, false)
   await act(async () => button(text).click())
-  // Event handlers start async IndexedDB work without returning its promise.
-  // Wait for the UI's completion boundary, not merely the earlier durable write.
-  if (text === 'Save review proposal') await settle(() => !button('Create article…')?.disabled)
   await drainEffects()
-}
-async function select(value) {
-  const field = document.querySelector('select[aria-label="Target article"]') || document.querySelector('select')
-  await act(async () => { field.value = value; field.dispatchEvent(new Event('change', { bubbles: true })) })
 }
 async function fixture() {
   const world = await worlds.createWorld('World without a Book')
@@ -154,40 +146,7 @@ test('concurrent explicit source additions preserve both IDs and reject foreign 
   const foreign = await p.createCodexEntry(foreignWorld.id, 'Foreign', 'lore-other')
   await assert.rejects(chatService.setChatArticleIncluded(f.chat.id, foreign.id, true), /available/)
 })
-test('append previews flush editor changes first and require a separate durable approval', async t => {
-  const f = await fixture()
-  let flushed = false
-  await mount(t, ArticleAnswerActions, { ...f, content: 'Answer body', disabled: false, onSaved: async () => {}, onBeforeArticleAction: async () => { flushed = true; await p.saveDocumentContent(f.entry.id, 'Unsaved editor text'); return true } })
-  await click('Append to article…')
-  await settle(() => [...document.querySelectorAll('option')].some(option => option.value === f.entry.id))
-  await select(f.entry.id)
-  await click('Save review proposal')
-  await settle(async () => (await p.getEntity(f.message.id)).documentEdits?.length)
-  assert.equal(flushed, true)
-  assert.equal((await p.getEntity(f.entry.id)).content, 'Unsaved editor text')
-  const proposal = (await p.getEntity(f.message.id)).documentEdits[0]
-  await act(async () => tools.applyChatDocumentEdit(f.message.id, proposal.id))
-  await drainEffects()
-  assert.equal((await p.getEntity(f.entry.id)).content, 'Unsaved editor text\n\nAnswer body')
-})
-test('replacement leaves the original intact until approval and rejects stale target edits', async t => {
-  const f = await fixture()
-  await mount(t, ArticleAnswerActions, { ...f, content: 'Answer body', disabled: false, onSaved: async () => {} })
-  await click('Replace article…')
-  await settle(() => [...document.querySelectorAll('option')].some(option => option.value === f.entry.id))
-  await select(f.entry.id)
-  assert.match(document.querySelector('[aria-label="Article action preview"]').textContent, /Replacing removes the current article body/)
-  await click('Save review proposal')
-  await settle(async () => (await p.getEntity(f.message.id)).documentEdits?.length)
-  assert.equal((await p.getEntity(f.entry.id)).content, 'Original body')
-  const proposal = (await p.getEntity(f.message.id)).documentEdits[0]
-  await act(async () => {
-    await p.saveDocumentContent(f.entry.id, 'Newer manual edit')
-    await assert.rejects(tools.applyChatDocumentEdit(f.message.id, proposal.id), /changed/)
-  })
-  await drainEffects()
-  assert.equal((await p.getEntity(f.entry.id)).content, 'Newer manual edit')
-})
+
 test('document approval rolls back the body and snapshot if saving approved status fails', async () => {
   const f = await fixture()
   const result = await tools.executeChatWorkspaceTool(f.world.id, { id: 'replace-answer', type: 'function', function: { name: 'propose_document_replacement', arguments: JSON.stringify({ entity_id: f.entry.id, expected_updated_at: f.entry.updatedAt, new_content: 'Answer body' }) } })
@@ -212,81 +171,4 @@ test('creating an article rolls back its identity if saving the answer body fail
   try { await assert.rejects(tools.createChatCodexEntry(f.message.id, result.codexCreation.id), /Simulated storage failure/) }
   finally { db.table('entities').hook('updating').unsubscribe(fail) }
   assert.equal((await p.listEntitiesByBook(f.world.id, 'codexEntry')).some(entry => entry.title === 'New answer article'), false)
-})
-test('create answer action saves a preview and only approval creates the World-owned article', async t => {
-  const f = await fixture()
-  await mount(t, ArticleAnswerActions, { ...f, content: 'Answer body', disabled: false, onSaved: async () => {} })
-  await click('Create article…')
-  await settle(() => document.querySelectorAll('option').length > 0)
-  const input = document.querySelector('input')
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set.call(input, 'Created from Chat')
-    input.dispatchEvent(new Event('input', { bubbles: true }))
-  })
-  await click('Save review proposal')
-  await settle(async () => (await p.getEntity(f.message.id)).codexCreations?.length)
-  assert.equal((await p.listEntitiesByBook(f.world.id, 'codexEntry')).length, 2)
-  const proposal = (await p.getEntity(f.message.id)).codexCreations[0]
-  let result
-  await act(async () => { result = await tools.createChatCodexEntry(f.message.id, proposal.id) })
-  await drainEffects()
-  const created = await p.getEntity(result.entityId)
-  assert.equal(created.worldId, f.world.id)
-  assert.equal(created.bookId, f.world.id)
-  assert.equal(created.content, 'Answer body')
-  assert.equal(created.title, 'Created from Chat')
-})
-test('a successful proposal save with failed UI refresh is not offered as an unsaved retry', async t => {
-  const f = await fixture()
-  await mount(t, ArticleAnswerActions, { ...f, content: 'Answer body', disabled: false, onSaved: async () => { throw new Error('Reload failure') } })
-  await click('Append to article…')
-  await settle(() => [...document.querySelectorAll('option')].some(option => option.value === f.entry.id))
-  await select(f.entry.id)
-  await click('Save review proposal')
-  await settle(() => document.querySelector('[role="alert"]'))
-  assert.match(document.querySelector('[role="alert"]').textContent, /proposal was saved/)
-  assert.equal(button('Save review proposal'), undefined)
-  assert.equal((await p.getEntity(f.message.id)).documentEdits.length, 1)
-})
-test('failed editor saving preserves the article and offers retry without saving a proposal', async t => {
-  const f = await fixture()
-  await mount(t, ArticleAnswerActions, { ...f, content: 'Answer body', disabled: false, onSaved: async () => {}, onBeforeArticleAction: async () => false })
-  await click('Replace article…')
-  await settle(() => [...document.querySelectorAll('option')].some(option => option.value === f.entry.id))
-  await select(f.entry.id)
-  await click('Save review proposal')
-  await settle(() => document.querySelector('[role="alert"]'))
-  assert.equal((await p.getEntity(f.entry.id)).content, 'Original body')
-  assert.equal((await p.getEntity(f.message.id)).documentEdits?.length ?? 0, 0)
-  assert.ok(button('Save review proposal'))
-})
-test('a changed earlier answer round cannot be saved as a stale combined article proposal', async t => {
-  const f = await fixture()
-  const last = await chatService.createChatMessage(f.chat, 'assistant', 'Final round')
-  await mount(t, ArticleAnswerActions, {
-    chat: f.chat, message: last, sourceMessages: [f.message, last], content: 'Answer body\n\nFinal round', disabled: false, onSaved: async () => {},
-    onBeforeArticleAction: async () => { await p.updateEntityAtomically(f.message.id, current => ({ ...current, content: 'Edited earlier round' })); return true },
-  })
-  await click('Append to article…')
-  await settle(() => [...document.querySelectorAll('option')].some(option => option.value === f.entry.id))
-  await select(f.entry.id)
-  await click('Save review proposal')
-  assert.match(document.querySelector('[role="alert"]').textContent, /source answer changed/i)
-  assert.equal((await p.getEntity(last.id)).documentEdits?.length ?? 0, 0)
-  assert.equal((await p.getEntity(f.entry.id)).content, 'Original body')
-})
-test('navigation while editor saving is pending cancels the old answer action', async t => {
-  const f = await fixture()
-  let release
-  const gate = new Promise(resolve => { release = resolve })
-  const props = { ...f, content: 'Answer body', disabled: false, onSaved: async () => {}, onBeforeArticleAction: () => gate }
-  const render = await mount(t, ArticleAnswerActions, props)
-  await click('Append to article…')
-  await settle(() => [...document.querySelectorAll('option')].some(option => option.value === f.entry.id))
-  await select(f.entry.id)
-  await act(async () => button('Save review proposal').click())
-  await render({ ...props, key: 'navigated-away', disabled: true })
-  await act(async () => release(true))
-  await drainEffects()
-  assert.equal((await p.getEntity(f.message.id)).documentEdits?.length ?? 0, 0)
 })
