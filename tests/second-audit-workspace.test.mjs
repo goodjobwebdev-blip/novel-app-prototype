@@ -34,7 +34,13 @@ const { default: Workspace } = await at('app/Workspace')
 after(async () => { (await p.database()).close(); dom.window.close(); rmSync(dir, { recursive: true, force: true }) })
 const button = text => [...document.querySelectorAll('button')].find(row => row.getAttribute('aria-label') === text || row.textContent.trim() === text)
 const editor = () => document.querySelector('[data-test-editor]')
-async function settle(predicate) { for (let i = 0; i < 200 && !predicate(); i++) await act(async () => new Promise(r => setTimeout(r, 10))); assert.ok(predicate(), document.body.textContent) }
+async function settle(predicate) {
+  for (let i = 0; i < 200 && !predicate(); i++) await act(async () => new Promise(r => setTimeout(r, 10)))
+  assert.ok(predicate(), document.body.textContent)
+  // A visible editor/library can precede queued profile/summary reads. Drain
+  // earlier IndexedDB work inside act rather than allowing late UI updates.
+  await act(async () => { const db = await p.database(); await db.transaction('rw', db.table('entities'), async () => {}) })
+}
 async function click(target) { assert.ok(target, 'navigation control exists'); await act(async () => target.click()) }
 async function edit(text) {
   const target = editor(); assert.ok(target && !target.readOnly, 'editor remains editable')
@@ -48,8 +54,13 @@ async function mount(t, beforeRender = async () => {}) {
   await assignBookTestProfiles({ persistence: p, ai, profiles }, f.book.id, settings, ['text', 'summary'])
   await p.saveDocumentContent(f.scene.id, 'Original manuscript')
   await beforeRender(f)
+  const warnings = [], originalError = console.error
+  t.mock.method(console, 'error', (...args) => { warnings.push(args.map(String).join(' ')); originalError(...args) })
   const root = createRoot(document.getElementById('root'))
-  t.after(async () => { await act(async () => root.unmount()) })
+  t.after(async () => {
+    await act(async () => root.unmount())
+    assert.equal(warnings.filter(message => /not wrapped in act|unmounted component/i.test(message)).length, 0, 'asynchronous Workspace completion stays inside act')
+  })
   await act(async () => root.render(React.createElement(Workspace)))
   await settle(() => [...document.querySelectorAll('.library-book')].some(row => row.textContent.includes(f.book.title)))
   await click([...document.querySelectorAll('.library-book')].find(row => row.textContent.includes(f.book.title)))
@@ -92,7 +103,7 @@ test('B2: re-summarize retains a draft edited before autosave and keeps generate
   t.mock.method(globalThis, 'fetch', async () => { await networkGate.wait(); return new Response('data: {"choices":[{"delta":{"content":"Generated summary"}}]}\n\ndata: [DONE]\n\n') })
   t.after(async () => { await act(async () => { networkGate.release(); await new Promise(r => setTimeout(r, 30)) }) })
   await click(button('Re-summarize'))
-  await networkGate.entered
+  await act(async () => networkGate.entered)
   await settle(() => button('Stop'))
   await edit('Manual summary draft')
   await act(async () => networkGate.release())
