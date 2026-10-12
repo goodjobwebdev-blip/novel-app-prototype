@@ -6,6 +6,7 @@ import { registerHooks } from 'node:module'
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import 'fake-indexeddb/auto'
+import Dexie from 'dexie'
 
 class TestCustomEvent extends Event {
   constructor(type, options = {}) { super(type); this.detail = options.detail }
@@ -671,6 +672,41 @@ for (const mode of ['import', 'pull']) {
     assert.equal(transport.writes.length, 1)
   })
 }
+
+test('B8: a shared profile edited during installation is not silently accepted into the cloud baseline', async t => {
+  const f = await fixture(t)
+  await control.saveSyncConnection(f.link, f.state)
+  const data = await archives.decodeBookArchive(await incomingArchive(f))
+  const text = data.settingsProfiles.find(row => row.kind === 'text')
+  text.name += ` race-${f.book.id}`
+  data.entities.find(row => row.settingsType === 'profiles-book').definitions = data.settingsProfiles
+  const transport = await bookTransport(f, { archive: archives.encodeBookArchive(data) })
+  installTransport(t, transport)
+  const installGate = gate(), table = (await p.database()).table('entities'), put = table.put
+  let pending, installedId
+  const spy = t.mock.method(table, 'put', async function (row, ...args) {
+    if (!installedId && row.settingsType === 'profiles-book' && row.definitions === undefined && row.value.text !== text.id) {
+      installedId = row.value.text
+      // The production lock stays real; only scheduling is gated. Dexie keeps
+      // this acquired transaction alive while another tab edits localStorage.
+      await Dexie.waitFor(installGate.wait())
+    }
+    return put.call(this, row, ...args)
+  })
+  cleanup(t, async () => { installGate.release(); await pending?.catch(() => {}); spy.mock.restore() })
+  pending = service.syncBookNow(f.book.id, noPendingSave)
+  await Promise.race([installGate.entered, pending.then(() => { throw new Error('Profile install did not reach its scheduling gate') })])
+  const installed = profiles.loadSettingsProfiles().profiles.find(row => row.id === installedId)
+  profiles.saveSettingsProfile({ ...installed, name: `${installed.name} actual writer edit` })
+  installGate.release()
+  assert.equal((await pending).kind, 'pulled')
+  assert.notEqual((await control.getBookSyncState(f.book.id)).localContentHash, await archiveContentHash(await capture(f.book.id)),
+    'the baseline must retain the imported definition, not absorb a later shared-profile edit')
+  assert.equal((await service.syncBookNow(f.book.id, noPendingSave)).kind, 'uploaded')
+  assert.equal(transport.writes.length, 1)
+  const uploaded = await archives.decodeBookArchive(transport.stored)
+  assert.equal(uploaded.settingsProfiles.find(row => row.id === installedId).name, `${installed.name} actual writer edit`)
+})
 
 test('device-local Book navigation remains outside sync hashes and does not cause uploads', async t => {
   const f = await fixture(t)

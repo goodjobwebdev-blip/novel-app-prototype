@@ -1445,7 +1445,7 @@ test('checking or failed linked-book usage never invents a count and keeps Delet
   await key(menu, 'Escape')
   entities.where = originalWhere
   await click(button(mounted.host, 'Retry linked books'))
-  assert.equal(mounted.host.querySelector('details.profile-usage summary')?.textContent.trim(), 'Used in 0 books')
+  assert.equal(await waitForProfileUsage(mounted.host), 'Used in 0 books')
   const warning = mounted.host.querySelector('.profile-linked-warning')
   assert.ok(warning, 'Unused profiles still explain shared effects after usage is ready')
   assert.match(warning.textContent, /No books currently use this profile/)
