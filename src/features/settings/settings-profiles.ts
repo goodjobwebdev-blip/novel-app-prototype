@@ -199,6 +199,30 @@ export function setDefaultSettingsProfile(kind: ProfileKind, id: string): void {
   const library = loadSettingsProfiles(); findProfile(library, id, kind)
   writeLibrary({ ...library, defaults: { ...library.defaults, [kind]: id } })
 }
+export async function saveDefaultSettingsProfiles(draft: SettingsProfileLibrary['defaults'], baseline: SettingsProfileLibrary['defaults']): Promise<SettingsProfileLibrary> {
+  const changes = (Object.keys(draft) as ProfileKind[]).filter(kind => draft[kind] !== baseline[kind])
+  return withProfileReferenceLock(async () => {
+    const { database } = await import('../../data/persistence')
+    const db = await database()
+    // Match profile deletion/selection writers: this IDB lock spans tabs.
+    return db.transaction('rw', db.table('entities'), async () => {
+      const library = loadSettingsProfiles()
+      for (const kind of changes) {
+        if (library.defaults[kind] !== baseline[kind] && library.defaults[kind] !== draft[kind]) {
+          throw new Error('Default selections changed in another editor. Your draft is retained; Discard defaults to load the latest selections.')
+        }
+        findProfile(library, draft[kind], kind)
+      }
+      const defaults = { ...library.defaults }
+      for (const kind of changes) defaults[kind] = draft[kind]
+      // Validate every change before the single durable write; untouched kinds
+      // come from the locked library, not from the old editor snapshot.
+      const saved = { ...library, defaults }
+      if (changes.length) writeLibrary(saved)
+      return saved
+    })
+  })
+}
 let referenceQueue: Promise<unknown> = Promise.resolve()
 export function withProfileReferenceLock<T>(operation: () => Promise<T>): Promise<T> {
   const result = referenceQueue.then(operation)

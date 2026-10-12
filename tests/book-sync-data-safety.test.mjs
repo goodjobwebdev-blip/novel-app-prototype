@@ -129,7 +129,7 @@ async function bookTransport(f, options = {}) {
     await options.downloadGate?.wait()
     return new Response(stored, { headers: { ETag: `"rev-${revision}"` } })
   }
-  return { fetch, calls, writes, get stored() { return stored }, get revision() { return revision } }
+  return { fetch, calls, writes, advanceRevision() { revision++ }, get stored() { return stored }, get revision() { return revision } }
 }
 function installTransport(t, transport) {
   const original = globalThis.fetch
@@ -651,6 +651,12 @@ for (const mode of ['import', 'pull']) {
     assert.equal(state.localContentHash, await archiveContentHash(await capture(f.book.id)), 'accepted local baseline includes installed IDs')
     assert.equal((await service.syncBookNow(f.book.id, noPendingSave)).kind, 'unchanged')
     assert.equal(transport.writes.length, 0)
+    const profileCount = profiles.loadSettingsProfiles().profiles.length
+    transport.advanceRevision()
+    assert.equal((await service.syncBookNow(f.book.id, noPendingSave)).kind, 'pulled')
+    assert.equal((await p.getBookProfileSelections(f.book.id)).text, installed.text, 'repeat pulls reuse conflict clones')
+    assert.equal(profiles.loadSettingsProfiles().profiles.length, profileCount)
+    assert.equal((await service.syncBookNow(f.book.id, noPendingSave)).kind, 'unchanged')
     await p.saveDocumentContent(f.scene.id, 'Actual edit after profile install')
     assert.equal((await service.syncBookNow(f.book.id, noPendingSave)).kind, 'uploaded')
     assert.equal(transport.writes.length, 1)

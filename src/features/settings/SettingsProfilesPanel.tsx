@@ -16,7 +16,7 @@ import SettingsBreadcrumbs from './SettingsBreadcrumbs'
 import SettingsSectionTabs from './SettingsSectionTabs'
 import {
   SETTINGS_PROFILES_EVENT, loadSettingsProfiles, saveSettingsProfile, createSettingsProfile,
-  deleteSettingsProfile, setDefaultSettingsProfile, resolveProfileSettings,
+  deleteSettingsProfile, setDefaultSettingsProfile, saveDefaultSettingsProfiles, resolveProfileSettings,
   type ProfileKind, type SettingsProfile, type SettingsProfileLibrary, type BookProfileSelections,
 } from './settings-profiles'
 import { listSettingsProfileUsage } from '../../data/persistence'
@@ -279,15 +279,10 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
     onSaved?.(resolveProfileSettings(defaults, loadAiSettings().favorites))
   }
   async function persistDefaults() {
-    try {
-      for (const kind of Object.keys(defaultDraft) as ProfileKind[]) {
-        if (loadSettingsProfiles().defaults[kind] !== defaultDraft[kind]) await setDefaultSettingsProfile(kind, defaultDraft[kind])
-      }
-    } finally {
-      // The shared API writes each kind separately. A partial failure remains dirty for retry.
-      const savedLibrary = loadSettingsProfiles()
-      setLibrary(savedLibrary); setDefaultBaseline(JSON.stringify(savedLibrary.defaults))
-    }
+    const savedLibrary = await saveDefaultSettingsProfiles({ ...defaultDraft }, JSON.parse(defaultBaseline) as SettingsProfileLibrary['defaults'])
+    setLibrary(savedLibrary)
+    setDefaultDraft(savedLibrary.defaults)
+    setDefaultBaseline(JSON.stringify(savedLibrary.defaults))
   }
   function makeDefault(profile: SettingsProfile) {
     requestLeave(() => { void run(async () => {

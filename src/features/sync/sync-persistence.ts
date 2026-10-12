@@ -4,7 +4,7 @@ import { database, listEntitiesByBook, listCodexDependencies, readBookArchive } 
 import { encodeBookArchive, portableWorldBookSnapshot } from '../../data/book-archive'
 import { storedLoreTypes } from '../codex/lore-types'
 import { documentBlocks } from '../editor/document-projection'
-import { sanitizeSettingsProfile, settingsProfilesForSelections, type SettingsProfile, type BookProfileSelections } from '../settings/settings-profiles'
+import { importSettingsProfiles, sanitizeSettingsProfile, settingsProfilesForSelections, type SettingsProfile, type BookProfileSelections } from '../settings/settings-profiles'
 import type { GalleryImage, ImageJob } from '../images/image-generation-types'
 import { archiveContentHash } from './sync-hash'
 
@@ -108,6 +108,21 @@ async function addArchiveRows(db: any, data: BookArchiveData, entities: ArcEntit
   await db.table('illustrations').bulkAdd(data.illustrations)
 }
 
+/** Install portable identities before accepting the local baseline, while the
+ * manuscript lock still excludes later edits. Do not repair the hash lazily on
+ * the next read: that could silently accept intervening user edits. Profile
+ * clones remain in localStorage (as with ordinary import), never overwrite a
+ * shared definition, and are reused by importSettingsProfiles on repeat pulls. */
+async function acceptedArchiveState(db: any, book: BookEntity, state: BookSyncState): Promise<BookSyncState> {
+  const selection = await db.table('entities').get(`settings-profiles-book-${book.id}`) as ArcEntity | undefined
+  if (selection?.definitions === undefined) return state
+  const value = importSettingsProfiles(selection.definitions as SettingsProfile[], selection.value as BookProfileSelections)
+  const { definitions: _portable, ...local } = selection
+  await db.table('entities').put({ ...local, value })
+  const localContentHash = await Dexie.waitFor(archiveContentHash(encodeBookArchive(await currentArchive(db, book))))
+  return { ...state, localContentHash }
+}
+
 export async function writeConnectedBookArchive(data: BookArchiveData, link: SyncLink, state: BookSyncState): Promise<string> {
   const db = await database()
   const book = archiveBook(data)
@@ -130,7 +145,7 @@ export async function writeConnectedBookArchive(data: BookArchiveData, link: Syn
     const shouldAddSeries = incomingSeries && !await db.table('entities').get(incomingSeries.id)
     await addArchiveRows(db, data, shouldAddSeries ? data.entities : ordinaryEntities)
     await db.table('syncLinks').add(link)
-    await db.table('syncState').add(state)
+    await db.table('syncState').add(await acceptedArchiveState(db, book, state))
   })
   notify(book.id)
   return book.id
@@ -253,7 +268,7 @@ export async function replaceConnectedBookArchive(bookId: string, data: BookArch
     const ordinaryEntities = data.entities.filter(entity => entity.id !== incomingSeries?.id)
     if (incomingSeries) await db.table('entities').put(incomingSeries)
     await addArchiveRows(db, data, ordinaryEntities)
-    await db.table('syncState').put(state)
+    await db.table('syncState').put(await acceptedArchiveState(db, incomingBook, state))
     return 'replaced' as const
   })
   notify(bookId)
