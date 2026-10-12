@@ -1424,7 +1424,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, cur
             void send()
           }
         }} placeholder="Ask about the book…" aria-label="Chat message" dialogTitle="Write chat message" onDictate={dictateMessage} dictationStatus={sttState.target === 'chat' ? sttState.status : 'idle'} dictationError={sttState.target === 'chat' ? sttState.error : undefined} dictationDisabled={generating} onStopDictation={stopSttSession} onCancelDictation={cancelSttSession} />
-        <ChatGenerateButton sttState={sttState} generating={generating} phase={phase} elapsed={elapsed} thinking={chat.thinking} onGenerate={() => { void send() }} onStop={stop} onMicro={() => { void dictateMessage() }} onThinking={setThinking} />
+        <ChatGenerateButton sttState={sttState} generating={generating} thinking={chat.thinking} onGenerate={() => { void send() }} onStop={stop} onMicro={() => { void dictateMessage() }} onThinking={setThinking} />
     </Composer>
 
     {promptOpen && <div className="chat-prompt-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setPromptOpen(false) }}>
@@ -1615,18 +1615,16 @@ function InlineMessageEdit({ value, onChange, onCancel, onSave, onSaveAndRegener
   return <div className="inline-edit chat-inline-edit"><ExpandableTextInput value={value} onChange={onChange} autoFocus aria-label="Edit chat message" dialogTitle="Edit chat message" /><div><Button size="small" variant="ghost" onClick={onCancel}>Cancel</Button><Button size="small" onClick={onSave}>Save</Button>{onSaveAndRegenerate && <Button size="small" variant="primary" onClick={onSaveAndRegenerate}>Save & regenerate</Button>}</div></div>
 }
 
-function ChatGenerateButton({ sttState, generating, phase, elapsed, thinking, onGenerate, onStop, onMicro, onThinking }: {
+function ChatGenerateButton({ sttState, generating, thinking, onGenerate, onStop, onMicro, onThinking }: {
   sttState: SttState
   generating: boolean
-  phase: GenerationPhase | null
-  elapsed: number
   thinking: boolean
   onGenerate: () => void
   onStop: () => void
   onMicro: () => void
   onThinking: (value: boolean) => void
 }) {
-  if (generating) return <div className="chat-generation-running"><span><i />{generationPhaseLabel(phase)} · {formatElapsed(elapsed)}</span><button className="play generating" type="button" onClick={onStop} aria-label="Stop chat generation"><Square aria-hidden="true" fill="currentColor" /></button></div>
+  if (generating) return <div className="chat-generation-running"><button className="play generating" type="button" onClick={onStop} aria-label="Stop chat generation"><Square aria-hidden="true" fill="currentColor" /></button></div>
 
   if (sttState.presentation !== 'expanded' && sttState.target === 'chat' && ['requesting-permission', 'recording', 'recording-live', 'stopping', 'transcribing', 'finalizing'].includes(sttState.status)) {
     const recording = sttState.status === 'recording' || sttState.status === 'recording-live'

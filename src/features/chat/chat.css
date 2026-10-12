@@ -20,7 +20,7 @@
 .chat-thoughts .arc-disclosure__body { max-height: 20rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--soft); font-size: .86rem; line-height: 1.55; }
 .chat-message-status { display: block; margin-top: .3rem; color: var(--muted); }
 .chat-thinking-indicator { display: inline-flex; align-items: center; gap: .5rem; color: var(--muted); padding: .75rem .9rem; border: 1px solid var(--border); border-radius: var(--radius); }
-.chat-thinking-indicator i, .chat-generation-running > span i { width: .45rem; height: .45rem; border-radius: 999px; background: currentColor; animation: chatPulse 1s ease-in-out infinite alternate; }
+.chat-thinking-indicator i { width: .45rem; height: .45rem; border-radius: 999px; background: currentColor; animation: chatPulse 1s ease-in-out infinite alternate; }
 @keyframes chatPulse { to { opacity: .25; transform: scale(.72); } }
 
 .functional-chat-composer { display: grid; gap: .55rem; }
@@ -41,7 +41,7 @@
 .chat-generate-actions svg { width: .95rem; }
 .chat-generate-actions span { font-size: .72rem; }
 .chat-generation-running { display: flex; align-items: center; gap: .55rem; }
-.chat-generation-running > span { display: inline-flex; align-items: center; gap: .4rem; font-size: .72rem; color: var(--muted); white-space: nowrap; }
+
 
 .chat-prompt-backdrop { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 1rem; background: rgba(0,0,0,.55); backdrop-filter: blur(8px); }
 .chat-prompt-dialog { width: min(58rem, 100%); max-height: min(88vh, 58rem); display: grid; grid-template-rows: auto minmax(12rem, 1fr) auto; gap: .8rem; padding: 1rem; border: 1px solid var(--border); border-radius: var(--overlay-radius); background: var(--canvas); box-shadow: 0 1.5rem 5rem rgba(0,0,0,.35); }

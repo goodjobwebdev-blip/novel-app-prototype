@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { ArrowRight } from 'lucide-react'
 import type { BookEntity, WorldEntity } from '../../data/persistence'
 import { listWorlds } from './world-service'
 import Select from '../../shared/ui/Select'
@@ -42,7 +43,7 @@ export default function BookWorldSelector({ book, onChange, onOpen }: {
       {book.worldId && !worlds.some(world => world.id === book.worldId) && <option value={book.worldId}>Loading linked World…</option>}
     </Select>
     <small>World entries appear alongside this Book’s local Codex. Editing a World entry changes it for every linked Book. Changing this link does not copy or delete World entries.</small>
-    <Button size="small" variant="ghost" disabled={busy} onClick={() => onOpen(book.worldId)}>Open World Building</Button>
+    <Button className="book-world-selector-open" variant="secondary" trailingIcon={<ArrowRight />} disabled={busy} onClick={() => onOpen(book.worldId)}>Open World Building</Button>
     {busy && <p role="status">Updating World link…</p>}
     {error && <p role="alert">{error}</p>}
   </div>

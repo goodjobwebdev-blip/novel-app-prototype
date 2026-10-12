@@ -2824,7 +2824,7 @@ function GenerateControl({ autocompleteReady = false, onAcceptAutocomplete, onCa
 
 
   const autocompleteAction = <div className="autocomplete-action" role="status" aria-live="polite">
-    {autocompleteReady && <button className="autocomplete-accept" type="button" aria-keyshortcuts="Tab" onPointerDown={event => event.preventDefault()} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); onCancelAutocomplete?.() } }} onBlur={event => { if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest('.cm-content, .autocomplete-accept'))) onCancelAutocomplete?.() }} onClick={() => onAcceptAutocomplete?.()}>Accept continuation · Tab</button>}
+    {autocompleteReady && <button className="autocomplete-accept" type="button" aria-label="Accept continuation" title="Accept continuation · Tab" aria-keyshortcuts="Tab" onPointerDown={event => event.preventDefault()} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); onCancelAutocomplete?.() } }} onBlur={event => { if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest('.cm-content, .autocomplete-accept'))) onCancelAutocomplete?.() }} onClick={() => onAcceptAutocomplete?.()}><Check aria-hidden="true" /></button>}
   </div>
 
   if (drawerCollapsed) return <div className="generate-control-shell collapsed-generate-control">

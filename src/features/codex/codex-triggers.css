@@ -6,6 +6,7 @@
 .codex-owner-notice { color: var(--soft); font-size: 12px; line-height: 1.5; }
 .book-world-selector { display: grid; gap: 9px; margin-top: 16px; }
 .book-world-selector > small { color: var(--faint); line-height: 1.5; }
+.book-world-selector-open { justify-self: start; }
 .context-trigger-window { display: grid; grid-template-columns: minmax(0, 1fr) minmax(86px, 120px); gap: 12px; align-items: center; }
 .context-trigger-window span { display: grid; gap: 3px; }
 .context-trigger-window small { opacity: .68; }
@@ -15,4 +16,7 @@
 .automatic-codex-preview article header { display: flex; justify-content: space-between; gap: 10px; }
 .automatic-codex-preview article small { opacity: .7; }
 .automatic-codex-preview ul { margin: 2px 0 0; padding-left: 18px; }
-@media (max-width: 640px) { .context-trigger-window { grid-template-columns: 1fr; } }
+@media (max-width: 640px) {
+  .context-trigger-window { grid-template-columns: 1fr; }
+  .book-world-selector-open { justify-self: stretch; width: 100%; }
+}
