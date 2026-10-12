@@ -162,7 +162,8 @@ async function homeViaWorldBuilding() {
   await settle(() => button('Open World Building') && !button('Open World Building').disabled)
   await click(button('Open World Building'))
   await settle(() => document.querySelector('.world-building'))
-  await homeViaSidebar()
+  if (document.querySelector('.workspace-screen.world-building')) await homeViaSidebar()
+  else await click(button('Home'))
   await settle(() => document.querySelector('.library-screen'))
 }
 test('empty World has no Home or unavailable Story banner and returns Home through the sidebar', async t => {
