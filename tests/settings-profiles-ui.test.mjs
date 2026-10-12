@@ -137,6 +137,28 @@ function preserveLocalStorage(t, getMounted) {
   })
 }
 
+for (const conflict of [false, true]) {
+  test(`B6: defaults save ${conflict ? 'rejects same-field conflict' : 'preserves unedited other-tab defaults'}`, async t => {
+    let mounted
+    preserveLocalStorage(t, () => mounted)
+    const text = profiles.createSettingsProfile('text', 'Draft text default')
+    const otherText = profiles.createSettingsProfile('text', 'Other tab text default')
+    const image = profiles.createSettingsProfile('image', 'Other tab image default')
+    mounted = await mount(t, Panel, panelProps({ section: 'application' }))
+    await change(field(mounted.host, 'Default Text models'), text.id)
+    await act(async () => { profiles.setDefaultSettingsProfile(conflict ? 'text' : 'image', conflict ? otherText.id : image.id) })
+    await settle()
+    await click(button(mounted.host, 'Save defaults'))
+    assert.equal(library().defaults.image, conflict ? field(mounted.host, 'Default Images').value : image.id)
+    assert.equal(library().defaults.text, conflict ? otherText.id : text.id)
+    if (conflict) {
+      assert.match(mounted.host.querySelector('[role="alert"]')?.textContent ?? '', /changed.*another|conflict/i)
+      assert.equal(field(mounted.host, 'Default Text models').value, text.id)
+    } else assert.equal(button(mounted.host, 'Save defaults').disabled, true)
+    await mounted.close()
+  })
+}
+
 test('book Profiles renders nine live selections and Edit links, without detailed editors or credentials', () => {
   const html = renderToStaticMarkup(React.createElement(BookProfilesPanel, { library: library(), selections: defaults(), busy: false, error: '', onChange() {}, onEdit() {}, onRetry() {} }))
   assert.equal((html.match(/<select/g) || []).length, 9)
@@ -915,28 +937,30 @@ test('successful UI profile Save ends palette editing without retaining an obsol
   await mounted.close()
 })
 
-test('partial Application defaults Save retains only unsaved changes for retry', async (t) => {
-  const text = profiles.createSettingsProfile('text', 'Partial default text')
-  const story = profiles.createSettingsProfile('story', 'Partial default story')
-  const previousStory = library().defaults.story
+test('Application defaults Save is atomic and retains every draft change after storage failure', async (t) => {
+  const text = profiles.createSettingsProfile('text', 'Atomic default text')
+  const story = profiles.createSettingsProfile('story', 'Atomic default story')
+  const previousDefaults = { ...library().defaults }
   const mounted = await mount(t, Panel, panelProps({ section: 'application' }))
   await change(field(mounted.host, 'Default Text models'), text.id)
   await change(field(mounted.host, 'Default Story prompt'), story.id)
   const originalSet = window.Storage.prototype.setItem
   let writes = 0
   window.Storage.prototype.setItem = function(key, value) {
-    if (key === profiles.SETTINGS_PROFILES_STORAGE_KEY && ++writes === 2) throw new Error('Second default write failed')
+    if (key === profiles.SETTINGS_PROFILES_STORAGE_KEY) { writes++; throw new Error('Default selections write failed') }
     return originalSet.call(this, key, value)
   }
   try {
     await click(button(mounted.host, 'Save defaults'))
-    assert.match(mounted.host.textContent, /Second default write failed/)
-    assert.equal(library().defaults.text, text.id)
-    assert.equal(library().defaults.story, previousStory)
+    assert.match(mounted.host.textContent, /Default selections write failed/)
+    assert.deepEqual(library().defaults, previousDefaults, 'neither changed assignment is committed on failure')
+    assert.equal(writes, 1, 'changed assignments use one durable library write')
+    assert.equal(field(mounted.host, 'Default Text models').value, text.id)
     assert.equal(field(mounted.host, 'Default Story prompt').value, story.id)
     assert.equal(button(mounted.host, 'Save defaults').disabled, false)
   } finally { window.Storage.prototype.setItem = originalSet }
   await click(button(mounted.host, 'Save defaults'))
+  assert.equal(library().defaults.text, text.id)
   assert.equal(library().defaults.story, story.id)
   assert.equal(button(mounted.host, 'Save defaults').disabled, true)
   await mounted.close()
@@ -1421,7 +1445,7 @@ test('checking or failed linked-book usage never invents a count and keeps Delet
   await key(menu, 'Escape')
   entities.where = originalWhere
   await click(button(mounted.host, 'Retry linked books'))
-  assert.equal(mounted.host.querySelector('details.profile-usage summary')?.textContent.trim(), 'Used in 0 books')
+  assert.equal(await waitForProfileUsage(mounted.host), 'Used in 0 books')
   const warning = mounted.host.querySelector('.profile-linked-warning')
   assert.ok(warning, 'Unused profiles still explain shared effects after usage is ready')
   assert.match(warning.textContent, /No books currently use this profile/)

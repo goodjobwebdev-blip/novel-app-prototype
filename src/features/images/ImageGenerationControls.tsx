@@ -1,5 +1,5 @@
 import MediaPromptEditor from './MediaPromptEditor'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import SearchableSelect from '../../shared/ui/SearchableSelect'
 import Select from '../../shared/ui/Select'
@@ -43,19 +43,34 @@ export default function ImageGenerationControls({ value, onChange, disabled = fa
   const needsSource = task === 'image-to-image' || task === 'image-to-video'
   const isVideo = task.endsWith('video')
   const sources = value.sources ?? []
+  const latest = useRef({ value, onChange, favorite, disabled })
+  latest.current = { value, onChange, favorite, disabled }
+  const scope = `${bookId ?? ''}:${task}:${value.alias}`
+  const sourceEpoch = useRef({ scope, revision: 0 })
+  if (sourceEpoch.current.scope !== scope) sourceEpoch.current = { scope, revision: sourceEpoch.current.revision + 1 }
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; sourceEpoch.current.revision += 1 } }, [])
+  const appendSources = (added: GenerationSource[], revision: number) => {
+    const current = latest.current
+    if (!mounted.current || current.disabled || sourceEpoch.current.revision !== revision) return
+    const existing = current.value.sources ?? []
+    const max = current.favorite?.maxSourceImages ?? 0
+    const nextSources = [...existing, ...added.filter(source => !existing.some(item => item.id === source.id))].slice(0, max)
+    if (nextSources.length === existing.length) return
+    const next = { ...current.value, sources: nextSources }
+    // Reserve immediately: two decodes can finish before React renders their update.
+    latest.current = { ...current, value: next }
+    current.onChange(next)
+  }
   const selectTask = (nextTask: GenerationTask) => {
     const nextAlias = settings.defaultAliases?.[nextTask] ?? settings.defaultAlias
     const nextModel = settings.favorites.find((model) => model.alias === nextAlias && modelTasks(model).includes(nextTask))
     onChange({ ...value, task: nextTask, alias: nextModel?.alias ?? '', size: nextModel?.defaultSize ?? value.size, sources: nextTask.startsWith('image-to-') ? sources.slice(0, nextModel?.maxSourceImages ?? 1) : [], resolution: nextModel?.videoResolutions?.[0], duration: nextModel?.videoDurations?.[0] ?? 5, aspectRatio: nextModel?.aspectRatios?.[0] })
   }
   const chooseModel = (model: FavoriteImageModel) => onChange({ ...value, alias: model.alias, size: model.enabledSizes.includes(value.size) ? value.size : model.defaultSize, sources: sources.slice(0, model.maxSourceImages ?? 0), resolution: model.videoResolutions?.includes(value.resolution ?? '') ? value.resolution : model.videoResolutions?.[0], duration: model.videoDurations?.includes(value.duration ?? -1) ? value.duration : model.videoDurations?.[0] ?? value.duration, aspectRatio: model.aspectRatios?.includes(value.aspectRatio ?? '') ? value.aspectRatio : model.aspectRatios?.[0] })
-  const addSource = (source: GenerationSource) => {
-    const max = favorite?.maxSourceImages ?? 0
-    if (!max || sources.some((item) => item.id === source.id) || sources.length >= max) return
-    onChange({ ...value, sources: [...sources, source] })
-  }
   const upload = async (files: FileList | null) => {
     if (!files) return
+    const revision = sourceEpoch.current.revision
     setSourceError('')
     try {
       const added: GenerationSource[] = []
@@ -63,10 +78,14 @@ export default function ImageGenerationControls({ value, onChange, disabled = fa
         if (file.size > 20 * 1024 * 1024) throw new Error(`${file.name} exceeds the 20 MB source-image limit.`)
         added.push(await sourceFromBlob(file, `upload:${crypto.randomUUID()}`, file.name))
       }
-      if (added.length) onChange({ ...value, sources: [...sources, ...added] })
-    } catch (reason) { setSourceError(reason instanceof Error ? reason.message : 'Could not read that source image.') }
+      appendSources(added, revision)
+    } catch (reason) { if (mounted.current && sourceEpoch.current.revision === revision) setSourceError(reason instanceof Error ? reason.message : 'Could not read that source image.') }
   }
-  const addAsset = async (asset: GalleryImage) => addSource(await sourceFromBlob(asset.image, asset.id, asset.prompt || asset.modelAlias || 'Gallery image'))
+  const addAsset = async (asset: GalleryImage) => {
+    const revision = sourceEpoch.current.revision
+    try { appendSources([await sourceFromBlob(asset.image, asset.id, asset.prompt || asset.modelAlias || 'Gallery image')], revision) }
+    catch (reason) { if (mounted.current && sourceEpoch.current.revision === revision) setSourceError(reason instanceof Error ? reason.message : 'Could not read that source image.') }
+  }
   return <fieldset className="image-generation-controls" disabled={disabled}>
     <Tabs label="Generation type" value={task} items={(Object.keys(generationTaskNames) as GenerationTask[]).map(option => ({ value: option, label: generationTaskNames[option] }))} onChange={selectTask} className="image-generation-task-control" />
     <MediaPromptEditor key={bookId ?? 'global'} value={value} onChange={onChange} bookId={bookId} capability={favorite ? `${favorite.name}: ${favorite.description ?? ''}. Tasks: ${modelTasks(favorite).join(', ')}.` : 'No media model selected'} />

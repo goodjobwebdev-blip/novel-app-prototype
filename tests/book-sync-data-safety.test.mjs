@@ -6,6 +6,7 @@ import { registerHooks } from 'node:module'
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import 'fake-indexeddb/auto'
+import Dexie from 'dexie'
 
 class TestCustomEvent extends Event {
   constructor(type, options = {}) { super(type); this.detail = options.detail }
@@ -35,6 +36,7 @@ const service = await import('../src/features/sync/sync-service.ts')
 const settings = await import('../src/features/sync/sync-settings.ts')
 const { archiveContentHash } = await import('../src/features/sync/sync-hash.ts')
 const { initialAiSettings } = await import('../src/shared/ai/ai-settings.ts')
+const profiles = await import('../src/features/settings/settings-profiles.ts')
 after(async () => (await p.database()).close())
 
 const endpoint = 'https://sync.example.test'
@@ -128,7 +130,7 @@ async function bookTransport(f, options = {}) {
     await options.downloadGate?.wait()
     return new Response(stored, { headers: { ETag: `"rev-${revision}"` } })
   }
-  return { fetch, calls, writes, get stored() { return stored }, get revision() { return revision } }
+  return { fetch, calls, writes, advanceRevision() { revision++ }, get stored() { return stored }, get revision() { return revision } }
 }
 function installTransport(t, transport) {
   const original = globalThis.fetch
@@ -279,7 +281,9 @@ async function assertLocalMediaPreserved(f, expected, result, transport) {
     assert.equal((await p.getEntity(f.scene.id)).content, 'REMOTE manuscript')
     assert.equal(state.status, 'synced')
     assert.equal(state.remoteETag, '"rev-2"')
-    assert.equal(state.localContentHash, await archiveContentHash(transport.stored))
+    // localContentHash is the accepted device export, which can normalize media
+    // fields and remap conflicting portable profile IDs without changing ETag.
+    assert.equal(state.localContentHash, await archiveContentHash(await capture(f.book.id)))
   }
 }
 
@@ -476,7 +480,9 @@ test('Book sync replaces existing reviewed kept media at the same IDs normally',
   assert.equal((await service.syncBookNow(f.book.id, noPendingSave)).kind, 'pulled')
   assert.equal((await db.table('imageJobs').get(incoming.job.id)).prompt, incoming.job.prompt)
   assert.equal((await db.table('galleryImages').get(incoming.asset.id)).prompt, incoming.asset.prompt)
-  assert.equal((await control.getBookSyncState(f.book.id)).localContentHash, await archiveContentHash(archive))
+  assert.equal((await control.getBookSyncState(f.book.id)).localContentHash, await archiveContentHash(await capture(f.book.id)))
+  assert.equal((await service.syncBookNow(f.book.id, noPendingSave)).kind, 'unchanged', 'normalized accepted media does not produce a false upload')
+  assert.equal(transport.writes.length, 0)
 })
 
 for (const collision of ['running job', 'unreviewed asset', 'foreign job', 'foreign asset', 'wrong media owner']) {
@@ -516,6 +522,25 @@ for (const collision of ['running job', 'unreviewed asset', 'foreign job', 'fore
     }
   })
 }
+
+test('B3: incoming Series cannot overwrite a foreign Note and replacement rolls back', async t => {
+  const f = await fixture(t)
+  const other = await p.createBook(initialAiSettings, 'Other owner')
+  cleanup(t, () => p.deleteEntityTree(other.book.id))
+  const note = await p.createNote(other.book.id, 'Must survive')
+  await p.saveDocumentContent(note.id, 'Foreign note body')
+  const original = await p.getEntity(note.id)
+  const snapshot = await p.createSnapshot(f.scene.id, 'manual')
+  const data = await archives.decodeBookArchive(await incomingArchive(f))
+  data.entities.find(row => row.id === f.book.id).seriesId = note.id
+  data.entities.push({ id: note.id, type: 'series', title: 'Incoming Series', createdAt: 1, updatedAt: 2 })
+  await control.saveSyncConnection(f.link, f.state)
+  await assert.rejects(control.replaceConnectedBookArchive(f.book.id, data, { ...f.state, remoteETag: '"rev-2"' }), /series.*identity|series.*conflict/i)
+  assert.deepEqual(await p.getEntity(note.id), original)
+  assert.equal((await p.getEntity(f.scene.id)).content, 'BASELINE manuscript')
+  assert.equal((await p.readSnapshot(snapshot.id)).content, 'BASELINE manuscript')
+  assert.deepEqual(await control.getBookSyncState(f.book.id), f.state)
+})
 
 test('Book sync still pulls a clean newer cloud archive', async t => {
   const f = await fixture(t)
@@ -586,6 +611,101 @@ test('first enable still creates and uploads a previously absent cloud Book afte
   assert.equal(transport.writes.length, 1)
   assert.equal((await archives.decodeBookArchive(transport.stored)).entities.find(row => row.id === f.scene.id).content, 'FLUSHED manuscript')
   assert.equal((await control.getSyncLink(f.book.id)).remoteBookId, f.remoteId)
+})
+
+test('B7: cloud import pairs the downloaded ETag with its archive, not stale list hash', async t => {
+  const f = await fixture(t)
+  const incoming = await incomingArchive(f)
+  const transport = await bookTransport(f, { archive: incoming })
+  installTransport(t, transport)
+  await p.deleteEntityTree(f.book.id)
+  const remote = { id: f.remoteId, clientBookId: f.book.id, currentContentHash: f.hash }
+  assert.equal(await service.importCloudBook(remote), f.book.id)
+  const state = await control.getBookSyncState(f.book.id)
+  assert.equal(state.remoteETag, '"rev-2"')
+  assert.equal(state.localContentHash, await archiveContentHash(await capture(f.book.id)))
+  assert.equal((await service.syncBookNow(f.book.id, noPendingSave)).kind, 'unchanged')
+  assert.equal(transport.writes.length, 0)
+})
+
+for (const mode of ['import', 'pull']) {
+  test(`B8: ${mode} accepts remapped profile and preset IDs without false dirty, but detects later edits`, async t => {
+    const f = await fixture(t)
+    const data = await archives.decodeBookArchive(await incomingArchive(f))
+    const text = data.settingsProfiles.find(row => row.kind === 'text')
+    const chat = data.settingsProfiles.find(row => row.id === text.settings.chatPromptPresetId)
+    data.entities.find(row => row.settingsType === 'profiles-book').definitions = data.settingsProfiles
+    // A distinct remote definition at occupied IDs forces the required clone path.
+    text.name += ' remote'; chat.name += ' remote'
+    const incoming = archives.encodeBookArchive(data)
+    const transport = await bookTransport(f, { archive: incoming })
+    installTransport(t, transport)
+    let bookSelectionNotified = false
+    const selectionChanged = event => { if (event.detail?.bookId === f.book.id) bookSelectionNotified = true }
+    window.addEventListener(profiles.SETTINGS_PROFILES_EVENT, selectionChanged)
+    cleanup(t, () => window.removeEventListener(profiles.SETTINGS_PROFILES_EVENT, selectionChanged))
+    if (mode === 'import') {
+      await p.deleteEntityTree(f.book.id)
+      await service.importCloudBook({ id: f.remoteId, clientBookId: f.book.id })
+    } else {
+      await control.saveSyncConnection(f.link, f.state)
+      assert.equal((await service.syncBookNow(f.book.id, noPendingSave)).kind, 'pulled')
+    }
+    const installed = await p.getBookProfileSelections(f.book.id)
+    assert.equal(bookSelectionNotified, true, 'installed selections notify mounted book settings even though lazy migration is no longer needed')
+    assert.notEqual(installed.text, text.id, 'conflicting shared text profile is cloned')
+    const installedText = profiles.loadSettingsProfiles().profiles.find(row => row.id === installed.text)
+    assert.notEqual(installedText.settings.chatPromptPresetId, chat.id, 'preset dependency is remapped too')
+    assert.equal(profiles.loadSettingsProfiles().profiles.find(row => row.id === text.id).name.endsWith(' remote'), false)
+    const state = await control.getBookSyncState(f.book.id)
+    assert.equal(state.localContentHash, await archiveContentHash(await capture(f.book.id)), 'accepted local baseline includes installed IDs')
+    assert.equal((await service.syncBookNow(f.book.id, noPendingSave)).kind, 'unchanged')
+    assert.equal(transport.writes.length, 0)
+    const profileCount = profiles.loadSettingsProfiles().profiles.length
+    transport.advanceRevision()
+    assert.equal((await service.syncBookNow(f.book.id, noPendingSave)).kind, 'pulled')
+    assert.equal((await p.getBookProfileSelections(f.book.id)).text, installed.text, 'repeat pulls reuse conflict clones')
+    assert.equal(profiles.loadSettingsProfiles().profiles.length, profileCount)
+    assert.equal((await service.syncBookNow(f.book.id, noPendingSave)).kind, 'unchanged')
+    await p.saveDocumentContent(f.scene.id, 'Actual edit after profile install')
+    assert.equal((await service.syncBookNow(f.book.id, noPendingSave)).kind, 'uploaded')
+    assert.equal(transport.writes.length, 1)
+  })
+}
+
+test('B8: a shared profile edited during installation is not silently accepted into the cloud baseline', async t => {
+  const f = await fixture(t)
+  await control.saveSyncConnection(f.link, f.state)
+  const data = await archives.decodeBookArchive(await incomingArchive(f))
+  const text = data.settingsProfiles.find(row => row.kind === 'text')
+  text.name += ` race-${f.book.id}`
+  data.entities.find(row => row.settingsType === 'profiles-book').definitions = data.settingsProfiles
+  const transport = await bookTransport(f, { archive: archives.encodeBookArchive(data) })
+  installTransport(t, transport)
+  const installGate = gate(), table = (await p.database()).table('entities'), put = table.put
+  let pending, installedId
+  const spy = t.mock.method(table, 'put', async function (row, ...args) {
+    if (!installedId && row.settingsType === 'profiles-book' && row.definitions === undefined && row.value.text !== text.id) {
+      installedId = row.value.text
+      // The production lock stays real; only scheduling is gated. Dexie keeps
+      // this acquired transaction alive while another tab edits localStorage.
+      await Dexie.waitFor(installGate.wait())
+    }
+    return put.call(this, row, ...args)
+  })
+  cleanup(t, async () => { installGate.release(); await pending?.catch(() => {}); spy.mock.restore() })
+  pending = service.syncBookNow(f.book.id, noPendingSave)
+  await Promise.race([installGate.entered, pending.then(() => { throw new Error('Profile install did not reach its scheduling gate') })])
+  const installed = profiles.loadSettingsProfiles().profiles.find(row => row.id === installedId)
+  profiles.saveSettingsProfile({ ...installed, name: `${installed.name} actual writer edit` })
+  installGate.release()
+  assert.equal((await pending).kind, 'pulled')
+  assert.notEqual((await control.getBookSyncState(f.book.id)).localContentHash, await archiveContentHash(await capture(f.book.id)),
+    'the baseline must retain the imported definition, not absorb a later shared-profile edit')
+  assert.equal((await service.syncBookNow(f.book.id, noPendingSave)).kind, 'uploaded')
+  assert.equal(transport.writes.length, 1)
+  const uploaded = await archives.decodeBookArchive(transport.stored)
+  assert.equal(uploaded.settingsProfiles.find(row => row.id === installedId).name, `${installed.name} actual writer edit`)
 })
 
 test('device-local Book navigation remains outside sync hashes and does not cause uploads', async t => {

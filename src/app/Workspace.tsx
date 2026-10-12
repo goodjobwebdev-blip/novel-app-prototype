@@ -800,6 +800,20 @@ export default function Workspace() {
     return content.structural
   }
 
+  /** A save can finish before destination I/O does. Dirty is not a revision:
+   * autosave can clear it, and edit→undo can restore the same text. Cancel the
+   * transition on any newer edit/selection instead of replacing that draft. */
+  function captureEditorTransition() {
+    const documentId = activeDocumentIdRef.current
+    const ownerId = currentBookIdRef.current
+    const revision = editorContentRevisionRef.current
+    return () => {
+      if (activeDocumentIdRef.current === documentId && currentBookIdRef.current === ownerId && editorContentRevisionRef.current === revision) return true
+      showToast('The editor changed while opening the destination. Your draft is retained; retry navigation.')
+      return false
+    }
+  }
+
   async function loadDocument(documentId: string, closePanel = true) {
     const expectedBookId = currentBookIdRef.current
     if (!expectedBookId) {
@@ -818,6 +832,7 @@ export default function Workspace() {
 
     bookRefreshIntentRef.current.invalidate()
     const intent = documentLoadIntentRef.current.begin()
+    const canLeaveEditor = captureEditorTransition()
     if (!await saveRequiredBeforeNavigation(changedSinceSnapshotRef.current, () => flushDocument('navigation', true))) {
       if (documentLoadIntentRef.current.isCurrent(intent) && bookScopeMatches(expectedBookId, currentBookIdRef.current)) {
         showToast('Could not save the current document. Fix the save problem before switching documents.')
@@ -847,8 +862,9 @@ export default function Workspace() {
       try { await saveOwnerWorkspaceState(expectedBookId, { lastOpenedCodexEntryId: editableDocument.id }) }
       catch { showToast('Article navigation could not be saved. Retry before switching articles.'); return }
       if (!documentLoadIntentRef.current.isCurrent(intent) || !bookScopeMatches(expectedBookId, currentBookIdRef.current)) return
-      setCurrentArticleId(editableDocument.id)
     }
+    if (!canLeaveEditor()) return
+    if (editableDocument.type === 'codexEntry') setCurrentArticleId(editableDocument.id)
     activeDocumentIdRef.current = editableDocument.id
     documentBaselineRef.current = editableDocument
     articleIssueRef.current = null; setArticleIssue(null)
@@ -885,6 +901,7 @@ export default function Workspace() {
   }
 
   async function openWorld(worldId: string) {
+    const canLeaveEditor = captureEditorTransition()
     const intent = bookOpenIntentRef.current.begin()
     bookRefreshIntentRef.current.invalidate()
     if (generationAbortRef.current || generationPreflightRef.current) { showToast('Stop generation before switching workspaces.'); return }
@@ -896,7 +913,7 @@ export default function Workspace() {
     if (!bookOpenIntentRef.current.isCurrent(intent)) return
     if (world?.type !== 'world') { showToast('That World is no longer available.'); return }
     const navigation = await getOwnerWorkspaceState(worldId)
-    if (!bookOpenIntentRef.current.isCurrent(intent)) return
+    if (!bookOpenIntentRef.current.isCurrent(intent) || !canLeaveEditor()) return
     const article = content.codexEntries.find(entry => entry.id === navigation.lastOpenedCodexEntryId) ?? content.codexEntries.find(entry => !isCodexEntryArchived(entry))
     setCurrentArticleId(article?.id ?? null)
     currentBookIdRef.current = world.id
@@ -922,6 +939,7 @@ export default function Workspace() {
   }
 
   async function openBook(bookId: string, preferredSceneId?: string) {
+    const canLeaveEditor = captureEditorTransition()
     if (!canUnmountEditor(Boolean(generationAbortRef.current || generationPreflightRef.current))) {
       showToast('Stop generation before switching books.')
       return
@@ -967,6 +985,7 @@ export default function Workspace() {
       if (!bookOpenIntentRef.current.isCurrent(intent)) return
     }
 
+    if (!canLeaveEditor()) return
     currentBookIdRef.current = book.id
     currentBookRef.current = book
     setCurrentArticleId(null)
@@ -1238,11 +1257,32 @@ export default function Workspace() {
     return updated
   }
 
+  function resetDeletedEditor() {
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
+    if (autoSyncTimerRef.current) { clearTimeout(autoSyncTimerRef.current); autoSyncTimerRef.current = null }
+    editorContentRevisionRef.current += 1
+    activeDocumentIdRef.current = null
+    documentBaselineRef.current = null
+    articleIssueRef.current = null; setArticleIssue(null)
+    changedSinceSnapshotRef.current = false
+    latestGenerationRequestRef.current = null
+    storyRef.current = ''; setStoryMarkdown('')
+    scenePovRef.current = ''
+    activeSceneIdRef.current = null; setActiveSceneId(null)
+    setActiveDocument(null)
+    setCurrentArticleId(null); setActiveChatId('')
+    setNotes([]); setCodexEntries([]); setCodexDependencies([]); setSummaryStates({})
+    setSaveState('saved')
+  }
+
   async function removeCurrentBookFromSettings() {
     if (!currentBook) return
-    await deleteWithSaveBarrier(currentBook.id)
+    const deletedBookId = currentBook.id
+    await deleteWithSaveBarrier(deletedBookId)
     const books = await listBooks()
     setBookList(books)
+    if (currentBookIdRef.current !== deletedBookId) return
+    resetDeletedEditor()
     bookOpenIntentRef.current.invalidate()
     documentLoadIntentRef.current.invalidate()
     bookRefreshIntentRef.current.invalidate()
@@ -2128,6 +2168,7 @@ export default function Workspace() {
 
     const book = currentBook
     const startingSummary = activeDocument
+    const startingEditorRevision = editorContentRevisionRef.current
     const controller = new AbortController()
     const owner: ActiveSummaryGenerationOwner = {
       requestId: ++summaryGenerationSequenceRef.current,
@@ -2215,8 +2256,29 @@ export default function Workspace() {
         status = 'cancelled'
         return
       }
-      const saved = await saveSummaryContent(summary.id, generated, source.sourceRevision, summary, undefined, owner.bookId)
+      const retainGeneratedDraft = async () => {
+        await createSnapshot(summary.id, 'generation', generated)
+        showToast('The summary was edited during generation. Your draft is retained; the generated summary was saved in a recovery snapshot.')
+      }
+      if (editorContentRevisionRef.current !== startingEditorRevision) {
+        await retainGeneratedDraft()
+        return
+      }
+      const saved = await documentSaveQueueRef.current.run(summary.id, async () => {
+        // Autosave and generation use the same queue. Never replace a manual
+        // draft that arrived while this generated result was waiting to save.
+        if (editorContentRevisionRef.current !== startingEditorRevision) return null
+        return saveSummaryContent(summary.id, generated, source.sourceRevision, summary, undefined, owner.bookId)
+      })
+      if (!saved || editorContentRevisionRef.current !== startingEditorRevision) {
+        await retainGeneratedDraft()
+        return
+      }
       const nextSummaryStates = await getSummaryStateMap(owner.bookId)
+      if (editorContentRevisionRef.current !== startingEditorRevision) {
+        await retainGeneratedDraft()
+        return
+      }
 
       // Persistence is safely scoped to the captured Summary. Active UI is mutated only
       // if the exact request still owns the same Book/Summary/editor screen.

@@ -188,7 +188,8 @@ export async function importCloudBook(remote: RemoteBook): Promise<string> {
   if (!book || book.id !== remote.clientBookId) throw new Error('The cloud book identity does not match the downloaded archive.')
   const now = Date.now()
   const link: SyncLink = { bookId: book.id, endpoint, remoteBookId: remote.id, createdAt: now, updatedAt: now }
-  const state = connectionState(book.id, downloaded.etag, remote.currentContentHash ?? await archiveContentHash(downloaded.archive))
+  if (!downloaded.etag) throw new Error('The cloud revision is missing. Nothing was imported.')
+  const state = connectionState(book.id, downloaded.etag, await archiveContentHash(downloaded.archive))
   return writeConnectedBookArchive(decoded, link, state)
 }
 
