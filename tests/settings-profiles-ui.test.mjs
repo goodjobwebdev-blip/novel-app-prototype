@@ -937,28 +937,30 @@ test('successful UI profile Save ends palette editing without retaining an obsol
   await mounted.close()
 })
 
-test('partial Application defaults Save retains only unsaved changes for retry', async (t) => {
-  const text = profiles.createSettingsProfile('text', 'Partial default text')
-  const story = profiles.createSettingsProfile('story', 'Partial default story')
-  const previousStory = library().defaults.story
+test('Application defaults Save is atomic and retains every draft change after storage failure', async (t) => {
+  const text = profiles.createSettingsProfile('text', 'Atomic default text')
+  const story = profiles.createSettingsProfile('story', 'Atomic default story')
+  const previousDefaults = { ...library().defaults }
   const mounted = await mount(t, Panel, panelProps({ section: 'application' }))
   await change(field(mounted.host, 'Default Text models'), text.id)
   await change(field(mounted.host, 'Default Story prompt'), story.id)
   const originalSet = window.Storage.prototype.setItem
   let writes = 0
   window.Storage.prototype.setItem = function(key, value) {
-    if (key === profiles.SETTINGS_PROFILES_STORAGE_KEY && ++writes === 2) throw new Error('Second default write failed')
+    if (key === profiles.SETTINGS_PROFILES_STORAGE_KEY) { writes++; throw new Error('Default selections write failed') }
     return originalSet.call(this, key, value)
   }
   try {
     await click(button(mounted.host, 'Save defaults'))
-    assert.match(mounted.host.textContent, /Second default write failed/)
-    assert.equal(library().defaults.text, text.id)
-    assert.equal(library().defaults.story, previousStory)
+    assert.match(mounted.host.textContent, /Default selections write failed/)
+    assert.deepEqual(library().defaults, previousDefaults, 'neither changed assignment is committed on failure')
+    assert.equal(writes, 1, 'changed assignments use one durable library write')
+    assert.equal(field(mounted.host, 'Default Text models').value, text.id)
     assert.equal(field(mounted.host, 'Default Story prompt').value, story.id)
     assert.equal(button(mounted.host, 'Save defaults').disabled, false)
   } finally { window.Storage.prototype.setItem = originalSet }
   await click(button(mounted.host, 'Save defaults'))
+  assert.equal(library().defaults.text, text.id)
   assert.equal(library().defaults.story, story.id)
   assert.equal(button(mounted.host, 'Save defaults').disabled, true)
   await mounted.close()

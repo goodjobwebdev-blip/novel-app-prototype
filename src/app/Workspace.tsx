@@ -2258,7 +2258,7 @@ export default function Workspace() {
       }
       const retainGeneratedDraft = async () => {
         await createSnapshot(summary.id, 'generation', generated)
-        showToast('The summary was edited during generation. Your draft is retained; the generated summary is available in History.')
+        showToast('The summary was edited during generation. Your draft is retained; the generated summary was saved in a recovery snapshot.')
       }
       if (editorContentRevisionRef.current !== startingEditorRevision) {
         await retainGeneratedDraft()

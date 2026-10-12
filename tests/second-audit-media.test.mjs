@@ -25,8 +25,8 @@ async function settle(predicate) {
   for (let i = 0; i < 100 && !predicate(); i++) await act(async () => new Promise(r => setTimeout(r, 10)))
   assert.ok(predicate(), 'asynchronous controls settled')
 }
-for (const scenario of ['prompt and size', 'overlapping uploads', 'task switch', 'model switch']) {
-  test(`B5: pending source decode preserves ${scenario}`, async t => {
+for (const origin of ['upload', 'gallery']) for (const scenario of ['prompt and size', 'overlapping uploads', 'task switch', 'model switch']) {
+  test(`B5 ${origin}: pending source decode preserves ${scenario}`, async t => {
     const favorite = settings.imageFavorite(settings.documentedImageModels.find(m => m.id === 'gpt-image-1'), [])
     favorite.alias = 'Sources'; favorite.tasks = ['text-to-image', 'image-to-image']; favorite.maxSourceImages = 3
     const library = profiles.loadSettingsProfiles()
@@ -35,17 +35,24 @@ for (const scenario of ['prompt and size', 'overlapping uploads', 'task switch',
     const oldBitmap = globalThis.createImageBitmap
     globalThis.createImageBitmap = () => new Promise(resolve => decodes.push(() => resolve({ width: 1, height: 1, close() {} })))
     t.after(() => { globalThis.createImageBitmap = oldBitmap })
+    const sourceAssets = ['first.png', 'second.png'].map(name => ({ id: `asset-${name}`, image: png, thumbnail: png, prompt: name, width: 1, height: 1, createdAt: 1, kept: true }))
     let draft = { prompt: 'Original', task: 'image-to-image', alias: 'Sources', size: favorite.defaultSize, sources: [] }, edit
     function Harness() {
       const [value, setValue] = React.useState(draft)
       edit = setValue
-      return React.createElement(Controls, { value, onChange: next => { draft = next; setValue(next) } })
+      return React.createElement(Controls, { value, sourceAssets, onChange: next => { draft = next; setValue(next) } })
     }
     const root = createRoot(document.getElementById('root'))
     t.after(async () => { await act(async () => { decodes.forEach(release => release()); await new Promise(r => setImmediate(r)); root.unmount() }) })
     await act(async () => root.render(React.createElement(Harness)))
     await settle(() => document.querySelector('input[type=file]'))
     const upload = async name => {
+      if (origin === 'gallery') {
+        const target = [...document.querySelectorAll('.image-source-library button')].find(row => row.textContent === name)
+        assert.ok(target && !target.disabled, 'gallery source is available')
+        await act(async () => target.click())
+        return
+      }
       const input = document.querySelector('input[type=file]')
       Object.defineProperty(input, 'files', { configurable: true, value: [Object.assign(png.slice(0, png.size, png.type), { name })] })
       await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })))

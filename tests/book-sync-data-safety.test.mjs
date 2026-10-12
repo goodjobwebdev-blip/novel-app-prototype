@@ -280,7 +280,9 @@ async function assertLocalMediaPreserved(f, expected, result, transport) {
     assert.equal((await p.getEntity(f.scene.id)).content, 'REMOTE manuscript')
     assert.equal(state.status, 'synced')
     assert.equal(state.remoteETag, '"rev-2"')
-    assert.equal(state.localContentHash, await archiveContentHash(transport.stored))
+    // localContentHash is the accepted device export, which can normalize media
+    // fields and remap conflicting portable profile IDs without changing ETag.
+    assert.equal(state.localContentHash, await archiveContentHash(await capture(f.book.id)))
   }
 }
 
@@ -477,7 +479,9 @@ test('Book sync replaces existing reviewed kept media at the same IDs normally',
   assert.equal((await service.syncBookNow(f.book.id, noPendingSave)).kind, 'pulled')
   assert.equal((await db.table('imageJobs').get(incoming.job.id)).prompt, incoming.job.prompt)
   assert.equal((await db.table('galleryImages').get(incoming.asset.id)).prompt, incoming.asset.prompt)
-  assert.equal((await control.getBookSyncState(f.book.id)).localContentHash, await archiveContentHash(archive))
+  assert.equal((await control.getBookSyncState(f.book.id)).localContentHash, await archiveContentHash(await capture(f.book.id)))
+  assert.equal((await service.syncBookNow(f.book.id, noPendingSave)).kind, 'unchanged', 'normalized accepted media does not produce a false upload')
+  assert.equal(transport.writes.length, 0)
 })
 
 for (const collision of ['running job', 'unreviewed asset', 'foreign job', 'foreign asset', 'wrong media owner']) {
