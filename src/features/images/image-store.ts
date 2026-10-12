@@ -44,7 +44,21 @@ export async function enqueueImageProposal(draft: MediaGenerationDraft, origin: 
   }
   return queueImageJob(spec, origin, snapshot)
 }
-async function queueImageJob(spec: ImageGenerationSpec, origin: ImageJobOrigin, approvedDraft?: MediaGenerationDraft): Promise<ImageJob> {
+function assertGenerationSources(spec: ImageGenerationSpec) {
+  const sources = spec.sources ?? []
+  const needsSource = ['image-to-image', 'image-to-video'].includes(generationTask(spec))
+  if (needsSource && !sources.length) throw new Error('Source images are unavailable. Select the reference images again before generating a new request.')
+  if (!needsSource && sources.length) throw new Error('This generation task does not accept reference images.')
+  if (sources.some(source => !source || !['image/png', 'image/jpeg', 'image/webp'].includes(source.mime) || !(source.data instanceof Blob) || !source.data.size || source.data.type !== source.mime)) {
+    throw new Error('A source image is unavailable or invalid. Select the reference images again before generating a new request.')
+  }
+}
+function immutableRequestSignature(spec: ImageGenerationSpec) {
+  return JSON.stringify({ prompt: spec.prompt, modelAlias: spec.modelAlias, provider: spec.provider, model: spec.model, size: spec.size, task: generationTask(spec), quality: spec.quality, moderation: spec.moderation, video: spec.video, leonardoOptions: spec.leonardoOptions, leonardoContractVersion: spec.leonardoContractVersion })
+}
+async function queueImageJob(spec: ImageGenerationSpec, origin: ImageJobOrigin, approvedDraft?: MediaGenerationDraft, directRetry?: ImageJob): Promise<ImageJob> {
+  // Validate frozen bytes without resolving the old alias against mutable favorites.
+  assertGenerationSources(spec)
   // Copy only request fields: retries must not inherit old job lifecycle metadata or rebind aliases.
   const clean: ImageGenerationSpec = structuredClone({ prompt: spec.prompt, modelAlias: spec.modelAlias, provider: spec.provider, model: spec.model, size: spec.size, task: generationTask(spec), sources: spec.sources ?? [], ...(spec.video ? { video: spec.video } : {}), ...(spec.leonardoOptions ? { leonardoOptions: spec.leonardoOptions, leonardoContractVersion: spec.leonardoContractVersion } : {}), ...(spec.quality ? { quality: spec.quality } : {}), ...(spec.moderation ? { moderation: spec.moderation } : {}) })
   // Digest before opening IndexedDB: Web Crypto must not suspend its transaction.
@@ -54,7 +68,26 @@ async function queueImageJob(spec: ImageGenerationSpec, origin: ImageJobOrigin, 
     const book = origin.bookId ? await db.table('entities').get(origin.bookId) : undefined
     if (origin.bookId && book?.type !== 'book') throw new Error('This book no longer exists.')
     let approval: { id: string; imageGenerations: ChatImageProposal[] } | undefined
-    if (origin.messageId) {
+    if (directRetry) {
+      // An explicit retry is authorized by the durable user-turn claim, not by a proposal
+      // or by the presence of any directImageRequest on an unrelated message.
+      const message = origin.messageId ? await db.table('entities').get(origin.messageId) : undefined
+      const chat = origin.chatId ? await db.table('entities').get(origin.chatId) : undefined
+      const user = directRetry.directUserMessageId ? await db.table('entities').get(directRetry.directUserMessageId) : undefined
+      const claim = user?.directImageClaim, request = message?.directImageRequest
+      const root: ImageJob | undefined = claim?.jobId ? await db.table('imageJobs').get(claim.jobId) : undefined
+      const current: ImageJob | undefined = await db.table('imageJobs').get(directRetry.id)
+      if (chat?.type !== 'chat' || chat.bookId !== origin.bookId
+        || message?.type !== 'chatMessage' || message.role !== 'assistant' || message.bookId !== origin.bookId || message.parentId !== chat.id
+        || user?.type !== 'chatMessage' || user.role !== 'user' || user.bookId !== origin.bookId || user.parentId !== chat.id
+        || !claim?.callId || claim.messageId !== message.id || request?.messageId !== message.id || request.jobId !== claim.jobId || request.callId !== claim.callId
+        || !root || root.directUserMessageId !== user.id || root.messageId !== message.id || root.chatId !== chat.id || root.bookId !== origin.bookId || root.proposalId
+        || !current || !['failed', 'interrupted', 'cancelled'].includes(current.status) || current.providerJobId
+        || current.directUserMessageId !== user.id || current.messageId !== message.id || current.chatId !== chat.id || current.bookId !== origin.bookId || current.proposalId
+        || immutableRequestSignature(root) !== immutableRequestSignature(clean) || immutableRequestSignature(current) !== immutableRequestSignature(clean)) {
+        throw new Error('The originating direct image request changed or is unavailable. Send a new request.')
+      }
+    } else if (origin.messageId) {
       const message = await db.table('entities').get(origin.messageId)
       const chat = await db.table('entities').get(origin.chatId)
       const proposal: ChatImageProposal | undefined = message?.imageGenerations?.find((p: ChatImageProposal) => p.id === origin.proposalId)
@@ -69,7 +102,7 @@ async function queueImageJob(spec: ImageGenerationSpec, origin: ImageJobOrigin, 
       if (existing) return existing as ImageJob
     }
     if (approval) await db.table('entities').update(approval.id, { imageGenerations: approval.imageGenerations, updatedAt: Date.now() })
-    const record: ImageJob = { ...clean, ...origin, localConnectionFingerprint, id: imageId('image-job'), bookTitle: book?.title, status: 'queued', createdAt: Date.now() }
+    const record: ImageJob = { ...clean, ...origin, ...(directRetry ? { directUserMessageId: directRetry.directUserMessageId } : {}), localConnectionFingerprint, id: imageId('image-job'), bookTitle: book?.title, status: 'queued', createdAt: Date.now() }
     await db.table('imageJobs').add(record)
     return record
   })
@@ -194,7 +227,7 @@ export async function retryImageJob(id: string) {
       }
     })
     notifyImageStore()
-  } else await queueImageJob(job, { bookId: job.bookId, chatId: job.chatId, messageId: job.messageId, proposalId: job.proposalId })
+  } else await queueImageJob(job, { bookId: job.bookId, chatId: job.chatId, messageId: job.messageId, proposalId: job.proposalId }, undefined, job.directUserMessageId ? job : undefined)
 }
 const imageDraftQueue = new KeyedAsyncQueue()
 export async function saveImageProposalDraft(origin: Required<Pick<ImageJobOrigin, 'bookId' | 'chatId' | 'messageId' | 'proposalId'>>, draft: MediaGenerationDraft) {

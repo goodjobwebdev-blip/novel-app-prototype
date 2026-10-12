@@ -1487,12 +1487,18 @@ export async function deleteEntity(id: string) {
   await deleteTtsCacheOwners([id]).catch(() => undefined)
 }
 
-export async function saveDocumentContent(entityId: string, content: string, expected?: { bookId?: string; updatedAt: number; content: string }) {
+export async function saveDocumentContent(entityId: string, content: string, expected?: { bookId?: string; updatedAt: number; content: string; workspaceOwnerId?: string }) {
   const db = await database()
   return db.transaction('rw', db.table('entities'), async () => {
     const current = await db.table('entities').get(entityId) as ArcEntity | undefined
+    if (expected?.workspaceOwnerId) {
+      // Check the initiating workspace inside the write transaction: a queued
+      // save must not retain permission after a Book disconnects/hides lore.
+      const owner = await db.table('entities').get(expected.workspaceOwnerId) as BookEntity | WorldEntity | undefined
+      if (!entityAvailableInOwner(current, owner)) throw Object.assign(new Error('This article is no longer available in this workspace. Recover your unsaved draft before leaving.'), { code: 'ARTICLE_ACCESS_LOST' })
+    }
     if (!current) throw new Error(`Cannot save missing entity ${entityId}`)
-    if (expected && (current.bookId !== expected.bookId || current.updatedAt !== expected.updatedAt || String(current.content ?? '') !== expected.content)) throw new Error('This document changed after the proposal was created. Read it again and prepare a new edit.')
+    if (expected && (current.bookId !== expected.bookId || current.updatedAt !== expected.updatedAt || String(current.content ?? '') !== expected.content)) throw Object.assign(new Error('This document changed after the proposal was created. Read it again and prepare a new edit.'), { code: 'DOCUMENT_CONFLICT' })
 
     const now = Math.max(Date.now(), current.updatedAt + 1)
     const patch: Record<string, unknown> = { content, updatedAt: now }

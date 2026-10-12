@@ -6,7 +6,7 @@ import type { BookEntity, CodexEntryEntity } from '../../data/persistence'
 import { database, isCodexEntryArchived } from '../../data/persistence'
 import { entityAvailableInBook } from '../worlds/world-service'
 import { updateChat, type ChatEntity } from './chat-service'
-import { listGalleryImages } from '../images/image-store'
+import { IMAGE_STORE_CHANGED, listGalleryImages } from '../images/image-store'
 import type { GalleryImage } from '../images/image-generation-types'
 import IllustrationModal from '../images/IllustrationModal'
 import Button from '../../shared/ui/Button'
@@ -49,6 +49,17 @@ export function ChatImageReferences({ chat, disabled, onChange }: { chat: ChatEn
   const busy = useRef(false)
   async function save(ids: string[]) { if (busy.current || disabled) return; busy.current = true; try { onChange(await updateChat(chat.id, { directImageReferenceIds: [...new Set(ids)] })) } catch (error) { setError((error as Error).message) } finally { busy.current = false } }
   const [assets, setAssets] = useState<GalleryImage[]>([]), [error, setError] = useState('')
-  useEffect(() => { let current = true; void listGalleryImages(chat.bookId).then(assets => { if (current) setAssets(assets.filter(a => a.kind !== 'video')) }).catch(e => { if (current) setError(e.message) }); return () => { current = false } }, [chat.bookId])
+  useEffect(() => {
+    let current = true, revision = 0
+    const reload = () => {
+      const request = ++revision
+      void listGalleryImages(chat.bookId).then(assets => {
+        if (current && request === revision) { setAssets(assets.filter(a => a.kind !== 'video')); setError('') }
+      }).catch(e => { if (current && request === revision) setError(e.message) })
+    }
+    window.addEventListener(IMAGE_STORE_CHANGED, reload)
+    reload()
+    return () => { current = false; window.removeEventListener(IMAGE_STORE_CHANGED, reload) }
+  }, [chat.bookId])
   return <Disclosure className="chat-image-references" title="Image references" description={`${chat.directImageReferenceIds?.length ?? 0} selected`}><p>Used only when you explicitly request an image. No reference image is selected automatically.</p>{assets.map(asset => <Checkbox key={asset.id} label={asset.prompt || 'Saved image'} disabled={disabled} checked={chat.directImageReferenceIds?.includes(asset.id) ?? false} onChange={e => { const ids = chat.directImageReferenceIds ?? [], next = e.target.checked ? [...ids, asset.id] : ids.filter(id => id !== asset.id); void save(next) }} />)}{(chat.directImageReferenceIds ?? []).filter(id => !assets.some(asset => asset.id === id)).map(id => <Button size="small" variant="ghost" disabled={disabled} key={id} onClick={() => { void save((chat.directImageReferenceIds ?? []).filter(value => value !== id)) }}>Remove unavailable reference</Button>)}{!assets.length && <p>No saved still images in this book.</p>}{error && <p role="alert">{error}</p>}</Disclosure>
 }

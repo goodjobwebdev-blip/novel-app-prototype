@@ -430,6 +430,97 @@ test('read-time lore type ensures and no-op World/entity mutations do not emit n
   assert.ok(worlds > 0)
 })
 
+// BUG-05: expected text is assembled independently, not with the production remapper.
+function demotionMarkdown(destination, original) {
+  return [
+    `[target](arc-codex:${destination})`,
+    `[angled](<arc-codex:${destination}> "Keep this title")`,
+    `The literal ID ${original} and arc-codex:${original} are prose.`,
+    `\`[example](arc-codex:${original})\``,
+    '```md', `[example](arc-codex:${original})`, '```',
+    `![not an article](arc-codex:${original})`,
+    `[external](https://example.com/arc-codex:${original})`,
+    `[other](arc-codex:unrelated-target)`,
+  ].join('\n')
+}
+
+test('BUG-05 demotion rewrites real article destinations in each linked Book and its history, not prose, code or other owners', async () => {
+  const f = await fixture()
+  const target = await p.createCodexEntry(f.world.id, 'Demoted target')
+  const original = demotionMarkdown(target.id, target.id)
+  await p.saveDocumentContent(target.id, original)
+  await p.putEntity({ ...await p.getEntity(target.id), checkpoints: [{ id: 'target-checkpoint', sceneId: '', content: original, createdAt: 1 }] })
+  await p.createSnapshot(target.id, 'manual')
+  const targetSummary = await p.getOrCreateSummary(await p.getEntity(target.id))
+  await p.saveDocumentContent(targetSummary.id, original)
+  await p.createSnapshot(targetSummary.id, 'manual')
+  const documents = new Map()
+  for (const book of f.books) {
+    const scene = (await p.listEntitiesByBook(book.id, 'scene'))[0]
+    const note = await p.createNote(book.id, 'Link-bearing note')
+    const article = await p.createCodexEntry(book.id, 'Local link source')
+    const summary = await p.getOrCreateSummary(article)
+    await p.putEntity({ ...article, checkpoints: [{ id: `checkpoint-${book.id}`, sceneId: scene.id, content: original, createdAt: 1 }] })
+    for (const row of [scene, note, article, summary]) {
+      await p.saveDocumentContent(row.id, original)
+      await p.createSnapshot(row.id, 'manual')
+    }
+    documents.set(book.id, [scene, note, article, summary])
+  }
+  await w.setWorldEntryHidden(f.books[2].id, target.id, true)
+  const outsider = await p.createCodexEntry(f.outsider.id, 'Outside owner source')
+  await p.saveDocumentContent(outsider.id, original)
+  await p.createSnapshot(outsider.id, 'manual')
+  const outsiderBefore = JSON.stringify(await p.getEntity(outsider.id))
+  const outsiderHistory = JSON.stringify(await p.listSnapshots(outsider.id))
+
+  await w.copyWorldEntryToAllBooksAndRemove(f.world.id, target.id)
+
+  assert.equal(await p.getEntity(target.id), undefined)
+  const copyIds = []
+  for (const book of f.books) {
+    const copy = (await w.listBookCodexEntries(book.id)).find(row => row.title === target.title)
+    assert.ok(copy, 'Every linked Book, including a hidden one, receives a copy')
+    assert.notEqual(copy.id, target.id)
+    copyIds.push(copy.id)
+    const expected = demotionMarkdown(copy.id, target.id)
+    assert.equal(copy.content, expected, 'The copied article self-link follows its new local identity')
+    assert.equal(copy.checkpoints[0].content, expected, 'Copied checkpoints remap destinations')
+    assert.equal((await p.listSnapshots(copy.id))[0].content, expected, 'Copied article history remaps destinations')
+    const copiedSummary = await p.getEntity(`summary-${copy.id}`)
+    assert.equal(copiedSummary.content, expected)
+    assert.equal((await p.listSnapshots(copiedSummary.id))[0].content, expected)
+    for (const row of documents.get(book.id)) {
+      const actual = await p.getEntity(row.id)
+      assert.equal(actual.content, expected, `${row.type} links follow this Book’s copy`)
+      assert.equal((await p.listSnapshots(row.id))[0].content, expected, `${row.type} snapshot links follow this Book’s copy`)
+      if (row.type === 'codexEntry') assert.equal(actual.checkpoints[0].content, expected, 'Existing local checkpoints are remapped')
+    }
+  }
+  assert.equal(new Set(copyIds).size, f.books.length, 'Each Book has an independent destination')
+  assert.equal(JSON.stringify(await p.getEntity(outsider.id)), outsiderBefore, 'Other owners are not rewritten')
+  assert.equal(JSON.stringify(await p.listSnapshots(outsider.id)), outsiderHistory, 'Other owners’ history is not rewritten')
+})
+
+test('BUG-05 failure during link rewriting rolls back all copies, links and source deletion', async t => {
+  const f = await fixture()
+  const target = await p.createCodexEntry(f.world.id, 'Atomic demotion target')
+  const source = await p.createNote(f.books[1].id, 'Atomic link source')
+  const content = `[target](arc-codex:${target.id})`
+  await p.saveDocumentContent(source.id, content)
+  await p.createSnapshot(source.id, 'manual')
+  const before = JSON.stringify(await f.db.table('entities').toArray())
+  const history = JSON.stringify(await f.db.table('snapshots').toArray())
+  const rejectRewrite = (changes, key) => {
+    if (key === source.id && 'content' in changes) throw new Error('Injected destination rewrite failure')
+  }
+  f.db.table('entities').hook('updating').subscribe(rejectRewrite)
+  t.after(() => f.db.table('entities').hook('updating').unsubscribe(rejectRewrite))
+  await assert.rejects(() => w.copyWorldEntryToAllBooksAndRemove(f.world.id, target.id), /Injected destination rewrite failure/)
+  assert.equal(JSON.stringify(await f.db.table('entities').toArray()), before)
+  assert.equal(JSON.stringify(await f.db.table('snapshots').toArray()), history)
+})
+
 test('a genuinely empty v8 database also gets the demo once and never resets later World data', async () => {
   const db = await p.database()
   db.close()

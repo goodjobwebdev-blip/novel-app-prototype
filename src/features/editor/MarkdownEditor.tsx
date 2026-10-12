@@ -347,6 +347,7 @@ const livePreview = ViewPlugin.fromClass(class {
 
 function formattingKeymap() {
   const wrapSelection = (marker: string) => (view: EditorView) => {
+    if (view.state.readOnly || !view.state.facet(EditorView.editable)) return false
     const selection = view.state.selection.main
     if (selection.empty) return false
     const selected = view.state.sliceDoc(selection.from, selection.to)
