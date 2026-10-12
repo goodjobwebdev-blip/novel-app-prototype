@@ -4,7 +4,7 @@ import { database, listEntitiesByBook, listCodexDependencies, readBookArchive } 
 import { encodeBookArchive, portableWorldBookSnapshot } from '../../data/book-archive'
 import { storedLoreTypes } from '../codex/lore-types'
 import { documentBlocks } from '../editor/document-projection'
-import { importSettingsProfiles, sanitizeSettingsProfile, settingsProfilesForSelections, type SettingsProfile, type BookProfileSelections } from '../settings/settings-profiles'
+import { importSettingsProfilesReceipt, notifySettingsProfilesChanged, sanitizeSettingsProfile, settingsProfilesForSelections, type SettingsProfile, type BookProfileSelections } from '../settings/settings-profiles'
 import type { GalleryImage, ImageJob } from '../images/image-generation-types'
 import { archiveContentHash } from './sync-hash'
 
@@ -111,15 +111,17 @@ async function addArchiveRows(db: any, data: BookArchiveData, entities: ArcEntit
 /** Install portable identities before accepting the local baseline, while the
  * manuscript lock still excludes later edits. Do not repair the hash lazily on
  * the next read: that could silently accept intervening user edits. Profile
- * clones remain in localStorage (as with ordinary import), never overwrite a
- * shared definition, and are reused by importSettingsProfiles on repeat pulls. */
+ * clones remain in localStorage (as with ordinary import), never overwrite
+ * a shared definition. Hash its immutable install receipt: the IDB lock does
+ * not exclude edits to profiles in localStorage. Repeat pulls reuse clones.
+ */
 async function acceptedArchiveState(db: any, book: BookEntity, state: BookSyncState): Promise<BookSyncState> {
   const selection = await db.table('entities').get(`settings-profiles-book-${book.id}`) as ArcEntity | undefined
   if (selection?.definitions === undefined) return state
-  const value = importSettingsProfiles(selection.definitions as SettingsProfile[], selection.value as BookProfileSelections)
+  const installed = importSettingsProfilesReceipt(selection.definitions as SettingsProfile[], selection.value as BookProfileSelections)
   const { definitions: _portable, ...local } = selection
-  await db.table('entities').put({ ...local, value })
-  const localContentHash = await Dexie.waitFor(archiveContentHash(encodeBookArchive(await currentArchive(db, book))))
+  await db.table('entities').put({ ...local, value: installed.selections })
+  const localContentHash = await Dexie.waitFor(archiveContentHash(encodeBookArchive(await currentArchive(db, book, installed.definitions))))
   return { ...state, localContentHash }
 }
 
@@ -147,6 +149,7 @@ export async function writeConnectedBookArchive(data: BookArchiveData, link: Syn
     await db.table('syncLinks').add(link)
     await db.table('syncState').add(await acceptedArchiveState(db, book, state))
   })
+  if (data.entities.some(entity => entity.settingsType === 'profiles-book' && entity.definitions !== undefined)) notifySettingsProfilesChanged(book.id)
   notify(book.id)
   return book.id
 }
@@ -154,14 +157,14 @@ export async function writeConnectedBookArchive(data: BookArchiveData, link: Syn
 /** Read-only counterpart of readBookArchive after its migrations have run.
  * It must stay inside the replacement transaction: calling the migration queue
  * here would escape the lock or deadlock behind an unrelated queued writer. */
-async function currentArchive(db: any, book: BookEntity): Promise<BookArchiveData> {
+async function currentArchive(db: any, book: BookEntity, installedDefinitions?: SettingsProfile[]): Promise<BookArchiveData> {
   const bookId = book.id
   const entries = await listEntitiesByBook(bookId)
   const selections = entries.find(entry => entry.type === 'settings' && entry.settingsType === 'profiles-book')
   if (!selections) throw new Error('Book profile selections changed. Retry sync.')
-  const settingsProfiles = selections.definitions !== undefined
+  const settingsProfiles = installedDefinitions ?? (selections.definitions !== undefined
     ? (selections.definitions as SettingsProfile[]).map(sanitizeSettingsProfile)
-    : settingsProfilesForSelections(selections.value as BookProfileSelections)
+    : settingsProfilesForSelections(selections.value as BookProfileSelections))
   const series = book.seriesId ? await db.table('entities').get(book.seriesId) : undefined
   const world = book.worldId ? await db.table('entities').get(book.worldId) as ArcEntity | undefined : undefined
   const ownTypes = storedLoreTypes(book), inheritedTypes = world ? storedLoreTypes(world) : []
@@ -271,6 +274,7 @@ export async function replaceConnectedBookArchive(bookId: string, data: BookArch
     await db.table('syncState').put(await acceptedArchiveState(db, incomingBook, state))
     return 'replaced' as const
   })
+  if (result === 'replaced' && data.entities.some(entity => entity.settingsType === 'profiles-book' && entity.definitions !== undefined)) notifySettingsProfilesChanged(bookId)
   notify(bookId)
   return result
 }

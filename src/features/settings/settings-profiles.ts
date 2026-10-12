@@ -330,8 +330,8 @@ export function profileConfiguration(profile: SettingsProfile): unknown {
   return { autocomplete: normalizeAutocompleteSettings(s.autocomplete), ...Object.fromEntries(['mainModel', 'supportModel', 'codexModel', 'chatModel', 'characterModel', 'mainThinkingEffort', 'supportThinkingEffort', 'codexThinkingEffort', 'chatThinkingEffort', 'characterThinkingEffort', 'mainModelContextLength', 'supportModelContextLength', 'codexModelContextLength', 'chatModelContextLength', 'characterModelContextLength', 'mainEffectiveContextLimit', 'codexEffectiveContextLimit', 'chatMaxModelRounds', 'characterMaxModelRounds', 'chatPromptPresetId', 'characterPromptPresetId'].map(key => [key, s[key as keyof AiSettings]])) }
 }
 
-export function settingsProfilesForSelections(selections: BookProfileSelections): SettingsProfile[] {
-  const library = loadSettingsProfiles(); validateBookProfileSelections(selections, library)
+export function settingsProfilesForSelections(selections: BookProfileSelections, library = loadSettingsProfiles()): SettingsProfile[] {
+  validateBookProfileSelections(selections, library)
   const text = findProfile(library, selections.text, 'text').settings
   const ids = new Set([...Object.values(selections), text.chatPromptPresetId ?? library.defaults.chat, text.characterPromptPresetId ?? library.defaults.character])
   return library.profiles.filter(profile => ids.has(profile.id)).map(profile => sanitizeSettingsProfile(profile.kind === 'text' ? { ...profile, settings: { ...profile.settings, chatPromptPresetId: profile.settings.chatPromptPresetId ?? library.defaults.chat, characterPromptPresetId: profile.settings.characterPromptPresetId ?? library.defaults.character } } : profile))
@@ -342,6 +342,13 @@ export function settingsProfilesForSelections(selections: BookProfileSelections)
  * Ordinary archive copies already remap IDs and therefore still create independent profiles.
  */
 export function importSettingsProfiles(profiles: SettingsProfile[], selections: BookProfileSelections): BookProfileSelections {
+  return importSettingsProfilesReceipt(profiles, selections).selections
+}
+
+/** A receipt captures the exact definitions installed by this import, before
+ * notifications or another tab can edit the shared library. Sync baselines
+ * must use this snapshot rather than rereading mutable profiles after an await. */
+export function importSettingsProfilesReceipt(profiles: SettingsProfile[], selections: BookProfileSelections): { selections: BookProfileSelections; definitions: SettingsProfile[] } {
   const library = loadSettingsProfiles(), clean = profiles.map(sanitizeSettingsProfile), ids = new Map<string, string>()
   if (new Set(clean.map(profile => profile.id)).size !== clean.length) throw new Error('Imported profile IDs are not unique.')
   const selectId = (profile: SettingsProfile): string => {
@@ -366,6 +373,7 @@ export function importSettingsProfiles(profiles: SettingsProfile[], selections: 
   const next = { ...library, profiles: [...library.profiles, ...imported.filter(profile => !library.profiles.some(local => local.id === profile.id))] }
   const result = Object.fromEntries(BOOK_PROFILE_KINDS.map(kind => [kind, ids.get(selections[kind])])) as BookProfileSelections
   validateBookProfileSelections(result, next)
+  const receipt = { selections: result, definitions: settingsProfilesForSelections(result, next) }
   if (next.profiles.length !== library.profiles.length) writeLibrary(next)
-  return result
+  return receipt
 }
