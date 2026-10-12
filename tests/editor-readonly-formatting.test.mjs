@@ -10,9 +10,10 @@ import { transpileSourceTree } from './transpile-source-tree.mjs'
 
 const dom = new JSDOM('<html><body><div id="root"></div></body></html>', { url: 'https://arc.test/', pretendToBeVisual: true })
 after(() => dom.window.close())
-for (const key of ['window', 'document', 'HTMLElement', 'Element', 'Node', 'MutationObserver', 'Window', 'DOMRect', 'Range']) globalThis[key] = dom.window[key]
+// Persistence notifications must use the same event realm as dispatchEvent.
+for (const key of ['window', 'document', 'HTMLElement', 'Element', 'Node', 'MutationObserver', 'Window', 'DOMRect', 'Range', 'Event', 'CustomEvent', 'KeyboardEvent']) globalThis[key] = dom.window[key]
 globalThis.getComputedStyle = dom.window.getComputedStyle
-globalThis.localStorage = dom.window.localStorage
+Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: dom.window.localStorage })
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window)
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window)

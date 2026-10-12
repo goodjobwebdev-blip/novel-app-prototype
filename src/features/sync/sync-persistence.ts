@@ -1,5 +1,12 @@
 import type { BookArchiveData, BookEntity, DocumentSnapshot, ArcEntity } from '../../data/persistence'
-import { database } from '../../data/persistence'
+import Dexie from 'dexie'
+import { database, listEntitiesByBook, listCodexDependencies, readBookArchive } from '../../data/persistence'
+import { encodeBookArchive, portableWorldBookSnapshot } from '../../data/book-archive'
+import { storedLoreTypes } from '../codex/lore-types'
+import { documentBlocks } from '../editor/document-projection'
+import { sanitizeSettingsProfile, settingsProfilesForSelections, type SettingsProfile, type BookProfileSelections } from '../settings/settings-profiles'
+import type { GalleryImage, ImageJob } from '../images/image-generation-types'
+import { archiveContentHash } from './sync-hash'
 
 export const SYNC_CHANGED = 'arc-sync-changed'
 
@@ -21,6 +28,8 @@ export type BookSyncState = {
   lastCheckedAt?: number
   lastSyncedAt?: number
   message?: string
+  /** Retries and metadata checks cannot authorize resolving divergent copies. */
+  unresolvedConflict?: boolean
   updatedAt: number
 }
 
@@ -51,9 +60,16 @@ export async function saveSyncConnection(link: SyncLink, state: BookSyncState): 
 
 export async function updateBookSyncState(bookId: string, patch: Partial<BookSyncState>): Promise<BookSyncState> {
   const db = await database()
-  const current = await db.table('syncState').get(bookId) as BookSyncState | undefined
-  const next: BookSyncState = { bookId, status: 'idle', remoteETag: '', localContentHash: '', ...current, ...patch, updatedAt: Date.now() }
-  await db.table('syncState').put(next)
+  const next = await db.transaction('rw', db.table('syncState'), async () => {
+    const current = await db.table('syncState').get(bookId) as BookSyncState | undefined
+    const value: BookSyncState = { bookId, status: 'idle', remoteETag: '', localContentHash: '', ...current, ...patch, updatedAt: Date.now() }
+    if (value.unresolvedConflict && patch.unresolvedConflict !== false) {
+      value.status = 'conflict'
+      value.message = patch.message ?? current?.message ?? 'Choose a recovery action for the different local and cloud copies.'
+    }
+    await db.table('syncState').put(value)
+    return value
+  })
   notify(bookId)
   return next
 }
@@ -120,15 +136,68 @@ export async function writeConnectedBookArchive(data: BookArchiveData, link: Syn
   return book.id
 }
 
-export async function replaceConnectedBookArchive(bookId: string, data: BookArchiveData, state: BookSyncState): Promise<void> {
+/** Read-only counterpart of readBookArchive after its migrations have run.
+ * It must stay inside the replacement transaction: calling the migration queue
+ * here would escape the lock or deadlock behind an unrelated queued writer. */
+async function currentArchive(db: any, book: BookEntity): Promise<BookArchiveData> {
+  const bookId = book.id
+  const entries = await listEntitiesByBook(bookId)
+  const selections = entries.find(entry => entry.type === 'settings' && entry.settingsType === 'profiles-book')
+  if (!selections) throw new Error('Book profile selections changed. Retry sync.')
+  const settingsProfiles = selections.definitions !== undefined
+    ? (selections.definitions as SettingsProfile[]).map(sanitizeSettingsProfile)
+    : settingsProfilesForSelections(selections.value as BookProfileSelections)
+  const series = book.seriesId ? await db.table('entities').get(book.seriesId) : undefined
+  const world = book.worldId ? await db.table('entities').get(book.worldId) as ArcEntity | undefined : undefined
+  const ownTypes = storedLoreTypes(book), inheritedTypes = world ? storedLoreTypes(world) : []
+  const loreTypes = inheritedTypes.length ? [...inheritedTypes, ...ownTypes.filter(type => !type.builtin && !inheritedTypes.some(inherited => inherited.id === type.id))] : ownTypes
+  const snapshots = await db.table('snapshots').where('entityId').anyOf([bookId, ...entries.map(entry => entry.id)]).toArray() as DocumentSnapshot[]
+  const referencedAssets = new Set([...entries, ...snapshots, ...entries.flatMap(entry => Array.isArray(entry.checkpoints) ? entry.checkpoints : [])]
+    .flatMap(entry => documentBlocks(entry.content ?? '').flatMap(item => item.block.assetId ? [item.block.assetId] : [])))
+  const galleryImages = (await db.table('galleryImages').where('bookId').anyOf(book.worldId ? [bookId, book.worldId] : [bookId]).toArray() as GalleryImage[])
+    .filter(asset => (asset.bookId === bookId && asset.kept) || referencedAssets.has(asset.id)).map(asset => ({ ...asset, kept: true, sourceIds: [] }))
+  if ([...referencedAssets].some(id => !galleryImages.some(asset => asset.id === id))) throw new Error('The local book references unavailable media. Nothing was overwritten.')
+  const keptIds = new Set(galleryImages.map(asset => asset.id))
+  const imageJobs = (await db.table('imageJobs').where('bookId').equals(bookId).toArray() as ImageJob[])
+    .filter(job => job.status === 'completed' && job.assetId && keptIds.has(job.assetId))
+    .map(({ providerJobId: _p, owner: _o, heartbeat: _h, sources: _s, localConnectionFingerprint: _identity, ...job }: ImageJob & { localConnectionFingerprint?: string }) => job)
+  return portableWorldBookSnapshot({
+    entities: [{ ...book, loreTypes: loreTypes.map(type => ({ ...type, ownerId: bookId })) },
+      ...entries.filter(entry => !(entry.type === 'settings' && entry.settingsType === 'ai')).map(entity => entity.settingsType === 'profiles-book' ? { ...entity, definitions: settingsProfiles } : entity), ...(series ? [series] : [])],
+    settingsProfiles, snapshots, galleryImages, imageJobs,
+    dependencies: await listCodexDependencies(bookId),
+    illustrations: await db.table('illustrations').where('entryId').anyOf(entries.filter(entry => entry.type === 'codexEntry').map(entry => entry.id)).toArray(),
+  }, bookId)
+}
+
+export type BookReplacementGuard = { expectedLocalHash: string; expectedLink?: SyncLink; expectedState?: BookSyncState }
+
+export async function replaceConnectedBookArchive(bookId: string, data: BookArchiveData, state: BookSyncState, guard?: BookReplacementGuard): Promise<'replaced' | 'conflict'> {
+  // Legacy/direct restore callers also get a compare-and-swap, never an
+  // unguarded force replacement. Service callers pass the pre-download hash.
+  const expectedLink = guard?.expectedLink ?? await getSyncLink(bookId)
+  const expectedState = guard?.expectedState ?? await getBookSyncState(bookId)
+  const expectedLocalHash = guard?.expectedLocalHash ?? await archiveContentHash(encodeBookArchive(await readBookArchive(bookId)))
+  if (!expectedLink || !expectedState) throw new Error('This book is no longer connected to cloud sync.')
   const db = await database()
   const incomingBook = archiveBook(data)
   if (incomingBook.id !== bookId) throw new Error('The remote archive belongs to a different book.')
-  await db.transaction('rw', ...archiveTables(db), db.table('illustrationUndo'), db.table('syncLinks'), db.table('syncState'), async () => {
-    const link = await db.table('syncLinks').get(bookId)
+  const result = await db.transaction('rw', ...archiveTables(db), db.table('illustrationUndo'), db.table('syncLinks'), db.table('syncState'), async () => {
+    const link = await db.table('syncLinks').get(bookId) as SyncLink | undefined
     if (!link) throw new Error('This book is no longer connected to cloud sync.')
+    if (link.endpoint !== expectedLink.endpoint || link.remoteBookId !== expectedLink.remoteBookId || link.createdAt !== expectedLink.createdAt || link.updatedAt !== expectedLink.updatedAt) throw new Error('The sync connection changed. Retry sync before applying a cloud archive.')
     const currentBook = await db.table('entities').get(bookId) as BookEntity | undefined
     if (currentBook?.type !== 'book') throw new Error('The local book no longer exists.')
+    const currentState = await db.table('syncState').get(bookId) as BookSyncState | undefined
+    // WebCrypto/Blob reads are not IDB requests. Keep the transaction alive
+    // exactly as World archive replacement does, while holding every write lock.
+    const currentHash = await Dexie.waitFor(archiveContentHash(encodeBookArchive(await currentArchive(db, currentBook))))
+    if (currentHash !== expectedLocalHash || currentState?.remoteETag !== expectedState.remoteETag ||
+      currentState?.localContentHash !== expectedState.localContentHash || Boolean(currentState?.unresolvedConflict) !== Boolean(expectedState.unresolvedConflict)) {
+      if (!currentState) throw new Error('The sync baseline disappeared. Nothing was overwritten.')
+      await db.table('syncState').put({ ...currentState, status: 'conflict', unresolvedConflict: true, message: 'Local content or the sync baseline changed while downloading. Nothing was overwritten. Choose a recovery action.', lastCheckedAt: Date.now(), updatedAt: Date.now() })
+      return 'conflict' as const
+    }
     const incomingSeries = data.entities.find(entity => entity.type === 'series' && entity.id === incomingBook.seriesId)
     if (incomingSeries) {
       const existingSeries = await db.table('entities').get(incomingSeries.id)
@@ -151,6 +220,8 @@ export async function replaceConnectedBookArchive(bookId: string, data: BookArch
     if (incomingSeries) await db.table('entities').put(incomingSeries)
     await addArchiveRows(db, data, ordinaryEntities)
     await db.table('syncState').put(state)
+    return 'replaced' as const
   })
   notify(bookId)
+  return result
 }

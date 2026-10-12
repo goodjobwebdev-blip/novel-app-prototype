@@ -301,6 +301,12 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
     if (dirty && draft && !usageReady) { setError('Check linked books before saving this profile.'); return false }
     let succeeded = false
     await run(async () => {
+      const assertConnectionsCurrent = () => {
+        if (connectionDirty && JSON.stringify({ connection: loadAiSettings(), imageKeys: loadImageSettings().keys }) !== connectionBaseline) {
+          throw new Error('Connections changed in another editor. Your draft is retained; Discard to load the latest saved connections before editing again.')
+        }
+      }
+      assertConnectionsCurrent()
       if (dirty && draft) {
         const current = loadSettingsProfiles().profiles.find(profile => profile.id === draft.id)
         if (JSON.stringify(current) !== baseline) throw new Error('This profile changed in another editor. Your draft is retained; Discard to load the latest saved version before editing again.')
@@ -323,6 +329,13 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
         const autocompleteWarning = draft.kind === 'text' && draft.settings.autocomplete.enabled ? ' Autocomplete will automatically send manuscript excerpts from all linked books to the active global text connection while typing and may incur costs. Saving does not send a request itself.' : ''
         if (linked.length && !window.confirm(`Save “${draft.name}”? This updates ${linked.length} linked book(s): ${linked.map(book => book.title).join(', ')}. Existing chats keep their snapshots.${autocompleteWarning}`)) return
       }
+      // The linked-book lookup/confirmation may yield. Check every conflict before any write.
+      assertConnectionsCurrent()
+      if (dirty && draft) {
+        const current = loadSettingsProfiles().profiles.find(profile => profile.id === draft.id)
+        if (JSON.stringify(current) !== baseline) throw new Error('This profile changed in another editor. Your draft is retained; Discard to load the latest saved version before editing again.')
+        if (!draft.name.trim()) throw new Error('Give this profile a name before saving.')
+      }
       if (connectionDirty) {
         // Never replace media favorites with the Connections form's older snapshot.
         saveImageSettings({ ...loadImageSettings(), keys: imageKeys })
@@ -331,10 +344,6 @@ const SettingsProfilesPanel = forwardRef<SettingsProfilesPanelRef, {
 
       }
       if (dirty && draft) {
-        // The linked-book lookup yields; recheck before writing a potentially stale draft.
-        const current = loadSettingsProfiles().profiles.find(profile => profile.id === draft.id)
-        if (JSON.stringify(current) !== baseline) throw new Error('This profile changed in another editor. Your draft is retained; Discard to load the latest saved version before editing again.')
-        if (!draft.name.trim()) throw new Error('Give this profile a name before saving.')
         const clean = { ...draft, name: draft.name.trim(), settings: withoutProfileCredentials(draft.settings) }
         if (clean.media) {
           const { keys: _keys, ...media } = clean.media as ImageSettings

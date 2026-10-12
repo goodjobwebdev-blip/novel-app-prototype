@@ -285,6 +285,9 @@ export default function Workspace() {
   const [chatEdit, setChatEdit] = useState(false)
   const [aiReady, setAiReady] = useState(false)
   const [saveState, setSaveState] = useState<SaveState>('loading')
+  const [articleIssue, setArticleIssue] = useState<{ documentId: string; kind: 'conflict' | 'access' } | null>(null)
+  const articleIssueRef = useRef<typeof articleIssue>(null)
+  const [recoveredArticleDraft, setRecoveredArticleDraft] = useState<string | null>(null)
   const [generationActive, setGenerationActive] = useState(false)
   const [generationPreflight, setGenerationPreflight] = useState(false)
   const generationPreflightRef = useRef(false)
@@ -326,6 +329,8 @@ export default function Workspace() {
   const [codexDependencies, setCodexDependencies] = useState<CodexDependencyEdge[]>([])
   const [summaryStates, setSummaryStates] = useState<Record<string, SummaryState>>({})
   const [activeDocument, setActiveDocument] = useState<EditableEntity | null>(null)
+  // The last revision this editor accepted, never a fresh pre-save database read.
+  const documentBaselineRef = useRef<EditableEntity | null>(null)
   useEffect(() => { setGenerationDetails(null); setGenerationDetailsOpen(false); setQuickTool(null); setSelectedProse(null); setBeatRewrite(null) }, [activeDocument?.id, currentBook?.id])
   const [editorRevision, setEditorRevision] = useState(0)
   const [activeSceneId, setActiveSceneId] = useState<string | null>(null)
@@ -533,10 +538,11 @@ export default function Workspace() {
           }
           return
         }
-        if (activeDocumentIdRef.current !== detail.entityId || dirtyAtStart || changedSinceSnapshotRef.current || generationAbortRef.current) return
+        if (activeDocumentIdRef.current !== detail.entityId || articleIssueRef.current?.documentId === documentId || dirtyAtStart || changedSinceSnapshotRef.current || generationAbortRef.current) return
         const refreshed = await getEntity<EditableEntity>(detail.entityId)
         if (!isCurrent() || changedSinceSnapshotRef.current || generationAbortRef.current) return
         if (!refreshed || !['scene', 'note', 'codexEntry', 'summary'].includes(refreshed.type) || !entityAvailableInWorkspace(refreshed, currentBookRef.current ?? undefined)) return
+        documentBaselineRef.current = refreshed
         setActiveDocument(refreshed)
         const content = String(refreshed.content ?? '')
         storyRef.current = content
@@ -567,9 +573,51 @@ export default function Workspace() {
     if (libraryState === 'ready') setSaveState('saved')
   }, [libraryState])
 
+  function reportArticleIssue(documentId: string, kind: 'conflict' | 'access') {
+    const issue = { documentId, kind }
+    // Access loss takes precedence over a prior revision conflict.
+    if (articleIssueRef.current?.documentId === documentId && articleIssueRef.current.kind === 'access') return
+    articleIssueRef.current = issue
+    setArticleIssue(issue)
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
+    setSaveState('error')
+  }
+
+  function acceptArticleMetadata(updated: EditableEntity) {
+    const baseline = documentBaselineRef.current
+    // Local metadata can advance the revision, not silently accept body edits.
+    if (!articleIssueRef.current && baseline?.id === updated.id && baseline.content === updated.content) documentBaselineRef.current = updated
+  }
+
+  async function reloadLatestArticle() {
+    const documentId = activeDocumentIdRef.current, ownerId = currentBookIdRef.current
+    if (!documentId || !ownerId || articleIssueRef.current?.kind === 'access') return
+    const editEpoch = editorContentRevisionRef.current
+    try {
+      // Drain already queued attempts before accepting a new baseline.
+      await documentSaveQueueRef.current.run(documentId, async () => {})
+      const [latest, owner] = await Promise.all([getEntity<EditableEntity>(documentId), getEntity<WorkspaceOwner>(ownerId)])
+      if (activeDocumentIdRef.current !== documentId || currentBookIdRef.current !== ownerId || editorContentRevisionRef.current !== editEpoch) return
+      if (!latest || !entityAvailableInWorkspace(latest, owner)) { reportArticleIssue(documentId, 'access'); return }
+      bookRefreshIntentRef.current.invalidate()
+      editorContentRevisionRef.current += 1
+      documentBaselineRef.current = latest
+      articleIssueRef.current = null; setArticleIssue(null)
+      currentBookRef.current = owner ?? null; setCurrentBook(owner ?? null)
+      setActiveDocument(latest)
+      storyRef.current = String(latest.content ?? '')
+      changedSinceSnapshotRef.current = false
+      setStoryMarkdown(storyRef.current)
+      setEditorRevision(value => value + 1)
+      setSaveState('saved')
+    } catch (error) { showToast(error instanceof Error ? error.message : 'The latest article could not be loaded.') }
+  }
+
   async function flushDocument(reason: SnapshotReason = 'autosave', snapshot = false): Promise<boolean> {
     const documentId = activeDocumentIdRef.current
     if (!storageReadyRef.current || !documentId || deletingEntityIdsRef.current.has(documentId)) return false
+    if (articleIssueRef.current?.documentId === documentId) return false
+    const workspaceOwnerId = currentBookIdRef.current
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
@@ -583,14 +631,23 @@ export default function Workspace() {
       let savedDocument: EditableEntity
       try {
         savedDocument = await documentSaveQueueRef.current.run(documentId, async () => {
+          if (articleIssueRef.current?.documentId === documentId) throw Object.assign(new Error('Resolve the article save conflict before retrying.'), { code: articleIssueRef.current.kind === 'access' ? 'ARTICLE_ACCESS_LOST' : 'DOCUMENT_CONFLICT' })
           const current = await getEntity<EditableEntity>(documentId)
-          if (!current) throw new Error(`Cannot save missing document ${documentId}`)
-          return current.type === 'summary'
+          if (!current) throw Object.assign(new Error(`Cannot save missing document ${documentId}`), documentBaselineRef.current?.type === 'codexEntry' ? { code: 'ARTICLE_ACCESS_LOST' } : {})
+          const baseline = documentBaselineRef.current
+          if (current.type === 'codexEntry' && baseline?.id !== documentId) throw Object.assign(new Error('The article baseline is no longer available.'), { code: 'DOCUMENT_CONFLICT' })
+          const saved = current.type === 'summary'
             ? await saveSummaryContent(current.id, contentSnapshot, (await buildSummarySource(current.sourceEntityId, currentBookIdRef.current ?? undefined)).sourceRevision, undefined, undefined, currentBookIdRef.current ?? undefined)
-            : await saveDocumentContent(documentId, contentSnapshot) as EditableEntity
+            : await saveDocumentContent(documentId, contentSnapshot, current.type === 'codexEntry' && baseline ? { bookId: baseline.bookId, updatedAt: baseline.updatedAt, content: String(baseline.content ?? ''), workspaceOwnerId: workspaceOwnerId ?? undefined } : undefined) as EditableEntity
+          // Advance only on our successful commit, before a second queued save.
+          if (activeDocumentIdRef.current === documentId) documentBaselineRef.current = saved
+          return saved
         })
       } catch (error) {
-        console.error('Failed to persist document', error)
+        const code = (error as { code?: string }).code
+        if (activeDocumentIdRef.current === documentId && (code === 'DOCUMENT_CONFLICT' || code === 'ARTICLE_ACCESS_LOST')) {
+          reportArticleIssue(documentId, code === 'ARTICLE_ACCESS_LOST' ? 'access' : 'conflict')
+        } else console.error('Failed to persist document', error)
         if (activeDocumentIdRef.current === documentId) setSaveState('error')
         return false
       }
@@ -632,6 +689,7 @@ export default function Workspace() {
         continue
       }
 
+      if (articleIssueRef.current?.documentId === documentId) return false
       if (snapshotRequested) changedSinceSnapshotRef.current = false
       setActiveDocument(savedDocument)
       if (nextSummaryStates) setSummaryStates(nextSummaryStates)
@@ -682,6 +740,7 @@ export default function Workspace() {
   }
 
   function handleStoryChange(value: string) {
+    if (articleIssueRef.current?.documentId === activeDocumentIdRef.current && articleIssueRef.current.kind === 'access') return
     editorContentRevisionRef.current += 1
     storyRef.current = value
     if (activeDocument?.type === 'scene') {
@@ -693,7 +752,7 @@ export default function Workspace() {
     }
     changedSinceSnapshotRef.current = true
     setStoryMarkdown(value)
-    if (storageReadyRef.current) setSaveState('saving')
+    if (storageReadyRef.current) setSaveState(articleIssueRef.current ? 'error' : 'saving')
     scheduleAutomaticSync()
   }
 
@@ -791,6 +850,8 @@ export default function Workspace() {
       setCurrentArticleId(editableDocument.id)
     }
     activeDocumentIdRef.current = editableDocument.id
+    documentBaselineRef.current = editableDocument
+    articleIssueRef.current = null; setArticleIssue(null)
     setActiveDocument(editableDocument)
     if (editableDocument.type === 'scene') {
       activeSceneIdRef.current = editableDocument.id
@@ -843,6 +904,8 @@ export default function Workspace() {
     setCurrentBook(world)
     applyBookContent(content)
     activeDocumentIdRef.current = article?.id ?? null
+    documentBaselineRef.current = article ?? null
+    articleIssueRef.current = null; setArticleIssue(null)
     setActiveDocument(article ?? null)
     activeSceneIdRef.current = null
     setActiveSceneId(null)
@@ -912,6 +975,8 @@ export default function Workspace() {
     applyBookContent(content)
     setExpandedIds(new Set(content.structural.filter((entity) => entity.type !== 'scene').map((entity) => entity.id)))
     activeDocumentIdRef.current = scene?.id ?? null
+    documentBaselineRef.current = scene ?? null
+    articleIssueRef.current = null; setArticleIssue(null)
     setActiveDocument(scene ?? null)
     activeSceneIdRef.current = scene?.id ?? null
     setActiveSceneId(scene?.id ?? null)
@@ -1021,7 +1086,7 @@ export default function Workspace() {
       if (!id || !bookId) return
       void getEntity<EditableEntity>(id).then(entry => {
         if (!active || !entry || !entityAvailableInWorkspace(entry, currentBookRef.current ?? undefined) || activeDocumentIdRef.current !== id) return
-        if (entry.type === 'codexEntry') setActiveDocument(current => current?.id === id ? { ...current, typeId: entry.typeId, category: entry.category, updatedAt: entry.updatedAt, sourceRevision: entry.sourceRevision } : current)
+        if (entry.type === 'codexEntry') { acceptArticleMetadata(entry); setActiveDocument(current => current?.id === id ? { ...current, typeId: entry.typeId, category: entry.category, updatedAt: entry.updatedAt, sourceRevision: entry.sourceRevision } : current) }
         if (entry.type === 'note') setActiveDocument(current => current?.id === id ? { ...current, compatibleLoreTypeIds: entry.compatibleLoreTypeIds, useAsCodexTemplate: entry.useAsCodexTemplate, useAsChatSkill: entry.useAsChatSkill } : current)
       }).catch(() => showToast('The lore type label could not be refreshed.'))
     }
@@ -1053,6 +1118,7 @@ export default function Workspace() {
     if (!isCurrent()) return
     setBookList(books)
     if (!book || !['book', 'world'].includes(book.type)) {
+      if (documentId && documentBaselineRef.current?.type === 'codexEntry' && (dirtyAtStart || articleIssueRef.current?.documentId === documentId)) { reportArticleIssue(documentId, 'access'); return }
       bookOpenIntentRef.current.invalidate(); documentLoadIntentRef.current.invalidate(); bookRefreshIntentRef.current.invalidate()
       currentBookIdRef.current = null; currentBookRef.current = null; activeDocumentIdRef.current = null; activeSceneIdRef.current = null
       setCurrentBook(null); setActiveDocument(null); setActiveSceneId(null); setCurrentArticleId(null); setActiveChatId('')
@@ -1067,6 +1133,13 @@ export default function Workspace() {
     const content = await readBookContent(bookId)
     if (!isCurrent()) return
     applyBookContent(content)
+    // Check availability even while dirty. Never silently discard that draft or
+    // keep saving it through a Book that no longer has access to canonical lore.
+    if (documentId && documentBaselineRef.current?.type === 'codexEntry' && !entityAvailableInWorkspace(refreshed, book)) {
+      reportArticleIssue(documentId, 'access')
+      return
+    }
+    if (articleIssueRef.current?.documentId === documentId) return
     if (dirtyAtStart || generationAbortRef.current || changedSinceSnapshotRef.current) return
     if (currentArticleId) {
       const article = await getEntity<CodexEntryEntity>(currentArticleId)
@@ -1081,6 +1154,7 @@ export default function Workspace() {
       return
     }
     if (refreshed) {
+      documentBaselineRef.current = refreshed
       setActiveDocument(current => {
         if (current?.id !== documentId) return current
         if (JSON.stringify(current) === JSON.stringify(refreshed)) return current
@@ -1270,11 +1344,12 @@ export default function Workspace() {
   }
 
   async function renameContentEntity(entity: NoteEntity | CodexEntryEntity) {
+    if (articleIssueRef.current?.documentId === entity.id) return
     const label = entity.type === 'note' ? 'Note title' : 'Codex entry name'
     const title = window.prompt(label, entity.title)
     if (title === null || !title.trim() || !currentBook) return
     const updated = await renameEntity(entity.id, title) as NoteEntity | CodexEntryEntity
-    if (activeDocumentIdRef.current === updated.id) setActiveDocument(updated)
+    if (activeDocumentIdRef.current === updated.id) { acceptArticleMetadata(updated); setActiveDocument(updated) }
     await reloadBookContent(currentBook.id)
   }
 
@@ -1294,14 +1369,16 @@ export default function Workspace() {
   }
 
   async function changeCodexCategory(category: string) {
+    if (articleIssueRef.current?.documentId === activeDocumentIdRef.current) return
     if (activeDocument?.type !== 'codexEntry' || !currentBook || isCodexEntryArchived(activeDocument)) return
     const sourceId = activeDocument.id
     const updated = await updateCodexCategory(sourceId, category)
     setCodexEntries((items) => items.map((item) => item.id === updated.id ? updated : item))
-    applyIfStillCurrent(sourceId, () => activeDocumentIdRef.current, () => setActiveDocument(updated))
+    applyIfStillCurrent(sourceId, () => activeDocumentIdRef.current, () => { acceptArticleMetadata(updated); setActiveDocument(updated) })
   }
 
   async function saveCodexTriggers() {
+    if (articleIssueRef.current?.documentId === activeDocumentIdRef.current) return
     if (activeDocument?.type !== 'codexEntry' || isCodexEntryArchived(activeDocument)) return
     const sourceId = activeDocument.id
     const triggerSnapshot = codexTriggerDraft.split(/\r?\n/)
@@ -1314,6 +1391,7 @@ export default function Workspace() {
       const updated = await updateCodexAutoIncludeTriggers(sourceId, triggerSnapshot)
       setCodexEntries((entries) => entries.map((entry) => entry.id === updated.id ? updated : entry))
       applyIfStillCurrent(sourceId, () => activeDocumentIdRef.current, () => {
+        acceptArticleMetadata(updated)
         setActiveDocument(updated)
         setCodexTriggerDraft((updated.autoIncludeTriggers ?? []).join('\n'))
                 setCodexTriggerError('')
@@ -1324,11 +1402,12 @@ export default function Workspace() {
   }
 
   async function changeCodexSummaryPreference(prefer: boolean) {
+    if (articleIssueRef.current?.documentId === activeDocumentIdRef.current) return
     if (activeDocument?.type !== 'codexEntry' || !currentBook || isCodexEntryArchived(activeDocument)) return
     const sourceId = activeDocument.id
     const updated = await updateCodexSummaryPreference(sourceId, prefer)
     setCodexEntries((items) => items.map((item) => item.id === updated.id ? updated : item))
-    applyIfStillCurrent(sourceId, () => activeDocumentIdRef.current, () => setActiveDocument(updated))
+    applyIfStillCurrent(sourceId, () => activeDocumentIdRef.current, () => { acceptArticleMetadata(updated); setActiveDocument(updated) })
   }
 
   async function addCodexDependency(sourceId: string, targetId: string) {
@@ -1366,6 +1445,7 @@ export default function Workspace() {
       if (activeDocumentIdRef.current === entity.id && changedSinceSnapshotRef.current && !await flushDocument('navigation', true)) throw new Error('Save the entry before archiving it.')
       const updated = await archiveCodexEntry(entity.id)
       if (activeDocumentIdRef.current === entity.id) {
+        documentBaselineRef.current = updated
         setActiveDocument(updated)
         storyRef.current = updated.content
         setStoryMarkdown(updated.content)
@@ -1384,6 +1464,7 @@ export default function Workspace() {
     try {
       const updated = await restoreCodexEntry(entity.id)
       if (activeDocumentIdRef.current === entity.id) {
+        documentBaselineRef.current = updated
         setActiveDocument(updated)
         storyRef.current = updated.content
         setStoryMarkdown(updated.content)
@@ -1572,7 +1653,7 @@ export default function Workspace() {
         await reloadBookContent(currentBook.id)
         if (activeDocumentIdRef.current === renamed.id) {
           const refreshed = await getEntity<EditableEntity>(renamed.id)
-          if (refreshed) setActiveDocument(refreshed)
+          if (refreshed) { acceptArticleMetadata(refreshed); setActiveDocument(refreshed) }
         }
       }
       showToast(`Renamed “${autotitle.request.targetTitle}” to “${autotitle.suggestion}”.`, 'success')
@@ -2352,6 +2433,25 @@ export default function Workspace() {
       <TtsStatusBar />
       <SttStatusBar />
 
+      {articleIssue && articleIssue.documentId === activeDocument?.id && <section role="alert" aria-label={articleIssue.kind === 'access' ? 'Article access lost' : 'Article save conflict'}>
+        <strong>{articleIssue.kind === 'access' ? 'This article is no longer available in this workspace.' : 'This article was changed by another editor.'}</strong>
+        <p>Your unsaved Markdown remains here. Recover it for copying before discarding or reloading; automatic saves are paused.</p>
+        <Button onClick={() => setRecoveredArticleDraft(storyRef.current)}>Recover draft</Button>
+        {articleIssue.kind === 'conflict' ? <Button onClick={() => { void reloadLatestArticle() }}>Reload latest article</Button> : <Button onClick={() => {
+          setRecoveredArticleDraft(storyRef.current)
+          bookRefreshIntentRef.current.invalidate(); editorContentRevisionRef.current += 1
+          activeDocumentIdRef.current = null; documentBaselineRef.current = null
+          articleIssueRef.current = null; setArticleIssue(null)
+          setActiveDocument(null); setCurrentArticleId(null)
+          changedSinceSnapshotRef.current = false; storyRef.current = ''; setStoryMarkdown(''); setSaveState('saved')
+        }}>Close unavailable article</Button>}
+      </section>}
+      {recoveredArticleDraft !== null && <section role="dialog" aria-label="Recovered article draft">
+        <h2>Unsaved article draft</h2><p>Copy this Markdown to keep it. This recovery does not write to the article.</p>
+        <textarea aria-label="Unsaved article draft" readOnly value={recoveredArticleDraft} />
+        <Button onClick={() => setRecoveredArticleDraft(null)}>Close draft recovery</Button>
+      </section>}
+
       {generationDetailsOpen && generationDetails && <GenerationDetailsDialog details={generationDetails} elapsedSeconds={generationElapsedSeconds} onClose={() => setGenerationDetailsOpen(false)} />}
       {loreMention && <LoreMentionPopover state={loreMention} onClose={() => setLoreMention(null)} onSelect={(entry) => { void loadLoreMentionPreview(loreMention.id, entry) }} onOpen={(entryId) => { void openLoreMentionEntry(entryId) }} />}
       {autotitleOverlay}
@@ -2384,7 +2484,7 @@ export default function Workspace() {
         {activeDocument?.type === 'codexEntry' && <ArticleLinks key={activeDocument.id} entry={activeDocument} content={storyMarkdown} entries={codexEntries} disabled={generationActive || activeCodexArchived} onOpen={id => { void openArticle(id) }} onInsert={markdown => { const selection = editorRef.current?.captureSelection?.(); if (selection) { editorRef.current?.replaceRange(selection, markdown); return } handleStoryChange(storyRef.current + markdown) }} />}
         {activeDocument?.type === 'summary' && summaryContextIndicator && <div className="summary-context-indicator">{summaryContextIndicator}</div>}
         {activeDocument && currentBook && ['scene', 'note', 'codexEntry'].includes(activeDocument.type) && !activeCodexArchived && <EditorBlocks key={`blocks-${activeDocument.id}`} bookId={activeDocument.bookId} editor={editorRef} disabled={generationActive} onEditRequestHandled={() => setBlockEditRequest(null)} insertImage={imageInsertRequest === activeDocument.id} onInsertHandled={() => setImageInsertRequest(null)} editRequest={blockEditRequest?.documentId === activeDocument.id && blockEditRequest.snapshot.document === storyMarkdown ? blockEditRequest : null} />}
-        <div hidden={timelineView?.entryId === activeDocument?.id && timelineView?.nonBaseline}>{activeDocument ? <MarkdownEditor key={`${activeDocument.id}-${editorRevision}`} ref={editorRef} historyKey={`${currentBook?.id}:${activeDocument.id}`} onArticleLink={id => { void openArticle(id) }} onAutocompleteInput={snapshot => { if (!generationPreflightRef.current && !generationAbortRef.current) void autocomplete.onInput(snapshot) }} onAutocompleteInvalidate={autocomplete.cancel} onAutocompleteAccept={autocomplete.accept} onSelectionChange={(selection) => setSelectedProse(selection ? { documentId: activeDocument.id, selection } : null)} bookId={activeDocument.bookId} showBeats={showBeats} highlightDialogue={activeDocument.type === 'scene' && highlightDialogue} onBeatAction={actOnBeat} onEditBlock={(item) => { const snapshot = editorRef.current?.captureSelection(item.from, item.to); if (snapshot) setBlockEditRequest({ documentId: activeDocument.id, item, snapshot }) }} value={storyMarkdown} onChange={handleStoryChange} onHistoryChange={setEditorHistory} ariaLabel={`${activeDocument.title} Markdown editor`} readOnly={activeCodexArchived || activeSummarySourceArchived} mentionTerms={activeDocument.type === 'scene' ? codexMentionIndex : []} onMentionClick={activeDocument.type === 'scene' ? openLoreMention : undefined} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No document selected</strong><p>{isWorldWorkspace ? 'Create a Codex article to start building this World. Books are optional.' : 'Choose a Scene, Note, Codex entry, or Summary from the book workspace.'}</p>{isWorldWorkspace && <Button onClick={() => { void addCodexEntry() }}>Create first article</Button>}<button type="button" onClick={() => setRightOpen(true)}>{isWorldWorkspace ? 'Open World Workspace' : 'Open Book Workspace'}</button></div>}</div>
+        <div hidden={timelineView?.entryId === activeDocument?.id && timelineView?.nonBaseline}>{activeDocument ? <MarkdownEditor key={`${activeDocument.id}-${editorRevision}`} ref={editorRef} historyKey={`${currentBook?.id}:${activeDocument.id}`} onArticleLink={id => { void openArticle(id) }} onAutocompleteInput={snapshot => { if (!generationPreflightRef.current && !generationAbortRef.current) void autocomplete.onInput(snapshot) }} onAutocompleteInvalidate={autocomplete.cancel} onAutocompleteAccept={autocomplete.accept} onSelectionChange={(selection) => setSelectedProse(selection ? { documentId: activeDocument.id, selection } : null)} bookId={activeDocument.bookId} showBeats={showBeats} highlightDialogue={activeDocument.type === 'scene' && highlightDialogue} onBeatAction={actOnBeat} onEditBlock={(item) => { const snapshot = editorRef.current?.captureSelection(item.from, item.to); if (snapshot) setBlockEditRequest({ documentId: activeDocument.id, item, snapshot }) }} value={storyMarkdown} onChange={handleStoryChange} onHistoryChange={setEditorHistory} ariaLabel={`${activeDocument.title} Markdown editor`} readOnly={activeCodexArchived || activeSummarySourceArchived || (articleIssue?.documentId === activeDocument.id && articleIssue.kind === 'access')} mentionTerms={activeDocument.type === 'scene' ? codexMentionIndex : []} onMentionClick={activeDocument.type === 'scene' ? openLoreMention : undefined} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No document selected</strong><p>{isWorldWorkspace ? 'Create a Codex article to start building this World. Books are optional.' : 'Choose a Scene, Note, Codex entry, or Summary from the book workspace.'}</p>{isWorldWorkspace && <Button onClick={() => { void addCodexEntry() }}>Create first article</Button>}<button type="button" onClick={() => setRightOpen(true)}>{isWorldWorkspace ? 'Open World Workspace' : 'Open Book Workspace'}</button></div>}</div>
         {characterSetupEntry && currentBook && <CharacterChatSetup bookId={currentBook.id} initialEntryId={characterSetupEntry} currentSceneId={activeSceneId || undefined} onClose={() => setCharacterSetupEntry(null)} onOpen={openChat} />}
       </article> : currentBook ? <ChatView key={`${currentBook.type}:${currentBook.id}`} bookId={currentBook.id} chatId={activeChatId} bookPromptValues={toBookPromptValues(currentBook, seriesList)} currentSceneId={isWorldWorkspace ? null : activeSceneId} currentArticleId={currentArticleId} onOpenArticle={id => { void openArticle(id) }} onBeforeArticleAction={beforeWorldCodexChange} onChatChange={openChat} onToast={showToast} /> : <section className="conversation chat-empty"><MessageCircle aria-hidden="true" /><p>Open a workspace before starting a chat.</p></section>}
 

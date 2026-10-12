@@ -2,6 +2,7 @@ import { createBook, database, type ArcEntity, type BookEntity, type CodexDepend
 import type { AiSettings } from '../../shared/ai/ai-settings'
 import { ensureLoreTypesWithDb, resolveLoreType, storedLoreTypes, type LoreType } from '../codex/lore-types.ts'
 import { documentBlocks, remapDocumentBlocks } from '../editor/document-projection.ts'
+import { remapArticleLinks } from '../codex/codex-article-links.ts'
 import type { GalleryImage } from '../images/image-generation-types'
 import type Dexie from 'dexie'
 
@@ -287,8 +288,9 @@ async function transferEntry(db: Dexie, source: CodexEntryEntity, ownerId: strin
   }
   const type = await transferType(db, source, ownerId)
   const { worldId: _world, codexScope: _scope, seriesSourceId: _source, seriesSourceSeriesId: _series, seriesSnapshotSignature: _signature, hiddenInBook: _hidden, ...local } = source
-  const entry: CodexEntryEntity = { ...local, ...type, id: targetId, bookId: ownerId, parentId: ownerId, ...(worldId ? { worldId } : {}), content: remapDocumentBlocks(source.content, ids), updatedAt: now, createdAt: move ? source.createdAt : now }
-  if (entry.checkpoints) entry.checkpoints = entry.checkpoints.map(point => ({ ...point, id: move ? point.id : id('checkpoint'), content: remapDocumentBlocks(point.content, ids) }))
+  const remapContent = (content: string) => remapArticleLinks(remapDocumentBlocks(content, ids), ids)
+  const entry: CodexEntryEntity = { ...local, ...type, id: targetId, bookId: ownerId, parentId: ownerId, ...(worldId ? { worldId } : {}), content: remapContent(source.content), updatedAt: now, createdAt: move ? source.createdAt : now }
+  if (entry.checkpoints) entry.checkpoints = entry.checkpoints.map(point => ({ ...point, id: move ? point.id : id('checkpoint'), content: remapContent(point.content) }))
   const illustration = await db.table('illustrations').where('entryId').equals(source.id).first() as Illustration | undefined
   if (illustration) {
     entry.primaryImageId = move ? illustration.id : id('image')
@@ -299,9 +301,9 @@ async function transferEntry(db: Dexie, source: CodexEntryEntity, ownerId: strin
   await db.table('entities').put(entry)
   for (const summary of summaries) {
     const { worldId: _world, ...localSummary } = summary
-    await db.table('entities').put({ ...localSummary, id: ids.get(summary.id), bookId: ownerId, ...(worldId ? { worldId } : {}), parentId: targetId, sourceEntityId: targetId, content: remapDocumentBlocks(summary.content ?? '', ids), updatedAt: now })
+    await db.table('entities').put({ ...localSummary, id: ids.get(summary.id), bookId: ownerId, ...(worldId ? { worldId } : {}), parentId: targetId, sourceEntityId: targetId, content: remapContent(summary.content ?? ''), updatedAt: now })
   }
-  for (const snapshot of snapshots) await db.table('snapshots').put({ ...snapshot, id: move ? snapshot.id : id('snapshot'), entityId: ids.get(snapshot.entityId), content: remapDocumentBlocks(snapshot.content, ids) })
+  for (const snapshot of snapshots) await db.table('snapshots').put({ ...snapshot, id: move ? snapshot.id : id('snapshot'), entityId: ids.get(snapshot.entityId), content: remapContent(snapshot.content) })
   return entry
 }
 async function copyOutgoingEdges(db: Dexie, source: CodexEntryEntity, target: CodexEntryEntity, book: BookEntity) {
@@ -369,7 +371,18 @@ export async function copyWorldEntryToAllBooksAndRemove(worldId: string, entryId
       const rows = await db.table('entities').where('bookId').equals(book.id).toArray() as ArcEntity[]
       for (const row of rows) {
         const replacement = replaceEntryReferences(row, entryId, copied.id)
-        if (JSON.stringify(replacement) !== JSON.stringify(row)) await db.table('entities').put(replacement)
+        if (JSON.stringify(replacement) !== JSON.stringify(row)) {
+          replacement.updatedAt = revision(row)
+          if (replacement.type === 'codexEntry' && replacement.content !== row.content) replacement.sourceRevision = replacement.updatedAt
+          await db.table('entities').put(replacement)
+        }
+      }
+      // History is owned via entityId, not bookId. Keep each Book's destination
+      // independent, and rewrite within this same rollback boundary.
+      const snapshots = await db.table('snapshots').where('entityId').anyOf(rows.map(row => row.id)).toArray() as DocumentSnapshot[]
+      for (const snapshot of snapshots) {
+        const content = remapArticleLinks(snapshot.content, new Map([[entryId, copied.id]]))
+        if (content !== snapshot.content) await db.table('snapshots').update(snapshot.id, { content })
       }
       await db.table('entities').update(book.id, { hiddenWorldEntryIds: (book.hiddenWorldEntryIds ?? []).filter(value => value !== entryId), updatedAt: revision(book) })
     }
@@ -394,5 +407,6 @@ function replaceEntryReferences<T>(value: T, sourceId: string, targetId: string,
   }
   if (typeof value === 'string' && ['entryId', 'sourceId', 'targetId', 'sourceEntityId', 'codexEntryIds', 'sourceIds', 'linkedEntityId'].includes(key) && value === sourceId) return targetId as T
   if (key === 'directImageReferenceIds' && value === `codex:${sourceId}`) return `codex:${targetId}` as T
+  if (key === 'content' && typeof value === 'string') return remapArticleLinks(value, new Map([[sourceId, targetId]])) as T
   return value
 }
