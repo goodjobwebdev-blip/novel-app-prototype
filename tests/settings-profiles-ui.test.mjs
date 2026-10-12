@@ -1116,6 +1116,27 @@ test('compact profile headers show loaded usage, kind-specific shared effects an
   }
 })
 
+test('profile toolbar contains type and profile selectors, with linked-book warnings only on dirty drafts', async t => {
+  const id = library().defaults.text
+  const mounted = await mount(t, Panel, panelProps({ initialProfileId: id }))
+  await waitForProfileUsage(mounted.host)
+  const toolbar = mounted.host.querySelector('.profile-header-main')
+  assert.ok(field(toolbar, 'Model profile type'), 'Profile type is part of the compact toolbar')
+  assert.equal(field(toolbar, 'Profile / preset').value, id)
+  const about = mounted.host.querySelector('.profile-about')
+  assert.equal(about.open, false)
+  assert.match(about.textContent, /shared global profile/i)
+  assert.equal(mounted.host.querySelector('.profile-linked-warning').hidden, true, 'Saved profiles do not need a permanent warning banner')
+  await openRename(mounted.host)
+  await change(field(mounted.host, 'Profile name'), 'Density dirty draft')
+  assert.equal(mounted.host.querySelector('.profile-linked-warning').hidden, false, 'Editing exposes linked-book impact before Save')
+  assert.match(mounted.host.querySelector('.profile-linked-warning').textContent, /linked books?/)
+  await click(button(mounted.host, 'Discard'))
+  assert.equal(mounted.host.querySelector('.profile-linked-warning').hidden, true)
+  assert.equal(profile(id).name, field(mounted.host, 'Profile / preset').selectedOptions[0].textContent.replace(' · Default', ''))
+  await mounted.close()
+})
+
 test('profile Actions opens by keyboard and Escape returns focus to its trigger', async (t) => {
   const custom = profiles.createSettingsProfile('text', 'Keyboard actions')
   const mounted = await mount(t, Panel, panelProps({ initialProfileId: custom.id }))
@@ -1169,7 +1190,7 @@ test('Create new profile reveals inline creation fields; Cancel creates nothing 
   const beforeDefaults = JSON.stringify(library().defaults)
   const beforeIds = JSON.stringify(library().profiles.map(item => item.id))
   const mounted = await mount(t, Panel, panelProps({ initialProfileId: source.id }))
-  const picker = mounted.host.querySelector('.profile-header-main select')
+  const picker = mounted.host.querySelector('.profile-header-main .profile-selection select')
   assert.ok(picker)
   await profileAction(mounted.host, 'Create new profile')
   const management = mounted.host.querySelector('.profile-management-fields')
@@ -1282,7 +1303,7 @@ for (const choice of ['Save and continue', 'Discard and continue']) {
     const beforeCount = library().profiles.length
     let editor
     const mounted = await mount(t, Panel, panelProps({ initialProfileId: source.id, renderEditor: props => { editor = props; return null } }))
-    const picker = mounted.host.querySelector('.profile-header-main select')
+    const picker = mounted.host.querySelector('.profile-header-main .profile-selection select')
     assert.ok(picker)
     await openRename(mounted.host)
     await change(field(mounted.host, 'Profile name'), 'Duplicate edited source')

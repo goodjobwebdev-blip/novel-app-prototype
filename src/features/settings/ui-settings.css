@@ -203,7 +203,6 @@ select {
 }
 
 .ui-font-field > span,
-.ui-theme-name > .arc-field__label,
 .ui-color-grid label > span {
   display: block;
   margin-bottom: 7px;
@@ -510,7 +509,7 @@ select {
   height: 34px;
   min-height: 34px;
   padding: 2px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   flex: none;
   cursor: pointer;
 }

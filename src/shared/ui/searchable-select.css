@@ -1,4 +1,4 @@
-.arc-searchable-select { position: relative; min-width: 0; display: grid; gap: 7px; }
+.arc-searchable-select { position: relative; min-width: 0; display: grid; gap: var(--field-gap); }
 .arc-searchable-select__label { color: var(--soft); font-size: 12px; font-weight: 600; }
 .arc-searchable-select__trigger { width: 100%; min-height: 54px; padding: 7px 11px; border: 1px solid color-mix(in srgb, var(--ink) 28%, var(--line)); border-radius: var(--radius); background: color-mix(in srgb, var(--surface-2) 82%, transparent); color: var(--ink); display: grid; grid-template-columns: minmax(0,1fr) 18px; align-items: center; gap: 10px; text-align: left; cursor: pointer; }
 .arc-searchable-select__trigger.has-icon { grid-template-columns: auto minmax(0,1fr) 18px; }

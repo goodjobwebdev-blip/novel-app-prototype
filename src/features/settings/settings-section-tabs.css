@@ -1,5 +1,5 @@
 .settings-section-tabs.settings-section-tabs {
-  margin: 0 0 22px;
+  margin: 0 0 var(--group-gap);
   scrollbar-width: none;
 }
 

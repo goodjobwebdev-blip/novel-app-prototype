@@ -19,6 +19,19 @@ This document tracks the app-wide migration to the shared components in `src/sha
 - Media, covers, chat bubbles, and large overlay geometry are not mechanically forced to `5px`.
 - Editor typography settings affect editor prose and expandable inputs only.
 
+## Density contract
+
+`src/shared/ui/density.css` owns UI spacing independently of theme palettes and manuscript typography:
+
+- Base spacing: `--space-1/2/3/4/6/8` = `4/8/12/16/24/32px`.
+- Use `--field-gap` for label/control/help spacing (4px desktop, 6px on narrow/coarse-pointer screens), `--control-gap` for related controls, and `--field-stack-gap` for stacked fields.
+- Use `--card-padding`, `--group-gap`, `--section-gap`, and `--page-padding` for nested surfaces and page geometry. Default card padding is 12px; changing touch size must not inflate surrounding whitespace.
+- Shared small/medium/large controls use 32/36/44px desktop minimum heights. Narrow/coarse-pointer screens use 44/44/48px; `--touch-target` remains 44px. Content can make a control taller.
+- Shared fields own their child margins and supporting typography; legacy `label > span` rules must exclude shared fields and choices.
+- `--muted` aliases `--soft` and `--border` aliases `--line`, so older semantic-token consumers follow the selected palette.
+- Settings puts profile type, selection, Duplicate, and Actions in one responsive toolbar. Shared/default/usage metadata and collapsed help follow it. Linked-book impact is explained in help at rest and shown as a banner for dirty, linked profiles; explicit Save/Discard and save confirmation remain unchanged.
+- Ordinary profile rows, warning surfaces, save bars, and navigation selections use `--radius`; leave dialogs use `--overlay-radius`. Semantic exceptions below still apply.
+
 ## App shell and workspace
 
 - [x] Migrate standard settings fields in `src/app/App.tsx` to shared inputs, selects, and checkboxes.
