@@ -1117,8 +1117,12 @@ export default function Workspace() {
     ])
     if (!isCurrent()) return
     setBookList(books)
+    // Snapshot bookkeeping can remain dirty after a successful autosave. Only
+    // text not in our committed baseline (or an existing conflict) needs recovery.
+    const hasArticleDraft = () => storyRef.current !== String(documentBaselineRef.current?.content ?? '')
+      || articleIssueRef.current?.documentId === documentId
     if (!book || !['book', 'world'].includes(book.type)) {
-      if (documentId && documentBaselineRef.current?.type === 'codexEntry' && (dirtyAtStart || articleIssueRef.current?.documentId === documentId)) { reportArticleIssue(documentId, 'access'); return }
+      if (documentId && documentBaselineRef.current?.type === 'codexEntry' && hasArticleDraft()) { reportArticleIssue(documentId, 'access'); return }
       bookOpenIntentRef.current.invalidate(); documentLoadIntentRef.current.invalidate(); bookRefreshIntentRef.current.invalidate()
       currentBookIdRef.current = null; currentBookRef.current = null; activeDocumentIdRef.current = null; activeSceneIdRef.current = null
       setCurrentBook(null); setActiveDocument(null); setActiveSceneId(null); setCurrentArticleId(null); setActiveChatId('')
@@ -1136,7 +1140,17 @@ export default function Workspace() {
     // Check availability even while dirty. Never silently discard that draft or
     // keep saving it through a Book that no longer has access to canonical lore.
     if (documentId && documentBaselineRef.current?.type === 'codexEntry' && !entityAvailableInWorkspace(refreshed, book)) {
-      reportArticleIssue(documentId, 'access')
+      if (hasArticleDraft()) {
+        reportArticleIssue(documentId, 'access')
+      } else {
+        // A flushed/clean article has nothing to recover: retain the original
+        // hide/disconnect/navigation behavior instead of showing an access error.
+        setActiveDocument(null); activeDocumentIdRef.current = null; documentBaselineRef.current = null
+        setStoryMarkdown(''); storyRef.current = ''; changedSinceSnapshotRef.current = false
+        if (documentId === currentArticleId) setCurrentArticleId(null)
+        if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
+        setEditorRevision(value => value + 1); setSaveState('saved')
+      }
       return
     }
     if (articleIssueRef.current?.documentId === documentId) return

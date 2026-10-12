@@ -28,6 +28,7 @@ registerHooks({ resolve(specifier, context, nextResolve) {
 } })
 
 const p = await import('../src/data/persistence.ts')
+const mediaStore = await import('../src/features/images/image-store.ts')
 const archives = await import('../src/data/book-archive.ts')
 const control = await import('../src/features/sync/sync-persistence.ts')
 const service = await import('../src/features/sync/sync-service.ts')
@@ -210,6 +211,117 @@ for (const kind of ['scene', 'note']) {
     await assertPreserved(f, edit, await pending, transport)
   })
 }
+
+// Synthetic queue rows avoid model/profile setup and never submit a paid request.
+// Worker lifecycle transitions and output persistence use the real media store.
+async function queuedLocalMedia(f) {
+  const job = {
+    id: `sync-media-${f.book.id}`, bookId: f.book.id, bookTitle: f.book.title,
+    prompt: 'Synthetic sync reference', provider: 'pruna', model: 'synthetic-model',
+    modelAlias: 'synthetic', size: { value: '1x1', width: 1, height: 1 },
+    task: 'image-to-image', status: 'queued', createdAt: 1,
+    localConnectionFingerprint: 'synthetic-device-connection',
+    sources: [{ id: 'synthetic-reference', mime: 'image/png', width: 1, height: 1,
+      data: new Blob(['synthetic reference bytes'], { type: 'image/png' }) }],
+  }
+  await (await p.database()).table('imageJobs').add(job)
+  return job
+}
+async function runningLocalMedia(job) {
+  const claimed = await mediaStore.claimImageJob('pruna', `sync-worker-${job.bookId}`)
+  assert.equal(claimed?.id, job.id, 'the real worker claims the synthetic queued row')
+  assert.equal(await mediaStore.patchOwnedImageJob(job.id, claimed.owner, {
+    providerJobId: `synthetic-ticket-${job.id}`,
+  }), true)
+  return (await p.database()).table('imageJobs').get(job.id)
+}
+async function completeLocalMedia(job) {
+  await mediaStore.completeImageJob(job, {
+    image: new Blob(['synthetic output bytes'], { type: 'image/png' }),
+    thumbnail: new Blob(['synthetic thumbnail bytes'], { type: 'image/png' }),
+    width: 1, height: 1,
+  })
+  const db = await p.database()
+  const completed = await db.table('imageJobs').get(job.id)
+  assert.equal(completed.status, 'completed')
+  assert.equal(completed.decision, undefined, 'the writer has not reviewed or kept the output')
+  assert.equal((await db.table('galleryImages').get(completed.assetId)).kept, false)
+  return completed
+}
+async function localMediaSnapshot(jobId) {
+  const db = await p.database(), job = await db.table('imageJobs').get(jobId)
+  if (!job) return undefined
+  const sources = job.sources && await Promise.all(job.sources.map(async source => ({
+    ...source, data: [...new Uint8Array(await source.data.arrayBuffer())],
+  })))
+  const asset = job.assetId ? await db.table('galleryImages').get(job.assetId) : undefined
+  return {
+    job: { ...job, sources },
+    asset: asset && { ...asset,
+      image: [...new Uint8Array(await asset.image.arrayBuffer())],
+      thumbnail: [...new Uint8Array(await asset.thumbnail.arrayBuffer())],
+    },
+  }
+}
+async function assertLocalMediaPreserved(f, expected, result, transport) {
+  assert.deepEqual(await localMediaSnapshot(expected.job.id), expected,
+    'incoming Book replacement must preserve the local job, request bytes, worker ticket and unreviewed output bytes')
+  assert.ok(['pulled', 'conflict'].includes(result.kind), 'preserve device-local media on pull or refuse replacement as a conflict')
+  const state = await control.getBookSyncState(f.book.id)
+  assert.equal((await control.getSyncLink(f.book.id)).remoteBookId, f.remoteId)
+  assert.equal(transport.writes.length, 0, 'a newer cloud archive must not trigger a media-related upload')
+  if (result.kind === 'conflict') {
+    assert.equal((await p.getEntity(f.scene.id)).content, 'BASELINE manuscript')
+    assert.equal(state.status, 'conflict')
+    assert.equal(state.remoteETag, baselineETag)
+    assert.equal(state.localContentHash, f.hash)
+  } else {
+    assert.equal((await p.getEntity(f.scene.id)).content, 'REMOTE manuscript')
+    assert.equal(state.status, 'synced')
+    assert.equal(state.remoteETag, '"rev-2"')
+    assert.equal(state.localContentHash, await archiveContentHash(transport.stored))
+  }
+}
+
+for (const transition of ['enqueue queued job', 'advance queued job to running', 'complete running job without Keep']) {
+  test(`Book sync replacement preserves local media during download: ${transition}`, { timeout: 10_000 }, async t => {
+    const f = await fixture(t)
+    let job
+    if (transition !== 'enqueue queued job') job = await queuedLocalMedia(f)
+    if (transition === 'complete running job without Keep') job = await runningLocalMedia(job)
+    await control.saveSyncConnection(f.link, f.state)
+    assert.equal(await archiveContentHash(await capture(f.book.id)), f.hash,
+      'device-local pending work is excluded from the portable archive hash before sync')
+    const downloadGate = gate()
+    const transport = await bookTransport(f, { archive: await incomingArchive(f), downloadGate })
+    installTransport(t, transport)
+    let pending
+    cleanup(t, async () => { downloadGate.release(); await pending?.catch(() => {}) })
+    pending = service.syncBookNow(f.book.id, noPendingSave)
+    await Promise.race([downloadGate.entered, pending.then(() => { throw new Error('Sync completed before download gate') })])
+    if (transition === 'enqueue queued job') job = await queuedLocalMedia(f)
+    else if (transition === 'advance queued job to running') job = await runningLocalMedia(job)
+    else job = await completeLocalMedia(job)
+    const expected = await localMediaSnapshot(job.id)
+    assert.ok(expected, 'local media is durably committed before download resumes')
+    assert.equal(await archiveContentHash(await capture(f.book.id)), f.hash,
+      'queued/running jobs and unkept outputs do not change the archive hash; hash-only replacement guards cannot detect their loss')
+    downloadGate.release()
+    await assertLocalMediaPreserved(f, expected, await pending, transport)
+  })
+}
+
+test('Book sync clean pull preserves an unreviewed local result that existed before sync', async t => {
+  const f = await fixture(t)
+  const job = await completeLocalMedia(await runningLocalMedia(await queuedLocalMedia(f)))
+  const expected = await localMediaSnapshot(job.id)
+  assert.equal(await archiveContentHash(await capture(f.book.id)), f.hash,
+    'the unreviewed result is device-local and the portable archive remains clean')
+  await control.saveSyncConnection(f.link, f.state)
+  const transport = await bookTransport(f, { archive: await incomingArchive(f) })
+  installTransport(t, transport)
+  await assertLocalMediaPreserved(f, expected, await service.syncBookNow(f.book.id, noPendingSave), transport)
+})
 
 test('Book sync still pulls a clean newer cloud archive', async t => {
   const f = await fixture(t)

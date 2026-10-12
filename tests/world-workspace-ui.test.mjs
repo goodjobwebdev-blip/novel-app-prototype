@@ -759,14 +759,21 @@ test('Chat retains the current World article as an explicit selectable source', 
 
 // QUESTION-01 contract: revision conflict, draft recovery and explicit reload.
 // The two roots have independent Workspace save queues/baselines, but share real
-// IndexedDB. Only the first write is held, BEFORE its transaction lock is acquired.
+// IndexedDB. Only the first document-content write is held, BEFORE its lock.
+// getEntity also opens rw normalization transactions; holding one of those lets
+// another lifecycle/autosave attempt commit the supposed loser before the winner.
 function pauseNextDocumentWrite(t) {
   const original = db.transaction
   let entered = false, release
   const gate = new Promise(resolve => { release = resolve })
   db.transaction = function (...args) {
     const tables = args.slice(1, -1).flat()
-    if (!entered && args[0] === 'rw' && tables.some(table => table?.name === 'entities')) {
+    const scope = args.at(-1)
+    // Match saveDocumentContent's transaction, not getEntity's normalization,
+    // metadata writes or snapshot bookkeeping. The transpiler preserves names.
+    const isDocumentWrite = typeof scope === 'function'
+      && /\bentityId\b/.test(scope.toString()) && /\bexpected\b/.test(scope.toString())
+    if (!entered && isDocumentWrite && args[0] === 'rw' && tables.some(table => table?.name === 'entities')) {
       entered = true
       db.transaction = original
       return gate.then(() => original.apply(this, args))
