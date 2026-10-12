@@ -639,6 +639,10 @@ for (const mode of ['import', 'pull']) {
     const incoming = archives.encodeBookArchive(data)
     const transport = await bookTransport(f, { archive: incoming })
     installTransport(t, transport)
+    let bookSelectionNotified = false
+    const selectionChanged = event => { if (event.detail?.bookId === f.book.id) bookSelectionNotified = true }
+    window.addEventListener(profiles.SETTINGS_PROFILES_EVENT, selectionChanged)
+    cleanup(t, () => window.removeEventListener(profiles.SETTINGS_PROFILES_EVENT, selectionChanged))
     if (mode === 'import') {
       await p.deleteEntityTree(f.book.id)
       await service.importCloudBook({ id: f.remoteId, clientBookId: f.book.id })
@@ -647,6 +651,7 @@ for (const mode of ['import', 'pull']) {
       assert.equal((await service.syncBookNow(f.book.id, noPendingSave)).kind, 'pulled')
     }
     const installed = await p.getBookProfileSelections(f.book.id)
+    assert.equal(bookSelectionNotified, true, 'installed selections notify mounted book settings even though lazy migration is no longer needed')
     assert.notEqual(installed.text, text.id, 'conflicting shared text profile is cloned')
     const installedText = profiles.loadSettingsProfiles().profiles.find(row => row.id === installed.text)
     assert.notEqual(installedText.settings.chatPromptPresetId, chat.id, 'preset dependency is remapped too')
