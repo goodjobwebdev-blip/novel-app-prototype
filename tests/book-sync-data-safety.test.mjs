@@ -323,6 +323,71 @@ test('Book sync clean pull preserves an unreviewed local result that existed bef
   await assertLocalMediaPreserved(f, expected, await service.syncBookNow(f.book.id, noPendingSave), transport)
 })
 
+test('Book sync preserves Chat media provenance when cloud deletes its origin, and Keep still exports a valid backup', async t => {
+  const f = await fixture(t)
+  const chats = await import('../src/features/chat/chat-service.ts')
+  const chat = await chats.createChat(f.book.id, 'Original media request')
+  const user = await chats.createChatMessage(chat, 'user', 'Generate an image of the original scene.')
+  const message = await chats.createChatMessage(chat, 'assistant', '')
+  const db = await p.database()
+  const queued = await queuedLocalMedia(f)
+  const origin = { chatId: chat.id, messageId: message.id, directUserMessageId: user.id,
+    submissionId: `direct-${user.id}` }
+  const claim = { jobId: queued.id, messageId: message.id, callId: `call-${queued.id}` }
+  await db.table('entities').update(user.id, { directImageClaim: claim })
+  await db.table('entities').update(message.id, { directImageRequest: claim })
+  await db.table('imageJobs').update(queued.id, origin)
+  const originals = await Promise.all([chat.id, user.id, message.id].map(id => p.getEntity(id)))
+  const job = await runningLocalMedia(await db.table('imageJobs').get(queued.id))
+  const expected = await localMediaSnapshot(job.id)
+  f.baseline = await capture(f.book.id)
+  f.hash = await archiveContentHash(f.baseline)
+  f.state = { ...f.state, localContentHash: f.hash }
+  await control.saveSyncConnection(f.link, f.state)
+
+  const incoming = await archives.decodeBookArchive(await incomingArchive(f))
+  const deletedIds = new Set([chat.id, user.id, message.id])
+  incoming.entities = incoming.entities.filter(row => !deletedIds.has(row.id))
+  const incomingBlob = archives.encodeBookArchive(incoming)
+  const decodedIncoming = await archives.decodeBookArchive(incomingBlob)
+  assert.equal(decodedIncoming.entities.some(row => deletedIds.has(row.id)), false,
+    'the valid incoming archive genuinely deletes the original Chat and both request turns')
+  const transport = await bookTransport(f, { archive: incomingBlob })
+  installTransport(t, transport)
+  const result = await service.syncBookNow(f.book.id, noPendingSave)
+  await assertLocalMediaPreserved(f, expected, result, transport)
+  if (result.kind === 'conflict') {
+    assert.deepEqual(await Promise.all([...deletedIds].map(id => p.getEntity(id))), originals,
+      'refusing replacement must retain the original Chat, assistant origin and explicit user request')
+  }
+  assert.equal(await mediaStore.patchOwnedImageJob(job.id, job.owner, { heartbeat: 123 }), true,
+    'the preserved worker still owns its original provider ticket')
+  // Real PNG bytes ensure decoding fails on dangling origin references, not invalid media.
+  const png = new Blob([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6AAAAAElFTkSuQmCC', 'base64')], { type: 'image/png' })
+  await mediaStore.completeImageJob(job, { image: png, thumbnail: png, width: 1, height: 1 })
+  const completed = await db.table('imageJobs').get(job.id)
+  assert.equal(completed.status, 'completed')
+  assert.equal(completed.providerJobId, job.providerJobId)
+  await mediaStore.decideImageJob(job.id, true)
+  const kept = await db.table('imageJobs').get(job.id)
+  assert.equal(kept.decision, 'kept')
+  assert.equal((await db.table('galleryImages').get(kept.assetId)).kept, true)
+  assert.deepEqual(Object.fromEntries(Object.keys(origin).map(key => [key, kept[key]])), origin,
+    'pull, completion and Keep must not silently erase or rebind immutable request provenance used by retry')
+  const portable = await p.readBookArchive(f.book.id)
+  assert.ok(portable.imageJobs.some(row => row.id === job.id), 'Keep exports the completed job')
+  assert.ok(portable.galleryImages.some(row => row.id === kept.assetId), 'Keep exports its output')
+  let restored
+  await assert.doesNotReject(async () => {
+    restored = await archives.decodeBookArchive(archives.encodeBookArchive(portable))
+  }, 'a freshly exported backup after Keep must decode without orphaned Chat/message references')
+  assert.ok(restored.imageJobs.some(row => row.id === job.id && row.assetId === kept.assetId))
+  const retainedUser = await p.getEntity(user.id)
+  assert.equal(retainedUser?.content, user.content, 'the original explicit user request remains accessible, not rebound to another turn')
+  assert.equal(retainedUser?.parentId, chat.id)
+  assert.deepEqual(retainedUser?.directImageClaim, claim, 'the original user-turn authorization remains intact')
+})
+
 test('Book sync preserves a running worker so its original ticket can complete after pull', async t => {
   const f = await fixture(t)
   const job = await runningLocalMedia(await queuedLocalMedia(f))
