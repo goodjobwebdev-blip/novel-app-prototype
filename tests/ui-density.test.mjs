@@ -47,3 +47,28 @@ test('shared fields own their spacing and descriptions inside legacy settings', 
     assert.equal(getComputedStyle(description).fontSize, '12px', 'Input and Select help use the same supporting type')
   }
 })
+
+test('shared density and surface tokens govern settings without changing manuscript typography', async t => {
+  const dom = await styledDom(t, '<section class="book-profile-row"></section><p class="profile-linked-warning"></p><div class="profile-save-bar"></div>')
+  const { document } = dom.window
+  const style = document.createElement('style')
+  style.textContent = await readFile(new URL('../src/features/settings/settings-profiles.css', import.meta.url), 'utf8')
+  document.head.append(style)
+  const root = dom.window.getComputedStyle(document.documentElement)
+  assert.notEqual(root.getPropertyValue('--field-gap').trim(), '', 'Shared field-gap token is defined')
+  assert.notEqual(root.getPropertyValue('--card-padding').trim(), '', 'Shared card-padding token is defined')
+  assert.notEqual(root.getPropertyValue('--touch-target').trim(), '', 'Touch target remains separate from spacing')
+  for (const selector of ['.book-profile-row', '.profile-linked-warning', '.profile-save-bar']) {
+    assert.equal(dom.window.getComputedStyle(document.querySelector(selector)).borderRadius, 'var(--radius)', `${selector} uses ordinary surface geometry`)
+  }
+  const previous = globalThis.document
+  globalThis.document = document
+  try {
+    for (const theme of ['very-dark', 'light']) {
+      ui.applyUiSettings({ ...ui.defaultUiSettings, activeThemeId: theme })
+      assert.equal(root.getPropertyValue('--muted').trim(), 'var(--soft)', 'Muted text uses the active theme secondary color')
+      assert.equal(document.documentElement.style.getPropertyValue('--editor-font-size'), `${ui.defaultUiSettings.editor.fontSize}px`)
+      assert.equal(document.documentElement.style.getPropertyValue('--editor-line-height'), String(ui.defaultUiSettings.editor.lineHeight))
+    }
+  } finally { globalThis.document = previous }
+})

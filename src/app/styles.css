@@ -79,7 +79,8 @@ button { color: inherit; }
 .provider-grid > button > i { width:36px; height:36px; border-radius:10px; background:rgba(255,255,255,.045); color:var(--accent); display:grid; place-items:center; font-size:12px; font-style:normal; font-weight:700; }
 .provider-grid strong,.provider-grid small { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }.provider-grid strong { font-size:12px; }.provider-grid small { margin-top:3px; color:var(--faint); font-size:9px; }.provider-grid b { color:var(--accent-bright); font-size:12px; }
 .connection-fields { margin-top: 18px; display: grid; gap: 13px; }
-label > span { display:flex; justify-content:space-between; margin-bottom:7px; color:var(--soft); font-size:12px; }
+/* Legacy labels must not override the shared field/choice layout. */
+label:not(.arc-field):not(.arc-choice):not(.arc-rich-choice) > span { display:flex; justify-content:space-between; margin-bottom:7px; color:var(--soft); font-size:12px; }
 label em { color:var(--faint); font-size:10px; font-style:normal; font-weight:400; }
 input,textarea { width:100%; border:1px solid var(--line); outline:none; color:var(--ink); background:rgba(255,255,255,.025); }
 input { min-height:46px; padding:10px 12px; border-radius:12px; } input:focus,textarea:focus { border-color:rgba(198,168,107,.45); box-shadow:0 0 0 3px rgba(198,168,107,.07); }

@@ -40,7 +40,7 @@
 .arc-rich-choice > input:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 22%, transparent); outline-offset: 2px; }
 .arc-rich-choice > input:disabled, .arc-rich-choice:has(input:disabled) { opacity: .5; cursor: not-allowed; }
 .arc-rich-choice__content, .arc-rich-choice__heading, .arc-rich-choice__title, .arc-rich-choice__description, .arc-rich-choice__meta, .arc-rich-choice__badges { min-width: 0; }
-.arc-rich-choice__content { display: grid; gap: 5px; }
+.arc-rich-choice__content { display: grid; gap: 5px; margin: 0; }
 .arc-rich-choice__heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .arc-rich-choice__title { color: var(--ink); font-size: 13px; font-weight: 700; line-height: 1.35; overflow-wrap: anywhere; }
 .arc-rich-choice__description { color: var(--soft); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }

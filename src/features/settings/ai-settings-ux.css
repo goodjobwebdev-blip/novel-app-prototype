@@ -9,7 +9,7 @@
 .ai-settings-shell .prompt-validation-summary,
 .ai-settings-shell .prompt-variable-list span { font-size: 12px; color: var(--soft); line-height: 1.5; }
 .ai-settings-shell .provider-grid small { white-space: normal; }
-.ai-settings-shell .settings-card label > span { font-size: 13px; }
+.ai-settings-shell .settings-card .arc-field__label { font-size: 13px; }
 .ai-settings-shell button { cursor: pointer; }
 .ai-settings-shell .status.error { color: var(--danger); }
 .ai-scope-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; color: var(--soft); font-size: 13px; }
