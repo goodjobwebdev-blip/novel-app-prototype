@@ -217,6 +217,10 @@ export async function replaceConnectedBookArchive(bookId: string, data: BookArch
     const incomingSeries = data.entities.find(entity => entity.type === 'series' && entity.id === incomingBook.seriesId)
     if (incomingSeries) {
       const existingSeries = await db.table('entities').get(incomingSeries.id)
+      if (existingSeries && (existingSeries.type !== 'series' || existingSeries.bookId || existingSeries.parentId)) {
+        throw new Error('The cloud series identity conflicts with a different local entity. Nothing was overwritten.')
+      }
+      if (incomingSeries.bookId || incomingSeries.parentId) throw new Error('The cloud series has an invalid owner identity.')
       if (existingSeries && JSON.stringify(existingSeries) !== JSON.stringify(incomingSeries)) {
         const otherBooks = (await db.table('entities').where('type').equals('book').toArray() as BookEntity[]).filter(book => book.id !== bookId && book.seriesId === incomingSeries.id)
         if (otherBooks.length) throw new Error('The cloud series changed, but another local book also uses that series. Import a recovery copy instead.')

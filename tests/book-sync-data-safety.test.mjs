@@ -35,6 +35,7 @@ const service = await import('../src/features/sync/sync-service.ts')
 const settings = await import('../src/features/sync/sync-settings.ts')
 const { archiveContentHash } = await import('../src/features/sync/sync-hash.ts')
 const { initialAiSettings } = await import('../src/shared/ai/ai-settings.ts')
+const profiles = await import('../src/features/settings/settings-profiles.ts')
 after(async () => (await p.database()).close())
 
 const endpoint = 'https://sync.example.test'
@@ -606,6 +607,55 @@ test('first enable still creates and uploads a previously absent cloud Book afte
   assert.equal((await archives.decodeBookArchive(transport.stored)).entities.find(row => row.id === f.scene.id).content, 'FLUSHED manuscript')
   assert.equal((await control.getSyncLink(f.book.id)).remoteBookId, f.remoteId)
 })
+
+test('B7: cloud import pairs the downloaded ETag with its archive, not stale list hash', async t => {
+  const f = await fixture(t)
+  const incoming = await incomingArchive(f)
+  const transport = await bookTransport(f, { archive: incoming })
+  installTransport(t, transport)
+  await p.deleteEntityTree(f.book.id)
+  const remote = { id: f.remoteId, clientBookId: f.book.id, currentContentHash: f.hash }
+  assert.equal(await service.importCloudBook(remote), f.book.id)
+  const state = await control.getBookSyncState(f.book.id)
+  assert.equal(state.remoteETag, '"rev-2"')
+  assert.equal(state.localContentHash, await archiveContentHash(await capture(f.book.id)))
+  assert.equal((await service.syncBookNow(f.book.id, noPendingSave)).kind, 'unchanged')
+  assert.equal(transport.writes.length, 0)
+})
+
+for (const mode of ['import', 'pull']) {
+  test(`B8: ${mode} accepts remapped profile and preset IDs without false dirty, but detects later edits`, async t => {
+    const f = await fixture(t)
+    const data = await archives.decodeBookArchive(await incomingArchive(f))
+    const text = data.settingsProfiles.find(row => row.kind === 'text')
+    const chat = data.settingsProfiles.find(row => row.id === text.settings.chatPromptPresetId)
+    data.entities.find(row => row.settingsType === 'profiles-book').definitions = data.settingsProfiles
+    // A distinct remote definition at occupied IDs forces the required clone path.
+    text.name += ' remote'; chat.name += ' remote'
+    const incoming = archives.encodeBookArchive(data)
+    const transport = await bookTransport(f, { archive: incoming })
+    installTransport(t, transport)
+    if (mode === 'import') {
+      await p.deleteEntityTree(f.book.id)
+      await service.importCloudBook({ id: f.remoteId, clientBookId: f.book.id })
+    } else {
+      await control.saveSyncConnection(f.link, f.state)
+      assert.equal((await service.syncBookNow(f.book.id, noPendingSave)).kind, 'pulled')
+    }
+    const installed = await p.getBookProfileSelections(f.book.id)
+    assert.notEqual(installed.text, text.id, 'conflicting shared text profile is cloned')
+    const installedText = profiles.loadSettingsProfiles().profiles.find(row => row.id === installed.text)
+    assert.notEqual(installedText.settings.chatPromptPresetId, chat.id, 'preset dependency is remapped too')
+    assert.equal(profiles.loadSettingsProfiles().profiles.find(row => row.id === text.id).name.endsWith(' remote'), false)
+    const state = await control.getBookSyncState(f.book.id)
+    assert.equal(state.localContentHash, await archiveContentHash(await capture(f.book.id)), 'accepted local baseline includes installed IDs')
+    assert.equal((await service.syncBookNow(f.book.id, noPendingSave)).kind, 'unchanged')
+    assert.equal(transport.writes.length, 0)
+    await p.saveDocumentContent(f.scene.id, 'Actual edit after profile install')
+    assert.equal((await service.syncBookNow(f.book.id, noPendingSave)).kind, 'uploaded')
+    assert.equal(transport.writes.length, 1)
+  })
+}
 
 test('device-local Book navigation remains outside sync hashes and does not cause uploads', async t => {
   const f = await fixture(t)
