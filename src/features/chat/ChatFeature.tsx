@@ -1,6 +1,5 @@
 import { THINKING_EFFORT_OPTIONS, normalizeThinkingEffort, type ThinkingEffort } from '../../shared/ai/thinking-effort'
 import ChatArticleContext from './ChatArticleContext'
-import ArticleAnswerActions from './ArticleAnswerActions'
 import { availableChatTools } from './chat-tool-availability'
 import { captureCharacterFrame, executeCharacterRead, type CharacterFrame, type CharacterBoundary } from './character-chat'
 import { queueRequestedImage } from './chat-direct-images'
@@ -1353,7 +1352,6 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, cur
           {waitingForApproval && <p className="chat-approval-wait">The agent is paused. Approve or reject the action above; it will continue with the actual result.</p>}
           {last.continuation && !last.continuedAt && messages.at(-1)?.id === last.id && !waitingForApproval && <Button className="chat-continue" disabled={generating} onClick={() => { void continueResponse(last) }}>Continue</Button>}
           <div className="message-tools chat-answer-tools">
-            {!chat?.character && chat && <ArticleAnswerActions key={last.id} chat={chat} message={last} sourceMessages={answerMessages} content={prose} disabled={generating || Boolean(summaryProposalId)} onBeforeArticleAction={onBeforeArticleAction} onSaved={reloadMessages} />}
             <Button className="chat-icon-action" size="small" variant="ghost" aria-label={copiedMessageId === last.id ? 'Copied answer' : 'Copy answer'} title={copiedMessageId === last.id ? 'Copied' : 'Copy'} leadingIcon={copiedMessageId === last.id ? <Check /> : <Copy />} disabled={!prose} onClick={() => { void copyMessage({ ...last, content: prose }) }} />
             {answerMessages.length === 1 && <Button className="chat-icon-action" size="small" variant="ghost" aria-label="Edit answer" title="Edit" leadingIcon={<Pencil />} disabled={generating || Boolean(summaryProposalId)} onClick={() => beginEdit(last)} />}
             <Button className="chat-icon-action" size="small" variant="ghost" aria-label="Fork from answer" title="Fork" leadingIcon={<GitFork />} onClick={() => { void fork(last) }} />
