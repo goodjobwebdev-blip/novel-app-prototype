@@ -55,8 +55,8 @@ async function settle(predicate) {
   for (let i = 0; i < 100 && !predicate(); i++) await act(async () => new Promise(resolve => setTimeout(resolve, 10)))
   assert.ok(predicate(), document.body.textContent)
 }
-const expanded = () => document.querySelector('[aria-label="Expanded Original media prompt"]')
-const compact = () => document.querySelector('[aria-label="Original media prompt"]')
+const expanded = () => document.querySelector('[aria-label="Expanded Media prompt"]')
+const compact = () => document.querySelector('[aria-label="Media prompt"]')
 function Harness({ bookId }) {
   const [value, setValue] = React.useState({ prompt: 'A red harbor', alias: '', size: '1024x1024' })
   return h(MediaPromptEditor, { key: bookId ?? 'global', bookId, value, onChange: setValue, capability: 'Still image' })
@@ -85,7 +85,7 @@ test('media popup dictation uses the selected book STT profile, replaces the sel
   t.after(async () => { await act(async () => root.unmount()) })
   try {
     await act(async () => root.render(h(Harness, { bookId: book.id })))
-    await click('Expand Original media prompt')
+    await click('Expand Media prompt')
     expanded().setSelectionRange(2, 5)
     await click('Dictation')
     await settle(() => stt.starts.length > 0)
@@ -119,7 +119,7 @@ test('global media dictation cancels provisional text and closes or unmounts wit
   let mounted = true
   try {
     await act(async () => root.render(h(Harness)))
-    await click('Expand Original media prompt')
+    await click('Expand Media prompt')
     const beforeStarts = stt.starts.length
     await click('Dictation')
     await settle(() => stt.starts.length > beforeStarts)
@@ -134,7 +134,7 @@ test('global media dictation cancels provisional text and closes or unmounts wit
     assert.equal(closedTarget.isValid(), false)
     assert.throws(() => closedTarget.onFinal('Late transcript'), /no longer available/)
     assert.equal(compact().value, 'A red harbor')
-    await click('Expand Original media prompt')
+    await click('Expand Media prompt')
     await click('Dictation')
     const unmountedTarget = stt.starts.at(-1).target
     const before = stt.cancels
@@ -151,7 +151,7 @@ test('missing Speech configuration shows an error inside the popup and keeps the
   t.after(async () => { await act(async () => root.unmount()) })
   try {
     await act(async () => root.render(h(Harness)))
-    await click('Expand Original media prompt')
+    await click('Expand Media prompt')
     await click('Dictation')
     await settle(() => Boolean(document.querySelector('[role="dialog"] [role="alert"]')))
     assert.match(document.querySelector('[role="dialog"] [role="alert"]').textContent, /Choose a transcription model/)

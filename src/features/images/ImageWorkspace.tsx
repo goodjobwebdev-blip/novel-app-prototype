@@ -77,7 +77,6 @@ export function ImageGenerateView({ bookId, state, onStateChange, onSettings }: 
       {(!settings.favorites.length || settings.error) && <button type="button" disabled={!onSettings} onClick={() => onSettings?.(task.endsWith('video') ? 'video' : 'image')}>Set up {task.endsWith('video') ? 'video' : 'image'} models</button>}
       <div className="image-generate-actions">
         <button className="image-primary-action" type="button" disabled={busy || !canGenerate} onClick={() => { void generate() }}>Generate</button>
-        <button type="button" disabled={busy || !state.draft.prompt} onClick={() => setDraft({ ...state.draft, prompt: '' })}>Clear prompt</button>
       </div>
       <p className="image-queue-status" role="status" aria-live="polite">{status}</p>
       {error && <p role="alert">{error}</p>}

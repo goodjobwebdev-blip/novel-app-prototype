@@ -15,7 +15,7 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   }
   return nextResolve(specifier, context)
 } })
-const { assembleMediaEnhancementRequest, enhanceMediaPrompt, mediaEnhancementFingerprint, mediaEnhancementIsStale, selectedMediaPrompt } = await import('../src/features/images/media-prompt.ts')
+const { assembleMediaEnhancementRequest, enhanceMediaPrompt, mediaEnhancementFingerprint, normalizeMediaPromptDraft, selectedMediaPrompt } = await import('../src/features/images/media-prompt.ts')
 const { saveMediaWorkspaceDraft, loadMediaWorkspaceDraft } = await import('../src/features/images/media-draft-storage.ts')
 const { initialAiSettings, copyAiSettings } = await import('../src/shared/ai/ai-settings.ts')
 const { clearFakeProviderTrace, getFakeProviderTrace } = await import('../src/shared/ai/fake-provider.ts')
@@ -26,17 +26,26 @@ test('enhancement context includes only prompt, guidance and media capabilities'
   assert.match(request, /Moonlit gate/)
   assert.match(request, /Vintage illustration/)
   assert.doesNotMatch(request, /SOURCE-SECRET|sources|manuscript/)
-  assert.doesNotMatch(JSON.stringify(assembleMediaEnhancementRequest({ ...draft, enhancementMode: 'standard' }, '').providerMessages), /Vintage illustration/)
+  assert.match(JSON.stringify(assembleMediaEnhancementRequest({ ...draft, enhancementMode: 'standard' }, '').providerMessages), /Vintage illustration/)
+  const unguided = assembleMediaEnhancementRequest({ ...draft, enhancementGuidance: '' }, '')
+  assert.equal(JSON.parse(unguided.providerMessages.at(-1).content).guidance, '')
 })
 
-test('selected prompt is exact, original survives, and changes invalidate enhancement', () => {
-  const completed = { ...draft, enhancedPrompt: '  Enhanced gate\n', enhancementFingerprint: mediaEnhancementFingerprint(draft, 'Still'), promptSelection: 'enhanced' }
-  assert.equal(selectedMediaPrompt(completed), '  Enhanced gate\n')
-  assert.equal(selectedMediaPrompt({ ...completed, promptSelection: 'original' }), 'Moonlit gate')
-  assert.equal(mediaEnhancementIsStale(completed, 'Still'), false)
-  assert.equal(mediaEnhancementIsStale({ ...completed, prompt: 'Sunlit gate' }, 'Still'), true)
-  assert.equal(mediaEnhancementIsStale({ ...completed, enhancementGuidance: 'Oil paint' }, 'Still'), true)
-  assert.equal(mediaEnhancementIsStale(completed, 'Video'), true)
+test('legacy drafts keep their selected text and merge custom instructions into one guidance field', () => {
+  const completed = { ...draft, enhancedPrompt: '  Enhanced gate\n', enhancementTemplate: 'Preserve the stone arch', promptSelection: 'enhanced' }
+  const current = normalizeMediaPromptDraft(completed)
+  assert.equal(current.prompt, '  Enhanced gate\n')
+  assert.equal(selectedMediaPrompt(current), selectedMediaPrompt(completed))
+  assert.equal(current.enhancementGuidance, 'Vintage illustration\n\nPreserve the stone arch')
+  assert.equal(current.enhancedPrompt, undefined)
+  assert.equal(current.enhancementTemplate, undefined)
+  assert.equal(current.promptSelection, undefined)
+  assert.deepEqual(normalizeMediaPromptDraft(current), current)
+  assert.equal(normalizeMediaPromptDraft({ ...completed, promptSelection: 'original' }).prompt, 'Moonlit gate')
+  const fingerprint = mediaEnhancementFingerprint(current, 'Still')
+  assert.notEqual(mediaEnhancementFingerprint({ ...current, prompt: 'Sunlit gate' }, 'Still'), fingerprint)
+  assert.notEqual(mediaEnhancementFingerprint({ ...current, enhancementGuidance: 'Oil paint' }, 'Still'), fingerprint)
+  assert.notEqual(mediaEnhancementFingerprint(current, 'Video'), fingerprint)
 })
 
 test('Support model enhancement returns a draft and cancellation does not mutate it', async () => {

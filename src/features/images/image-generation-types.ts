@@ -59,8 +59,9 @@ export type ImageGenerationSpec = OpenAIImageOptions & {
   video?: VideoGenerationOptions
 }
 export type MediaGenerationDraft = {
-  enhancedPrompt?: string
   enhancementGuidance?: string
+  // Compatibility fields for drafts persisted before the single-prompt editor.
+  enhancedPrompt?: string
   enhancementTemplate?: string
   enhancementFingerprint?: string
   enhancementMode?: 'standard' | 'guided'
