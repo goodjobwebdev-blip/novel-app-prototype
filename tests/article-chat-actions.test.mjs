@@ -10,6 +10,7 @@ import { transpileSourceTree } from './transpile-source-tree.mjs'
 const dom = new JSDOM('<div id="root"></div>', { url: 'https://arc.test/', pretendToBeVisual: true })
 for (const key of ['window', 'document', 'HTMLElement', 'Element', 'Node', 'MutationObserver', 'Event', 'CustomEvent', 'localStorage', 'sessionStorage']) globalThis[key] = dom.window[key]
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
+dom.window.HTMLElement.prototype.scrollIntoView = function () {}
 const directory = mkdtempSync(new URL('../node_modules/.article-chat-test-', import.meta.url))
 transpileSourceTree(directory)
 const at = name => import(pathToFileURL(`${directory}/${name}.mjs`))
@@ -24,8 +25,8 @@ const chatService = await at('features/chat/chat-service')
 const tools = await at('features/chat/chat-tools')
 const links = await at('features/codex/codex-article-links')
 const { default: ArticleLinks } = await at('features/codex/ArticleLinks')
-const { default: ChatArticleContext } = await at('features/chat/ChatArticleContext')
-const { MarkdownMessage } = await at('features/chat/ChatFeature')
+const { ChatView, MarkdownMessage } = await at('features/chat/ChatFeature')
+const { initialAiSettings } = await at('shared/ai/ai-settings')
 const { assembleChatGenerationRequest } = await at('features/chat/chat-request')
 const { buildContextValues } = await at('shared/context/context-service')
 const originalConsoleError = console.error
@@ -108,25 +109,32 @@ test('World link navigation never exposes private Book backlinks', async t => {
   await click(shared.title)
   assert.deepEqual(opened, [shared.id])
 })
-test('adding the current article is explicit and remains visibly pinned after editor selection changes and remount', async t => {
-  const f = await fixture()
-  let current = f.chat
-  let props
-  let render
-  const onChange = next => { current = next; props = { ...props, chat: next } }
-  props = { chat: current, currentArticleId: f.entry.id, disabled: false, onChange }
-  render = await mount(t, ChatArticleContext, props)
-  await settle(() => button('Add current article to context'))
-  assert.deepEqual(current.contextProfile.codexEntryIds, [])
-  await click('Add current article to context')
-  await settle(() => current.contextProfile.codexEntryIds.includes(f.entry.id))
-  props = { ...props, currentArticleId: f.other.id }
-  await render(props)
-  assert.match(document.querySelector('.chat-article-context').textContent, /First article/)
-  assert.deepEqual((await chatService.getChat(f.chat.id)).contextProfile.codexEntryIds, [f.entry.id])
-  await render({ ...props, key: 'restored-chat', chat: await chatService.getChat(f.chat.id) })
-  await settle(() => /1 selected/.test(document.querySelector('.chat-article-context').textContent))
-})
+for (const scope of ['Book', 'World']) {
+  test(`${scope} Chat has no inline article picker and preserves context configured in settings`, async t => {
+    const owner = scope === 'World' ? await worlds.createWorld('Chat owner') : (await p.createBook(initialAiSettings, 'Chat owner')).book
+    const chat = await chatService.createChat(owner.id)
+    const entry = await p.createCodexEntry(owner.id, 'Selected article', 'lore-other')
+    await p.saveDocumentContent(entry.id, 'Selected article body')
+    await chatService.saveChatContextProfile(chat.id, { ...chat.contextProfile, codexEntryIds: [entry.id] })
+    const props = { bookId: owner.id, chatId: chat.id, bookPromptValues: { title: owner.title }, onChatChange() {}, onToast() {} }
+    const render = await mount(t, ChatView, props)
+    const assertChatReady = async () => {
+      await settle(() => document.querySelector('.functional-chat h1')?.textContent === chat.title)
+      assert.equal(document.querySelector('.functional-chat header small')?.textContent, `${scope} chat`)
+      assert.ok(!document.querySelector('[aria-label="Explicit article context"]'))
+      assert.ok(!document.querySelector('.chat-article-context'))
+      assert.ok(!button('Add current article to context'))
+      assert.equal([...document.querySelectorAll('summary')].some(item => item.textContent === 'Choose articles'), false)
+      assert.deepEqual((await chatService.getChat(chat.id)).contextProfile.codexEntryIds, [entry.id])
+    }
+    await assertChatReady()
+    await render({ ...props, key: 'restored-chat' })
+    await assertChatReady()
+    const savedChat = await chatService.getChat(chat.id)
+    const context = await buildContextValues({ bookId: owner.id, type: 'chat', profile: savedChat.contextProfile })
+    assert.match(context.additionalContext, /Selected article body/)
+  })
+}
 test('World Chat request assembly cannot interpolate metadata from the last Book', async () => {
   const f = await fixture()
   const context = await buildContextValues({ bookId: f.world.id, type: 'chat', profile: f.chat.contextProfile })

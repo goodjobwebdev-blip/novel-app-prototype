@@ -761,7 +761,7 @@ test('World deletion UI counts Notes and Chats even without articles', async t =
   assert.ok(await p.getEntity(world.id))
 })
 
-test('Chat retains the current World article as an explicit selectable source', async t => {
+test('opening World Chat from an article does not expose an inline context picker or select the article', async t => {
   const world = await w.createWorld('Chat with current article')
   const article = await addEntry(world.id, 'Current article')
   const chat = await chatService.createChat(world.id, 'Article discussion')
@@ -771,9 +771,10 @@ test('Chat retains the current World article as an explicit selectable source', 
   await worldTab('Chat')
   await settle(() => [...document.querySelectorAll('.arc-resource-row')].some(row => row.querySelector('strong')?.textContent === chat.title))
   await click([...document.querySelectorAll('.arc-resource-row')].find(row => row.querySelector('strong')?.textContent === chat.title).querySelector('.arc-resource-row__open'))
-  await settle(() => button('Add current article to context'))
-  await click(button('Add current article to context'))
-  await settle(async () => (await chatService.getChat(chat.id)).contextProfile.codexEntryIds.includes(article.id))
+  await settle(() => document.querySelector('.functional-chat h1')?.textContent === chat.title)
+  assert.ok(!document.querySelector('[aria-label="Explicit article context"]'))
+  assert.ok(!button('Add current article to context'))
+  assert.deepEqual((await chatService.getChat(chat.id)).contextProfile.codexEntryIds, [])
   assert.equal((await p.listBooks()).length, 0)
 })
 
