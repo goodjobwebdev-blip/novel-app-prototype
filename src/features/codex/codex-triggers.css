@@ -1,5 +1,12 @@
 .codex-trigger-editor { display: grid; gap: 7px; min-width: 0; color: var(--soft); }
-.codex-trigger-editor > span { font-size: 12px; font-weight: 600; }
+.codex-trigger-editor > label { display: grid; gap: 7px; }
+.codex-trigger-editor > label > span { font-size: 12px; font-weight: 600; }
+.codex-trigger-suggestions { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; font: 11px/1.5 var(--sans, ui-sans-serif, system-ui); }
+.codex-trigger-suggestions > span { color: var(--faint); }
+.codex-trigger-suggestions button { min-height: 44px; max-width: 100%; padding: 4px 0; border: 0; background: transparent; color: var(--accent); font: inherit; text-align: left; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; overflow-wrap: anywhere; cursor: pointer; }
+.codex-trigger-suggestions button:hover { text-decoration-style: solid; }
+.codex-trigger-suggestions button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+.codex-trigger-suggestions button:disabled { opacity: .5; cursor: not-allowed; }
 .codex-trigger-editor small { color: var(--faint); opacity: .8; line-height: 1.4; }
 .codex-trigger-editor [aria-invalid="true"] { border-color: var(--danger, #c94b55); outline-color: var(--danger, #c94b55); }
 .codex-trigger-editor .codex-trigger-error, .codex-trigger-conflict { color: var(--danger, #c94b55); font-size: 12px; line-height: 1.5; }

@@ -1,5 +1,4 @@
 import { THINKING_EFFORT_OPTIONS, normalizeThinkingEffort, type ThinkingEffort } from '../../shared/ai/thinking-effort'
-import ChatArticleContext from './ChatArticleContext'
 import { availableChatTools } from './chat-tool-availability'
 import { captureCharacterFrame, executeCharacterRead, type CharacterFrame, type CharacterBoundary } from './character-chat'
 import { queueRequestedImage } from './chat-direct-images'
@@ -140,7 +139,6 @@ type ChatViewProps = {
   chatId: string
   bookPromptValues: BookPromptValues
   currentSceneId?: string | null
-  currentArticleId?: string | null
   onOpenArticle?: (articleId: string) => void
   onBeforeArticleAction?: () => Promise<boolean | void>
   onBeforeGeneration?: () => Promise<boolean>
@@ -202,7 +200,7 @@ function messageToolExecutions(message: ChatMessageEntity): ChatToolExecution[] 
   }))
 }
 
-export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, currentArticleId, onOpenArticle, onBeforeArticleAction, onBeforeGeneration, onChatChange, onToast }: ChatViewProps) {
+export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onOpenArticle, onBeforeArticleAction, onBeforeGeneration, onChatChange, onToast }: ChatViewProps) {
   const [chat, setChat] = useState<ChatEntity | null>(null)
   const [messages, setMessages] = useState<ChatMessageEntity[]>([])
   const [draft, setDraft] = useState('')
@@ -1407,7 +1405,6 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, cur
   return <>
     <section className="conversation functional-chat">
       <header><small>{chat.character ? 'Character chat' : chat.worldId ? 'World chat' : 'Book chat'}</small><h1>{chat.title}</h1></header>
-      {!chat.character && <ChatArticleContext key={chat.id} chat={chat} currentArticleId={currentArticleId} disabled={generating} onChange={updated => applyIfCurrentChat(chat, () => setChat(updated))} />}
       <CharacterPosition chat={chat} disabled={generating} onOpen={onChatChange} />
       <div className="messages">
         {!messages.length && !generating && <div className="chat-first-message"><Feather aria-hidden="true" /><strong>Start this conversation</strong><p>The model, prompt, and context are saved independently for this chat.</p></div>}

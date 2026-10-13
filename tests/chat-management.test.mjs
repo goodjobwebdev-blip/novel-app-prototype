@@ -162,6 +162,7 @@ test('Codex dependencies require approval and support directional create, update
 test('stale dependencies and rejected trigger proposals do not mutate; trigger normalization preserves source revision', async () => {
   const f = await fixture()
   const a = await db.createCodexEntry(f.book.id, 'A')
+  await db.updateCodexAutoIncludeTriggers(a.id, ['A'])
   const b = await db.createCodexEntry(f.book.id, 'B')
   const edge = await db.createCodexDependency(f.book.id, a.id, b.id)
   const remove = await execute(f.book.id, 'propose_codex_dependency', { entity_id: a.id, target_id: b.id, action: 'remove' })

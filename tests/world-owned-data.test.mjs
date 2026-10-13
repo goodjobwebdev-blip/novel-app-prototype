@@ -76,8 +76,11 @@ test('World writes reserve archived triggers, reject private dependencies, and d
   const { book } = await p.createBook(ai.initialAiSettings)
   await w.setBookWorld(book.id, world.id)
   const shared = await p.createCodexEntry(world.id, 'Reserved'), local = await p.createCodexEntry(book.id, 'Private')
+  await p.updateCodexAutoIncludeTriggers(shared.id, ['Reserved'])
   await p.archiveCodexEntry(shared.id)
-  await assert.rejects(() => p.createCodexEntry(world.id, 'reserved'), /reserved/)
+  const duplicate = await p.createCodexEntry(world.id, 'reserved')
+  assert.deepEqual(duplicate.autoIncludeTriggers, [])
+  await assert.rejects(() => p.updateCodexAutoIncludeTriggers(duplicate.id, ['reserved']), /reserved/)
   await p.restoreCodexEntry(shared.id)
   await assert.rejects(() => p.createCodexDependency(world.id, shared.id, local.id), /not available/)
   // Archive/restore changes the revision too: a proposal made before those writes is stale.

@@ -490,7 +490,7 @@ test('failed sidebar Context blocks Generate without discarding the manuscript o
   assert.equal((await p.getBookContextSettings(fixture.book.id)).previousScenesForCodexTriggers, 9)
 })
 
-test('sidebar Chat Context updates the mounted Chat and failed saves block switching to another chat', async t => {
+test('sidebar Chat Context updates the mounted request preview and failed saves block switching chats', async t => {
   await mountWorkspace(t)
   await openBook()
   const originalProfile = (await chats.getChat(chat.id)).contextProfile
@@ -517,7 +517,7 @@ test('sidebar Chat Context updates the mounted Chat and failed saves block switc
   const sourceCheckbox = () => [...document.querySelectorAll('.settings-sidebar .context-selection-row')].find(item => item.textContent.includes(entry.title))?.querySelector('input[type="checkbox"]')
   await settle(sourceCheckbox)
   await click(sourceCheckbox())
-  await settle(() => document.querySelector('.chat-article-context strong')?.textContent === 'Article context · 1 selected')
+
   await settle(() => document.querySelector('.chat-request-preview')?.textContent.includes('SIDEBAR_PREVIEW_CONTEXT_MARKER'))
   await click(ariaButton('Close request composition'))
   assert.equal(composer.value, 'Chat draft retained during Context changes')

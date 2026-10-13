@@ -24,7 +24,6 @@ const chatService = await at('features/chat/chat-service')
 const tools = await at('features/chat/chat-tools')
 const links = await at('features/codex/codex-article-links')
 const { default: ArticleLinks } = await at('features/codex/ArticleLinks')
-const { default: ChatArticleContext } = await at('features/chat/ChatArticleContext')
 const { MarkdownMessage } = await at('features/chat/ChatFeature')
 const { assembleChatGenerationRequest } = await at('features/chat/chat-request')
 const { buildContextValues } = await at('shared/context/context-service')
@@ -57,14 +56,6 @@ async function mount(t, component, props) {
   const render = async next => { await act(async () => root.render(React.createElement(component, next))); await drainEffects() }
   await render(props)
   return render
-}
-async function settle(predicate) {
-  for (let i = 0; i < 100; i++) {
-    let ready
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); ready = await predicate() })
-    if (ready) return
-  }
-  assert.fail(document.body.textContent)
 }
 const button = text => [...document.querySelectorAll('button')].find(item => item.textContent.trim() === text)
 async function click(text) {
@@ -107,25 +98,6 @@ test('World link navigation never exposes private Book backlinks', async t => {
   assert.equal(document.body.textContent.includes('PRIVATE'), false)
   await click(shared.title)
   assert.deepEqual(opened, [shared.id])
-})
-test('adding the current article is explicit and remains visibly pinned after editor selection changes and remount', async t => {
-  const f = await fixture()
-  let current = f.chat
-  let props
-  let render
-  const onChange = next => { current = next; props = { ...props, chat: next } }
-  props = { chat: current, currentArticleId: f.entry.id, disabled: false, onChange }
-  render = await mount(t, ChatArticleContext, props)
-  await settle(() => button('Add current article to context'))
-  assert.deepEqual(current.contextProfile.codexEntryIds, [])
-  await click('Add current article to context')
-  await settle(() => current.contextProfile.codexEntryIds.includes(f.entry.id))
-  props = { ...props, currentArticleId: f.other.id }
-  await render(props)
-  assert.match(document.querySelector('.chat-article-context').textContent, /First article/)
-  assert.deepEqual((await chatService.getChat(f.chat.id)).contextProfile.codexEntryIds, [f.entry.id])
-  await render({ ...props, key: 'restored-chat', chat: await chatService.getChat(f.chat.id) })
-  await settle(() => /1 selected/.test(document.querySelector('.chat-article-context').textContent))
 })
 test('World Chat request assembly cannot interpolate metadata from the last Book', async () => {
   const f = await fixture()
