@@ -2424,13 +2424,12 @@ export default function Workspace() {
         : isWorldWorkspace ? `World / ${currentBook?.title ?? ''}` : ['Outline', activeAct?.title, activeChapter?.title, activeDocument?.title].filter(Boolean).join(' / ')
   const activeCodexArchived = activeDocument?.type === 'codexEntry' && isCodexEntryArchived(activeDocument)
   const activeSummarySourceArchived = Boolean(summaryCodexSource && isCodexEntryArchived(summaryCodexSource))
-  const pageLabel = activeDocument?.type === 'note'
-    ? 'N'
-    : activeDocument?.type === 'codexEntry'
-      ? 'C'
-      : activeDocument?.type === 'summary'
-        ? 'Σ'
-        : String((activeChapter?.order ?? 0) + 1).padStart(2, '0')
+  const isReferenceDocument = activeDocument?.type === 'note' || activeDocument?.type === 'codexEntry'
+  const pageLabel = isReferenceDocument
+    ? null
+    : activeDocument?.type === 'summary'
+      ? 'Σ'
+      : String((activeChapter?.order ?? 0) + 1).padStart(2, '0')
   const openSummaryState = summarySource ? summaryStates[summarySource.id] ?? 'missing' : 'missing'
   const summaryContextIndicator = summaryCodexSource
     ? isCodexEntryArchived(summaryCodexSource)
@@ -2535,8 +2534,8 @@ export default function Workspace() {
       {quickTool?.tool.kind === 'rewrite' && activeDocument?.id === quickTool.capture.document.id && currentBook?.id === quickTool.capture.bookId && <QuickRewriteDialog key={`${quickTool.tool.id}-${quickTool.capture.snapshot.revision}`} tool={quickTool.tool} capture={quickTool.capture} apply={(text) => Boolean(editorRef.current?.replaceRange(quickTool.capture.snapshot, text))} close={() => setQuickTool(null)} />}
       {beatRewrite && currentBook && activeDocument?.type === 'scene' && beatRewrite.documentId === activeDocument.id && <ProseRewriteDialog key={`${activeDocument.id}-${beatRewrite.snapshot.revision}`} title="Regenerate scene beat" original={beatRewrite.snapshot.text} instruction={beatRewrite.instruction} instructionReadOnly autoStart generate={(instruction, chunk, signal, onRequest) => generateSceneBeat({ bookId: currentBook.id, book: toBookPromptValues(currentBook, seriesList), scene: activeDocument, source: beatRewrite.snapshot.document, from: beatRewrite.snapshot.from, to: beatRewrite.snapshot.to, instruction }, chunk, signal, onRequest)} apply={(text) => Boolean(editorRef.current?.replaceRange(beatRewrite.snapshot, `\n\n${text.trim()}\n\n`))} close={() => setBeatRewrite(null)} />}
 
-      {screen === 'editor' ? <article className="story-editor">
-        <small className="page-number">{pageLabel}</small><p className="document-path">{documentPath || 'No document selected'}</p>
+      {screen === 'editor' ? <article className={`story-editor ${isReferenceDocument ? 'story-editor--reference' : ''}`}>
+        {pageLabel && <small className="page-number">{pageLabel}</small>}<p className="document-path">{documentPath || 'No document selected'}</p>
         {activeDocument?.type === 'scene' && currentBook && <><h1 className="scene-title">{activeDocument.title}</h1><SceneWritingSettings key={activeDocument.id} scene={activeDocument} book={toBookPromptValues(currentBook, seriesList)} disabled={generationActive} onSave={async (patch, before) => {
           const id = activeDocument.id
           await applyChatManagementChange(currentBook.id, id, { kind: 'scene_metadata', patch, before })
