@@ -19,9 +19,10 @@ test('selected Context tab controls rendering and persistence without overwritin
   assert.match(app, /book\?\.contextType === 'codex' \|\| book\?\.contextType === 'chat' \? book\.contextType : ownerKind === 'world' \? 'codex' : 'scene'/)
   assert.doesNotMatch(app, /contextSection === 'summary'|contextSection === 'note'/)
   assert.match(app, /type=\{contextSection\}/)
-  assert.match(app, /section === 'chat' && book\.chatId && chatContextProfile/)
-  assert.match(app, /saveChatContextProfile\(book\.chatId, chatContextProfile\)/)
-  assert.match(app, /setContextSettings\(value\)[\s\S]*setChatContextProfile\(chat\?\.contextProfile \?\? null\)/)
+  assert.ok(/section === 'chat' && book\?\.chatId/.test(app), 'Chat updates capture the active chat ID')
+  assert.ok(/draft = \{ kind: 'chat', chatId: book\.chatId, profile: latest\.chatProfile \}/.test(app), 'Queued drafts keep their original chat ownership')
+  assert.ok(/saveChatContextProfile\(draft\.chatId, draft\.profile\)/.test(app), 'Chat drafts save to their captured chat, not a later selection')
+  assert.ok(/contextDraftsRef\.current\.get\(`chat:\$\{chatId\}`\)/.test(app), 'Failed per-chat drafts are retained separately')
 })
 
 test('document-bound previews only receive the open document for the matching tab', () => {

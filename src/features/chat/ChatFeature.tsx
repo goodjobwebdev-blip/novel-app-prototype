@@ -141,6 +141,7 @@ type ChatViewProps = {
   currentSceneId?: string | null
   onOpenArticle?: (articleId: string) => void
   onBeforeArticleAction?: () => Promise<boolean | void>
+  onBeforeGeneration?: () => Promise<boolean>
   onChatChange: (chatId: string) => void
   onToast: (message: string, variant?: ToastVariant) => void
 }
@@ -199,7 +200,7 @@ function messageToolExecutions(message: ChatMessageEntity): ChatToolExecution[] 
   }))
 }
 
-export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onOpenArticle, onBeforeArticleAction, onChatChange, onToast }: ChatViewProps) {
+export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onOpenArticle, onBeforeArticleAction, onBeforeGeneration, onChatChange, onToast }: ChatViewProps) {
   const [chat, setChat] = useState<ChatEntity | null>(null)
   const [messages, setMessages] = useState<ChatMessageEntity[]>([])
   const [draft, setDraft] = useState('')
@@ -318,6 +319,21 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onO
   }, [bookId, chatId])
 
   useEffect(() => {
+    let cancelled = false
+    let revision = 0
+    const refreshContext = async (event: Event) => {
+      if ((event as CustomEvent<{ bookId: string }>).detail?.bookId !== bookId) return
+      const version = ++revision
+      const persisted = await getChat(chatId).catch(() => undefined)
+      if (cancelled || version !== revision || !persisted || persisted.bookId !== bookId) return
+      setChat(current => current?.id === chatId && JSON.stringify(current.contextProfile) !== JSON.stringify(persisted.contextProfile)
+        ? { ...current, contextProfile: persisted.contextProfile } : current)
+    }
+    window.addEventListener('arc-chat-changed', refreshContext)
+    return () => { cancelled = true; window.removeEventListener('arc-chat-changed', refreshContext) }
+  }, [bookId, chatId])
+
+  useEffect(() => {
     if (!generating) return
     const update = () => setElapsed(Math.max(0, Math.floor((Date.now() - startedAtRef.current) / 1000)))
     update()
@@ -391,7 +407,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onO
     const events = [SETTINGS_PROFILES_EVENT, 'storage']
     events.forEach(event => window.addEventListener(event, reload))
     return () => { cancelled = true; events.forEach(event => window.removeEventListener(event, reload)) }
-  }, [promptOpen, bookId, chatId, chat?.id, chat?.updatedAt, currentSceneId])
+  }, [promptOpen, bookId, chatId, chat?.id, chat?.updatedAt, chat?.contextProfile, currentSceneId])
 
   async function reloadMessages() {
     if (!chat || !isCurrentChat(chat)) return []
@@ -612,6 +628,11 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onO
     requestSnapshot?: NormalizedAssembledRequest,
   ): Promise<PreparedAssistantGeneration> {
     assertGenerationOwnerCurrent(owner, activeChat)
+    if (await onBeforeGeneration?.() === false) throw new Error('Save Context in Settings before generating a reply.')
+    assertGenerationOwnerCurrent(owner, activeChat)
+    const persistedChat = onBeforeGeneration ? await getChat(activeChat.id) : undefined
+    assertGenerationOwnerCurrent(owner, activeChat)
+    const contextChat = persistedChat ? { ...activeChat, contextProfile: persistedChat.contextProfile } : activeChat
     let settings: Awaited<ReturnType<typeof getChatBookAiSettings>>
     let mediaSettings: ImageSettings
     try {
@@ -635,8 +656,8 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onO
     let skills: CapturedChatSkill[]
     let context: Awaited<ReturnType<typeof buildContextValues>>
     try {
-      if (activeChat.character) { character = await captureCharacterFrame(activeChat, history); context = character.context; skills = []; loreTypes = [] }
-      else ({ context, skills, loreTypes } = await prepareChatSkillContext(activeChat, activeChat.worldId ? undefined : currentSceneId || undefined, activeChat.worldId ? history.filter(item => item.role === 'user').at(-1)?.content : undefined))
+      if (activeChat.character) { character = await captureCharacterFrame(contextChat, history); context = character.context; skills = []; loreTypes = [] }
+      else ({ context, skills, loreTypes } = await prepareChatSkillContext(contextChat, activeChat.worldId ? undefined : currentSceneId || undefined, activeChat.worldId ? history.filter(item => item.role === 'user').at(-1)?.content : undefined))
     } catch (error) {
       assertGenerationOwnerCurrent(owner, activeChat)
       throw new Error(error instanceof Error ? error.message : 'Chat context could not be prepared.')
