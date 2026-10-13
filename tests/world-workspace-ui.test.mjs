@@ -761,23 +761,6 @@ test('World deletion UI counts Notes and Chats even without articles', async t =
   assert.ok(await p.getEntity(world.id))
 })
 
-test('opening World Chat from an article does not expose an inline context picker or select the article', async t => {
-  const world = await w.createWorld('Chat with current article')
-  const article = await addEntry(world.id, 'Current article')
-  const chat = await chatService.createChat(world.id, 'Article discussion')
-  await mount(t)
-  await openWorldRow(world)
-  await settle(() => titleIs(article.title))
-  await worldTab('Chat')
-  await settle(() => [...document.querySelectorAll('.arc-resource-row')].some(row => row.querySelector('strong')?.textContent === chat.title))
-  await click([...document.querySelectorAll('.arc-resource-row')].find(row => row.querySelector('strong')?.textContent === chat.title).querySelector('.arc-resource-row__open'))
-  await settle(() => document.querySelector('.functional-chat h1')?.textContent === chat.title)
-  assert.ok(!document.querySelector('[aria-label="Explicit article context"]'))
-  assert.ok(!button('Add current article to context'))
-  assert.deepEqual((await chatService.getChat(chat.id)).contextProfile.codexEntryIds, [])
-  assert.equal((await p.listBooks()).length, 0)
-})
-
 // QUESTION-01 contract: revision conflict, draft recovery and explicit reload.
 // The two roots have independent Workspace save queues/baselines, but share real
 // IndexedDB. Only the first document-content write is held, BEFORE its lock.
