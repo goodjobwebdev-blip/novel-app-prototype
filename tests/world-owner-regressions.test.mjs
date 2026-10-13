@@ -99,6 +99,7 @@ test('World context uses only selected and automatically available World sources
   const dependency = await p.createCodexEntry(world.id, 'World dependent source')
   const draft = await p.createCodexEntry(world.id, 'Unfinished source')
   const archived = await p.createCodexEntry(world.id, 'Archived source')
+  for (const entry of [root, draft, archived]) await p.updateCodexAutoIncludeTriggers(entry.id, [entry.title])
   await p.saveDocumentContent(selectedNote.id, 'SELECTED_WORLD_NOTE')
   await p.saveDocumentContent(root.id, 'AUTOMATIC_WORLD_LORE')
   await p.saveDocumentContent(dependency.id, 'DEPENDENCY_WORLD_LORE')

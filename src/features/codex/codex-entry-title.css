@@ -1,0 +1,12 @@
+.codex-entry-title { min-width: 0; }
+.document-titlebar .codex-entry-title__button:not(.arc-button), .codex-entry-title__input { box-sizing: border-box; display: block; width: 100%; min-width: 0; min-height: 44px; margin: 0; padding: 2px 0; border: 0; border-radius: 3px; background: transparent; color: inherit; font: inherit; line-height: inherit; text-align: left; letter-spacing: inherit; }
+.document-titlebar .codex-entry-title__button:not(.arc-button) { cursor: text; white-space: normal; overflow-wrap: anywhere; }
+.document-titlebar .codex-entry-title__button:not(.arc-button):hover { color: var(--accent); }
+.codex-entry-title__input { outline: none; box-shadow: 0 1px 0 var(--accent); }
+.document-titlebar .codex-entry-title__button:not(.arc-button):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.codex-entry-title__input[aria-invalid="true"] { box-shadow: 0 1px 0 var(--danger); }
+.codex-entry-title__hint, .codex-entry-title__error { display: block; margin-top: 7px; font: 11px/1.5 var(--sans, ui-sans-serif, system-ui); color: var(--faint); }
+.codex-entry-title__error { color: var(--danger); }
+.codex-content-heading { display: flex; align-items: center; gap: 14px; margin: 30px 0 18px; }
+.codex-content-heading h2 { flex: none; margin: 0; color: var(--soft); font: 600 12px/1.5 var(--sans, ui-sans-serif, system-ui); letter-spacing: .08em; text-transform: uppercase; }
+.codex-content-heading::after { content: ''; flex: 1; border-top: 1px solid var(--line); }
