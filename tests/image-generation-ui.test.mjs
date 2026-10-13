@@ -12,6 +12,8 @@ import 'fake-indexeddb/auto'
 const dom = new JSDOM('<html><body><div id="root"></div></body></html>', { url: 'https://arc.test/' })
 for (const key of ['window', 'document', 'HTMLElement', 'HTMLDialogElement', 'sessionStorage', 'localStorage', 'Event', 'CustomEvent']) globalThis[key] = dom.window[key]
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
+globalThis.requestAnimationFrame = callback => setTimeout(callback, 0)
+globalThis.cancelAnimationFrame = clearTimeout
 const visualViewport = new dom.window.EventTarget()
 visualViewport.height = 700
 visualViewport.offsetTop = 0
@@ -491,7 +493,7 @@ test('image jobs collapse independently and retain expansion across completion a
   } finally { await act(async () => root.unmount()) }
 })
 
-test('media enhancement preserves original text, chips do not send, and late results keep newer edits', async (t) => {
+test('media enhancement replaces the prompt using guidance and late results keep newer edits', async (t) => {
   const ai = await moduleAt('shared/ai/ai-settings')
   const fake = await moduleAt('shared/ai/fake-provider')
   const { default: Prompt } = await moduleAt('features/images/MediaPromptEditor')
@@ -503,30 +505,37 @@ test('media enhancement preserves original text, chips do not send, and late res
   profiles.saveSettingsProfile({ ...textProfile, settings: config })
   fake.clearFakeProviderTrace()
   function ControlledPrompt() {
-    const [value, onChange] = React.useState({ prompt: 'Moonlit harbor', alias: 'Visual', size: '1024x1024', enhancementTemplate: 'Improve this prompt. [DELAY_MS:0]' })
+    const [value, onChange] = React.useState({ prompt: 'Moonlit harbor', alias: 'Visual', size: '1024x1024' })
     return h(Prompt, { value, onChange, capability: 'Still images' })
   }
   const root = testRoot(t)
   try {
     await act(async () => root.render(h(ControlledPrompt)))
-    await click('Enhance with guidance')
-    await click('Vintage illustration')
+    await act(async () => document.querySelector('.media-prompt-editor summary').click())
+    const prompt = document.querySelector('textarea[aria-label="Media prompt"]')
+    const guidance = document.querySelector('textarea[aria-label="Enhancement guidance"]')
+    await input(guidance, 'Vintage illustration [DELAY_MS:0]')
     assert.equal(fake.getFakeProviderTrace().length, 0)
-    await click('Enhance with this guidance')
-    await settle(() => document.body.textContent.includes('Enhanced draft ready'))
-    const original = document.querySelector('textarea[aria-label="Original media prompt"]')
-    const enhanced = document.querySelector('textarea[aria-label="Enhanced media prompt"]')
-    assert.equal(original.value, 'Moonlit harbor')
-    assert.ok(enhanced.value)
-    const previous = enhanced.value
-    await input(document.querySelector('textarea[aria-label="Enhancement instructions"]'), 'Improve slowly. [DELAY_MS:30]')
     await click('Enhance')
-    await input(original, 'Newer original edit')
+    await settle(() => document.body.textContent.includes('Prompt enhanced'))
+    const trace = fake.getFakeProviderTrace().at(-1)
+    assert.equal(prompt.value, trace.emittedContent.trim())
+    assert.notEqual(prompt.value, 'Moonlit harbor')
+    assert.match(JSON.stringify(trace.messages), /Vintage illustration/)
+    const previous = prompt.value
+    await input(guidance, 'Improve slowly. [DELAY_MS:30]')
+    await click('Enhance')
+    await input(prompt, 'Newer prompt edit')
     await settle(() => document.body.textContent.includes('draft changed while enhancing'))
-    assert.equal(original.value, 'Newer original edit')
-    assert.equal(enhanced.value, previous)
-    assert.match(document.body.textContent, /Out of date/)
+    assert.equal(prompt.value, 'Newer prompt edit')
     assert.equal((await store.listImageJobs()).filter(job => job.prompt === previous).length, 0)
+    await click('Enhance')
+    await click('Expand Media prompt')
+    await input(document.querySelector('textarea[aria-label="Expanded Media prompt"]'), 'Unapplied popup edit')
+    await settle(() => document.body.textContent.includes('An expanded editor is open'))
+    assert.equal(prompt.value, 'Newer prompt edit')
+    await click('Apply')
+    assert.equal(prompt.value, 'Unapplied popup edit')
   } finally { await act(async () => root.unmount()) }
 })
 

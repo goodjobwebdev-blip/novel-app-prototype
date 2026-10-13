@@ -27,6 +27,7 @@ type ExpandableTextInputProps = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>
   value: string
   onChange: (value: string) => void
   dialogTitle?: string
+  onOpenChange?: (open: boolean) => void
   onDictate?: (target: ExpandableTextInputDictationTarget) => Promise<boolean>
   dictationError?: string
   dictationStatus?: SttStatus
@@ -44,6 +45,7 @@ const ExpandableTextInput = forwardRef<HTMLTextAreaElement, ExpandableTextInputP
   value,
   onChange,
   dialogTitle = 'Edit prompt',
+  onOpenChange,
   onDictate,
   dictationStatus = 'idle',
   dictationError,
@@ -155,11 +157,13 @@ const ExpandableTextInput = forwardRef<HTMLTextAreaElement, ExpandableTextInputP
     setError('')
     attemptedDictationRef.current = false
     openRef.current = true
+    onOpenChange?.(true)
     setOpen(true)
   }
 
   function closeDialog() {
     openRef.current = false
+    onOpenChange?.(false)
     if (expandedDictationRef.current) onCancelDictation?.()
     setExpandedDictationOwned(false)
     setOpen(false)
@@ -170,6 +174,7 @@ const ExpandableTextInput = forwardRef<HTMLTextAreaElement, ExpandableTextInputP
     if (expandedDictationRef.current) return
     onChange(draft)
     openRef.current = false
+    onOpenChange?.(false)
     setOpen(false)
     returnFocus()
   }

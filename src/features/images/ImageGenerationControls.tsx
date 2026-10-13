@@ -1,6 +1,6 @@
 import MediaPromptEditor from './MediaPromptEditor'
 import { useEffect, useRef, useState } from 'react'
-import { X } from 'lucide-react'
+import { ArrowRight, Image, Type, Video, X } from 'lucide-react'
 import SearchableSelect from '../../shared/ui/SearchableSelect'
 import Select from '../../shared/ui/Select'
 import Tabs from '../../shared/ui/Tabs'
@@ -87,7 +87,15 @@ export default function ImageGenerationControls({ value, onChange, disabled = fa
     catch (reason) { if (mounted.current && sourceEpoch.current.revision === revision) setSourceError(reason instanceof Error ? reason.message : 'Could not read that source image.') }
   }
   return <fieldset className="image-generation-controls" disabled={disabled}>
-    <Tabs label="Generation type" value={task} items={(Object.keys(generationTaskNames) as GenerationTask[]).map(option => ({ value: option, label: generationTaskNames[option] }))} onChange={selectTask} className="image-generation-task-control" />
+    <Tabs label="Generation type" value={task} items={(Object.keys(generationTaskNames) as GenerationTask[]).map(option => ({
+      value: option,
+      label: generationTaskNames[option],
+      icon: <span className="image-generation-task-icon" aria-hidden="true" title={generationTaskNames[option]}>
+        {option.startsWith('text-to-') ? <Type size={18} /> : <Image size={18} />}
+        <ArrowRight size={14} />
+        {option.endsWith('video') ? <Video size={18} /> : <Image size={18} />}
+      </span>,
+    }))} onChange={selectTask} className="image-generation-task-control" />
     <MediaPromptEditor key={bookId ?? 'global'} value={value} onChange={onChange} bookId={bookId} capability={favorite ? `${favorite.name}: ${favorite.description ?? ''}. Tasks: ${modelTasks(favorite).join(', ')}.` : 'No media model selected'} />
     <div className="image-generation-pickers">
       <ImageModelPicker value={value.alias} models={compatible} onChange={chooseModel} disabled={disabled} />
