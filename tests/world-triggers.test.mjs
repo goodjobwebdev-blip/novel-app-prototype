@@ -2,7 +2,7 @@ import { assertTestResourceLimits } from './test-resource-policy.mjs'
 assertTestResourceLimits()
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { automaticCodexCandidates, automaticCodexMatches, buildCodexMentionIndex, codexTriggerKey, conflictingCodexTriggers } from '../src/features/codex/codex-trigger-service.ts'
+import { automaticCodexCandidates, automaticCodexMatches, buildCodexMentionIndex, codexTriggerKey, codexTitleTriggerSuggestions, conflictingCodexTriggers } from '../src/features/codex/codex-trigger-service.ts'
 import { cascadeAutomaticCodexDependencies } from '../src/features/codex/codex-dependency-cascade.ts'
 import { dashboardPreferences, defaultCodexDashboard, queryCodexDashboard } from '../src/features/codex/codex-dashboard.ts'
 
@@ -11,6 +11,14 @@ const worldEntry = (id, triggers, extra = {}) => entry(id, triggers, { bookId: '
 const scene = { id: 'scene', type: 'scene', bookId: 'book', parentId: 'book', title: 'Opening', content: '', createdAt: 1, updatedAt: 1 }
 const matchIds = (entries, text, extra = {}) => automaticCodexMatches({ entities: entries, scenes: [scene], anchorSceneId: scene.id, anchorSceneText: text, previousSceneCount: 0, ...extra }).map(match => match.entry.id)
 const edge = (sourceId, targetId) => ({ id: `${sourceId}-${targetId}`, bookId: 'book', sourceId, targetId, relationLabel: '', includeWithSource: true, createdAt: 1, updatedAt: 1 })
+
+test('title suggestions exclude standalone honorifics, placeholders and existing triggers', () => {
+  assert.deepEqual(codexTitleTriggerSuggestions('Nicholas Cage'), ['Nicholas', 'Cage', 'Nicholas Cage'])
+  for (const prefix of ['Mr.', 'Mister', 'Dr.', 'Doctor', 'Mrs.']) {
+    assert.deepEqual(codexTitleTriggerSuggestions(`${prefix} Nicholas Cage`, ['nicholas']), ['Cage', 'Nicholas Cage', `${prefix} Nicholas Cage`])
+  }
+  assert.deepEqual(codexTitleTriggerSuggestions('Untitled Entry 2'), [])
+})
 
 test('an active local normalized trigger suppresses the whole World entry, including its other triggers', () => {
   const world = worldEntry('World tower', ['North Tower', 'Beacon'])

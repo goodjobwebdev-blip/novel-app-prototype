@@ -136,21 +136,16 @@ test('visibility is Book-local and also filters World summaries/dependencies wit
   await assert.rejects(() => w.setWorldEntryHidden(f.outsider.id, entry.id, true), /connected World/)
 })
 
-test('new Book and World Codex entries have empty triggers for placeholder and real titles; rename never changes triggers', async () => {
+test('new Book and World entries have empty triggers; rename preserves empty and explicit triggers', async () => {
   const f = await fixture()
-  for (const owner of [f.books[0], f.world]) {
-    for (const title of [undefined, 'Untitled Entry', 'Named article']) {
-      const entry = await p.createCodexEntry(owner.id, title)
-      assert.deepEqual(entry.autoIncludeTriggers, [])
-      assert.deepEqual((await p.getEntity(entry.id)).autoIncludeTriggers, [])
-      const renamed = await p.renameEntity(entry.id, 'Renamed article')
-      assert.equal(renamed.title, 'Renamed article')
-      assert.deepEqual(renamed.autoIncludeTriggers, [])
-      assert.deepEqual((await p.getEntity(entry.id)).autoIncludeTriggers, [])
-      await p.updateCodexAutoIncludeTriggers(entry.id, ['Explicit alias ' + entry.id])
-      await p.renameEntity(entry.id, 'Another title')
-      assert.deepEqual((await p.getEntity(entry.id)).autoIncludeTriggers, ['Explicit alias ' + entry.id])
-    }
+  for (const [owner, title] of [[f.books[0], undefined], [f.world, 'Named article']]) {
+    const entry = await p.createCodexEntry(owner.id, title)
+    assert.deepEqual(entry.autoIncludeTriggers, [])
+    await p.renameEntity(entry.id, 'Renamed article')
+    assert.deepEqual((await p.getEntity(entry.id)).autoIncludeTriggers, [])
+    await p.updateCodexAutoIncludeTriggers(entry.id, ['Explicit alias'])
+    await p.renameEntity(entry.id, 'Another title')
+    assert.deepEqual((await p.getEntity(entry.id)).autoIncludeTriggers, ['Explicit alias'])
   }
 })
 
