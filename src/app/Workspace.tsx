@@ -98,6 +98,8 @@ import LocalBookSync from '../features/sync/LocalBookSync'
 import { useWorkspaceSyncStatus } from '../features/sync/WorkspaceSyncStatus'
 import { checkRemoteBook, syncBookNow, checkRemoteWorld, syncWorldNow } from '../features/sync/sync-service'
 import { loadSyncSettings } from '../features/sync/sync-settings'
+import { getSyncLink, getBookSyncState } from '../features/sync/sync-persistence'
+import { getWorldSyncState } from '../features/sync/world-sync-service'
 import { useBookLibrary } from '../data/useBookLibrary'
 import { generationWordDelayMs, loadAiSettings, textAiIsConfigured, type AiSettings } from '../shared/ai/ai-settings'
 import { createBufferedWordRenderer } from '../features/writing/buffered-word-renderer'
@@ -728,15 +730,36 @@ export default function Workspace() {
 
   function scheduleAutomaticSync() {
     const owner = currentBookRef.current
+    if (autoSyncTimerRef.current) { window.clearTimeout(autoSyncTimerRef.current); autoSyncTimerRef.current = null }
     if (!owner || !loadSyncSettings().automaticUpload) return
-    if (autoSyncTimerRef.current) window.clearTimeout(autoSyncTimerRef.current)
-    autoSyncTimerRef.current = window.setTimeout(() => {
-      autoSyncTimerRef.current = null
-      if (currentBookIdRef.current !== owner.id) return
-      void (owner.type === 'world' ? syncWorldNow(owner.id, prepareBookExport) : syncBookNow(owner.id, prepareBookExport)).then((result) => {
+    const isConnected = async () => owner.type === 'world'
+      ? Boolean(await getWorldSyncState(owner.id))
+      : Boolean(await getSyncLink(owner.id) && await getBookSyncState(owner.id))
+    const reportError = (error: unknown) => showToast(error instanceof Error ? error.message : 'Automatic sync failed. Retry from workspace settings.')
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const connected = await isConnected()
+        if (autoSyncTimerRef.current !== timer) return
+        autoSyncTimerRef.current = null
+        if (!connected || currentBookIdRef.current !== owner.id || !loadSyncSettings().automaticUpload) return
+        const result = await (owner.type === 'world' ? syncWorldNow(owner.id, prepareBookExport) : syncBookNow(owner.id, prepareBookExport))
         if (result.kind === 'pulled') return owner.type === 'world' ? refreshWorldCodexWorkspace() : importedBook(owner.id)
-      }).catch(error => showToast(error instanceof Error ? error.message : 'Automatic sync failed. Retry from workspace settings.'))
+      })().catch(error => {
+        if (autoSyncTimerRef.current === timer) autoSyncTimerRef.current = null
+        reportError(error)
+      })
     }, 2 * 60 * 1000)
+    autoSyncTimerRef.current = timer
+    // Cancel local-only workspaces without letting an older lookup cancel a newer timer.
+    void isConnected().then(connected => {
+      if (autoSyncTimerRef.current === timer && (!connected || currentBookIdRef.current !== owner.id || !loadSyncSettings().automaticUpload)) {
+        window.clearTimeout(timer); autoSyncTimerRef.current = null
+      }
+    }).catch(error => {
+      if (autoSyncTimerRef.current !== timer) return
+      window.clearTimeout(timer); autoSyncTimerRef.current = null
+      reportError(error)
+    })
   }
 
   function handleStoryChange(value: string) {

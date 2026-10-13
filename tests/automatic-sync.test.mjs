@@ -4,19 +4,21 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
+import { stripTypeScriptTypes } from 'node:module'
 
 // Execute the actual Workspace scheduler with controlled time and sync I/O.
 const source = readFileSync(new URL('../src/app/Workspace.tsx', import.meta.url), 'utf8')
 const start = source.indexOf('  function scheduleAutomaticSync()')
 const end = source.indexOf('  function handleStoryChange(', start)
 assert.ok(start >= 0 && end > start)
-const scheduler = source.slice(start, end)
+const scheduler = stripTypeScriptTypes(source.slice(start, end))
 const settle = async () => { for (let i = 0; i < 20; i++) await Promise.resolve() }
 
 function fixture(type = 'book', connected = true) {
   let automaticUpload = true, connection = connected, nextTimer = 0
   const timers = new Map(), calls = [], errors = []
   const context = {
+    Error,
     currentBookRef: { current: { id: 'local-owner', type } },
     currentBookIdRef: { current: 'local-owner' }, autoSyncTimerRef: { current: null },
     loadSyncSettings: () => ({ automaticUpload }),
@@ -63,6 +65,19 @@ for (const type of ['book', 'world']) {
     assert.deepEqual(f.errors, [])
   })
 }
+
+test('a newer edit supersedes a timeout waiting for its connection lookup', async () => {
+  const f = fixture()
+  f.schedule(); await settle()
+  let release
+  f.context.getSyncLink = () => new Promise(resolve => { release = resolve })
+  await f.fire()
+  const releaseOldLookup = release
+  f.schedule(); await settle()
+  releaseOldLookup({ bookId: 'local-owner' }); await settle()
+  assert.equal(f.calls.length, 0)
+  assert.equal(f.timers.size, 1)
+})
 
 test('disabling automatic upload during the idle interval skips sync', async () => {
   const f = fixture()
