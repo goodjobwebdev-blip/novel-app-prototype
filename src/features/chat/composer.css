@@ -121,7 +121,7 @@ body:has([role="dialog"]) .selection-tools { display: none; }
 .workspace-composer.is-collapsed .collapsed-generate-control { align-items: center; gap: 8px; }
 .workspace-composer.is-collapsed .generation-actions .generation-primary { width: 56px!important; padding: 0!important; }
 .workspace-composer .generation-running > .generation-activity-strip { width: auto; height: 44px; margin: 0; display: inline-flex; border-radius: var(--radius); }
-.workspace-composer .generation-running > .generation-stop-circle { margin: 0; }
+.workspace-composer .generate-control-shell > .generation-stop-circle { width: 56px; height: 56px; margin: 0; }
 .workspace-composer .collapsed-dictation-button { width: 44px; height: 44px; min-width: 44px; padding: 0; flex: none; display: grid; place-items: center; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb,var(--deep) 90%,var(--accent)); color: var(--soft); cursor: pointer; touch-action: manipulation; }
 .workspace-composer .collapsed-dictation-button svg { width: 17px; height: 17px; }
 .workspace-composer .collapsed-dictation-button:hover:not(:disabled),.workspace-composer .collapsed-dictation-button:focus-visible { border-color: color-mix(in srgb,var(--accent) 48%,var(--line)); color: var(--accent-bright); }
