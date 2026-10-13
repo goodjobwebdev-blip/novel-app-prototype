@@ -34,6 +34,7 @@ async function fixture() {
     books.push(await w.setBookWorld(book.id, world.id))
   }
   const local = await p.createCodexEntry(books[0].id, 'The tower', 'Place')
+  await p.updateCodexAutoIncludeTriggers(local.id, ['The tower'])
   await p.saveDocumentContent(local.id, 'A red tower')
   const source = await w.moveEntryToWorld(books[0].id, local.id)
   const canonical = async book => (await p.listEntitiesByBook(book.id, 'codexEntry')).find(entry => entry.id === source.id)
@@ -171,6 +172,7 @@ test('backups import visible World lore and binary images as independent local c
   assert.equal(entry.worldId, undefined); assert.equal(entry.seriesSourceId, undefined); assert.equal(entry.codexScope, undefined)
   assert.equal((await p.getEntity(copied.bookId)).worldId, undefined)
   assert.equal(entry.content, canonical.content)
+  assert.deepEqual(entry.autoIncludeTriggers, canonical.autoIncludeTriggers)
   const image = await p.getIllustration(entry.id)
   assert.equal(image.bookId, copied.bookId); assert.equal(image.id, entry.primaryImageId)
   for (const blob of [image.image, image.thumbnail]) {
@@ -184,6 +186,7 @@ test('backups import visible World lore and binary images as independent local c
 test('joining a World keeps local entries local; conflicting moves never overwrite canonical data', async () => {
   const f = await fixture(), newcomer = (await p.createBook(initialAiSettings, 'Newcomer')).book
   const duplicate = await p.createCodexEntry(newcomer.id, 'The tower')
+  await p.updateCodexAutoIncludeTriggers(duplicate.id, ['The tower'])
   await p.saveDocumentContent(duplicate.id, 'Local duplicate')
   await w.setBookWorld(newcomer.id, f.world.id)
   assert.deepEqual(ids(await p.listEntitiesByBook(newcomer.id, 'codexEntry')), ids([duplicate, f.source]))

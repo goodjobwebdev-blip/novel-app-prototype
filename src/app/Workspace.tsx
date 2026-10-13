@@ -1,6 +1,8 @@
 import { entityAvailableInWorkspace, worldPromptValues, type WorkspaceOwner } from './workspace-owner'
 import AuthorGoalsTasks from '../features/author-planning/AuthorGoalsTasks'
 import ArticleLinks from '../features/codex/ArticleLinks'
+import CodexEntryTitle from '../features/codex/CodexEntryTitle'
+import CodexTriggerSuggestions from '../features/codex/CodexTriggerSuggestions'
 import { CharacterChatSetup, RoleplayParticipant } from '../features/chat/CharacterChatControls'
 import CodexDashboard from '../features/codex/CodexDashboard'
 import { resolveEntryAt } from '../features/codex/codex-timeline-service'
@@ -1397,6 +1399,17 @@ export default function Workspace() {
     }
   }
 
+  async function saveCodexTitle(entity: CodexEntryEntity, title: string) {
+    if (articleIssueRef.current?.documentId === entity.id) throw new Error('Resolve the article save issue before renaming.')
+    if (isCodexEntryArchived(entity)) throw new Error('Restore this entry before renaming.')
+    await documentSaveQueueRef.current.run(entity.id, async () => {
+      if (articleIssueRef.current?.documentId === entity.id) throw new Error('Resolve the article save issue before renaming.')
+      const updated = await renameEntity(entity.id, title) as CodexEntryEntity
+      setCodexEntries(entries => entries.map(entry => entry.id === updated.id ? updated : entry))
+      applyIfStillCurrent(entity.id, () => activeDocumentIdRef.current, () => { acceptArticleMetadata(updated); setActiveDocument(updated) })
+    })
+  }
+
   async function renameContentEntity(entity: NoteEntity | CodexEntryEntity) {
     if (articleIssueRef.current?.documentId === entity.id) return
     const label = entity.type === 'note' ? 'Note title' : 'Codex entry name'
@@ -1431,24 +1444,27 @@ export default function Workspace() {
     applyIfStillCurrent(sourceId, () => activeDocumentIdRef.current, () => { acceptArticleMetadata(updated); setActiveDocument(updated) })
   }
 
-  async function saveCodexTriggers() {
+  async function saveCodexTriggers(value = codexTriggerDraft) {
     if (articleIssueRef.current?.documentId === activeDocumentIdRef.current) return
     if (activeDocument?.type !== 'codexEntry' || isCodexEntryArchived(activeDocument)) return
     const sourceId = activeDocument.id
-    const triggerSnapshot = codexTriggerDraft.split(/\r?\n/)
+    const triggerSnapshot = value.split(/\r?\n/)
     const conflicts = codexTriggerConflicts(activeDocument, triggerSnapshot, triggerOwnerEntries)
     if (conflicts.length) {
       setCodexTriggerError(conflicts.map(conflict => `“${conflict.trigger}” is already used in “${conflict.title}”.`).join(' '))
       return
     }
     try {
-      const updated = await updateCodexAutoIncludeTriggers(sourceId, triggerSnapshot)
-      setCodexEntries((entries) => entries.map((entry) => entry.id === updated.id ? updated : entry))
-      applyIfStillCurrent(sourceId, () => activeDocumentIdRef.current, () => {
-        acceptArticleMetadata(updated)
-        setActiveDocument(updated)
-        setCodexTriggerDraft((updated.autoIncludeTriggers ?? []).join('\n'))
-                setCodexTriggerError('')
+      await documentSaveQueueRef.current.run(sourceId, async () => {
+        if (articleIssueRef.current?.documentId === sourceId) throw new Error('Resolve the article save issue before changing triggers.')
+        const updated = await updateCodexAutoIncludeTriggers(sourceId, triggerSnapshot)
+        setCodexEntries((entries) => entries.map((entry) => entry.id === updated.id ? updated : entry))
+        applyIfStillCurrent(sourceId, () => activeDocumentIdRef.current, () => {
+          acceptArticleMetadata(updated)
+          setActiveDocument(updated)
+          setCodexTriggerDraft(current => current === value ? (updated.autoIncludeTriggers ?? []).join('\n') : current)
+          setCodexTriggerError('')
+        })
       })
     } catch (error) {
       applyIfStillCurrent(sourceId, () => activeDocumentIdRef.current, () => setCodexTriggerError(error instanceof Error ? error.message : 'Could not save Codex triggers.'))
@@ -2543,20 +2559,21 @@ export default function Workspace() {
         }} /></>}
         {(activeDocument?.type === 'note' || activeDocument?.type === 'codexEntry') && <div className={`document-titlebar ${activeCodexArchived ? 'archived' : ''}`}>
           {activeDocument.type === 'codexEntry' ? <CodexIllustration key={activeDocument.id} entry={activeDocument} readOnly={activeCodexArchived} actions={<>
-            {activeCodexArchived ? <Button size="small" variant="secondary" leadingIcon={<ArchiveRestore />} onClick={() => { void restoreCodex(activeDocument) }}>Restore</Button> : <Button size="small" variant="secondary" leadingIcon={<Pencil />} onClick={() => { void renameContentEntity(activeDocument) }}>Rename</Button>}
+            {activeCodexArchived && <Button size="small" variant="secondary" leadingIcon={<ArchiveRestore />} onClick={() => { void restoreCodex(activeDocument) }}>Restore</Button>}
             {!activeCodexArchived && <Button className="document-icon-action autotitle-trigger" size="small" variant="secondary" onClick={() => { void startAutotitle(activeDocument) }} aria-label={`Rename ${activeDocument.title} with AI`} title="Rename with AI" leadingIcon={<WandSparkles />} />}
             <SummaryIcon state={summaryStates[activeDocument.id] ?? 'missing'} kind="codex" onOpen={() => { void openSummary(activeDocument) }} />
-          </>}><small>{activeCodexArchived ? `Archived · ${activeDocument.category}` : activeDocument.category}</small><h1>{activeDocument.title}</h1></CodexIllustration> : <><div><small>Note</small><h1>{activeDocument.title}</h1></div><div className="document-title-actions"><Button className="document-icon-action autotitle-trigger" size="small" variant="secondary" onClick={() => { void startAutotitle(activeDocument) }} aria-label={`Autotitle ${activeDocument.title}`} title="Autotitle" leadingIcon={<WandSparkles />} /><Button size="small" variant="secondary" leadingIcon={<Pencil />} onClick={() => { void renameContentEntity(activeDocument) }}>Rename</Button></div></>}
+          </>}><small>{activeCodexArchived ? `Archived · ${activeDocument.category}` : activeDocument.category}</small><CodexEntryTitle key={activeDocument.id} title={activeDocument.title} readOnly={activeCodexArchived} disabled={generationActive || articleIssue?.documentId === activeDocument.id} onSave={title => saveCodexTitle(activeDocument, title)} /></CodexIllustration> : <><div><small>Note</small><h1>{activeDocument.title}</h1></div><div className="document-title-actions"><Button className="document-icon-action autotitle-trigger" size="small" variant="secondary" onClick={() => { void startAutotitle(activeDocument) }} aria-label={`Autotitle ${activeDocument.title}`} title="Autotitle" leadingIcon={<WandSparkles />} /><Button size="small" variant="secondary" leadingIcon={<Pencil />} onClick={() => { void renameContentEntity(activeDocument) }}>Rename</Button></div></>}
         </div>}
         {activeDocument?.type === 'codexEntry' && !isWorldWorkspace && <RoleplayParticipant entry={activeDocument} bookId={currentBook?.id} disabled={generationActive} onBeforeChange={beforeWorldCodexChange} onRefresh={refreshWorldCodexWorkspace} onStart={() => { void beforeWorldCodexChange().then(() => setCharacterSetupEntry(activeDocument.id)).catch(error => showToast(error.message)) }} />}
         {activeDocument?.type === 'codexEntry' && currentBook?.type === 'book' && <CodexTimeline key={`timeline-${activeDocument.id}`} bookId={currentBook.id} entry={activeDocument} currentSceneId={activeSceneId || undefined} disabled={generationActive} onBeforeChange={beforeWorldCodexChange} onRefresh={refreshWorldCodexWorkspace} onViewChange={nonBaseline => setTimelineView({ entryId: activeDocument.id, nonBaseline })} />}
         {activeDocument?.type === 'codexEntry' && <p className="codex-owner-notice">{activeDocument.worldId ? 'World entry · Changes are saved directly to World and shared with all linked Books.' : 'Book-only entry · Changes affect only this Book.'}{activeDocument.codexStatus === 'draft' ? ' Draft · Not automatically included in AI context.' : ''}</p>}
         {activeDocument?.type === 'note' && <NoteRoleControls key={`note-roles-${activeDocument.id}`} note={activeDocument} onChange={updated => { setActiveDocument(current => current?.id === updated.id ? { ...current, useAsChatSkill: updated.useAsChatSkill, useAsCodexTemplate: updated.useAsCodexTemplate, compatibleLoreTypeIds: updated.compatibleLoreTypeIds } : current); void reloadBookContent(updated.bookId) }} />}
-        {activeDocument?.type === 'codexEntry' && <section className={`document-metadata codex-document-metadata ${activeCodexArchived ? 'archived' : ''}`} aria-label="Codex metadata"><LoreTypeSelect label="Category" ownerId={activeDocument.bookId} disabled={activeCodexArchived} value={activeDocument.typeId ?? activeDocument.category} onChange={id => { void changeCodexCategory(id) }} />{!activeCodexArchived && <Checkbox className="codex-summary-preference" label="Prefer summary for AI context" description={codexSummaryPolicyText(activeDocument, summaryStates[activeDocument.id] ?? 'missing')} disabled={generationActive} checked={activeDocument.preferSummaryForContext === true} onChange={(event) => { void changeCodexSummaryPreference(event.target.checked) }} />}{!activeCodexArchived && <label className="codex-trigger-editor"><span>Auto include when text contains</span><ExpandableTextInput disabled={generationActive} value={codexTriggerDraft} onChange={value => { setCodexTriggerDraft(value); setCodexTriggerError('') }} onBlur={() => { void saveCodexTriggers() }} aria-invalid={Boolean(triggerValidationMessage)} aria-describedby={triggerValidationMessage ? 'codex-trigger-validation' : undefined} aria-label="Automatic Codex triggers" dialogTitle="Edit automatic Codex triggers" placeholder="One literal trigger per line" /><small>One name, alias, phrase, or #tag per line. New entries start with their title; removing it keeps it removed, and renaming the entry does not rewrite triggers.</small>{triggerValidationMessage && <span id="codex-trigger-validation" className="codex-trigger-error" role="alert">{triggerValidationMessage}</span>}</label>}{activeCodexArchived && <p className="archived-document-note"><Archive aria-hidden="true" /><span><strong>Archived lore</strong><small>Readable here, but excluded from AI context, Chat discovery, and normal Codex search until restored.</small></span></p>}</section>}
+        {activeDocument?.type === 'codexEntry' && <section className={`document-metadata codex-document-metadata ${activeCodexArchived ? 'archived' : ''}`} aria-label="Codex metadata"><LoreTypeSelect label="Category" ownerId={activeDocument.bookId} disabled={activeCodexArchived} value={activeDocument.typeId ?? activeDocument.category} onChange={id => { void changeCodexCategory(id) }} />{!activeCodexArchived && <Checkbox className="codex-summary-preference" label="Prefer summary for AI context" description={codexSummaryPolicyText(activeDocument, summaryStates[activeDocument.id] ?? 'missing')} disabled={generationActive} checked={activeDocument.preferSummaryForContext === true} onChange={(event) => { void changeCodexSummaryPreference(event.target.checked) }} />}{!activeCodexArchived && <div className="codex-trigger-editor"><label htmlFor="codex-trigger-input"><span>Auto include when text contains</span><ExpandableTextInput id="codex-trigger-input" disabled={generationActive} value={codexTriggerDraft} onChange={value => { setCodexTriggerDraft(value); setCodexTriggerError('') }} onBlur={() => { void saveCodexTriggers() }} aria-invalid={Boolean(triggerValidationMessage)} aria-describedby={triggerValidationMessage ? 'codex-trigger-validation' : 'codex-trigger-help'} aria-label="Automatic Codex triggers" dialogTitle="Edit automatic Codex triggers" placeholder="One name or phrase per line" /></label><CodexTriggerSuggestions title={activeDocument.title} value={codexTriggerDraft} disabled={generationActive} onAdd={trigger => { const next = [codexTriggerDraft.trimEnd(), trigger].filter(Boolean).join('\n'); setCodexTriggerDraft(next); setCodexTriggerError(''); void saveCodexTriggers(next) }} /><small id="codex-trigger-help">One name, alias, phrase, or #tag per line. Leave empty to disable text matching.</small>{triggerValidationMessage && <span id="codex-trigger-validation" className="codex-trigger-error" role="alert">{triggerValidationMessage}</span>}</div>}{activeCodexArchived && <p className="archived-document-note"><Archive aria-hidden="true" /><span><strong>Archived lore</strong><small>Readable here, but excluded from AI context, Chat discovery, and normal Codex search until restored.</small></span></p>}</section>}
         {activeDocument?.type === 'codexEntry' && !activeCodexArchived && <CodexTemplates key={`templates-${activeDocument.id}`} bookId={currentBook?.id ?? ''} targetId={activeDocument.id} typeId={activeDocument.typeId ?? activeDocument.category} body={storyMarkdown} editor={editorRef} disabled={generationActive} />}
         {activeDocument?.type === 'codexEntry' && <CodexDependenciesMetadata key={`dependencies-${activeDocument.id}`} source={activeDocument} entries={codexEntries} edges={codexDependencies} readOnly={activeCodexArchived} onAdd={(targetId) => addCodexDependency(activeDocument.id, targetId)} onUpdate={changeCodexDependency} onRemove={deleteCodexDependency} onOpen={(entryId) => { void loadDocument(entryId) }} />}
         {activeDocument?.type === 'codexEntry' && <ArticleLinks key={activeDocument.id} entry={activeDocument} content={storyMarkdown} entries={codexEntries} disabled={generationActive || activeCodexArchived} onOpen={id => { void openArticle(id) }} onInsert={markdown => { const selection = editorRef.current?.captureSelection?.(); if (selection) { editorRef.current?.replaceRange(selection, markdown); return } handleStoryChange(storyRef.current + markdown) }} />}
         {activeDocument?.type === 'summary' && summaryContextIndicator && <div className="summary-context-indicator">{summaryContextIndicator}</div>}
+        {activeDocument?.type === 'codexEntry' && !(timelineView?.entryId === activeDocument.id && timelineView.nonBaseline) && <header className="codex-content-heading"><h2>Article content</h2></header>}
         {activeDocument && currentBook && ['scene', 'note', 'codexEntry'].includes(activeDocument.type) && !activeCodexArchived && <EditorBlocks key={`blocks-${activeDocument.id}`} bookId={activeDocument.bookId} editor={editorRef} disabled={generationActive} onEditRequestHandled={() => setBlockEditRequest(null)} insertImage={imageInsertRequest === activeDocument.id} onInsertHandled={() => setImageInsertRequest(null)} editRequest={blockEditRequest?.documentId === activeDocument.id && blockEditRequest.snapshot.document === storyMarkdown ? blockEditRequest : null} />}
         <div hidden={timelineView?.entryId === activeDocument?.id && timelineView?.nonBaseline}>{activeDocument ? <MarkdownEditor key={`${activeDocument.id}-${editorRevision}`} ref={editorRef} historyKey={`${currentBook?.id}:${activeDocument.id}`} onArticleLink={id => { void openArticle(id) }} onAutocompleteInput={snapshot => { if (!generationPreflightRef.current && !generationAbortRef.current) void autocomplete.onInput(snapshot) }} onAutocompleteInvalidate={autocomplete.cancel} onAutocompleteAccept={autocomplete.accept} onSelectionChange={(selection) => setSelectedProse(selection ? { documentId: activeDocument.id, selection } : null)} bookId={activeDocument.bookId} showBeats={showBeats} highlightDialogue={activeDocument.type === 'scene' && highlightDialogue} onBeatAction={actOnBeat} onEditBlock={(item) => { const snapshot = editorRef.current?.captureSelection(item.from, item.to); if (snapshot) setBlockEditRequest({ documentId: activeDocument.id, item, snapshot }) }} value={storyMarkdown} onChange={handleStoryChange} onHistoryChange={setEditorHistory} ariaLabel={`${activeDocument.title} Markdown editor`} readOnly={activeCodexArchived || activeSummarySourceArchived || (articleIssue?.documentId === activeDocument.id && articleIssue.kind === 'access')} mentionTerms={activeDocument.type === 'scene' ? codexMentionIndex : []} onMentionClick={activeDocument.type === 'scene' ? openLoreMention : undefined} /> : <div className="empty-editor"><FileText aria-hidden="true" /><strong>No document selected</strong><p>{isWorldWorkspace ? 'Create a Codex article to start building this World. Books are optional.' : 'Choose a Scene, Note, Codex entry, or Summary from the book workspace.'}</p>{isWorldWorkspace && <Button onClick={() => { void addCodexEntry() }}>Create first article</Button>}<button type="button" onClick={() => setRightOpen(true)}>{isWorldWorkspace ? 'Open World Workspace' : 'Open Book Workspace'}</button></div>}</div>
         {characterSetupEntry && currentBook && <CharacterChatSetup bookId={currentBook.id} initialEntryId={characterSetupEntry} currentSceneId={activeSceneId || undefined} onClose={() => setCharacterSetupEntry(null)} onOpen={openChat} />}

@@ -1149,7 +1149,7 @@ export async function createCodexEntry(bookId: string, title = 'Untitled Entry',
     const now = Date.now()
     const owner = await db.table('entities').get(bookId) as ArcEntity | undefined
     if (!owner || !['book', 'world'].includes(owner.type)) throw new Error('This Codex owner is unavailable.')
-    const entry: CodexEntryEntity = { id: makeId('codex'), type: 'codexEntry', bookId, ...(owner.type === 'world' ? { worldId: bookId } : {}), codexStatus: 'active', parentId: bookId, title, category: loreType.name, typeId: loreType.id, content: '', autoIncludeTriggers: normalizeCodexTriggerList([title]), preferSummaryForContext: false, sourceRevision: now, createdAt: now, updatedAt: now }
+    const entry: CodexEntryEntity = { id: makeId('codex'), type: 'codexEntry', bookId, ...(owner.type === 'world' ? { worldId: bookId } : {}), codexStatus: 'active', parentId: bookId, title, category: loreType.name, typeId: loreType.id, content: '', autoIncludeTriggers: [], preferSummaryForContext: false, sourceRevision: now, createdAt: now, updatedAt: now }
     await db.table('entities').put(entry)
     await touchAncestors(db, bookId, now)
     return entry

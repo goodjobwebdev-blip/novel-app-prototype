@@ -49,6 +49,21 @@ export function normalizeCodexTriggerList(values: string[]) {
   return result
 }
 
+const nameHonorific = /^(?:mr|mister|mrs|missus|ms|miss|mx|dr|doctor|prof|professor|sir|dame|lady|lord|rev|reverend|fr|father|st|saint|capt|captain)\.?$/iu
+
+export function codexTitleTriggerSuggestions(title: string, current: string[] = []): string[] {
+  const full = normalizeCodexTrigger(title)
+  if (!full || /^untitled entry(?: \d+)?$/iu.test(full)) return []
+  const words = full.split(' ')
+  // Honorifics are useful with a name, but much too broad as standalone triggers.
+  while (words.length && nameHonorific.test(words[0])) words.shift()
+  if (!words.length) return []
+  const name = words.join(' ')
+  const parts = words.filter(word => /[\p{L}\p{N}]/u.test(word) && !nameHonorific.test(word))
+  const existing = new Set(current.map(codexTriggerKey))
+  return normalizeCodexTriggerList([...parts, name, full]).filter(value => !existing.has(codexTriggerKey(value)))
+}
+
 function entryTriggers(entry: CodexEntryEntity) {
   const value: unknown = entry.autoIncludeTriggers
   return normalizeCodexTriggerList(Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [])
