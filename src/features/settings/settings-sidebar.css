@@ -1,0 +1,359 @@
+/* The existing settings App owns all chrome and controls; only its host is new. */
+.settings-sidebar {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  height: 100dvh;
+  min-height: 0;
+  padding: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--canvas);
+}
+
+@media (min-width: 760px) {
+  .workspace-screen.settings-open,
+  .settings-sidebar {
+    --settings-sidebar-width: min(470px, 44vw);
+  }
+
+  .workspace-screen.settings-open {
+    padding-left: var(--settings-sidebar-width);
+  }
+
+  /* Fixed controls do not follow the workspace's content-box clearance. */
+  .workspace-screen.settings-open > .floating-controls {
+    left: calc(var(--settings-sidebar-width) + clamp(14px, 4vw, 32px));
+  }
+
+  .workspace-screen.settings-open > .workspace-composer:not(.is-collapsed),
+  .workspace-screen.settings-open > .chat-message-composer {
+    left: var(--settings-sidebar-width);
+  }
+
+  .workspace-screen.settings-open > .chat-follow-output {
+    left: calc(50% + var(--settings-sidebar-width) / 2);
+  }
+
+  /* Keep right-anchored actions in the remaining workspace without moving them. */
+  .workspace-screen.settings-open > .workspace-composer.is-collapsed {
+    max-width: calc(100vw - var(--settings-sidebar-width) - 2 * max(12px, env(safe-area-inset-right)));
+  }
+
+  .workspace-screen.settings-open > .summary-generate-wrap {
+    max-width: calc(100vw - var(--settings-sidebar-width) - 2 * clamp(14px, 4vw, 32px));
+  }
+
+  .workspace-screen.settings-open > .note-editor-actions {
+    max-width: calc(100vw - var(--settings-sidebar-width) - 32px);
+  }
+
+  .settings-sidebar {
+    right: auto;
+    width: var(--settings-sidebar-width);
+    box-shadow: 24px 0 60px rgba(0, 0, 0, .5);
+    container-type: inline-size;
+    container-name: settings-sidebar;
+  }
+
+  /* Undo the standalone App's 280px rail without changing control styling. */
+  .settings-sidebar > .app-shell.ai-settings-shell {
+    --page-padding: var(--space-4);
+    display: block;
+    grid-template-columns: none;
+    min-height: 100%;
+  }
+
+  .settings-sidebar .settings-rail {
+    height: auto;
+    padding: max(12px, env(safe-area-inset-top)) 14px 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    display: block;
+  }
+
+  .settings-sidebar .settings-rail nav {
+    margin: 11px -14px 0;
+    border-top: 1px solid var(--line);
+    display: flex;
+    gap: 0;
+  }
+
+  .settings-sidebar .settings-rail nav button {
+    width: auto;
+    min-height: 0;
+    height: 58px;
+    padding: 7px 10px;
+    border-radius: 0;
+    display: grid;
+    justify-content: normal;
+    gap: 3px;
+    font-size: 11px;
+  }
+
+  .settings-sidebar .settings-rail nav button.active {
+    background: transparent;
+  }
+
+  .settings-sidebar .settings-rail nav button.active::after {
+    inset: auto 12px 0;
+    width: auto;
+    height: 2px;
+  }
+
+  .settings-sidebar .settings-rail > p {
+    display: none;
+  }
+
+  .settings-sidebar .settings-page {
+    padding-top: var(--section-gap);
+  }
+
+  .settings-sidebar .card-heading > p {
+    display: none;
+  }
+
+  .settings-sidebar .profile-leave-dialog {
+    left: 16px;
+    top: 16px;
+    transform: none;
+    width: calc(100% - 32px);
+    max-height: calc(100dvh - 32px);
+    overflow: auto;
+  }
+
+  /* Reuse feature-local narrow layouts by drawer width, not workspace width.
+     Containment and all inner overrides are desktop-only to preserve mobile. */
+  @container settings-sidebar (max-width: 759px) {
+    .settings-sidebar .ui-appearance-tools {
+      position: relative;
+    }
+
+    .settings-sidebar .ui-appearance-tools nav {
+      flex-basis: 100%;
+    }
+
+    .settings-sidebar .ui-settings-panel .ui-safe-reset {
+      width: 100%;
+    }
+
+    .settings-sidebar .ui-range-grid {
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
+
+    .settings-sidebar .connection-fields {
+      grid-template-columns: minmax(0, 1fr);
+      align-items: normal;
+    }
+
+    .settings-sidebar .connection-fields label:first-child:nth-last-child(3) {
+      grid-column: auto;
+    }
+
+    .settings-sidebar .reload-button {
+      min-width: 0;
+    }
+
+    .settings-sidebar .model-pickers {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 13px;
+    }
+  }
+
+  @container settings-sidebar (max-width: 720px) {
+    .settings-sidebar .model-role-settings {
+      grid-template-columns: 1fr;
+    }
+
+    .settings-sidebar .story-message-toolbar {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .settings-sidebar .story-message-actions {
+      justify-content: flex-end;
+    }
+  }
+
+  @container settings-sidebar (max-width: 700px) {
+    .settings-sidebar :is(.context-limit-grid, .speech-settings-grid) {
+      grid-template-columns: 1fr;
+    }
+
+    .settings-sidebar .speech-key-row {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .settings-sidebar .speech-key-row button {
+      width: 100%;
+      max-width: none;
+    }
+
+    .settings-sidebar .speech-model-list {
+      max-height: 360px;
+    }
+
+    .settings-sidebar .speech-model-list button {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 5px;
+    }
+
+    .settings-sidebar :is(.speech-model-list, .stt-model-list) button > small {
+      max-width: none;
+      text-align: left;
+    }
+
+    .settings-sidebar .text-provider-controls > .arc-field {
+      flex-basis: 100%;
+    }
+
+    .settings-sidebar .text-provider-controls > .arc-button {
+      margin-top: 0;
+    }
+
+    .settings-sidebar .profile-header-main > .settings-profile-type,
+    .settings-sidebar .profile-management-fields > .arc-field {
+      flex-basis: 100%;
+      width: 100%;
+    }
+
+    .settings-sidebar .profile-header-main > .profile-selection {
+      flex: 1 1 150px;
+    }
+
+    .settings-sidebar .profile-save-bar {
+      flex-wrap: wrap;
+    }
+
+    .settings-sidebar .profile-save-bar > span {
+      min-width: 0;
+      flex-basis: 100px;
+    }
+
+    .settings-sidebar .profile-actions > .arc-field {
+      flex-basis: 100%;
+    }
+  }
+
+  @container settings-sidebar (max-width: 640px) {
+    .settings-sidebar .settings-save-recovery:not(.profile-leave-dialog) {
+      position: static;
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .settings-sidebar .settings-save-recovery-actions button {
+      flex: 1 1 auto;
+    }
+
+    .settings-sidebar .prompt-preset-picker > .arc-field {
+      flex-basis: 100%;
+    }
+
+    .settings-sidebar .prompt-preset-library article {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+
+    .settings-sidebar .response-length-setting > label > span {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 2px;
+    }
+  }
+
+  @container settings-sidebar (max-width: 620px) {
+    .settings-sidebar :is(.ui-theme-grid, .ui-color-grid) {
+      grid-template-columns: 1fr;
+    }
+
+    .settings-sidebar .ui-custom-themes > header {
+      align-items: flex-start;
+    }
+  }
+
+  @container settings-sidebar (max-width: 560px) {
+    .settings-sidebar .ai-settings-shell .model-list article {
+      grid-template-columns: 44px minmax(0, 1fr);
+    }
+
+    .settings-sidebar .ai-settings-shell .use-model {
+      grid-column: 2;
+      justify-self: start;
+    }
+
+    .settings-sidebar .ai-settings-shell .card-heading {
+      align-items: start;
+    }
+
+    .settings-sidebar .prompt-variable-list > div {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .settings-sidebar .prompt-variable-list > div > span {
+      grid-column: 1 / -1;
+      grid-row: 2;
+    }
+
+    .settings-sidebar .prompt-variable-list .insert-condition {
+      grid-column: 2;
+      grid-row: 1;
+    }
+
+    .settings-sidebar .context-picker-toolbar {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .settings-sidebar .context-tree-children {
+      padding-left: 10px;
+      margin-left: 2px;
+    }
+
+    .settings-sidebar .context-save-status {
+      max-width: 100%;
+    }
+
+    .settings-sidebar .context-defaults-settings .page-heading {
+      flex-wrap: wrap;
+    }
+
+    .settings-sidebar :is(.image-generation-pickers, .image-provider-fields, .image-model-discovery, .image-favorite-defaults) {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .settings-sidebar .image-model-discovery {
+      gap: 8px;
+    }
+
+    .settings-sidebar .image-favorite-actions {
+      align-items: stretch;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .settings-sidebar .image-ui .image-favorite-actions .image-remove-favorite {
+      margin-left: 0;
+    }
+  }
+
+  @container settings-sidebar (max-width: 430px) {
+    .settings-sidebar .page-heading {
+      display: block;
+    }
+
+    .settings-sidebar .save-state {
+      margin-top: 12px;
+    }
+
+    .settings-sidebar .prompt-footer > span {
+      display: none;
+    }
+  }
+
+  @container settings-sidebar (max-width: 360px) {
+    .settings-sidebar .profile-header-main > .profile-selection {
+      flex-basis: 100%;
+    }
+  }
+}

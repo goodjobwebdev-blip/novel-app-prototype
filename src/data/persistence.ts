@@ -937,12 +937,13 @@ export async function getBookContextSettings(bookId: string): Promise<BookContex
   })
 }
 
-export async function saveBookContextSettings(bookId: string, value: BookContextSettings): Promise<BookContextSettings> {
+export async function saveBookContextSettings(bookId: string, value: BookContextSettings, options: { preserveSceneAnchor?: boolean } = {}): Promise<BookContextSettings> {
   if (await getWorld(bookId)) return saveWorldContextSettings(bookId, value)
   const normalized = normalizeBookContextSettings(value), db = await database()
   return db.transaction('rw', db.table('entities'), async () => {
     if ((await db.table('entities').get(bookId))?.type !== 'book') throw new Error('This book no longer exists.')
     const existing = await db.table('entities').get(bookContextSettingsId(bookId)) as BookContextSettingsEntity | undefined
+    if (options.preserveSceneAnchor) normalized.lastOpenedSceneId = normalizeBookContextSettings(existing?.value).lastOpenedSceneId
     const now = Date.now()
     await db.table('entities').put({ ...makeBookContextSettingsEntity(bookId, normalized, existing?.createdAt ?? now), updatedAt: now })
     return normalized
@@ -953,10 +954,20 @@ export async function getGenerationContextProfile(bookId: string, type: Generati
   return (await getBookContextSettings(bookId)).profiles[type]
 }
 
-export async function rememberLastOpenedScene(bookId: string, sceneId: string) {
-  const settings = await getBookContextSettings(bookId)
-  if (settings.lastOpenedSceneId === sceneId) return settings
-  return saveBookContextSettings(bookId, { ...settings, lastOpenedSceneId: sceneId })
+export async function rememberLastOpenedScene(bookId: string, sceneId: string): Promise<BookContextSettings> {
+  if (await getWorld(bookId)) return getWorldContextSettings(bookId)
+  const db = await database()
+  return db.transaction('rw', db.table('entities'), async () => {
+    if ((await db.table('entities').get(bookId))?.type !== 'book') throw new Error('This book no longer exists.')
+    const existing = await db.table('entities').get(bookContextSettingsId(bookId)) as BookContextSettingsEntity | undefined
+    if (existing && (existing.type !== 'settings' || existing.settingsType !== 'context-book')) throw new Error('Invalid book context settings. Original data was preserved.')
+    const settings = normalizeBookContextSettings(existing?.value)
+    if (existing && settings.lastOpenedSceneId === sceneId) return settings
+    settings.lastOpenedSceneId = sceneId
+    const now = Date.now()
+    await db.table('entities').put({ ...makeBookContextSettingsEntity(bookId, settings, existing?.createdAt ?? now), updatedAt: now })
+    return settings
+  })
 }
 
 /** Owner-general access keeps getBook strictly Book-only. Legacy bookId fields are canonical owner IDs. */

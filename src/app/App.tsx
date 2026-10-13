@@ -15,7 +15,7 @@ import Disclosure from '../shared/ui/Disclosure'
 import SearchableSelect from '../shared/ui/SearchableSelect'
 import RadioGroup from '../shared/ui/RadioGroup'
 import Tabs from '../shared/ui/Tabs'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react'
 import {
   Bot,
   Check,
@@ -140,7 +140,23 @@ function sttCatalogConnectionKey(settings: AiSettings['speech']) {
 function isAbortError(error: unknown) {
   return error instanceof Error && error.name === 'AbortError'
 }
+export type SettingsPanelHandle = {
+  requestLeave(destination: () => void): void
+  saveContext(): Promise<boolean>
+}
+
+type ContextDraft =
+  | { kind: 'book'; bookId: string; value: BookContextSettings }
+  | { kind: 'chat'; chatId: string; profile: GenerationContextProfile }
+  | { kind: 'default'; value: BookContextSettings }
+
+function contextDraftKey(draft: ContextDraft) {
+  return draft.kind === 'book' ? `book:${draft.bookId}` : draft.kind === 'chat' ? `chat:${draft.chatId}` : 'default'
+}
+
 type AiSettingsProps = {
+  embedded?: boolean
+  panelRef?: Ref<SettingsPanelHandle>
   ownerKind?: 'world' | 'book'
   initialTab?: SettingsTab
   onGlobalSettings?: () => void
@@ -160,11 +176,17 @@ function readProfileLibrary(): { library?: SettingsProfileLibrary; error?: strin
 
 export default function App(props: AiSettingsProps) {
   const [loaded, setLoaded] = useState(readProfileLibrary)
-  if (!loaded.library) return <main className="app-shell ai-settings-shell"><section className="settings-page"><h1>Settings unavailable</h1><p role="alert">{loaded.error}</p><div className="profile-actions"><Button onClick={() => setLoaded(readProfileLibrary())}>Retry loading</Button>{props.onHome && <Button onClick={props.onHome}>Home</Button>}{props.onBack && <Button onClick={props.onBack}>Close settings</Button>}</div></section></main>
-  return <SettingsApp {...props} initialLibrary={loaded.library} />
+  const settingsPanelRef = useRef<SettingsPanelHandle | null>(null)
+  useImperativeHandle(props.panelRef, () => ({
+    requestLeave: destination => settingsPanelRef.current ? settingsPanelRef.current.requestLeave(destination) : destination(),
+    saveContext: () => settingsPanelRef.current?.saveContext() ?? Promise.resolve(false),
+  }))
+  const Root = props.embedded ? 'section' : 'main'
+  if (!loaded.library) return <Root className="app-shell ai-settings-shell"><section className="settings-page"><h1>Settings unavailable</h1><p role="alert">{loaded.error}</p><div className="profile-actions"><Button onClick={() => setLoaded(readProfileLibrary())}>Retry loading</Button>{props.onHome && <Button onClick={props.onHome}>Home</Button>}{props.onBack && <Button onClick={props.onBack}>Close settings</Button>}</div></section></Root>
+  return <SettingsApp {...props} panelRef={settingsPanelRef} initialLibrary={loaded.library} />
 }
 
-function SettingsApp({ ownerKind = 'book', onHome, onBack, onSaved, onGlobalSettings, onLastBook, lastBookTitle, initialProfileId, book, initialTab = 'ai', initialLibrary }: AiSettingsProps & { initialLibrary: SettingsProfileLibrary }) {
+function SettingsApp({ embedded = false, panelRef, ownerKind = 'book', onHome, onBack, onSaved, onGlobalSettings, onLastBook, lastBookTitle, initialProfileId, book, initialTab = 'ai', initialLibrary }: AiSettingsProps & { initialLibrary: SettingsProfileLibrary }) {
   const [settings, setSettings] = useState<AiSettings>(initialAiSettings)
   const [library, setLibrary] = useState(initialLibrary)
   const [selections, setSelections] = useState<BookProfileSelections | null>(null)
@@ -192,11 +214,23 @@ function SettingsApp({ ownerKind = 'book', onHome, onBack, onSaved, onGlobalSett
   const [leaveSaving, setLeaveSaving] = useState(false)
   const contextSaveVersionRef = useRef(0)
   const contextSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const contextLoadQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const contextDraftsRef = useRef(new Map<string, ContextDraft>())
+  const contextDiscardingRef = useRef(false)
+  const contextLatestRef = useRef({ bookId: book?.id, chatId: book?.chatId, ready: !book, saved: true, settings: contextSettings, chatProfile: chatContextProfile })
+  const activeContextScopeRef = useRef({ bookId: book?.id, chatId: book?.chatId })
+  activeContextScopeRef.current = { bookId: book?.id, chatId: book?.chatId }
   const pendingLeaveDestinationRef = useRef<(() => void) | null>(null)
   const leaveSavingRef = useRef(false)
   const onSavedRef = useRef(onSaved)
   onSavedRef.current = onSaved
   const isBookSettings = Boolean(book) && !localGlobal
+  const Root = embedded ? 'section' : 'main'
+  useImperativeHandle(panelRef, () => ({ requestLeave: navigate, saveContext }))
+
+  useEffect(() => {
+    if (embedded) setContextSection(book?.contextType === 'codex' || book?.contextType === 'chat' ? book.contextType : ownerKind === 'world' ? 'codex' : 'scene')
+  }, [embedded, book?.id, book?.contextType, ownerKind])
 
   useEffect(() => {
     try {
@@ -249,113 +283,184 @@ function SettingsApp({ ownerKind = 'book', onHome, onBack, onSaved, onGlobalSett
     await pending
   }
 
+  function updateContextSaveStatus() {
+    const saved = contextLatestRef.current.ready && contextDraftsRef.current.size === 0
+    contextLatestRef.current.saved = saved
+    setContextSaved(saved)
+    if (saved) setContextSaveError('')
+  }
+
   useEffect(() => {
     let cancelled = false
-    if (!book) {
-      setContextSaveError('')
-      setContextSettings(loadDefaultBookContextSettings())
-      setChatContextProfile(null)
-      setContextSources([])
-      setContextSaved(true)
-      setContextReady(true)
-      return () => { cancelled = true }
-    }
+    const bookId = book?.id
+    const chatId = book?.chatId
+    contextLatestRef.current = { ...contextLatestRef.current, bookId, chatId, ready: false, saved: false }
     setContextReady(false)
     setContextSaved(false)
     setContextSaveError('')
-    void Promise.all([getBookContextSettings(book.id), listEntitiesByBook(book.id), book.chatId ? getChat(book.chatId) : Promise.resolve(undefined)]).then(([value, entities, chat]) => {
-      if (!cancelled) {
+    const pending = (async () => {
+      try {
+        // Drain writes before reading a new scope; retained failed drafts take precedence.
+        await contextSaveQueueRef.current
+        const [value, entities, chat] = bookId
+          ? await Promise.all([getBookContextSettings(bookId), listEntitiesByBook(bookId), chatId ? getChat(chatId) : Promise.resolve(undefined)])
+          : [loadDefaultBookContextSettings(), [], undefined] as const
+        if (cancelled) return
+        const bookDraft = contextDraftsRef.current.get(bookId ? `book:${bookId}` : 'default')
+        const chatDraft = chatId ? contextDraftsRef.current.get(`chat:${chatId}`) : undefined
+        const nextSettings = bookDraft && bookDraft.kind !== 'chat' ? { ...bookDraft.value, lastOpenedSceneId: value.lastOpenedSceneId } : value
+        const nextChatProfile = chatDraft?.kind === 'chat' ? chatDraft.profile : chat?.contextProfile ?? null
+        contextLatestRef.current = { bookId, chatId, ready: true, saved: false, settings: nextSettings, chatProfile: nextChatProfile }
+        setContextSettings(nextSettings)
+        setChatContextProfile(nextChatProfile)
+        setContextSources([...entities])
         setContextReady(true)
-        setContextSettings(value)
-        setChatContextProfile(chat?.contextProfile ?? null)
-        setContextSources(entities)
-        setContextSaved(true)
+        updateContextSaveStatus()
+        if (contextDraftsRef.current.size) setContextSaveError('Context could not be saved. Your selections are still here.')
+      } catch {
+        if (!cancelled) { setContextSaved(false); setContextSaveError('Context settings could not be loaded. Reopen settings to try again.') }
       }
-    }).catch(() => { if (!cancelled) { setContextSaved(false); setContextSaveError('Context settings could not be loaded. Reopen settings to try again.') } })
+    })()
+    contextLoadQueueRef.current = pending
     return () => { cancelled = true }
   }, [book?.id, book?.chatId, contextLoadVersion])
-  async function saveContextDefaults(): Promise<boolean> {
-    if (!contextReady) return true // No editable Context draft has been loaded.
-    const section = contextSection
-    setContextSaveError('')
-    setContextSaved(false)
-    const value = contextSettings
-    if (!book) {
+
+  useEffect(() => {
+    if (!embedded || !book) return
+    let cancelled = false
+    let refreshVersion = 0
+    const bookId = book.id
+    const chatId = book.chatId
+    async function refresh(event?: Event) {
+      const changedBookId = (event as CustomEvent<{ bookId?: string }> | undefined)?.detail?.bookId
+      if (changedBookId && changedBookId !== bookId) return
+      const version = ++refreshVersion
       try {
-        const saved = saveDefaultBookContextSettings(value)
-        setContextSettings(saved)
-        setContextSaved(true)
-        return true
+        await contextLoadQueueRef.current
+        const [entities, persisted, chat] = await Promise.all([listEntitiesByBook(bookId), getBookContextSettings(bookId), chatId ? getChat(chatId) : Promise.resolve(undefined)])
+        const latest = contextLatestRef.current
+        if (cancelled || version !== refreshVersion || !latest.ready || latest.bookId !== bookId || latest.chatId !== chatId) return
+        setContextSources(entities)
+        // Only reference metadata follows persistence; source refreshes never replace the draft.
+        if (latest.settings.lastOpenedSceneId !== persisted.lastOpenedSceneId) {
+          latest.settings = { ...latest.settings, lastOpenedSceneId: persisted.lastOpenedSceneId }
+          setContextSettings(latest.settings)
+        }
+        if (chatId && !contextDraftsRef.current.has(`chat:${chatId}`)) {
+          latest.chatProfile = chat?.contextProfile ?? null
+          setChatContextProfile(latest.chatProfile)
+        }
       } catch {
-        setContextSaved(false)
-        setContextSaveError('Context could not be saved. Your selections are still here.')
-        return false
+        if (!cancelled && version === refreshVersion) setContextSaveError('Context sources could not be refreshed. Your selections are still here.')
       }
     }
+    void refresh()
+    const events = ['arc-entity-changed', 'arc-worlds-changed', 'arc-chat-changed']
+    for (const event of events) window.addEventListener(event, refresh)
+    return () => { cancelled = true; for (const event of events) window.removeEventListener(event, refresh) }
+  }, [embedded, book?.id, book?.chatId, book?.currentDocumentId, book?.contextType, contextLoadVersion])
 
-    const version = ++contextSaveVersionRef.current
-    if (section === 'chat' && book.chatId && chatContextProfile) {
+  function queueContextDraft(draft: ContextDraft): Promise<void> {
+    const key = contextDraftKey(draft)
+    const version = contextSaveVersionRef.current
+    const pending = contextSaveQueueRef.current.then(async () => {
+      // A newer edit or explicit discard supersedes queued, not-yet-started work.
+      if (version !== contextSaveVersionRef.current || contextDraftsRef.current.get(key) !== draft) return
       try {
-        await saveChatContextProfile(book.chatId, chatContextProfile)
-        if (version !== contextSaveVersionRef.current) return false
-        setContextSaved(true)
-        return true
+        let saved: BookContextSettings | undefined
+        if (draft.kind === 'chat') await saveChatContextProfile(draft.chatId, draft.profile)
+        else if (draft.kind === 'default') saved = saveDefaultBookContextSettings(draft.value)
+        else saved = await saveBookContextSettings(draft.bookId, draft.value, { preserveSceneAnchor: true })
+        if (version !== contextSaveVersionRef.current || contextDraftsRef.current.get(key) !== draft) return
+        contextDraftsRef.current.delete(key)
+        const latest = contextLatestRef.current
+        if (saved && (draft.kind === 'book' ? latest.bookId === draft.bookId : !latest.bookId)) {
+          latest.settings = saved
+          setContextSettings(saved)
+        }
+        updateContextSaveStatus()
       } catch {
-        if (version === contextSaveVersionRef.current) { setContextSaved(false); setContextSaveError('Context could not be saved. Your selections are still here.') }
-        return false
+        if (version === contextSaveVersionRef.current && contextDraftsRef.current.get(key) === draft) {
+          contextLatestRef.current.saved = false
+          setContextSaved(false)
+          setContextSaveError('Context could not be saved. Your selections are still here.')
+        }
       }
-    }
+    })
+    contextSaveQueueRef.current = pending
+    return pending
+  }
 
-    const pending = contextSaveQueueRef.current.catch(() => undefined).then(() => saveBookContextSettings(book.id, value))
-    contextSaveQueueRef.current = pending.then(() => undefined, () => undefined)
+  async function drainSettingsQueues() {
+    // An edit may enqueue another write while this barrier is waiting.
+    let profiles: Promise<void>
+    let context: Promise<void>
+    do {
+      profiles = profileSaveQueueRef.current
+      context = contextSaveQueueRef.current
+      await Promise.all([profiles, context])
+    } while (profiles !== profileSaveQueueRef.current || context !== contextSaveQueueRef.current)
+  }
+
+  async function saveContext(): Promise<boolean> {
+    if (contextDiscardingRef.current) return false
     try {
-      const savedDefaults = await pending
-      if (version !== contextSaveVersionRef.current) return false
-      setContextSettings(savedDefaults)
-      setContextSaved(true)
-      return true
+      await drainSettingsQueues()
+      await contextLoadQueueRef.current
+      await drainSettingsQueues()
+      const latest = contextLatestRef.current
+      const scope = activeContextScopeRef.current
+      if (contextDiscardingRef.current || !latest.ready || latest.bookId !== scope.bookId || latest.chatId !== scope.chatId) return false
+      // Check synchronous dirty state only after all automatically queued saves finish.
+      if (!latest.saved) {
+        for (const draft of contextDraftsRef.current.values()) void queueContextDraft(draft)
+        await drainSettingsQueues()
+      }
+      return contextLatestRef.current.saved && contextDraftsRef.current.size === 0
     } catch {
-      if (version === contextSaveVersionRef.current) { setContextSaved(false); setContextSaveError('Context could not be saved. Your selections are still here.') }
+      setContextSaveError('Context could not be saved. Your selections are still here.')
       return false
     }
   }
 
+  async function saveContextDefaults(): Promise<boolean> {
+    // Leaving an unloaded panel is safe; generation requires the stricter readiness barrier.
+    if (!contextLatestRef.current.ready && !contextDraftsRef.current.size) return true
+    if (!(await saveContext())) return false
+    return true
+  }
+
   function updateContextDefaults(value: BookContextSettings, section: GenerationContextType = 'scene') {
-    if (!contextReady) return
+    const latest = contextLatestRef.current
+    if (contextDiscardingRef.current || !latest.ready || latest.bookId !== book?.id || latest.chatId !== book?.chatId) return
     setContextSaveError('')
-    setContextSaved(false)
-    if (section === 'chat' && book?.chatId) setChatContextProfile(value.profiles.chat)
-    else setContextSettings(value)
+    let draft: ContextDraft
+    if (section === 'chat' && book?.chatId) {
+      latest.chatProfile = value.profiles.chat
+      setChatContextProfile(latest.chatProfile)
+      draft = { kind: 'chat', chatId: book.chatId, profile: latest.chatProfile }
+    } else {
+      latest.settings = value
+      setContextSettings(value)
+      draft = book ? { kind: 'book', bookId: book.id, value } : { kind: 'default', value }
+    }
+    contextDraftsRef.current.set(contextDraftKey(draft), draft)
+    updateContextSaveStatus()
     if (!book) {
       try {
         const saved = saveDefaultBookContextSettings(value)
+        contextDraftsRef.current.delete(contextDraftKey(draft))
+        latest.settings = saved
         setContextSettings(saved)
-        setContextSaved(true)
+        updateContextSaveStatus()
       } catch {
+        latest.saved = false
         setContextSaved(false)
         setContextSaveError('Context could not be saved. Your selections are still here.')
       }
       return
     }
-    const version = ++contextSaveVersionRef.current
-    if (section === 'chat' && book.chatId) {
-      contextSaveQueueRef.current = contextSaveQueueRef.current.catch(() => undefined).then(async () => {
-        await saveChatContextProfile(book.chatId!, value.profiles.chat)
-        if (version === contextSaveVersionRef.current) setContextSaved(true)
-      }).catch(() => {
-        if (version === contextSaveVersionRef.current) { setContextSaved(false); setContextSaveError('Context could not be saved. Your selections are still here.') }
-      })
-      return
-    }
-    contextSaveQueueRef.current = contextSaveQueueRef.current.catch(() => undefined).then(async () => {
-      const savedDefaults = await saveBookContextSettings(book.id, value)
-      if (version === contextSaveVersionRef.current) {
-        setContextSettings(savedDefaults)
-        setContextSaved(true)
-      }
-    }).catch(() => {
-      if (version === contextSaveVersionRef.current) { setContextSaved(false); setContextSaveError('Context could not be saved. Your selections are still here.') }
-    })
+    void queueContextDraft(draft)
   }
 
   function saveApplicationContext(next: BookContextSettings): boolean {
@@ -375,7 +480,7 @@ function SettingsApp({ ownerKind = 'book', onHome, onBack, onSaved, onGlobalSett
     leaveSavingRef.current = true; setLeaveSaving(true)
     await profileSaveQueueRef.current
     const saved = await saveRequiredSettingsForLeave([
-          ...(!contextSaved ? [() => saveContextDefaults()] : []),
+          () => saveContextDefaults(),
           ...(applicationContextError ? [async () => saveApplicationContext(applicationContext)] : []),
         ])
     leaveSavingRef.current = false; setLeaveSaving(false)
@@ -391,10 +496,36 @@ function SettingsApp({ ownerKind = 'book', onHome, onBack, onSaved, onGlobalSett
   async function leaveSettingsWithoutSaving() {
     const destination = pendingLeaveDestinationRef.current
     if (!destination || leaveSavingRef.current || !window.confirm('Leave without saving Context? Unsaved changes will be lost.')) return
+    const scope = activeContextScopeRef.current
+    leaveSavingRef.current = true; setLeaveSaving(true)
+    contextDiscardingRef.current = true
     contextSaveVersionRef.current += 1
-    await contextSaveQueueRef.current.catch(() => undefined)
-    setLeaveRecoveryOpen(false); pendingLeaveDestinationRef.current = null
-    try { destination() } catch (failure) { setProfileError(failure instanceof Error ? failure.message : 'Settings navigation failed.') }
+    try {
+      await contextSaveQueueRef.current.catch(() => undefined)
+      await contextLoadQueueRef.current
+      const [persisted, chat] = scope.bookId
+        ? await Promise.all([getBookContextSettings(scope.bookId), scope.chatId ? getChat(scope.chatId) : Promise.resolve(undefined)])
+        : [loadDefaultBookContextSettings(), undefined] as const
+      const active = activeContextScopeRef.current
+      if (active.bookId !== scope.bookId || active.chatId !== scope.chatId) throw new Error('Context scope changed while discarding.')
+      // Discard only after persisted values can replace both the draft refs and the visible controls.
+      contextLatestRef.current = { ...scope, ready: true, saved: false, settings: persisted, chatProfile: chat?.contextProfile ?? null }
+      setContextSettings(persisted)
+      setChatContextProfile(contextLatestRef.current.chatProfile)
+      setContextReady(true)
+      contextDraftsRef.current.clear()
+      updateContextSaveStatus()
+      setLeaveRecoveryOpen(false); pendingLeaveDestinationRef.current = null
+      try { destination() } catch (failure) { setProfileError(failure instanceof Error ? failure.message : 'Settings navigation failed.') }
+    } catch {
+      contextLatestRef.current.saved = false
+      setContextSaved(false)
+      setContextSaveError('Context could not be reloaded. Your unsaved selections are still here.')
+      setLeaveRecoveryOpen(true)
+    } finally {
+      contextDiscardingRef.current = false
+      leaveSavingRef.current = false; setLeaveSaving(false)
+    }
   }
   function openGlobalProfile(id?: string) {
     navigate(() => { const nextTab = loadSettingsProfiles().profiles.find(profile => profile.id === id)?.kind === 'ui' ? 'appearance' : 'ai'; setEditProfileId(id); setSettingsTab(nextTab); setLocalGlobal(true) })
@@ -403,7 +534,7 @@ function SettingsApp({ ownerKind = 'book', onHome, onBack, onSaved, onGlobalSett
     ? { ...contextSettings, profiles: { ...contextSettings.profiles, chat: chatContextProfile } }
     : contextSettings
   const globalSection = (settingsTab === 'appearance' || settingsTab === 'application' || settingsTab === 'sync' ? settingsTab : 'ai') as GlobalSettingsSection
-  return <main className="app-shell ai-settings-shell">
+  return <Root className="app-shell ai-settings-shell">
     <aside className="settings-rail" aria-label={`${isBookSettings ? 'Book' : 'Global'} settings navigation`}>
       <div className="rail-header"><button className="home-button" type="button" onClick={() => navigate(onHome)} disabled={leaveSaving} aria-label="Back to library"><Home aria-hidden="true" /><b>Home</b></button>
         {isBookSettings && <button className="global-settings-button" type="button" onClick={() => onGlobalSettings ? navigate(onGlobalSettings) : openGlobalProfile()} disabled={leaveSaving} aria-label="Global Settings" title="Global Settings"><Settings aria-hidden="true" /></button>}
@@ -424,7 +555,7 @@ function SettingsApp({ ownerKind = 'book', onHome, onBack, onSaved, onGlobalSett
           {ownerKind === 'world' && <div><button disabled aria-describedby="world-story-settings-disabled">Story</button><p id="world-story-settings-disabled">Story settings are available only in Books · Настройки истории доступны только в книгах</p></div>}
           <SettingsSectionTabs tabs={ownerKind === 'world' ? contextSections.filter(([id]) => id !== 'scene') : contextSections} active={contextSection} onChange={setContextSection} idPrefix="context" label="Context type" />
           <div role="tabpanel" id={`context-panel-${contextSection}`} aria-labelledby={`context-tab-${contextSection}`}>
-            <ContextSettings bookId={book.id} bookTitle={book.title} bookPromptValues={book.promptValues} type={contextSection} currentDocumentId={(book.contextType ?? 'scene') === contextSection ? book.currentDocumentId : undefined} currentDocumentText={(book.contextType ?? 'scene') === contextSection ? book.currentDocumentText : undefined} insertionPosition={(book.contextType ?? 'scene') === contextSection ? book.insertionPosition : undefined} chatId={contextSection === 'chat' ? book.chatId : undefined} settings={settings} value={visibleContextSettings} sources={contextSources} saved={contextSaved} saveError={contextSaveError} onRetry={() => { void saveContextDefaults() }} onChange={(value) => updateContextDefaults(value, contextSection)} />
+            <ContextSettings embedded={embedded} bookId={book.id} bookTitle={book.title} bookPromptValues={book.promptValues} type={contextSection} currentDocumentId={(book.contextType ?? 'scene') === contextSection ? book.currentDocumentId : undefined} currentDocumentText={(book.contextType ?? 'scene') === contextSection ? book.currentDocumentText : undefined} insertionPosition={(book.contextType ?? 'scene') === contextSection ? book.insertionPosition : undefined} chatId={contextSection === 'chat' ? book.chatId : undefined} settings={settings} value={visibleContextSettings} sources={contextSources} saved={contextSaved} saveError={contextSaveError} onRetry={() => { void saveContextDefaults() }} onChange={(value) => updateContextDefaults(value, contextSection)} />
           </div>
           {book.currentSummary && <BookSummaryPreview book={book} settings={settings} />}
         </>}
@@ -434,7 +565,7 @@ function SettingsApp({ ownerKind = 'book', onHome, onBack, onSaved, onGlobalSett
         {(onLastBook || localGlobal && onBack) && <button className="settings-return-link" type="button" disabled={leaveSaving} onClick={() => navigate(onLastBook ?? onBack)}>Back to last book{lastBookTitle || book?.title ? ` · ${lastBookTitle || book?.title}` : ''}</button>}
       </div> : null} onSaved={() => { const effective = resolveProfileSettings(selections ?? Object.fromEntries(bookProfileKinds.map(kind => [kind, loadSettingsProfiles().defaults[kind]])) as BookProfileSelections, loadAiSettings().favorites); setSettings(effective); onSavedRef.current?.(effective) }} renderEditor={props => <ProfileEditor key={`${props.kind}-${editProfileId ?? ''}`} {...props} book={book} />} application={<><TtsCacheSettings /><GlobalContextDefaults value={applicationContext} saved={!applicationContextError} saveError={applicationContextError} onRetry={() => saveApplicationContext(applicationContext)} onChange={saveApplicationContext} /></>} sync={<SyncSettingsPanel />} />}
     </section>
-  </main>
+  </Root>
 }
 
 function ProfileEditor({ settings, onChange, kind, library, book, textProviderControl }: ProfileEditorProps & { book?: AiSettingsProps['book'] }) {
@@ -821,7 +952,7 @@ function GlobalContextDefaults({ value, saved, saveError, onRetry, onChange }: {
 }
 
 
-function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDocumentId, currentDocumentText, insertionPosition, chatId, settings, value, sources, saved, saveError, onRetry, onChange }: { bookId: string; bookTitle: string; bookPromptValues?: BookPromptValues; type: Exclude<GenerationContextType, 'note'>; currentDocumentId?: string; currentDocumentText?: string; insertionPosition?: number; chatId?: string; settings: AiSettings; value: BookContextSettings; sources: ArcEntity[]; saved: boolean; saveError: string; onRetry: () => void; onChange: (value: BookContextSettings) => void }) {
+function ContextSettings({ embedded = false, bookId, bookTitle, bookPromptValues, type, currentDocumentId, currentDocumentText, insertionPosition, chatId, settings, value, sources, saved, saveError, onRetry, onChange }: { embedded?: boolean; bookId: string; bookTitle: string; bookPromptValues?: BookPromptValues; type: Exclude<GenerationContextType, 'note'>; currentDocumentId?: string; currentDocumentText?: string; insertionPosition?: number; chatId?: string; settings: AiSettings; value: BookContextSettings; sources: ArcEntity[]; saved: boolean; saveError: string; onRetry: () => void; onChange: (value: BookContextSettings) => void }) {
   const [previewPending, setPreviewPending] = useState(true)
   const [preview, setPreview] = useState<PreparedContextValues | null>(null)
   const [previewError, setPreviewError] = useState('')
@@ -829,6 +960,7 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
   const [previewCharacter, setPreviewCharacter] = useState<CharacterFrame>()
   const [previewHistory, setPreviewHistory] = useState<ChatMessageEntity[]>([])
   const [previewMediaSettings, setPreviewMediaSettings] = useState<ImageSettings>()
+  const previewScopeRef = useRef('')
   const profile = value.profiles[type]
   const updateProfile = (next: typeof profile) => onChange({ ...value, profiles: { ...value.profiles, [type]: next } })
   const toggle = (key: 'structuralIds' | 'noteIds' | 'codexEntryIds', id: string) => updateProfile({ ...profile, [key]: profile[key].includes(id) ? profile[key].filter((item) => item !== id) : [...profile[key], id] })
@@ -836,14 +968,20 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
   const archivedSelectedIds = new Set(archivedSelectedCodex.map((item) => item.id))
   useEffect(() => {
     let cancelled = false
-    setPreviewPending(true)
-    setPreview(null)
-    setPreviewError('')
-    setPreviewChat(null); setPreviewHistory([]); setPreviewCharacter(undefined); setPreviewMediaSettings(undefined)
+    const scope = JSON.stringify([bookId, type, currentDocumentId, chatId])
+    if (!embedded || previewScopeRef.current !== scope) {
+      setPreviewPending(true)
+      setPreview(null)
+      setPreviewError('')
+      setPreviewChat(null); setPreviewHistory([]); setPreviewCharacter(undefined); setPreviewMediaSettings(undefined)
+    }
+    previewScopeRef.current = scope
     const currentSceneId = type === 'scene' ? currentDocumentId : value.lastOpenedSceneId || undefined
-    ;(async () => {
+    const prepare = async () => {
       try {
+        if (cancelled) return
         const mediaSettings = type === 'chat' ? await loadBookImageSettings(bookId) : undefined
+        if (cancelled) return
         let chat: ChatEntity | null = null
         let history: ChatMessageEntity[] = []
         if (type === 'chat' && chatId) {
@@ -851,8 +989,10 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
           chat = loadedChat ?? null
           history = loadedHistory
         }
-        if (!cancelled) setPreviewChat(chat)
+        if (cancelled) return
+        if (!embedded) setPreviewChat(chat)
         const character = chat?.character ? await captureCharacterFrame(chat, history, profile) : undefined
+        if (cancelled) return
         const prepared = character?.context ?? await buildContextValues({ bookId, type, currentSceneId, currentSceneText: type === 'scene' ? currentDocumentText : undefined, currentDocumentId, previousScenesForCodexTriggers: value.previousScenesForCodexTriggers, profile })
         if (!cancelled) {
           setPreviewCharacter(character)
@@ -872,9 +1012,11 @@ function ContextSettings({ bookId, bookTitle, bookPromptValues, type, currentDoc
           setPreviewError(error instanceof Error ? error.message : 'Request preview could not be prepared.')
         }
       }
-    })()
-    return () => { cancelled = true }
-  }, [bookId, chatId, currentDocumentId, currentDocumentText, profile, sources, type, value.lastOpenedSceneId, value.previousScenesForCodexTriggers, settings])
+    }
+    const timer = embedded ? window.setTimeout(() => { void prepare() }, 200) : undefined
+    if (!embedded) void prepare()
+    return () => { cancelled = true; if (timer !== undefined) window.clearTimeout(timer) }
+  }, [embedded, bookId, chatId, currentDocumentId, currentDocumentText, profile, sources, type, value.lastOpenedSceneId, value.previousScenesForCodexTriggers, settings])
 
   const currentDocument = sources.find((item) => item.id === currentDocumentId)
   const anchor = sources.find(item => item.id === (type === 'scene' ? currentDocumentId : previewChat?.character?.cutoff.sceneId ?? value.lastOpenedSceneId) && item.type === 'scene')
