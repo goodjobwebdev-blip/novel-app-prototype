@@ -38,10 +38,13 @@ for (const type of ['scene', 'note', 'codexEntry']) {
     }
     const { document, getComputedStyle } = dom.window
     const editor = getComputedStyle(document.querySelector('.story-editor'))
-    const toolbar = getComputedStyle(document.querySelector('.floating-controls'))
+    // JSDOM cannot resolve clamp() in the toolbar inset or editor padding shorthand.
+    const css = readFileSync(new URL('../src/app/styles.css', import.meta.url), 'utf8')
+    const toolbarTop = Number(css.match(/\.floating-controls \{[^}]*inset:(\d+)px/)[1])
+    const editorTop = Number.parseFloat(editor.paddingTop) || Number(css.match(/\.story-editor \{[^}]*padding:(\d+)px/)[1])
     const button = getComputedStyle(document.querySelector('.floating-controls button'))
     assert.equal(button.height, '44px', 'Keep accessible toolbar targets')
-    assert.equal(Number.parseFloat(editor.paddingTop) - Number.parseFloat(toolbar.inset) - Number.parseFloat(button.height), 12, 'Breadcrumbs sit 12px below toolbar')
+    assert.equal(editorTop - toolbarTop - Number.parseFloat(button.height), 12, 'Breadcrumbs sit 12px below toolbar')
     const path = getComputedStyle(document.querySelector('.document-path'))
     assert.equal(path.marginTop, '0px')
     assert.equal(path.marginBottom, '12px')
