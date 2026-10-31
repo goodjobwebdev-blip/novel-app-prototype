@@ -6,18 +6,15 @@ import { readFileSync } from 'node:fs'
 import { JSDOM } from 'jsdom'
 
 const workspace = readFileSync(new URL('../src/app/Workspace.tsx', import.meta.url), 'utf8')
-const css = readFileSync(new URL('../src/app/styles.css', import.meta.url), 'utf8')
 
-function rule(selector) {
-  const start = css.indexOf(`${selector} {`)
-  assert.ok(start >= 0, `Missing CSS rule: ${selector}`)
-  return css.slice(start, css.indexOf('}', start) + 1)
+function pageLabel(type) {
+  const declarations = workspace.slice(workspace.indexOf('  const isReferenceDocument ='), workspace.indexOf('  const openSummaryState ='))
+  return new Function('activeDocument', 'activeChapter', `${declarations}\nreturn pageLabel`)({ type }, { order: 0 })
 }
 
-test('Notes and Codex omit the page marker without changing scene numbers or summary markers', () => {
-  assert.match(workspace, /const isReferenceDocument = activeDocument\?\.type === 'note' \|\| activeDocument\?\.type === 'codexEntry'/)
-  assert.match(workspace, /const pageLabel = isReferenceDocument\s*\? null\s*: activeDocument\?\.type === 'summary'\s*\? 'Σ'\s*: String\(\(activeChapter\?\.order \?\? 0\) \+ 1\)\.padStart\(2, '0'\)/)
-  assert.match(workspace, /isReferenceDocument \? 'story-editor--reference' : ''/)
+test('scene, Note and Codex headers omit numbering while summaries retain their marker', () => {
+  for (const type of ['scene', 'note', 'codexEntry']) assert.equal(pageLabel(type), null, type)
+  assert.equal(pageLabel('summary'), 'Σ')
   assert.match(workspace, /\{pageLabel && <small className="page-number">\{pageLabel\}<\/small>\}/)
 })
 
@@ -28,17 +25,31 @@ test('reference headers preserve breadcrumbs and the Codex type label', () => {
   assert.match(workspace, /<small>\{activeCodexArchived \? `Archived · \$\{activeDocument\.category\}` : activeDocument\.category\}<\/small>/)
 })
 
-test('reference breadcrumbs start 24px below the toolbar while manuscript spacing stays unchanged', t => {
-  const styles = ['.story-editor', '.document-path', '.story-editor--reference', '.story-editor--reference > .document-path'].map(rule).join('\n')
-  const dom = new JSDOM(`<style>${styles}</style><article class="story-editor story-editor--reference"><p class="document-path">Codex / Place / The Drowned Quarter</p></article><article class="story-editor"><small class="page-number">01</small><p class="document-path">Outline / Scene</p></article>`)
-  t.after(() => dom.window.close())
-  const reference = dom.window.document.querySelector('.story-editor--reference')
-  const manuscript = dom.window.document.querySelector('.story-editor:not(.story-editor--reference)')
-  assert.match(rule('.floating-controls'), /inset:14px /)
-  assert.match(rule('.floating-controls > button,.floating-control-group > button'), /height:44px;/)
-  assert.equal(Number.parseFloat(dom.window.getComputedStyle(reference).paddingTop) - 14 - 44, 24)
-  assert.equal(dom.window.getComputedStyle(reference.firstElementChild).marginTop, '0px')
-  // JSDOM does not resolve the clamp() in the manuscript padding shorthand.
-  assert.match(rule('.story-editor'), /padding:112px clamp\(23px,6vw,56px\) 170px;/)
-  assert.equal(dom.window.getComputedStyle(manuscript.querySelector('.document-path')).marginTop, '8px')
-})
+for (const type of ['scene', 'note', 'codexEntry']) {
+  test(`${type} keeps toolbar, breadcrumbs and title compact without shrinking controls`, t => {
+    const reference = type !== 'scene'
+    const dom = new JSDOM(`<header class="floating-controls"><button>Workspace</button></header><article class="story-editor ${reference ? 'story-editor--reference' : ''}"><p class="document-path">Document path</p>${reference ? '<div class="document-titlebar"><div><h1>Title</h1></div></div>' : '<h1 class="scene-title">Title</h1>'}</article>`)
+    t.after(() => dom.window.close())
+    // Match application import order, including component CSS and later app overrides.
+    for (const path of ['src/features/images/illustrations.css', 'src/app/styles.css', 'src/shared/ui/density.css', 'src/features/settings/ui-settings.css', 'src/shared/ui/mobile-control-hardening.css', 'src/features/chat/composer.css']) {
+      const style = dom.window.document.createElement('style')
+      style.textContent = readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')
+      dom.window.document.head.append(style)
+    }
+    const { document, getComputedStyle } = dom.window
+    const editor = getComputedStyle(document.querySelector('.story-editor'))
+    // JSDOM cannot resolve clamp() in the toolbar inset or editor padding shorthand.
+    const css = readFileSync(new URL('../src/app/styles.css', import.meta.url), 'utf8')
+    const toolbarTop = Number(css.match(/\.floating-controls \{[^}]*inset:(\d+)px/)[1])
+    const editorTop = Number.parseFloat(editor.paddingTop) || Number(css.match(/\.story-editor \{[^}]*padding:(\d+)px/)[1])
+    const button = getComputedStyle(document.querySelector('.floating-controls button'))
+    assert.equal(button.height, '44px', 'Keep accessible toolbar targets')
+    assert.equal(editorTop - toolbarTop - Number.parseFloat(button.height), 12, 'Breadcrumbs sit 12px below toolbar')
+    const path = getComputedStyle(document.querySelector('.document-path'))
+    assert.equal(path.marginTop, '0px')
+    assert.equal(path.marginBottom, '12px')
+    const title = getComputedStyle(document.querySelector(reference ? '.document-titlebar' : '.scene-title'))
+    assert.equal(title.marginTop, '0px')
+    assert.equal(title.marginBottom, reference ? '16px' : '12px')
+  })
+}

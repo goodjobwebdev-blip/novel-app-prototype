@@ -13,7 +13,7 @@
   .composer-shell .composer-status-body { max-height: 23dvh; }
   :is(.workspace-composer,.chat-message-composer) .chat-config-strip > summary > svg { margin-left: auto; }
 }
-.scene-title { font: 500 1.8rem var(--serif); }
+.scene-title { margin: 0 0 12px; font: 500 1.8rem var(--serif); }
 .scene-writing-settings { margin: .5rem 0 2rem; border: 1px solid var(--line); border-radius: .75rem; padding: .6rem; color: var(--soft); font: .8rem var(--sans, sans-serif); }
 .scene-writing-settings summary { display: flex; align-items: center; gap: .7rem; cursor: pointer; min-height: 32px; }
 .scene-writing-settings summary span { flex: 1; }

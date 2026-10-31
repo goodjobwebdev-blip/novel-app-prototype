@@ -2529,11 +2529,7 @@ export default function Workspace() {
   const activeCodexArchived = activeDocument?.type === 'codexEntry' && isCodexEntryArchived(activeDocument)
   const activeSummarySourceArchived = Boolean(summaryCodexSource && isCodexEntryArchived(summaryCodexSource))
   const isReferenceDocument = activeDocument?.type === 'note' || activeDocument?.type === 'codexEntry'
-  const pageLabel = isReferenceDocument
-    ? null
-    : activeDocument?.type === 'summary'
-      ? 'Σ'
-      : String((activeChapter?.order ?? 0) + 1).padStart(2, '0')
+  const pageLabel = activeDocument?.type === 'summary' ? 'Σ' : null
   const openSummaryState = summarySource ? summaryStates[summarySource.id] ?? 'missing' : 'missing'
   const summaryContextIndicator = summaryCodexSource
     ? isCodexEntryArchived(summaryCodexSource)
