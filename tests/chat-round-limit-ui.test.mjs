@@ -96,6 +96,7 @@ test('failed rounds keep their error in the answer after reload, including an em
     const failed = saved.at(-1)
     assert.equal(failed.status, 'failed')
     assert.ok(api.calls.every(request => request.validateChatResponse === true), 'Every real chat round enables completion validation')
+    assert.deepEqual(api.calls.map(request => request.diagnosticRound), mode === 'failed-empty' ? [1, 2] : [1])
     assert.equal(failed.generationError, toasts.at(-1))
     assert.equal(document.querySelector('[role="alert"].chat-generation-error')?.textContent, toasts.at(-1))
     if (mode === 'failed-empty') {

@@ -32,6 +32,7 @@ export async function consumeCompletionStream(
   signal: AbortSignal,
   consumeLine: (line: string) => boolean,
   onResponse?: () => void,
+  onNetworkChunk?: () => void,
 ) {
   const reader = body.getReader()
   const decoder = new TextDecoder()
@@ -51,6 +52,7 @@ export async function consumeCompletionStream(
       signal.throwIfAborted()
       const read = await abortable(reader.read(), signal)
       signal.throwIfAborted()
+      if (read.value?.byteLength) onNetworkChunk?.()
       buffer += decoder.decode(read.value, { stream: !read.done })
       const lines = buffer.split(/\r?\n/)
       buffer = lines.pop() ?? ''
