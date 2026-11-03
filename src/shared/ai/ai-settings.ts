@@ -1,3 +1,4 @@
+import { NANOGPT_BASE_URL, normalizeNanoGPTBaseUrl } from './nanogpt-endpoint'
 import { normalizeThinkingEffort, type ThinkingEffort } from './thinking-effort'
 import { normalizeChatRoundLimit } from '../../features/chat/chat-round-limit'
 import type { ProviderProfile } from '../../features/settings/provider-profiles'
@@ -348,7 +349,7 @@ export const defaultPromptCompositions: PromptCompositions = {
 export const initialAiSettings: AiSettings = {
   provider: 'nanogpt',
   apiKey: '',
-  baseUrl: 'https://nano-gpt.com/api/v1',
+  baseUrl: NANOGPT_BASE_URL,
   mainThinkingEffort: 'default',
   supportThinkingEffort: 'default',
   codexThinkingEffort: 'default',
@@ -480,11 +481,16 @@ export function normalizeAiSettings(value?: StoredAiSettings): AiSettings {
   const responseLengths = normalizeResponseLengths(value?.responseLengths, value?.responseLength)
   const promptMirror = legacyPromptMirror(promptCompositions) as AiPrompts
   const { responseLength: _legacyResponseLength, ...storedValue } = value ?? {}
+  const baseUrl = typeof value?.baseUrl === 'string' ? value.baseUrl : initialAiSettings.baseUrl
+  const providerProfiles = value?.providerProfiles?.nanogpt
+    ? { ...value.providerProfiles, nanogpt: { ...value.providerProfiles.nanogpt, baseUrl: normalizeNanoGPTBaseUrl(value.providerProfiles.nanogpt.baseUrl ?? '') } }
+    : value?.providerProfiles
   return {
     ...initialAiSettings,
     ...storedValue,
+    providerProfiles,
     apiKey: value?.provider === 'fake' ? '' : typeof value?.apiKey === 'string' ? value.apiKey : initialAiSettings.apiKey,
-    baseUrl: value?.provider === 'fake' ? '' : typeof value?.baseUrl === 'string' ? value.baseUrl : initialAiSettings.baseUrl,
+    baseUrl: value?.provider === 'fake' ? '' : (value?.provider ?? initialAiSettings.provider) === 'nanogpt' ? normalizeNanoGPTBaseUrl(baseUrl) : baseUrl,
     responseLengths,
     speech: normalizeSpeechSettings(value?.speech),
     promptCompositionVersion: PROMPT_COMPOSITION_SCHEMA_VERSION,

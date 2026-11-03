@@ -1,3 +1,4 @@
+import { normalizeNanoGPTBaseUrl } from './nanogpt-endpoint'
 import { thinkingRequestParameters, type ThinkingEffort } from './thinking-effort'
 import { bookTemplateValues, renderPromptTemplate, type BookPromptValues } from './prompt-template'
 import type { NormalizedProviderMessage } from './prompt-composition'
@@ -87,12 +88,12 @@ export function renderStoryPrompt(template: string, values: StoryPromptValues) {
 }
 
 function completionEndpoint(baseUrl: string) {
-  const normalized = baseUrl.trim().replace(/\/+$/, '') || 'https://nano-gpt.com/api/v1'
+  const normalized = normalizeNanoGPTBaseUrl(baseUrl).trim().replace(/\/+$/, '')
   return `${normalized}/chat/completions`
 }
 
 export async function fetchNanoGPTModelContextLength(apiKey: string, baseUrl: string, modelId: string) {
-  const normalized = baseUrl.trim().replace(/\/+$/, '') || 'https://nano-gpt.com/api/v1'
+  const normalized = normalizeNanoGPTBaseUrl(baseUrl).trim().replace(/\/+$/, '')
   const response = await fetch(`${normalized}/models?detailed=true&sort=favorites`, {
     headers: { Accept: 'application/json', Authorization: `Bearer ${apiKey}` },
     signal: AbortSignal.timeout(4_000),
