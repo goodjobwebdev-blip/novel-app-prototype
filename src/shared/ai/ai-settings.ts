@@ -484,7 +484,7 @@ export function normalizeAiSettings(value?: StoredAiSettings): AiSettings {
     ...initialAiSettings,
     ...storedValue,
     apiKey: value?.provider === 'fake' ? '' : typeof value?.apiKey === 'string' ? value.apiKey : initialAiSettings.apiKey,
-    baseUrl: value?.provider === 'fake' ? '' : value?.provider === 'nanogpt' && value.baseUrl?.trim().replace(/\/+$/, '') === 'https://nano-gpt.com/api/v1' ? initialAiSettings.baseUrl : typeof value?.baseUrl === 'string' ? value.baseUrl : initialAiSettings.baseUrl,
+    baseUrl: value?.provider === 'fake' ? '' : value?.provider === 'nanogpt' && typeof value.baseUrl === 'string' && value.baseUrl.trim().replace(/\/+$/, '') === 'https://nano-gpt.com/api/v1' ? initialAiSettings.baseUrl : typeof value?.baseUrl === 'string' ? value.baseUrl : initialAiSettings.baseUrl,
     responseLengths,
     speech: normalizeSpeechSettings(value?.speech),
     promptCompositionVersion: PROMPT_COMPOSITION_SCHEMA_VERSION,
