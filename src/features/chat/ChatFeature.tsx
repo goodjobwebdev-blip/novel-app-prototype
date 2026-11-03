@@ -702,6 +702,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onO
     let lastRoundMessage: ChatMessageEntity | null = null
     let completed = false
     let unexpectedFailure = false
+    let generationError: string | undefined
     let historyInvalidated = false
     let activeRoundContent = ''
     let activeRoundThoughts = ''
@@ -734,7 +735,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onO
       if (!roundContent && !roundThoughts && !hasWorkspaceProposal && !toolExecutions.length && !toolActivity.length && status === 'complete') return null
       lastRoundMessage = await createChatMessage(activeChat, 'assistant', roundContent, {
         thoughts: roundThoughts || undefined,
-        status, responseId, roundNumber, toolActivity, toolExecutions, characterBoundary: capturedBoundary,
+        status, generationError: status === 'failed' ? generationError : undefined, responseId, roundNumber, toolActivity, toolExecutions, characterBoundary: capturedBoundary,
         imageGenerations: extras.imageGenerations,
         brainstorms: extras.brainstorms,
         documentEdits: extras.documentEdits,
@@ -787,7 +788,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onO
         const persisted = await listChatMessages(sourceBookId, activeChat.id)
         const last = persisted.filter(message => message.responseId === responseId).at(-1)
         if (last) {
-          const saved = await updateChatMessage(last.id, { status })
+          const saved = await updateChatMessage(last.id, { status, generationError })
           if (generationOwnsCurrentUi(owner)) setMessages(current => current.map(message => message.id === saved.id ? saved : message))
         }
         return
@@ -795,7 +796,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onO
       const existing = await findAlreadyPersistedRound()
       if (existing) {
         activeRoundPersisted = true
-        const saved = existing.status === status ? existing : await updateChatMessage(existing.id, { status })
+        const saved = await updateChatMessage(existing.id, { status, generationError })
         commitVisibleRound(saved, Boolean(activeRoundThoughts))
         return
       }
@@ -859,6 +860,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onO
           provider: settings.provider,
           model: activeChat.model,
           messages: finalizedRequest.messages,
+          validateChatResponse: true,
           thinking: activeChat.thinking,
           thinkingEffort: activeChat.thinkingEffort,
           tools: finalizedRequest.tools,
@@ -994,7 +996,8 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onO
         onToast(error instanceof Error ? error.message : 'Chat history changed while this response was generating. The streamed reply was not saved.')
       } else if (!aborted) {
         unexpectedFailure = true
-        onToast(error instanceof Error ? error.message : 'Chat generation stopped unexpectedly.')
+        generationError = error instanceof Error ? error.message : 'Chat generation stopped unexpectedly.'
+        onToast(generationError)
       }
     } finally {
       const stopped = controller.signal.aborted
@@ -1357,6 +1360,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onO
               {message.thoughts && <Disclosure className="chat-thoughts" title="Thoughts" open={openThoughtMessageIds.has(message.id)} onToggle={(event) => setPersistedThoughtsOpen(message.id, event.currentTarget.open)}>{message.thoughts}</Disclosure>}
               {message.content && <div className="chat-assistant-body">{chat?.character ? <CharacterMessage content={message.content} participants={chat.character.participants} render={text => <MarkdownMessage onArticleLink={onOpenArticle} content={text} />} /> : <MarkdownMessage onArticleLink={onOpenArticle} content={message.content} />}</div>}
             </>}
+            {message.status === 'failed' && message.generationError && <p className="chat-generation-error" role="alert">{message.generationError}</p>}
             {executions.length ? <div className="chat-round-tools" aria-label={`Round ${message.roundNumber ?? index + 1} tool calls`}>{executions.map(execution => <Disclosure className={`chat-tool-execution ${execution.ok === false ? 'failed' : execution.ok === true ? 'succeeded' : ''}`} title={<><code>{execution.name}</code><span>{execution.ok === false ? 'Failed' : execution.ok === true ? 'Succeeded' : 'Result'}</span></>} key={execution.callId}>
               <div>{execution.arguments ? <section><strong>Arguments</strong><pre>{formatToolPayload(execution.arguments)}</pre></section> : null}<section><strong>Result</strong><pre>{formatToolPayload(execution.result)}</pre></section></div>
             </Disclosure>)}</div> : null}

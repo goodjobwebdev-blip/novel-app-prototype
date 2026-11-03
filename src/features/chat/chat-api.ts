@@ -33,6 +33,8 @@ export type ChatCompletionRequest = {
   model: string
   maxTokens?: number
   requireComplete?: boolean
+  /** Opt in to chat-specific response validation; defaults to false. */
+  validateChatResponse?: boolean
   messages: ChatCompletionMessage[]
   thinking: boolean
   thinkingEffort?: ThinkingEffort
@@ -71,7 +73,7 @@ function completionEndpoint(baseUrl: string) {
   return `${normalized}/chat/completions`
 }
 
-function errorMessage(status: number, payload: unknown, apiKey: string) {
+function errorMessage(status: number, payload: unknown, apiKey: string, fallback = `Chat request failed (${status}).`) {
   if (payload && typeof payload === 'object') {
     const value = payload as { message?: unknown; error?: { message?: unknown } | string }
     const message = typeof value.error === 'object' && typeof value.error?.message === 'string'
@@ -83,7 +85,7 @@ function errorMessage(status: number, payload: unknown, apiKey: string) {
           : ''
     if (message) return apiKey ? message.split(apiKey).join('[redacted]').slice(0, 320) : message.slice(0, 320)
   }
-  return `Chat request failed (${status}).`
+  return fallback
 }
 
 function reasoningText(delta: Record<string, unknown>) {
@@ -196,6 +198,8 @@ export async function streamChatCompletion(
   }
   if (!response.body) throw new Error('The provider returned an empty streaming response.')
   let received = false
+  let receivedContent = false
+  let streamingError = false
   let done = false
   let finishReason: string | undefined
   let usage: ChatCompletionUsage = {}
@@ -218,15 +222,26 @@ export async function streamChatCompletion(
   const consumeLine = (line: string) => {
     const trimmed = line.trim()
     if (request.requireComplete && /^event:\s*error$/i.test(trimmed)) throw new Error('The provider returned a streaming error.')
+    if (request.validateChatResponse && trimmed.startsWith('event:')) {
+      streamingError = /^event:\s*error$/i.test(trimmed)
+      return false
+    }
     if (!trimmed.startsWith('data:')) return false
     const data = trimmed.slice(5).trim()
     if (!data) return false
-    if (data === '[DONE]') { done = true; return true }
-    const payload = JSON.parse(data) as unknown
-    if (request.requireComplete && payload && typeof payload === 'object') {
-      const value = payload as Record<string, unknown>
-      if (value.error != null || value.type === 'error' || value.object === 'error') throw new Error('The provider returned a streaming error.')
+    if (data === '[DONE]') {
+      if (streamingError) throw new Error('The provider returned a streaming error.')
+      done = true
+      return true
     }
+    const payload = JSON.parse(data) as unknown
+    if ((request.requireComplete || request.validateChatResponse) && payload && typeof payload === 'object') {
+      const value = payload as Record<string, unknown>
+      if (streamingError || value.error != null || value.type === 'error' || value.object === 'error') {
+        if (request.requireComplete) throw new Error('The provider returned a streaming error.')
+        throw new Error(errorMessage(response.status, payload, request.apiKey, 'The provider returned a streaming error.'))
+      }
+    } else if (streamingError) throw new Error('The provider returned a streaming error.')
     const nextUsage = parseUsage(payload)
     if (hasUsage(nextUsage)) {
       const definedUsage = Object.fromEntries(Object.entries(nextUsage).filter(([, value]) => value !== undefined)) as Partial<ChatCompletionUsage>
@@ -238,6 +253,7 @@ export async function streamChatCompletion(
     parsed.toolFragments.forEach((fragment, index) => appendToolFragment(fragment, index))
     if (parsed.chunk.content || parsed.chunk.thoughts) {
       received = true
+      if (parsed.chunk.content?.trim()) receivedContent = true
       onChunk(parsed.chunk)
     }
     return false
@@ -246,6 +262,13 @@ export async function streamChatCompletion(
   await consumeCompletionStream(response.body, signal, consumeLine, onResponse)
 
   if (request.requireComplete && !done && finishReason !== 'stop') throw new Error('The provider did not complete the response.')
+  if (request.validateChatResponse) {
+    if (streamingError) throw new Error('The provider returned a streaming error.')
+    if (finishReason === 'length' || finishReason === 'max_tokens') throw new Error(`The provider hit its output token limit (${finishReason}). The response is incomplete; try again or adjust the provider's output limit.`)
+    if (finishReason === 'content_filter') throw new Error('The provider stopped the response because of its content filter (content_filter).')
+    if (finishReason && !['stop', 'tool_calls'].includes(finishReason)) throw new Error(errorMessage(response.status, { message: `The provider returned an incomplete response (finish_reason: ${finishReason}).` }, request.apiKey))
+    if (!done && !finishReason) throw new Error('The provider did not complete the response. The stream was interrupted; try again.')
+  }
   if (!received) throw new Error('The provider completed without returning a response.')
   const toolCalls = [...accumulated.entries()]
     .sort(([a], [b]) => a - b)
@@ -254,6 +277,7 @@ export async function streamChatCompletion(
       id: call.id || `tool-call-${index}`,
     }))
     .filter((call) => call.function.name)
+  if (request.validateChatResponse && !receivedContent && !toolCalls.length) throw new Error('The provider completed without returning an answer or a tool call (only reasoning or empty content).')
   if (hasUsage(usage) && typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('arc-chat-cache-usage', { detail: usage }))
   }

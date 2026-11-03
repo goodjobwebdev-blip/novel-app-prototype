@@ -19,6 +19,7 @@
 .chat-thoughts { min-width: 0; margin: 0 0 .65rem; background: transparent; }
 .chat-thoughts .arc-disclosure__body { max-height: 20rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--soft); font-size: .86rem; line-height: 1.55; }
 .chat-message-status { display: block; margin-top: .3rem; color: var(--muted); }
+.chat-generation-error { margin: .65rem 0; padding: .7rem; border: 1px solid var(--danger); border-radius: var(--radius); color: var(--danger); font-size: .85rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .chat-thinking-indicator { display: inline-flex; align-items: center; gap: .5rem; color: var(--muted); padding: .75rem .9rem; border: 1px solid var(--border); border-radius: var(--radius); }
 .chat-thinking-indicator i { width: .45rem; height: .45rem; border-radius: 999px; background: currentColor; animation: chatPulse 1s ease-in-out infinite alternate; }
 @keyframes chatPulse { to { opacity: .25; transform: scale(.72); } }

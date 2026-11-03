@@ -14,7 +14,7 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   return nextResolve(specifier, context)
 } })
 const { streamChatCompletion } = await import('../src/features/chat/chat-api.ts')
-const request = { provider: 'compatible', apiKey: 'test-only-secret', baseUrl: 'https://provider.invalid/v1', model: 'test', messages: [{ role: 'user', content: 'Create a scene' }], thinking: true }
+const request = { provider: 'compatible', apiKey: 'test-only-secret', baseUrl: 'https://provider.invalid/v1', model: 'test', messages: [{ role: 'user', content: 'Create a scene' }], thinking: true, validateChatResponse: true }
 const event = (delta, finish_reason) => `data: ${JSON.stringify({ choices: [{ delta, finish_reason }] })}\n\n`
 const tool = { index: 0, id: 'scene-call', type: 'function', function: { name: 'propose_scene_create', arguments: '{"title":"Next"}' } }
 function mockStream(t, text) {

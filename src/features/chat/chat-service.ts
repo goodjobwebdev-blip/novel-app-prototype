@@ -140,6 +140,7 @@ export type ChatMessageEntity = ArcEntity & {
   content: string
   thoughts?: string
   status?: ChatMessageStatus
+  generationError?: string
   responseId?: string
   toolActivity?: string[]
   toolExecutions?: ChatToolExecution[]
@@ -381,7 +382,7 @@ async function touchFromMessages(bookId: string, chatId: string, autoTitle?: str
   })
 }
 
-export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntity['role'], content: string, extra: Pick<ChatMessageEntity, 'thoughts' | 'status' | 'responseId' | 'toolActivity' | 'toolExecutions' | 'roundNumber' | 'continuation' | 'continuedAt' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations' | 'brainstorms' | 'characterBoundary'> = {}): Promise<ChatMessageEntity> {
+export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntity['role'], content: string, extra: Pick<ChatMessageEntity, 'thoughts' | 'status' | 'generationError' | 'responseId' | 'toolActivity' | 'toolExecutions' | 'roundNumber' | 'continuation' | 'continuedAt' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations' | 'brainstorms' | 'characterBoundary'> = {}): Promise<ChatMessageEntity> {
   const messages = await listChatMessages(chat.bookId, chat.id)
   const now = Date.now()
   const message: ChatMessageEntity = {
@@ -395,6 +396,7 @@ export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntit
     content,
     thoughts: extra.thoughts,
     status: extra.status ?? 'complete',
+    generationError: extra.generationError,
     responseId: extra.responseId,
     toolActivity: extra.toolActivity ? [...extra.toolActivity] : undefined,
     toolExecutions: extra.toolExecutions ? structuredClone(extra.toolExecutions) : undefined,
@@ -428,7 +430,7 @@ export async function createChatMessage(chat: ChatEntity, role: ChatMessageEntit
   return message
 }
 
-export async function updateChatMessage(messageId: string, patch: Partial<Pick<ChatMessageEntity, 'content' | 'thoughts' | 'status' | 'responseId' | 'toolActivity' | 'toolExecutions' | 'roundNumber' | 'continuation' | 'continuedAt' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations' | 'brainstorms' | 'characterBoundary'>>): Promise<ChatMessageEntity> {
+export async function updateChatMessage(messageId: string, patch: Partial<Pick<ChatMessageEntity, 'content' | 'thoughts' | 'status' | 'generationError' | 'responseId' | 'toolActivity' | 'toolExecutions' | 'roundNumber' | 'continuation' | 'continuedAt' | 'documentEdits' | 'codexCreations' | 'outlineActions' | 'entityActions' | 'imageGenerations' | 'brainstorms' | 'characterBoundary'>>): Promise<ChatMessageEntity> {
   const snapshot = structuredClone(patch)
   const next = await updateEntityAtomically<ChatMessageEntity>(messageId, current => {
     if (current.type !== 'chatMessage') throw new Error('Message is no longer available.')
