@@ -1,4 +1,3 @@
-import { normalizeNanoGPTBaseUrl } from '../../shared/ai/nanogpt-endpoint'
 import { thinkingRequestParameters, type ThinkingEffort } from '../../shared/ai/thinking-effort'
 import type { AiProvider } from '../../shared/ai/ai-settings'
 import { streamFakeProvider } from '../../shared/ai/fake-provider'
@@ -183,8 +182,7 @@ export async function streamChatCompletion(
   }
   Object.assign(body, thinkingRequestParameters(request.provider, request.thinking, request.thinkingEffort))
 
-  const baseUrl = request.provider === 'nanogpt' ? normalizeNanoGPTBaseUrl(request.baseUrl) : request.baseUrl
-  const response = await fetchCompletionResponse(completionEndpoint(baseUrl), {
+  const response = await fetchCompletionResponse(completionEndpoint(request.baseUrl), {
     method: 'POST',
     headers: {
       Accept: 'text/event-stream',

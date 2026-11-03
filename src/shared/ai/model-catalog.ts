@@ -1,4 +1,3 @@
-import { normalizeNanoGPTBaseUrl } from './nanogpt-endpoint'
 import type { AiProvider, AiSettings } from './ai-settings'
 
 export type ProviderModel = {
@@ -24,7 +23,7 @@ const MAX_CATALOGS = 8
 function normalizeBaseUrl(settings: Pick<AiSettings, 'provider' | 'baseUrl'>) {
   if (settings.provider === 'openrouter') return 'https://openrouter.ai/api/v1'
   if (settings.provider === 'openai') return 'https://api.openai.com/v1'
-  if (settings.provider === 'nanogpt') return normalizeNanoGPTBaseUrl(settings.baseUrl).trim().replace(/\/+$/, '')
+  if (settings.provider === 'nanogpt') return 'https://api.nano-gpt.com/api/v1'
   return settings.baseUrl.trim().replace(/\/+$/, '')
 }
 
