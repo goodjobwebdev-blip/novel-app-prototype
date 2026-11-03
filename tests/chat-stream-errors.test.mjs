@@ -62,6 +62,57 @@ test('chat accepts normal text and complete tool rounds with DONE or a finish re
   }
 })
 
+test('diagnostics describe a stalled tool stream without leaking arguments or keys', async t => {
+  let now = 0
+  t.mock.method(Date, 'now', () => now)
+  let reads = 0
+  t.mock.method(globalThis, 'fetch', async () => new Response(new ReadableStream({
+    pull(controller) {
+      if (reads++ === 0) {
+        now = 1000
+        controller.enqueue(new TextEncoder().encode(event({ tool_calls: [tool] })))
+      } else {
+        now = 121000
+        controller.enqueue(new TextEncoder().encode('data: {"error":{"message":"Request timed out. Please try again later."}}\n\n'))
+        controller.close()
+      }
+    },
+  }, { highWaterMark: 0 })))
+  await assert.rejects(streamChatCompletion({ ...request, diagnosticRound: 2, tools: [{ type: 'function', function: { name: tool.function.name, parameters: {} } }] }, () => {}, new AbortController().signal), error => {
+    assert.match(error.message, /Request timed out\. Please try again later\./)
+    assert.match(error.message, /Round: 2/)
+    assert.match(error.message, /Tool: propose_scene_create/)
+    assert.match(error.message, /Tool arguments received: yes/)
+    assert.match(error.message, /Request duration: 121 s/)
+    assert.match(error.message, /Last fragment before error: 120 s ago/)
+    assert.match(error.message, /Gap before last network chunk: 120 s/)
+    assert.doesNotMatch(error.message, /Next|test-only-secret/)
+    return true
+  })
+})
+
+test('diagnostics distinguish HTTP failures and failures before response headers', async t => {
+  for (const http of [false, true]) {
+    t.mock.method(globalThis, 'fetch', async () => {
+      if (!http) throw new TypeError('Failed to fetch')
+      return new Response('{"error":{"message":"Request timed out"}}', { status: 504 })
+    })
+    await assert.rejects(streamChatCompletion({ ...request, diagnosticRound: 1 }, () => {}, new AbortController().signal), error => {
+      assert.match(error.message, http ? /Stage: HTTP response; HTTP: 504/ : /Stage: waiting for response; HTTP: none/)
+      assert.match(error.message, /Tool: not received/)
+      assert.match(error.message, /Tool arguments received: no/)
+      assert.match(error.message, /Last fragment before error: none/)
+      return true
+    })
+  }
+})
+
+test('diagnostics do not wrap cancellation', async t => {
+  const controller = new AbortController()
+  controller.abort()
+  await assert.rejects(streamChatCompletion({ ...request, diagnosticRound: 1 }, () => {}, controller.signal), error => error.name === 'AbortError' && !error.message.includes('Round:'))
+})
+
 test('strict text-only callers still reject tool completions', async t => {
   mockStream(t, event({ tool_calls: [tool] }, 'tool_calls') + 'data: [DONE]\n\n')
   await assert.rejects(streamChatCompletion({ ...request, requireComplete: true }, () => {}, new AbortController().signal), /incomplete/)

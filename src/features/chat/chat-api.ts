@@ -35,6 +35,8 @@ export type ChatCompletionRequest = {
   requireComplete?: boolean
   /** Opt in to chat-specific response validation; defaults to false. */
   validateChatResponse?: boolean
+  /** Include safe per-request diagnostics in chat errors. */
+  diagnosticRound?: number
   messages: ChatCompletionMessage[]
   thinking: boolean
   thinkingEffort?: ThinkingEffort
@@ -145,11 +147,49 @@ function hasUsage(usage: ChatCompletionUsage) {
   return Object.values(usage).some((value) => value !== undefined)
 }
 
+type StreamDiagnostics = {
+  stage: string
+  status?: number
+  lastFragmentAt?: number
+  lastNetworkAt?: number
+  networkGap?: number
+  toolNames: Map<number, string>
+  argumentsReceived: boolean
+}
+
 export async function streamChatCompletion(
   request: ChatCompletionRequest,
   onChunk: (chunk: ChatCompletionChunk) => void,
   signal: AbortSignal,
   onResponse?: () => void,
+): Promise<ChatCompletionResult> {
+  const startedAt = Date.now()
+  const diagnostics: StreamDiagnostics = { stage: 'waiting for response', toolNames: new Map(), argumentsReceived: false }
+  try {
+    return await streamChatCompletionRequest(request, onChunk, signal, onResponse, diagnostics)
+  } catch (error) {
+    if (request.diagnosticRound === undefined || signal.aborted || (error instanceof Error && error.name === 'AbortError')) throw error
+    const now = Date.now()
+    const seconds = (ms: number) => `${Math.max(0, Math.round(ms / 1000))} s`
+    // Only known tool names are safe to display; never include streamed arguments/content.
+    const names = [...diagnostics.toolNames.values()].map(name => request.tools?.some(tool => tool.function.name === name) ? name : 'unknown tool')
+    const message = error instanceof Error ? error.message : 'Chat generation stopped unexpectedly.'
+    const detail = [
+      `Round: ${request.diagnosticRound}; Stage: ${diagnostics.stage}; HTTP: ${diagnostics.status ?? 'none'}`,
+      `Tool: ${names.join(', ') || 'not received'}; Tool arguments received: ${diagnostics.argumentsReceived ? 'yes' : 'no'}`,
+      `Request duration: ${seconds(now - startedAt)}; Last fragment before error: ${diagnostics.lastFragmentAt === undefined ? 'none' : `${seconds(now - diagnostics.lastFragmentAt)} ago`}`,
+      `Gap before last network chunk: ${diagnostics.networkGap === undefined ? 'none' : seconds(diagnostics.networkGap)}`,
+    ].join('\n')
+    throw new Error(`${errorMessage(0, { message }, request.apiKey)}\n${detail}`, { cause: error })
+  }
+}
+
+async function streamChatCompletionRequest(
+  request: ChatCompletionRequest,
+  onChunk: (chunk: ChatCompletionChunk) => void,
+  signal: AbortSignal,
+  onResponse: (() => void) | undefined,
+  diagnostics: StreamDiagnostics,
 ): Promise<ChatCompletionResult> {
   const providerMessages = request.messages
   if (request.provider === 'fake') {
@@ -192,6 +232,8 @@ export async function streamChatCompletion(
     body: JSON.stringify(body),
   }, signal)
 
+  diagnostics.status = response.status
+  diagnostics.stage = 'HTTP response'
   if (!response.ok) {
     const payload = await readCompletionError(response, signal)
     throw new Error(errorMessage(response.status, payload, request.apiKey))
@@ -216,6 +258,8 @@ export async function streamChatCompletion(
     if (fragment.function?.name) current.function.name += fragment.function.name
     if (fragment.function?.arguments) current.function.arguments += fragment.function.arguments
     accumulated.set(index, current)
+    diagnostics.toolNames.set(index, current.function.name)
+    if (fragment.function?.arguments) diagnostics.argumentsReceived = true
     received = true
   }
 
@@ -242,6 +286,7 @@ export async function streamChatCompletion(
         throw new Error(errorMessage(response.status, payload, request.apiKey, 'The provider returned a streaming error.'))
       }
     } else if (streamingError) throw new Error('The provider returned a streaming error.')
+    diagnostics.lastFragmentAt = Date.now()
     const nextUsage = parseUsage(payload)
     if (hasUsage(nextUsage)) {
       const definedUsage = Object.fromEntries(Object.entries(nextUsage).filter(([, value]) => value !== undefined)) as Partial<ChatCompletionUsage>
@@ -259,7 +304,12 @@ export async function streamChatCompletion(
     return false
   }
 
-  await consumeCompletionStream(response.body, signal, consumeLine, onResponse)
+  diagnostics.stage = 'receiving stream'
+  await consumeCompletionStream(response.body, signal, consumeLine, onResponse, () => {
+    const now = Date.now()
+    diagnostics.networkGap = diagnostics.lastNetworkAt === undefined ? undefined : now - diagnostics.lastNetworkAt
+    diagnostics.lastNetworkAt = now
+  })
 
   if (request.requireComplete && !done && finishReason !== 'stop') throw new Error('The provider did not complete the response.')
   if (request.validateChatResponse) {

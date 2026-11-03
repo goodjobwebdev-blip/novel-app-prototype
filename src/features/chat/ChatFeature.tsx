@@ -861,6 +861,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onO
           model: activeChat.model,
           messages: finalizedRequest.messages,
           validateChatResponse: true,
+          diagnosticRound: roundNumber,
           thinking: activeChat.thinking,
           thinkingEffort: activeChat.thinkingEffort,
           tools: finalizedRequest.tools,
