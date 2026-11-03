@@ -41,6 +41,8 @@ export async function streamChatCompletion(request, onChunk, signal) {
   calls.push(structuredClone(request));
   if (beforeReturn) await beforeReturn(calls.length);
   signal.throwIfAborted();
+  if (mode === 'failed-thoughts') { onChunk({ thoughts: 'Planning the new scene' }); throw new Error('The provider hit its output token limit (length).'); }
+  if (mode === 'failed-empty') throw new Error('The provider did not complete the response.');
   onChunk({ content: 'Round ' + calls.length });
   if (mode === 'brainstorm') { mode = 'complete'; return { toolCalls: [{ id: 'brainstorm-call', type: 'function', function: { name: 'present_brainstorm', arguments: JSON.stringify({ topic: 'The next scene', options: [{ title: 'Explore', description: 'Follow the river' }, { title: 'Wait', description: 'Watch the gate' }] }) } }] }; }
   if (mode === 'reads') return { toolCalls: [{ id: 'read-' + calls.length, type: 'function', function: { name: 'read_outline', arguments: '{}' } }] };
@@ -76,6 +78,39 @@ async function fixture(limit) {
   return { book, chat }
 }
 function view(f) { return h(ChatView, { bookId: f.book.id, chatId: f.chat.id, bookPromptValues: { title: f.book.title }, onChatChange() {}, onToast(message) { if (!/^(Created|Applied|Approved|Regenerated|Renamed|Deleted|Updated)/.test(message)) throw new Error(message) } }) }
+
+test('failed rounds keep their error in the answer after reload, including an empty second round', async t => {
+  for (const mode of ['failed-thoughts', 'failed-empty']) {
+    const f = await fixture(8)
+    const toasts = []
+    api.configure(mode === 'failed-empty' ? 'reads' : mode, count => {
+      if (mode === 'failed-empty' && count === 2) api.setMode(mode)
+    })
+    let root = createRoot(document.getElementById('root'))
+    t.after(async () => { if (root) await act(async () => root.unmount()) })
+    const render = () => h(ChatView, { bookId: f.book.id, chatId: f.chat.id, bookPromptValues: { title: f.book.title }, onChatChange() {}, onToast: message => toasts.push(message) })
+    await act(async () => root.render(render()))
+    await send()
+    await settle(() => toasts.length > 0 && Boolean(button('Send')) && !button('Send').disabled)
+    const saved = await chatService.listChatMessages(f.book.id, f.chat.id)
+    const failed = saved.at(-1)
+    assert.equal(failed.status, 'failed')
+    assert.equal(failed.generationError, toasts.at(-1))
+    assert.equal(document.querySelector('[role="alert"].chat-generation-error')?.textContent, toasts.at(-1))
+    if (mode === 'failed-empty') {
+      assert.equal(saved.filter(message => message.role === 'assistant').length, 2)
+      assert.equal(saved.at(-2).content, 'Round 1')
+      assert.equal(saved.at(-2).status, 'complete')
+    } else assert.equal(failed.thoughts, 'Planning the new scene')
+    await act(async () => root.unmount())
+    root = createRoot(document.getElementById('root'))
+    await act(async () => root.render(render()))
+    await settle(() => document.querySelector('[role="alert"].chat-generation-error')?.textContent === failed.generationError)
+    assert.equal(document.querySelectorAll('.chat-answer-group').length, 1)
+    await act(async () => root.unmount())
+    root = null
+  }
+})
 
 test('malformed stored limits resolve to eight; explicit invalid saves are rejected', () => {
   for (const value of [0, -1, 1.5, NaN, Infinity, '8', undefined, 33]) {
