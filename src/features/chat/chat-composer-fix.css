@@ -274,7 +274,8 @@
   padding: .55rem;
   border: 1px solid var(--line);
   border-radius: var(--overlay-radius);
-  background: rgba(12, 13, 12, .985);
+  background: var(--surface);
+  color: var(--ink);
   box-shadow: 0 18px 50px rgba(0,0,0,.52);
   backdrop-filter: blur(22px);
 }
