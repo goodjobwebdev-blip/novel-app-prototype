@@ -176,7 +176,6 @@
 }
 
 .library-import-actions :is(.book-backup-import, .local-book-sync, .cloud-book-import) > .arc-button {
-  min-height: 46px;
   box-shadow: 0 7px 20px #0002;
 }
 

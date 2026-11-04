@@ -58,10 +58,13 @@ input[type="range"] {
 /* Arc-themed action surfaces where the component CSS previously only set layout. */
 .speech-settings .card-heading > button:not(.arc-button),
 .stt-settings-card .card-heading > button:not(.arc-button),
-.codex-panel-actions > button:not(.arc-icon-button) {
+.codex-panel-actions > button:not(.arc-button) {
   appearance: none;
-  min-height: 36px;
-  padding: 0 10px;
+  box-sizing: border-box;
+  min-height: var(--control-height);
+  padding: 0 var(--space-3);
+  font-size: 12px;
+  line-height: 1;
   border: 1px solid var(--line, var(--border));
   border-radius: var(--radius);
   background: rgba(255, 255, 255, .035);
@@ -188,19 +191,19 @@ input[type="range"] {
 }
 
 .functional-chat-composer .chat-config-row :is(.chat-skills, .chat-image-references) button:not(.arc-button) {
+  box-sizing: border-box;
   width: auto;
   height: auto;
-  min-height: 40px;
+  min-height: var(--control-height);
   margin: 0;
-  padding: .4rem .6rem;
+  padding: 0 var(--space-3);
+  font-size: 12px;
+  line-height: 1;
   border-radius: var(--radius);
 }
 
 .functional-chat-composer .chat-system-prompt-button {
   width: 100%;
-  height: auto;
-  min-height: 44px;
-  padding: .5rem .75rem;
   border-radius: var(--radius);
 }
 
@@ -242,7 +245,7 @@ input[type="range"] {
 .lore-types-manager > article > div { display: flex; flex-wrap: wrap; gap: 6px; }
 .lore-types-manager > article > label,
 .lore-types-manager > article > div:has(button:nth-child(3)) { grid-column: 1 / -1; }
-.lore-types-manager > article button:not(.arc-icon-button) { min-width: 40px; min-height: 40px; margin: 0; }
+.lore-types-manager > article button:not(.arc-button) { min-width: 0; margin: 0; }
 .lore-types-manager button:disabled { opacity: .45; cursor: not-allowed; }
 
 

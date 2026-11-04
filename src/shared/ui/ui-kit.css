@@ -81,7 +81,7 @@
 .ui-kit-workspace-pattern-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); align-items: start; gap: 16px; }
 .ui-kit-workspace-pattern-grid > .arc-card { min-width: 0; }
 .ui-kit-pattern-actions { margin-bottom: 12px; display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
-.ui-kit-pattern-actions .arc-button { min-height: 44px; }
+
 .ui-kit-outline-pattern { --ui-kit-tree-line: color-mix(in srgb,var(--ink) 24%,var(--line)); }
 .ui-kit-outline-tree,.ui-kit-outline-tree ul { margin: 0; padding: 0; list-style: none; }
 .ui-kit-outline-tree > li + li { margin-top: 2px; }

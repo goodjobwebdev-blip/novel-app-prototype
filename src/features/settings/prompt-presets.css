@@ -12,4 +12,4 @@
 .prompt-preset-library article span,
 .prompt-preset-library article small { color: var(--soft); font-size: .76rem; }
 .prompt-preset-library article > div:last-child { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-@media (max-width: 640px) { .prompt-preset-picker > .arc-field { flex-basis: 100%; }.prompt-preset-picker > .arc-button { min-height: 44px; flex: 1 0 max-content; } .prompt-preset-library article { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 640px) { .prompt-preset-picker > .arc-field { flex-basis: 100%; }.prompt-preset-picker > .arc-button { flex: 1 0 max-content; } .prompt-preset-library article { align-items: flex-start; flex-direction: column; } }

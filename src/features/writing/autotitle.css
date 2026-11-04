@@ -21,7 +21,7 @@
 .autotitle-meta { display: flex; flex-wrap: wrap; gap: 6px; }
 .autotitle-meta span { padding: 5px 8px; border: 1px solid var(--line); border-radius: 999px; background: color-mix(in srgb, var(--surface-2) 75%, transparent); color: var(--faint); font: 9px/1.2 ui-sans-serif,system-ui,sans-serif; }
 .autotitle-actions { display: flex; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
-.autotitle-actions button { appearance: none; min-height: 42px; padding: 0 13px; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb, var(--surface-2) 82%, transparent); color: var(--soft); display: inline-flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer; font-size: 11px; }
+.autotitle-actions button:not(.arc-button) { box-sizing: border-box; appearance: none; min-height: var(--control-height); padding: 0 var(--space-3); border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb, var(--surface-2) 82%, transparent); color: var(--soft); display: inline-flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer; font-size: 12px; line-height: 1; }
 .autotitle-actions button:hover { border-color: color-mix(in srgb, var(--accent) 38%, var(--line)); color: var(--ink); }
 .autotitle-actions button svg { width: 15px; height: 15px; }
 .autotitle-actions .primary { border-color: color-mix(in srgb, var(--accent) 48%, var(--line)); background: var(--accent); color: #191711; font-weight: 700; }
@@ -38,6 +38,6 @@
   .autotitle-panel { width: 100%; max-height: min(78svh, 640px); padding: 15px; border-radius: var(--overlay-radius); }
 
   .autotitle-actions { justify-content: stretch; }
-  .autotitle-actions button { flex: 1 1 auto; min-height: 44px; }
+  .autotitle-actions button { flex: 1 1 auto; }
   .autotitle-actions .primary { flex-basis: 100%; order: -1; }
 }
