@@ -76,7 +76,7 @@
 .chat-prompt-dialog header .chat-icon-action { flex: none; }
 .chat-predefined > header .arc-button { border-radius: var(--radius); }
 .chat-predefined > article { border-radius: var(--radius); }
-.chat-predefined .arc-input,.chat-predefined .arc-select { min-height: 44px; }
+.chat-predefined .arc-input,.chat-predefined .arc-select { min-height: var(--control-height); }
 .story-message-actions .chat-icon-action { width: 34px; height: 34px; min-width: 34px; min-height: 34px; padding: 0; border-radius: var(--radius); }
 
 @media (max-width: 720px) {

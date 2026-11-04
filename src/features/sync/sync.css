@@ -180,14 +180,14 @@
 }
 
 .library-import-actions :is(.local-book-sync, .cloud-book-import) > .arc-button {
-  min-height: 46px;
+  min-height: var(--control-height);
   box-shadow: 0 7px 20px #0002;
 }
 
 .library-import-actions .book-backup-import > button {
   appearance: none;
-  min-height: 46px;
-  padding: 0 15px;
+  min-height: var(--control-height);
+  padding: var(--control-padding-y) var(--control-padding-x);
   border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--line));
   border-radius: var(--radius);
   background: color-mix(in srgb, var(--accent) 8%, var(--surface));
