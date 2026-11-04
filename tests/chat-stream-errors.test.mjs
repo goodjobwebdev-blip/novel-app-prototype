@@ -113,6 +113,41 @@ test('diagnostics do not wrap cancellation', async t => {
   await assert.rejects(streamChatCompletion({ ...request, diagnosticRound: 1 }, () => {}, controller.signal), error => error.name === 'AbortError' && !error.message.includes('Round:'))
 })
 
+test('diagnostics identify provider stream errors and preserve only safe type/code fields', async t => {
+  for (const [prefix, payload] of [
+    ['', { error: { message: 'Request timed out. Please try again later.', type: 'timeout_error', code: 504, arguments: 'private scene' } }],
+    ['', { type: 'error', message: 'Request timed out', code: 'timeout' }],
+    ['event: error\n', { message: 'Request timed out', type: 'test-only-secret', code: 'test-only-secret' }],
+    ['event: error\n', null],
+  ]) {
+    mockStream(t, `${prefix}data: ${JSON.stringify(payload)}\n\n`)
+    await assert.rejects(streamChatCompletion({ ...request, diagnosticRound: 5 }, () => {}, new AbortController().signal), error => {
+      assert.match(error.message, /Error source: provider stream/)
+      if (payload?.error) assert.match(error.message, /Error type: "timeout_error"; Error code: 504/)
+      if (payload?.code === 'timeout') assert.match(error.message, /Error type: "error"; Error code: "timeout"/)
+      assert.doesNotMatch(error.message, /private scene|test-only-secret/)
+      return true
+    })
+  }
+})
+
+test('diagnostics distinguish stream read failures from malformed provider data', async t => {
+  for (const network of [true, false]) {
+    t.mock.method(globalThis, 'fetch', async () => new Response(new ReadableStream({
+      start(controller) {
+        if (network) controller.error(new TypeError('network error'))
+        else { controller.enqueue(new TextEncoder().encode('data: {invalid}\n\n')); controller.close() }
+      },
+    })))
+    await assert.rejects(streamChatCompletion({ ...request, diagnosticRound: 2 }, () => {}, new AbortController().signal), error => {
+      assert.match(error.message, network ? /Error source: stream read/ : /Error source: stream parsing/)
+      assert.match(error.message, network ? /Error type: "TypeError"/ : /Error type: "SyntaxError"/)
+      assert.match(error.message, /HTTP: 200/)
+      return true
+    })
+  }
+})
+
 test('strict text-only callers still reject tool completions', async t => {
   mockStream(t, event({ tool_calls: [tool] }, 'tool_calls') + 'data: [DONE]\n\n')
   await assert.rejects(streamChatCompletion({ ...request, requireComplete: true }, () => {}, new AbortController().signal), /incomplete/)
