@@ -41,7 +41,7 @@ import Composer from '../features/chat/Composer'
 import { startImageQueue } from '../features/images/image-queue'
 import ImageWorkspace from '../features/images/ImageWorkspace'
 import ActionMenu, { type ActionMenuItem } from '../shared/ui/ActionMenu'
-import Button from '../shared/ui/Button'
+import Button, { IconButton } from '../shared/ui/Button'
 import Toast, { type ToastVariant } from '../shared/ui/Toast'
 import { useImageQuery } from '../features/images/image-hooks'
 import { listImageJobs } from '../features/images/image-store'
@@ -2577,7 +2577,7 @@ export default function Workspace() {
     <main className="library-screen">
       {autotitleOverlay}
       {toast && <Toast fixed key={toast.id} variant={toast.variant} title={toast.title} onDismiss={() => setToast(null)}>{toast.message}</Toast>}
-      <header className="library-top"><div className="arc-brand"><Feather aria-hidden="true" /> ARC</div><button className="ui-kit-entry" type="button" onClick={() => setUiKitOpen(true)} aria-label="Open UI Kit" title="UI Kit"><Palette aria-hidden="true" /></button><button className="image-destination-button" type="button" onClick={() => { void openImages('home') }} aria-label="Open images and gallery"><ImageIcon aria-hidden="true" /><ImageActivityBadge active={activeImageJobs} review={reviewImageJobs} attention={attentionImageJobs} /></button><button type="button" onClick={() => openSettings('home')} aria-label="Open default settings"><Settings2 aria-hidden="true" /></button></header>
+      <header className="library-top"><div className="arc-brand"><Feather aria-hidden="true" /> ARC</div><IconButton className="ui-kit-entry" type="button" onClick={() => setUiKitOpen(true)} aria-label="Open UI Kit" title="UI Kit"><Palette aria-hidden="true" /></IconButton><IconButton className="image-destination-button" type="button" onClick={() => { void openImages('home') }} aria-label="Open images and gallery"><ImageIcon aria-hidden="true" /><ImageActivityBadge active={activeImageJobs} review={reviewImageJobs} attention={attentionImageJobs} /></IconButton><IconButton type="button" onClick={() => openSettings('home')} aria-label="Open default settings"><Settings2 aria-hidden="true" /></IconButton></header>
       <section className="library-content">
         <div className="library-title"><div><small>Your library</small><h1>Books</h1></div></div>
         <div className="library-primary-action"><Button variant="primary" size="large" aria-label="New book" disabled={libraryState !== 'ready' || creatingBook} onClick={() => { void makeBook() }} leadingIcon={<Plus aria-hidden="true" />}>{creatingBook ? 'Creating…' : 'New book'}</Button></div>
@@ -2588,7 +2588,7 @@ export default function Workspace() {
         <div className="library-import-actions"><BookBackupImport onImported={importedBook} /><LocalBookSync books={bookList} beforeSync={prepareBookExport} onConfigure={() => openSettings('home', 'sync')} onRemoteApplied={importedBook} /><CloudBookImport onImported={importedBook} /></div>
         <div className="library-grid">{bookList.map((book, index) => <article className="library-book-card" key={book.id}>
           <button type="button" className="library-book" onClick={() => { void openBook(book.id).catch((error) => showToast(error instanceof Error ? error.message : 'Could not open the book.')) }}><i className={`mock-cover ${['tide', 'orchard', 'fires'][index % 3]}`}>{book.title.slice(0,1)}</i><span><small>{formatSeries(book, seriesList)}</small><strong>{book.title}</strong><em>{formatEdited(book.updatedAt)}</em></span></button>
-          <div className="library-book-actions"><Button className="library-book-action autotitle-trigger" variant="ghost" onClick={() => { void startAutotitle(book) }} aria-label={`Autotitle ${book.title}`} title="Autotitle" leadingIcon={<WandSparkles aria-hidden="true" />} /><Button className="library-book-action" variant="ghost" onClick={() => { void editBookTitle(book) }} aria-label={`Rename ${book.title}`} leadingIcon={<Pencil aria-hidden="true" />} /><Button className="library-book-action" variant="danger" onClick={() => { void removeBook(book) }} aria-label={`Delete ${book.title}`} leadingIcon={<Trash2 aria-hidden="true" />} /></div>
+          <div className="library-book-actions"><IconButton className="library-book-action autotitle-trigger" variant="ghost" onClick={() => { void startAutotitle(book) }} aria-label={`Autotitle ${book.title}`} title="Autotitle"><WandSparkles aria-hidden="true" /></IconButton><IconButton className="library-book-action" variant="ghost" onClick={() => { void editBookTitle(book) }} aria-label={`Rename ${book.title}`}><Pencil aria-hidden="true" /></IconButton><IconButton className="library-book-action" variant="danger" onClick={() => { void removeBook(book) }} aria-label={`Delete ${book.title}`}><Trash2 aria-hidden="true" /></IconButton></div>
         </article>)}</div>
         {libraryState === 'ready' && <WorldsHomeSection onViewAll={() => { void openWorldBuilding() }} onOpen={openWorldBuilding} />}
       </section>
@@ -2598,9 +2598,9 @@ export default function Workspace() {
   return (
     <main ref={workspaceRef} className={`workspace-screen ${leftOpen ? 'settings-open' : ''} ${isWorldWorkspace ? 'world-building' : ''} ${screen === 'chat' ? 'chat-active' : ''}`}>
       <header className="floating-controls">
-        <div className="floating-control-group"><button type="button" onClick={() => openSettings(screen)} aria-label={isWorldWorkspace ? 'Open current World settings' : 'Open current book settings'} title={isWorldWorkspace ? 'World settings' : 'Book settings'}><PanelLeftOpen aria-hidden="true" /></button><button className="image-destination-button" type="button" onClick={() => { void openImages(screen) }} aria-label="Open images and gallery" title="Images and gallery"><ImageIcon aria-hidden="true" /><ImageActivityBadge active={activeImageJobs} review={reviewImageJobs} attention={attentionImageJobs} /></button></div>
+        <div className="floating-control-group"><IconButton type="button" onClick={() => openSettings(screen)} aria-label={isWorldWorkspace ? 'Open current World settings' : 'Open current book settings'} title={isWorldWorkspace ? 'World settings' : 'Book settings'}><PanelLeftOpen aria-hidden="true" /></IconButton><IconButton className="image-destination-button" type="button" onClick={() => { void openImages(screen) }} aria-label="Open images and gallery" title="Images and gallery"><ImageIcon aria-hidden="true" /><ImageActivityBadge active={activeImageJobs} review={reviewImageJobs} attention={attentionImageJobs} /></IconButton></div>
         <span className={`save-state ${saveState} ${syncStatus.state === 'conflict' ? 'sync-conflict-state' : ''}`} title={syncStatus.message || (saveState === 'error' ? 'Local save failed; your current editor text remains in memory.' : undefined)}><i /> {saveState === 'loading' ? 'Loading' : saveState === 'saving' ? 'Saving' : saveState === 'error' ? 'Save failed' : 'Saved'}{syncStatus.label ? ` · ${syncStatus.label}` : ''}</span>
-        <button type="button" onClick={() => setRightOpen(true)} aria-label={isWorldWorkspace ? 'Open World workspace' : 'Open book workspace'} title={isWorldWorkspace ? 'World workspace' : 'Book workspace'}><PanelRightOpen aria-hidden="true" /></button>
+        <IconButton type="button" onClick={() => setRightOpen(true)} aria-label={isWorldWorkspace ? 'Open World workspace' : 'Open book workspace'} title={isWorldWorkspace ? 'World workspace' : 'Book workspace'}><PanelRightOpen aria-hidden="true" /></IconButton>
       </header>
 
       {toast && <Toast fixed key={toast.id} variant={toast.variant} title={toast.title} onDismiss={() => setToast(null)}>{toast.message}</Toast>}
@@ -2644,9 +2644,9 @@ export default function Workspace() {
         {(activeDocument?.type === 'note' || activeDocument?.type === 'codexEntry') && <div className={`document-titlebar ${activeCodexArchived ? 'archived' : ''}`}>
           {activeDocument.type === 'codexEntry' ? <CodexIllustration key={activeDocument.id} entry={activeDocument} readOnly={activeCodexArchived} actions={<>
             {activeCodexArchived && <Button size="small" variant="secondary" leadingIcon={<ArchiveRestore />} onClick={() => { void restoreCodex(activeDocument) }}>Restore</Button>}
-            {!activeCodexArchived && <Button className="document-icon-action autotitle-trigger" size="small" variant="secondary" onClick={() => { void startAutotitle(activeDocument) }} aria-label={`Rename ${activeDocument.title} with AI`} title="Rename with AI" leadingIcon={<WandSparkles />} />}
+            {!activeCodexArchived && <IconButton className="document-icon-action autotitle-trigger" variant="secondary" onClick={() => { void startAutotitle(activeDocument) }} aria-label={`Rename ${activeDocument.title} with AI`} title="Rename with AI"><WandSparkles /></IconButton>}
             <SummaryIcon state={summaryStates[activeDocument.id] ?? 'missing'} kind="codex" onOpen={() => { void openSummary(activeDocument) }} />
-          </>}><small>{activeCodexArchived ? `Archived · ${activeDocument.category}` : activeDocument.category}</small><CodexEntryTitle key={activeDocument.id} title={activeDocument.title} readOnly={activeCodexArchived} disabled={generationActive || articleIssue?.documentId === activeDocument.id} onSave={title => saveCodexTitle(activeDocument, title)} /></CodexIllustration> : <><div><small>Note</small><h1>{activeDocument.title}</h1></div><div className="document-title-actions"><Button className="document-icon-action autotitle-trigger" size="small" variant="secondary" onClick={() => { void startAutotitle(activeDocument) }} aria-label={`Autotitle ${activeDocument.title}`} title="Autotitle" leadingIcon={<WandSparkles />} /><Button size="small" variant="secondary" leadingIcon={<Pencil />} onClick={() => { void renameContentEntity(activeDocument) }}>Rename</Button></div></>}
+          </>}><small>{activeCodexArchived ? `Archived · ${activeDocument.category}` : activeDocument.category}</small><CodexEntryTitle key={activeDocument.id} title={activeDocument.title} readOnly={activeCodexArchived} disabled={generationActive || articleIssue?.documentId === activeDocument.id} onSave={title => saveCodexTitle(activeDocument, title)} /></CodexIllustration> : <><div><small>Note</small><h1>{activeDocument.title}</h1></div><div className="document-title-actions"><IconButton className="document-icon-action autotitle-trigger" variant="secondary" onClick={() => { void startAutotitle(activeDocument) }} aria-label={`Autotitle ${activeDocument.title}`} title="Autotitle"><WandSparkles /></IconButton><Button size="small" variant="secondary" leadingIcon={<Pencil />} onClick={() => { void renameContentEntity(activeDocument) }}>Rename</Button></div></>}
         </div>}
         {activeDocument?.type === 'codexEntry' && !isWorldWorkspace && <RoleplayParticipant entry={activeDocument} bookId={currentBook?.id} disabled={generationActive} onBeforeChange={beforeWorldCodexChange} onRefresh={refreshWorldCodexWorkspace} onStart={() => { void beforeWorldCodexChange().then(() => setCharacterSetupEntry(activeDocument.id)).catch(error => showToast(error.message)) }} />}
         {activeDocument?.type === 'codexEntry' && currentBook?.type === 'book' && <CodexTimeline key={`timeline-${activeDocument.id}`} bookId={currentBook.id} entry={activeDocument} currentSceneId={activeSceneId || undefined} disabled={generationActive} onBeforeChange={beforeWorldCodexChange} onRefresh={refreshWorldCodexWorkspace} onViewChange={nonBaseline => setTimelineView({ entryId: activeDocument.id, nonBaseline })} />}
@@ -2693,7 +2693,7 @@ export default function Workspace() {
       </aside>}
 
       {rightOpen && <aside className="book-panel">
-        <header><div><small>{formatSeries(currentBook, seriesList)}</small><strong>{currentBook?.title ?? 'Untitled Book'}</strong></div><div className="book-panel-header-actions">{activeSceneId && <button type="button" onClick={() => { void loadScene(activeSceneId) }} aria-label="Return to Scene" title="Return to Scene"><CornerUpLeft aria-hidden="true" /></button>}<button type="button" onClick={() => setRightOpen(false)} aria-label={isWorldWorkspace ? 'Close World workspace' : 'Close book workspace'} title={isWorldWorkspace ? 'Close World workspace' : 'Close book workspace'}><X aria-hidden="true" /></button></div></header>
+        <header><div><small>{formatSeries(currentBook, seriesList)}</small><strong>{currentBook?.title ?? 'Untitled Book'}</strong></div><div className="book-panel-header-actions">{activeSceneId && <IconButton type="button" onClick={() => { void loadScene(activeSceneId) }} aria-label="Return to Scene" title="Return to Scene"><CornerUpLeft aria-hidden="true" /></IconButton>}<IconButton type="button" onClick={() => setRightOpen(false)} aria-label={isWorldWorkspace ? 'Close World workspace' : 'Close book workspace'} title={isWorldWorkspace ? 'Close World workspace' : 'Close book workspace'}><X aria-hidden="true" /></IconButton></div></header>
         <nav>{([['book', Settings2], ['outline', BookOpenText], ['notes', NotebookPen], ['codex', WandSparkles], ['chat', MessageCircle]] as const).map(([tab, Icon]) => <button type="button" className={rightTab === tab ? 'active' : ''} onClick={() => { setRightTab(tab); if (tab === 'chat') setChatPanel(screen === 'chat' ? 'settings' : 'list') }} key={tab}><Icon aria-hidden="true" /><span>{isWorldWorkspace ? tab === 'book' ? 'World' : tab === 'outline' ? 'Books' : tab[0].toUpperCase() + tab.slice(1) : tab}</span></button>)}</nav>
         <div className="panel-content">{isWorldWorkspace && currentBook?.type === 'world' && (rightTab === 'book' || rightTab === 'outline') ? <WorldWorkspacePanel world={currentBook} tab={rightTab === 'book' ? 'world' : 'books'} beforeChange={beforeWorldCodexChange} onOpenBook={id => { void openBook(id) }} onRefresh={refreshWorldCodexWorkspace} onHome={() => { void goHome() }} /> :
           rightTab === 'book' ? <BookSettings planning={<AuthorGoalsTasks key={`planning-${currentBook?.id}`} bookId={currentBook?.id ?? ''} liveScene={activeDocument?.type === 'scene' ? { id: activeDocument.id, content: storyMarkdown } : undefined} onOpen={id => { void getEntity<EditableEntity>(id).then(entity => { if (!entity) return; if (entity.type === 'chapter') void openSummary(entity as unknown as StructuralEntity); else void loadDocument(id) }) }} />} onBeforeExport={prepareBookExport} onImported={importedBook} book={currentBook?.type === 'book' ? currentBook : null} books={bookList} series={seriesList} onSave={saveBookMetadata} onWorldChange={changeBookWorld} onOpenWorld={worldId => { void openWorldBuilding(worldId) }} onCreateSeries={addSeries} onRenameSeries={renameSeries} onDelete={removeCurrentBookFromSettings} /> :
@@ -2738,7 +2738,7 @@ function LoreMentionPopover({ state, onClose, onSelect, onOpen }: {
 
   const titleId = `codex-mention-title-${state.id}`
   return createPortal(<section ref={panelRef} className="codex-mention-popover" role="dialog" aria-labelledby={titleId} style={{ left, top, width, maxHeight: Math.max(180, viewportHeight - top - 12) }}>
-    <header><div><small>Codex mention</small><strong id={titleId}>{state.preview?.title ?? selected?.title ?? (state.term.entries.length === 1 ? state.term.entries[0].title : state.term.text)}</strong></div><button className="codex-mention-close" type="button" onClick={onClose} aria-label="Close lore preview" title="Close"><X aria-hidden="true" /></button></header>
+    <header><div><small>Codex mention</small><strong id={titleId}>{state.preview?.title ?? selected?.title ?? (state.term.entries.length === 1 ? state.term.entries[0].title : state.term.text)}</strong></div><IconButton className="codex-mention-close" type="button" onClick={onClose} aria-label="Close lore preview" title="Close"><X aria-hidden="true" /></IconButton></header>
     {state.term.entries.length > 1 && <div className="codex-mention-choices"><p>{selected ? 'Other matching entries' : 'Multiple Codex entries use this name. Choose one:'}</p>{state.term.entries.map((entry) => <button key={entry.id} className={entry.id === state.selectedId ? 'selected' : ''} type="button" onClick={() => onSelect(entry)}><span><strong>{entry.title}</strong><small>{entry.category}</small></span>{entry.id === state.selectedId && <Check aria-hidden="true" />}</button>)}</div>}
     {state.loading && <p className="codex-mention-loading">Loading lore…</p>}
     {state.error && <p className="codex-mention-error" role="alert">{state.error}</p>}
@@ -2773,9 +2773,9 @@ function SttStatusBar() {
     <Mic aria-hidden="true" />
     <div className="tts-status-copy"><strong>{stt.label || 'Dictation'}</strong><small>{stt.error || `${label}${stt.provider ? ` · ${stt.provider === 'openai' ? 'OpenAI' : 'NanoGPT'} · ${stt.model}` : ''}`}</small></div>
     <div className="tts-status-actions">
-      {(stt.status === 'recording' || stt.status === 'recording-live') && <button type="button" onClick={stopSttSession} aria-label="Stop dictation"><Square aria-hidden="true" fill="currentColor" /></button>}
-      {active && <button type="button" onClick={cancelSttSession} aria-label="Cancel dictation"><X aria-hidden="true" /></button>}
-      {!active && <button type="button" onClick={dismissSttState} aria-label="Dismiss dictation status"><X aria-hidden="true" /></button>}
+      {(stt.status === 'recording' || stt.status === 'recording-live') && <IconButton type="button" onClick={stopSttSession} aria-label="Stop dictation"><Square aria-hidden="true" fill="currentColor" /></IconButton>}
+      {active && <IconButton type="button" onClick={cancelSttSession} aria-label="Cancel dictation"><X aria-hidden="true" /></IconButton>}
+      {!active && <IconButton type="button" onClick={dismissSttState} aria-label="Dismiss dictation status"><X aria-hidden="true" /></IconButton>}
     </div>
   </section>
 }
@@ -2805,11 +2805,11 @@ function TtsStatusBar() {
         <small aria-live="polite">{label}{tts.chunkCount ? ` · Part ${Math.max(1, tts.chunkIndex || 1)} of ${tts.chunkCount}` : ''}{tts.error ? ` · ${tts.error}` : ''}</small>{tts.cachedChunks !== undefined && <small>{tts.cachedChunks} cached parts · {tts.missingChunks ?? 0} new audio requests</small>}
       </div>
       <div className="tts-status-actions">
-        {tts.status === 'playing' && <button className="tts-playback-toggle" type="button" onClick={pauseTtsSession} aria-label="Pause audio" title="Pause"><Pause aria-hidden="true" /></button>}
-        {tts.status === 'paused' && <button className="tts-playback-toggle" type="button" onClick={() => { void resumeTtsSession() }} aria-label="Resume audio" title="Resume"><Play aria-hidden="true" fill="currentColor" /></button>}
-        {tts.canReplay && !playbackActive && <button className="tts-playback-toggle" type="button" onClick={() => { void replayTtsSession() }} aria-label="Replay generated audio" title="Replay"><RotateCcw aria-hidden="true" /></button>}
-        {!['complete','failed','stopped'].includes(tts.status) && <button className="tts-stop" type="button" onClick={stopTtsSession} aria-label="Stop audio" title="Stop"><Square aria-hidden="true" fill="currentColor" /></button>}
-        {['complete','failed','stopped'].includes(tts.status) && <button type="button" onClick={dismissTtsState} aria-label="Dismiss audio status" title="Dismiss"><X aria-hidden="true" /></button>}
+        {tts.status === 'playing' && <IconButton className="tts-playback-toggle" type="button" onClick={pauseTtsSession} aria-label="Pause audio" title="Pause"><Pause aria-hidden="true" /></IconButton>}
+        {tts.status === 'paused' && <IconButton className="tts-playback-toggle" type="button" onClick={() => { void resumeTtsSession() }} aria-label="Resume audio" title="Resume"><Play aria-hidden="true" fill="currentColor" /></IconButton>}
+        {tts.canReplay && !playbackActive && <IconButton className="tts-playback-toggle" type="button" onClick={() => { void replayTtsSession() }} aria-label="Replay generated audio" title="Replay"><RotateCcw aria-hidden="true" /></IconButton>}
+        {!['complete','failed','stopped'].includes(tts.status) && <IconButton className="tts-stop" type="button" onClick={stopTtsSession} aria-label="Stop audio" title="Stop"><Square aria-hidden="true" fill="currentColor" /></IconButton>}
+        {['complete','failed','stopped'].includes(tts.status) && <IconButton type="button" onClick={dismissTtsState} aria-label="Dismiss audio status" title="Dismiss"><X aria-hidden="true" /></IconButton>}
       </div>
     </div>
     {showTimeline && <div className="tts-playback-timeline">
@@ -2907,15 +2907,15 @@ function GenerateControl({ autocompleteReady = false, onAcceptAutocomplete, onCa
 
   if (drawerCollapsed && isGenerating && phase) return <div className="generate-control-shell generation-running collapsed-generate-control">
     <GenerationActivityStrip phase={phase} elapsedSeconds={elapsedSeconds} placement="floating" onOpenDetails={onOpenDetails} />
-    <button className="collapsed-dictation-button" type="button" disabled aria-label="Dictation unavailable during generation"><Mic aria-hidden="true" /></button>
-    <button className="generation-stop-circle" type="button" onClick={onStop} aria-label="Stop generation"><Square aria-hidden="true" fill="currentColor" /></button>
+    <IconButton className="collapsed-dictation-button" type="button" disabled aria-label="Dictation unavailable during generation"><Mic aria-hidden="true" /></IconButton>
+    <IconButton className="generation-stop-circle" type="button" onClick={onStop} aria-label="Stop generation"><Square aria-hidden="true" fill="currentColor" /></IconButton>
   </div>
 
-  if (inDrawer && isGenerating && phase) return <div className="generate-control-shell drawer-generation-stop"><button className="generation-stop-circle" type="button" onClick={onStop} aria-label="Stop generation"><Square aria-hidden="true" fill="currentColor" /></button></div>
+  if (inDrawer && isGenerating && phase) return <div className="generate-control-shell drawer-generation-stop"><IconButton className="generation-stop-circle" type="button" onClick={onStop} aria-label="Stop generation"><Square aria-hidden="true" fill="currentColor" /></IconButton></div>
 
   if (isGenerating && phase) return <div className="generate-control-shell generation-running">
     <GenerationActivityStrip phase={phase} elapsedSeconds={elapsedSeconds} placement="floating" onOpenDetails={onOpenDetails} />
-    <button className="generation-stop-circle" type="button" onClick={onStop} aria-label="Stop generation"><Square aria-hidden="true" fill="currentColor" /></button>
+    <IconButton className="generation-stop-circle" type="button" onClick={onStop} aria-label="Stop generation"><Square aria-hidden="true" fill="currentColor" /></IconButton>
   </div>
 
   if (sttActive) {
@@ -2930,7 +2930,7 @@ function GenerateControl({ autocompleteReady = false, onAcceptAutocomplete, onCa
         <i aria-hidden="true" /><span className="generation-phase">{label}</span>
         {sttRecording && <><span className="generation-separator" aria-hidden="true">·</span><span className="generation-time" aria-hidden="true">{formatGenerationTime(speechElapsed)}</span></>}
       </div>
-      <button className={`collapsed-dictation-button ${sttRecording ? 'recording' : ''}`} type="button" onClick={sttRecording ? stopSttSession : sttPermissionPending ? cancelSttSession : undefined} disabled={!sttRecording && !sttPermissionPending} aria-label={sttRecording ? 'Stop dictation' : sttPermissionPending ? 'Cancel microphone permission request' : 'Dictation in progress'}>{sttRecording ? <Square aria-hidden="true" fill="currentColor" /> : sttPermissionPending ? <X aria-hidden="true" /> : <Mic aria-hidden="true" />}</button>
+      <IconButton className={`collapsed-dictation-button ${sttRecording ? 'recording' : ''}`} type="button" onClick={sttRecording ? stopSttSession : sttPermissionPending ? cancelSttSession : undefined} disabled={!sttRecording && !sttPermissionPending} aria-label={sttRecording ? 'Stop dictation' : sttPermissionPending ? 'Cancel microphone permission request' : 'Dictation in progress'}>{sttRecording ? <Square aria-hidden="true" fill="currentColor" /> : sttPermissionPending ? <X aria-hidden="true" /> : <Mic aria-hidden="true" />}</IconButton>
       <div className="generation-actions generation-actions--square"><button className="play generation-primary" type="button" disabled aria-label="Generate unavailable during dictation"><Play aria-hidden="true" fill="currentColor" /><span>Generate</span></button></div>
     </div>
     const expandedLabel = sttRecording ? `${label} · ${formatGenerationTime(speechElapsed)}` : label
@@ -2946,7 +2946,7 @@ function GenerateControl({ autocompleteReady = false, onAcceptAutocomplete, onCa
 
   if (drawerCollapsed) return <div className="generate-control-shell collapsed-generate-control">
     {autocompleteAction}
-    <button className="collapsed-dictation-button" type="button" onClick={onMicro} aria-label="Dictate into editor" title="Dictate into editor"><Mic aria-hidden="true" /></button>
+    <IconButton className="collapsed-dictation-button" type="button" onClick={onMicro} aria-label="Dictate into editor" title="Dictate into editor"><Mic aria-hidden="true" /></IconButton>
     <GenerationActions label="Generate" onGenerate={onGenerate} actions={generationActions} />
   </div>
 
@@ -2969,7 +2969,7 @@ function AutotitlePanel({ state, onAccept, onRegenerate, onStop, onCancel }: { s
 
   return createPortal(<div className="autotitle-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget) onCancel() }}>
     <section className="autotitle-panel" role="dialog" aria-modal="true" aria-labelledby={titleId}>
-      <header><div className="autotitle-heading-icon"><WandSparkles aria-hidden="true" /></div><div><small>AI title · {label}</small><strong id={titleId}>{state.targetTitle}</strong></div><button className="autotitle-close" type="button" onClick={onCancel} aria-label="Close title generator" title="Close"><X aria-hidden="true" /></button></header>
+      <header><div className="autotitle-heading-icon"><WandSparkles aria-hidden="true" /></div><div><small>AI title · {label}</small><strong id={titleId}>{state.targetTitle}</strong></div><IconButton className="autotitle-close" type="button" onClick={onCancel} aria-label="Close title generator" title="Close"><X aria-hidden="true" /></IconButton></header>
       {state.status === 'loading' ? <div className="autotitle-suggestion loading" aria-live="polite"><small>Suggested title</small><span><RefreshCw aria-hidden="true" /> Generating suggestion…</span></div> : state.suggestion ? <div className="autotitle-suggestion" aria-live="polite"><small>Suggested title</small><strong>{state.suggestion}</strong></div> : null}
       {state.error && <p className="autotitle-error" role="alert">{state.error}</p>}
       {state.request && <><div className="autotitle-meta"><span>{label}</span><span>{state.request.model}</span>{diagnostics && <span>~{diagnostics.requestTokens.toLocaleString()} tokens · {Math.round(diagnostics.usageRatio * 100)}% context</span>}</div><details className="autotitle-request"><summary>Request details</summary><pre>{`TARGET: ${state.request.targetId}\n\nSYSTEM:\n${state.request.systemPrompt}\n\nUSER:\n${state.request.userMessage}`}</pre></details></>}
@@ -3015,7 +3015,7 @@ function GenerationDetailsDialog({ details, elapsedSeconds, onClose }: {
       <section className="generation-details-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <header>
           <div><small>{status} · {formatGenerationTime(visibleElapsed)}</small><h2 id={titleId}>{details.task} generation</h2></div>
-          <button type="button" onClick={onClose} aria-label="Close generation details"><X aria-hidden="true" /></button>
+          <IconButton type="button" onClick={onClose} aria-label="Close generation details"><X aria-hidden="true" /></IconButton>
         </header>
         <div className="generation-details-content">
           <section className="generation-thoughts">
@@ -3047,7 +3047,7 @@ function GenerationDetailsDialog({ details, elapsedSeconds, onClose }: {
 }
 
 function MessageActions({ user = false }: { user?: boolean }) { return <div className="message-tools"><button type="button"><Pencil aria-hidden="true" /> Edit</button>{!user && <><button type="button"><GitFork aria-hidden="true" /> Fork</button><button type="button"><Volume2 aria-hidden="true" /> Read aloud</button><button type="button"><RefreshCw aria-hidden="true" /> Regenerate</button></>}<button type="button"><Trash2 aria-hidden="true" /> Delete</button></div> }
-function SummaryIcon({ state, onOpen, kind = 'outline' }: { state: SummaryState; onOpen: () => void; kind?: 'outline' | 'codex' }) { const Icon = state === 'current' ? FileText : state === 'outdated' ? RefreshCw : FileQuestion; const title = kind === 'codex' ? state === 'missing' ? 'No summary — full entry is used for AI context.' : state === 'current' ? 'Current summary.' : 'Summary outdated — full entry will be used.' : `${state[0].toUpperCase()}${state.slice(1)} summary`; return <button className={`summary-status ${state} ${kind === 'codex' ? 'codex-summary-status' : ''}`} type="button" onClick={onOpen} aria-label={`Open ${state} summary`} title={title}><Icon aria-hidden="true" /></button> }
+function SummaryIcon({ state, onOpen, kind = 'outline' }: { state: SummaryState; onOpen: () => void; kind?: 'outline' | 'codex' }) { const Icon = state === 'current' ? FileText : state === 'outdated' ? RefreshCw : FileQuestion; const title = kind === 'codex' ? state === 'missing' ? 'No summary — full entry is used for AI context.' : state === 'current' ? 'Current summary.' : 'Summary outdated — full entry will be used.' : `${state[0].toUpperCase()}${state.slice(1)} summary`; return <IconButton className={`summary-status ${state} ${kind === 'codex' ? 'codex-summary-status' : ''}`} type="button" onClick={onOpen} aria-label={`Open ${state} summary`} title={title}><Icon aria-hidden="true" /></IconButton> }
 function codexSummaryPolicyText(entry: CodexEntryEntity, state: SummaryState) { if (!entry.preferSummaryForContext) return 'Full entry is used for AI context.'; if (state === 'current') return 'Current summary is used for AI context.'; if (state === 'missing') return 'No summary yet — full entry is used.'; return 'Summary is outdated — full entry is used until updated.' }
 function formatEdited(updatedAt: number) {
   const minutes = Math.max(0, Math.round((Date.now() - updatedAt) / 60_000))
@@ -3261,7 +3261,7 @@ function BookSettings({ book, books, series, planning, onSave, onWorldChange, on
         <button ref={seriesTriggerRef} className="series-trigger" type="button" aria-haspopup="listbox" aria-expanded={seriesPickerMode !== null} onClick={() => { setSeriesQuery(''); setSeriesError(''); setSeriesPickerMode('choose') }}><span><strong>{selectedSeries?.title ?? 'Standalone'}</strong><small>{selectedSeries ? `${seriesUsage(selectedSeries.id)} book${seriesUsage(selectedSeries.id) === 1 ? '' : 's'}` : 'Not part of a series'}</small></span><ChevronDown aria-hidden="true" /></button>
         {selectedSeries && <button className="series-rename-trigger" type="button" onClick={() => { setSeriesQuery(selectedSeries.title); setSeriesError(''); setSeriesPickerMode('rename') }}><Pencil aria-hidden="true" /> Rename series <small>Changes all {seriesUsage(selectedSeries.id)} linked book{seriesUsage(selectedSeries.id) === 1 ? '' : 's'}</small></button>}
         {seriesPickerMode && <section ref={seriesPickerRef} className={`series-picker ${seriesPickerMode}`} aria-label={seriesPickerMode === 'choose' ? 'Choose series' : 'Rename series'}>
-          <header><button type="button" onClick={() => seriesPickerMode === 'rename' ? setSeriesPickerMode('choose') : setSeriesPickerMode(null)} aria-label={seriesPickerMode === 'rename' ? 'Back to series list' : 'Back to book settings'}><ArrowLeft aria-hidden="true" /></button><div><small>Book identity</small><h3>{seriesPickerMode === 'choose' ? 'Choose series' : 'Rename series'}</h3></div></header>
+          <header><IconButton type="button" onClick={() => seriesPickerMode === 'rename' ? setSeriesPickerMode('choose') : setSeriesPickerMode(null)} aria-label={seriesPickerMode === 'rename' ? 'Back to series list' : 'Back to book settings'}><ArrowLeft aria-hidden="true" /></IconButton><div><small>Book identity</small><h3>{seriesPickerMode === 'choose' ? 'Choose series' : 'Rename series'}</h3></div></header>
           {seriesPickerMode === 'choose' ? <>
             <label className="series-search"><Search aria-hidden="true" /><input autoFocus type="search" value={seriesQuery} onChange={(event) => { setSeriesQuery(event.target.value); setSeriesError('') }} placeholder="Search or create a series…" aria-label="Search or create a series" /></label>
             <p>Series organize Books. Changing Series does not change this Book’s World or Codex.</p>
@@ -3432,7 +3432,7 @@ function OutlineRow({ entity, label, wordCount, summaryState, selected = false, 
   onDelete: (entity: StructuralEntity) => void
 }) {
   return <div className={`outline-row ${selected ? 'selected' : ''}`}>
-    {expandable ? <button className="tree-toggle" type="button" onClick={() => onToggle(entity.id)} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${entity.title}`}><span aria-hidden="true">{expanded ? <Minus /> : <Plus />}</span></button> : <span className="tree-leaf-node" aria-hidden="true" />}
+    {expandable ? <IconButton className="tree-toggle" type="button" onClick={() => onToggle(entity.id)} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${entity.title}`}>{expanded ? <Minus /> : <Plus />}</IconButton> : <span className="tree-leaf-node" aria-hidden="true" />}
     <button className="tree-label" type="button" onClick={() => entity.type === 'scene' ? onOpenScene(entity.id) : onToggle(entity.id)}><small>{label} · {formatWordCount(wordCount)}</small><strong>{entity.title}</strong></button>
     <SummaryIcon state={summaryState} onOpen={() => onOpenSummary(entity)} />
     <OutlineActionsMenu entity={entity} first={first} last={last} onCreate={onCreate} onAutotitle={onAutotitle} onRead={onRead} onRename={onRename} onMove={onMove} onDelete={onDelete} />
@@ -3497,6 +3497,6 @@ function Notes({ notes, activeId, onCreate, onOpen, onAutotitle, onRead, onRenam
 }
 
 
-function ChatList({onOpen,activeChat,onSettings}:{onOpen:(title:string)=>void;activeChat:string;onSettings:()=>void}) { return <section><div className="panel-title"><div><small>Conversations</small><h2>Chats</h2></div><button type="button" aria-label="Start new chat"><Plus aria-hidden="true" /></button></div>{activeChat && <button className="current-chat" onClick={onSettings}><Settings2 aria-hidden="true" /><span><small>Current chat</small>{activeChat} settings</span><ChevronRight aria-hidden="true" /></button>}<Input className="panel-search" type="search" leadingIcon={<Search aria-hidden="true" />} placeholder="Search chats" aria-label="Search chats" />{chats.map(([title,preview,time]) => <button className="chat-row" key={title} onClick={() => onOpen(title)}><i><MessageCircle aria-hidden="true" /></i><span><strong>{title}</strong><small>{preview}</small></span><em>{time}</em></button>)}</section> }
+function ChatList({onOpen,activeChat,onSettings}:{onOpen:(title:string)=>void;activeChat:string;onSettings:()=>void}) { return <section><div className="panel-title"><div><small>Conversations</small><h2>Chats</h2></div><IconButton className="panel-icon-action" type="button" aria-label="Start new chat"><Plus aria-hidden="true" /></IconButton></div>{activeChat && <button className="current-chat" onClick={onSettings}><Settings2 aria-hidden="true" /><span><small>Current chat</small>{activeChat} settings</span><ChevronRight aria-hidden="true" /></button>}<Input className="panel-search" type="search" leadingIcon={<Search aria-hidden="true" />} placeholder="Search chats" aria-label="Search chats" />{chats.map(([title,preview,time]) => <button className="chat-row" key={title} onClick={() => onOpen(title)}><i><MessageCircle aria-hidden="true" /></i><span><strong>{title}</strong><small>{preview}</small></span><em>{time}</em></button>)}</section> }
 function ChatSettings({title,onBack}:{title:string;onBack:()=>void}) { return <section><button className="back-list" onClick={onBack}><ArrowLeft aria-hidden="true" /> All chats</button><div className="panel-title"><div><small>Current chat</small><h2>{title}</h2></div></div><label className="panel-field"><span>System prompt</span><textarea defaultValue="You are a thoughtful story collaborator. Use only selected book context."/></label><label className="panel-field"><span>Model</span><select><option>Claude 3.7 Sonnet</option><option>GPT-4.1</option></select></label><label className="thinking"><span>Thinking<small>Allow longer internal reasoning</small></span><input type="checkbox" defaultChecked/></label><label className="panel-field"><span>Context</span><div className="chips"><button>Chapter 7 <X aria-hidden="true" /></button><button>Codex <X aria-hidden="true" /></button><button><Plus aria-hidden="true" /> Add</button></div></label></section> }
 

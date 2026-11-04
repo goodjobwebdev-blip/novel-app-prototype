@@ -10,7 +10,7 @@ import '../shared/context/context-settings-ux.css'
 import Input from '../shared/ui/Input'
 import Select from '../shared/ui/Select'
 import Checkbox from '../shared/ui/Checkbox'
-import Button from '../shared/ui/Button'
+import Button, { IconButton } from '../shared/ui/Button'
 import Disclosure from '../shared/ui/Disclosure'
 import SearchableSelect from '../shared/ui/SearchableSelect'
 import RadioGroup from '../shared/ui/RadioGroup'
@@ -536,9 +536,9 @@ function SettingsApp({ embedded = false, panelRef, ownerKind = 'book', onHome, o
   const globalSection = (settingsTab === 'appearance' || settingsTab === 'application' || settingsTab === 'sync' ? settingsTab : 'ai') as GlobalSettingsSection
   return <Root className="app-shell ai-settings-shell">
     <aside className="settings-rail" aria-label={`${isBookSettings ? 'Book' : 'Global'} settings navigation`}>
-      <div className="rail-header"><button className="home-button" type="button" onClick={() => navigate(onHome)} disabled={leaveSaving} aria-label="Back to library"><Home aria-hidden="true" /><b>Home</b></button>
-        {isBookSettings && <button className="global-settings-button" type="button" onClick={() => onGlobalSettings ? navigate(onGlobalSettings) : openGlobalProfile()} disabled={leaveSaving} aria-label="Global Settings" title="Global Settings"><Settings aria-hidden="true" /></button>}
-        {onBack && <button className="settings-close" type="button" onClick={() => navigate(onBack)} aria-label="Close settings" disabled={leaveSaving}><X aria-hidden="true" /></button>}</div>
+      <div className="rail-header">{embedded && onBack && <IconButton className="settings-close" type="button" onClick={() => navigate(onBack)} aria-label="Close settings" disabled={leaveSaving}><X aria-hidden="true" /></IconButton>}<button className="home-button" type="button" onClick={() => navigate(onHome)} disabled={leaveSaving} aria-label="Back to library"><Home aria-hidden="true" /><b>Home</b></button>
+        {isBookSettings && <IconButton className="global-settings-button" type="button" onClick={() => onGlobalSettings ? navigate(onGlobalSettings) : openGlobalProfile()} disabled={leaveSaving} aria-label="Global Settings" title="Global Settings"><Settings aria-hidden="true" /></IconButton>}
+        {!embedded && onBack && <IconButton className="settings-close" type="button" onClick={() => navigate(onBack)} aria-label="Close settings" disabled={leaveSaving}><X aria-hidden="true" /></IconButton>}</div>
       <nav>{(isBookSettings ? ([['profiles', Bot, 'Profiles'], ['context', SlidersHorizontal, 'Context']] as const) : ([['ai', Bot, 'AI'], ['appearance', Type, 'UI'], ['application', SlidersHorizontal, 'Application'], ['sync', Cloud, 'Sync']] as const)).map(([key, Icon, label]) => <button key={key} className={settingsTab === key ? 'active' : ''} type="button" aria-current={settingsTab === key ? 'page' : undefined} onClick={() => selectSettingsTab(key)}><Icon aria-hidden="true" /><span>{label}</span></button>)}</nav>
       <p>{isBookSettings ? 'Choose shared profiles for this book. Context remains local to this book or chat.' : 'Shared profiles update linked books after Save. Connections stay local and never enter backups.'}</p>
     </aside>
@@ -926,7 +926,7 @@ function PredefinedMessages({ scope = 'story', messages, previewValues, onChange
           <label><span>Name</span><input value={message.name ?? ''} onChange={(event) => updateMessage(message.id, { name: event.target.value })} placeholder="Optional label" /></label>
           <label><span>Role</span><select value={message.role} onChange={(event) => updateMessage(message.id, { role: event.target.value as PredefinedMessage['role'] })}><option value="system">System</option><option value="user">User</option><option value="assistant">Assistant</option></select></label>
           <label className="story-message-enabled"><input type="checkbox" checked={message.enabled} onChange={(event) => updateMessage(message.id, { enabled: event.target.checked })} /><span>Enabled</span></label>
-          <div className="story-message-actions"><button type="button" disabled={index === 0} onClick={() => moveMessage(index, -1)} aria-label={`Move ${message.name || 'message'} up`}>↑</button><button type="button" disabled={index === messages.length - 1} onClick={() => moveMessage(index, 1)} aria-label={`Move ${message.name || 'message'} down`}>↓</button><button type="button" onClick={() => { setDeletedMessage({ message, index }); onChange(messages.filter((candidate) => candidate.id !== message.id)) }} aria-label={`Delete ${message.name || 'message'}`}><Trash2 aria-hidden="true" /></button></div>
+          <div className="story-message-actions"><IconButton type="button" disabled={index === 0} onClick={() => moveMessage(index, -1)} aria-label={`Move ${message.name || 'message'} up`}>↑</IconButton><IconButton type="button" disabled={index === messages.length - 1} onClick={() => moveMessage(index, 1)} aria-label={`Move ${message.name || 'message'} down`}>↓</IconButton><IconButton type="button" onClick={() => { setDeletedMessage({ message, index }); onChange(messages.filter((candidate) => candidate.id !== message.id)) }} aria-label={`Delete ${message.name || 'message'}`}><Trash2 aria-hidden="true" /></IconButton></div>
         </div>
         <PromptTemplateEditor value={message.template} diagnostics={diagnostics} ariaLabel={`${message.name || `${scopeLabel} message ${index + 1}`} template`} onChange={(template) => updateMessage(message.id, { template })} />
         <small className={errors.length ? 'story-message-error' : ''}>{errors.length ? `${errors.length} error${errors.length === 1 ? '' : 's'} — generation is blocked` : message.enabled ? `Message ${index + 1} · ${message.role}` : `Message ${index + 1} · omitted while disabled`}</small>

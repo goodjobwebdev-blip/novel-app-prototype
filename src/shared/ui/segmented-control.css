@@ -51,5 +51,5 @@
 
 @media (max-width: 520px) {
   .arc-segmented-control > .arc-segmented-control__option { padding-inline: 10px; }
-  .arc-segmented-control--full > .arc-segmented-control__option { min-height: 48px; padding-inline: 6px; font-size: 11px; }
+  .arc-segmented-control--full > .arc-segmented-control__option { padding-inline: 6px; }
 }

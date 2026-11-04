@@ -1,3 +1,4 @@
+import { IconButton } from './Button'
 import { useEffect, type ReactNode } from 'react'
 import { CheckCircle2, CircleX, TriangleAlert, X } from 'lucide-react'
 import { createPortal } from 'react-dom'
@@ -26,7 +27,7 @@ export default function Toast({ variant, title, children, action, onDismiss, fix
     <Icon className="arc-toast__icon" aria-hidden="true" />
     <div><strong>{title}</strong>{children && <p>{children}</p>}</div>
     {action && <button className="arc-toast__action" type="button" onClick={action.onClick} aria-label={action.ariaLabel} disabled={action.disabled}>{action.label}</button>}
-    {onDismiss && <button className="arc-toast__dismiss" type="button" onClick={onDismiss} aria-label={`Dismiss ${title}`}><X aria-hidden="true" /></button>}
+    {onDismiss && <IconButton className="arc-toast__dismiss" type="button" onClick={onDismiss} aria-label={`Dismiss ${title}`}><X aria-hidden="true" /></IconButton>}
   </article>
 
   return fixed ? createPortal(content, document.body) : content

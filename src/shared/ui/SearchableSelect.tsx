@@ -1,3 +1,4 @@
+import { IconButton } from './Button'
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Check, ChevronDown, X } from 'lucide-react'
 import { createPortal } from 'react-dom'
@@ -155,7 +156,7 @@ export default function SearchableSelect({
     {description && <small className="arc-searchable-select__description">{description}</small>}
     {open && (mobile ? createPortal(<dialog ref={dialogRef} className="arc-searchable-select__modal" aria-labelledby={labelId} onCancel={event => { event.preventDefault(); close() }} onPointerDown={event => { if (event.target === event.currentTarget) close() }}>
       <section onKeyDown={handleKeys}>
-        <header><strong>{label}</strong><button type="button" onClick={() => close()} aria-label={`Close ${label}`}><X aria-hidden="true" /></button></header>
+        <header><strong>{label}</strong><IconButton type="button" onClick={() => close()} aria-label={`Close ${label}`}><X aria-hidden="true" /></IconButton></header>
         {optionList}
       </section>
     </dialog>, document.body) : <div className="arc-searchable-select__panel" onKeyDown={handleKeys}>{optionList}</div>)}

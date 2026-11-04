@@ -4,7 +4,7 @@ import { Pencil, X } from 'lucide-react'
 import { sensoryPrompts } from './prose-transformations'
 import { generateSensoryDetails, validSensoryReplacement, type SensoryVariant } from './sensory-details'
 import type { QuickToolCapture } from './quick-tools'
-import Button from '../../shared/ui/Button'
+import Button, { IconButton } from '../../shared/ui/Button'
 
 export default function SensoryDetailDialog({ capture, apply, close }: { capture: QuickToolCapture; apply: (text: string) => boolean; close: () => void }) {
   const [variants, setVariants] = useState<SensoryVariant[]>([])
@@ -58,7 +58,7 @@ export default function SensoryDetailDialog({ capture, apply, close }: { capture
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
     }
   }}>
-    <header><h2 id="sensory-detail-title">Sensory detail</h2><Button className="sensory-close" variant="ghost" style={{ borderRadius: 'var(--radius)' }} aria-label="Close sensory detail" onClick={dismiss} leadingIcon={<X size={18} />} /></header>
+    <header><h2 id="sensory-detail-title">Sensory detail</h2><IconButton className="sensory-close" variant="ghost" style={{ borderRadius: 'var(--radius)' }} aria-label="Close sensory detail" onClick={dismiss}><X size={18} /></IconButton></header>
     <p>Choose an idea to replace the selected passage. Use its pencil to review or edit the variant first.</p>
     <details className="sensory-original"><summary>Selected passage</summary><pre className="rewrite-original">{capture.snapshot.text}</pre></details>
     <div className="sensory-groups">{sensoryPrompts.map(sense => {
@@ -67,7 +67,7 @@ export default function SensoryDetailDialog({ capture, apply, close }: { capture
         <h3 id={`sensory-${sense.id}`}>{sense.label}</h3>
         <div className="sensory-chips">{ideas.map(variant => <div className="sensory-chip" key={variant.id}>
           <button type="button" className="sensory-chip-use" title={editing?.id === variant.id ? editing.text : variant.text} onClick={() => choose(editing?.id === variant.id ? editing.text : variant.text)}>{variant.label}{variant.edited && <small>Edited</small>}</button>
-          <button type="button" className="sensory-chip-edit" aria-label={`Edit ${variant.label}`} aria-expanded={editing?.id === variant.id} onClick={event => { editTrigger.current = event.currentTarget; setEditing({ id: variant.id, text: variant.text }); setError('') }}><Pencil size={15} /></button>
+          <IconButton type="button" className="sensory-chip-edit" aria-label={`Edit ${variant.label}`} aria-expanded={editing?.id === variant.id} onClick={event => { editTrigger.current = event.currentTarget; setEditing({ id: variant.id, text: variant.text }); setError('') }}><Pencil size={15} /></IconButton>
         </div>)}</div>
         {!ideas.length && <p className="sensory-empty">{running ? 'Finding ideas…' : 'No ideas for this sense yet.'}</p>}
         {editing && ideas.some(variant => variant.id === editing.id) && <div className="sensory-edit-panel">

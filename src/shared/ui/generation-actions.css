@@ -10,9 +10,6 @@
 .generation-actions .generation-more {
   display: grid;
   place-items: center;
-  width: 44px;
-  height: 44px;
-  padding: 0;
   border: 1px solid var(--line);
   border-radius: 50%;
   background: color-mix(in srgb, var(--deep) 92%, var(--accent));
@@ -53,7 +50,7 @@
 .generation-actions--menu-start .generation-action-popover { left: 0; right: auto; transform-origin: bottom left; }
 .generation-action-heading { display: flex; align-items: center; justify-content: space-between; padding-left: 10px; }
 .generation-action-heading > span { color: var(--faint); font: 600 10px ui-sans-serif, system-ui, sans-serif; letter-spacing: .06em; }
-.generation-actions .generation-action-heading button { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; color: var(--soft); border-radius: var(--radius); cursor: pointer; }
+.generation-actions .generation-action-heading button { border: 0; background: transparent; color: var(--soft); border-radius: var(--radius); cursor: pointer; }
 .generation-action-list { display: grid; }
 .generation-actions .generation-action-row {
   width: 100%;
@@ -162,7 +159,7 @@
 }
 .chat-dictation-controls { display: flex; align-items: center; justify-content: flex-end; gap: 5px; grid-column: 1 / -1; }
 .chat-dictation-controls > span { display: inline-flex; align-items: center; gap: 6px; margin-right: 6px; color: var(--accent); font: 500 12px ui-sans-serif, system-ui, sans-serif; }
-.chat-dictation-controls button { width: 44px; height: 44px; padding: 0; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: var(--deep); color: var(--ink); cursor: pointer; }
+.chat-dictation-controls button { border: 1px solid var(--line); border-radius: 50%; background: var(--deep); color: var(--ink); cursor: pointer; }
 .chat-dictation-controls svg { width: 17px; height: 17px; }
 .chat-dictation-controls button:active { background: color-mix(in srgb, var(--accent) 20%, var(--deep)); }
 .chat-dictation-controls button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

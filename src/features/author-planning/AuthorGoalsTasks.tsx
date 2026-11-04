@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ArrowDown, ArrowUp, Trash2 } from 'lucide-react'
 import type { ArcEntity } from '../../data/persistence'
-import Button from '../../shared/ui/Button'
+import Button, { IconButton } from '../../shared/ui/Button'
 import Disclosure from '../../shared/ui/Disclosure'
 import ExpandableTextInput from '../../shared/ui/ExpandableTextInput'
 import Input from '../../shared/ui/Input'
@@ -156,9 +156,9 @@ export default function AuthorGoalsTasks({ bookId, liveScene, onOpen }: { bookId
               {Object.entries(taskStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </Select>
             <Button size="small" variant="ghost" disabled={busy} onClick={() => editTask(item)}>Edit</Button>
-            <Button className="author-icon-action" size="small" variant="ghost" aria-label={`Move ${item.title} up`} disabled={busy || planning.tasks[0].id === item.id} onClick={() => move(item.id, -1)} leadingIcon={<ArrowUp />} />
-            <Button className="author-icon-action" size="small" variant="ghost" aria-label={`Move ${item.title} down`} disabled={busy || planning.tasks.at(-1)?.id === item.id} onClick={() => move(item.id, 1)} leadingIcon={<ArrowDown />} />
-            <Button className="author-icon-action" size="small" variant="ghost" aria-label={`Delete ${item.title}`} disabled={busy} onClick={() => { if (window.confirm(`Delete task “${item.title}”?`)) void save({ ...planning, tasks: planning.tasks.filter(candidate => candidate.id !== item.id) }) }} leadingIcon={<Trash2 />} />
+            <IconButton className="author-icon-action" variant="ghost" aria-label={`Move ${item.title} up`} disabled={busy || planning.tasks[0].id === item.id} onClick={() => move(item.id, -1)}><ArrowUp /></IconButton>
+            <IconButton className="author-icon-action" variant="ghost" aria-label={`Move ${item.title} down`} disabled={busy || planning.tasks.at(-1)?.id === item.id} onClick={() => move(item.id, 1)}><ArrowDown /></IconButton>
+            <IconButton className="author-icon-action" variant="ghost" aria-label={`Delete ${item.title}`} disabled={busy} onClick={() => { if (window.confirm(`Delete task “${item.title}”?`)) void save({ ...planning, tasks: planning.tasks.filter(candidate => candidate.id !== item.id) }) }}><Trash2 /></IconButton>
           </div>
         </li>
       })}</ol>

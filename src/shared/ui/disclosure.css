@@ -38,9 +38,6 @@
   border-top: 1px solid var(--line);
 }
 
-@media (max-width: 720px) {
-  .arc-disclosure > summary { min-height: 56px; padding: var(--space-2) var(--space-3); }
-}
 
 @media (prefers-reduced-motion: reduce) {
   .arc-disclosure > summary > svg { transition: none; }

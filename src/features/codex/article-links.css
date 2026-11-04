@@ -9,7 +9,7 @@
 .codex-article-links__insert {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 44px;
+  grid-template-columns: minmax(0, 1fr) var(--icon-button-size);
   align-items: end;
   gap: 8px;
 }
@@ -17,12 +17,7 @@
 .codex-article-links__insert .arc-select { min-width: 0; max-width: 100%; }
 .codex-article-links__insert .arc-select { min-height: 44px; }
 .codex-article-links__add.arc-button {
-  width: 44px;
-  min-width: 44px;
-  height: 44px;
-  min-height: 44px;
   margin: 0;
-  padding: 0;
 }
 .codex-article-links__help,
 .codex-article-links__empty {

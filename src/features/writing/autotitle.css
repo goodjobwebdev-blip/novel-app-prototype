@@ -3,13 +3,13 @@
 .autotitle-trigger.loading svg { animation: autotitle-pulse 1s ease-in-out infinite; }
 .autotitle-backdrop { position: fixed; z-index: 240; inset: 0; padding: max(18px, env(safe-area-inset-top)) 14px max(18px, env(safe-area-inset-bottom)); background: rgba(8,9,8,.74); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); display: grid; place-items: center; }
 .autotitle-panel { width: min(100%, 560px); max-height: calc(100svh - 36px); overflow: auto; padding: 17px; border: 1px solid var(--line); border-radius: var(--overlay-radius); background: color-mix(in srgb, var(--surface) 97%, transparent); box-shadow: 0 24px 80px rgba(0,0,0,.55); display: grid; gap: 14px; }
-.autotitle-panel header { display: grid; grid-template-columns: 38px minmax(0,1fr) 44px; align-items: center; gap: 11px; }
+.autotitle-panel header { display: grid; grid-template-columns: 38px minmax(0,1fr) var(--icon-button-size); align-items: center; gap: 11px; }
 .autotitle-panel header > div:not(.autotitle-heading-icon) { display: grid; gap: 3px; min-width: 0; }
 .autotitle-panel header small { color: var(--accent); font: 700 9px ui-sans-serif,system-ui,sans-serif; letter-spacing: .11em; text-transform: uppercase; }
 .autotitle-panel header strong { overflow: hidden; color: var(--ink); font: 500 19px/1.25 var(--serif); text-overflow: ellipsis; white-space: nowrap; }
 .autotitle-heading-icon { width: 38px; height: 38px; border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line)); border-radius: var(--radius); background: color-mix(in srgb, var(--surface-2) 76%, var(--accent) 9%); color: var(--accent-bright); display: grid; place-items: center; }
 .autotitle-heading-icon svg { width: 17px; height: 17px; }
-.autotitle-close { appearance: none; width: 44px; height: 44px; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb, var(--surface-2) 82%, transparent); color: var(--soft); display: grid; place-items: center; cursor: pointer; }
+.autotitle-close { appearance: none; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb, var(--surface-2) 82%, transparent); color: var(--soft); cursor: pointer; }
 .autotitle-close:hover { border-color: color-mix(in srgb, var(--accent) 38%, var(--line)); color: var(--ink); }
 .autotitle-close svg { width: 17px; height: 17px; }
 .autotitle-suggestion { min-height: 84px; padding: 13px 14px; border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line)); border-radius: var(--radius); background: color-mix(in srgb, var(--surface-2) 82%, var(--accent) 5%); display: grid; align-content: center; gap: 7px; }
@@ -30,13 +30,13 @@
 .autotitle-request { border-top: 1px solid var(--line); padding-top: 10px; }
 .autotitle-request summary { color: var(--faint); cursor: pointer; font-size: .72rem; }
 .autotitle-request pre { margin: 9px 0 0; max-height: 220px; overflow: auto; padding: 11px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--editor-surface, var(--deep)); color: var(--soft); white-space: pre-wrap; overflow-wrap: anywhere; font: 10px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
-.document-title-actions .autotitle-trigger { min-width: 34px; }
+
 @keyframes autotitle-pulse { 50% { opacity: .45; transform: scale(.92); } }
 @keyframes autotitle-spin { to { transform: rotate(360deg); } }
 @media (max-width: 640px) {
   .autotitle-backdrop { align-items: end; padding: max(12px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom)); }
   .autotitle-panel { width: 100%; max-height: min(78svh, 640px); padding: 15px; border-radius: var(--overlay-radius); }
-  .autotitle-trigger { width: 44px; min-width: 44px; height: 44px; min-height: 44px; }
+
   .autotitle-actions { justify-content: stretch; }
   .autotitle-actions button { flex: 1 1 auto; min-height: 44px; }
   .autotitle-actions .primary { flex-basis: 100%; order: -1; }

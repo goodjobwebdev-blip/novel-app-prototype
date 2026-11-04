@@ -54,7 +54,7 @@ import {
 } from 'lucide-react'
 import { streamChatCompletion, type ChatCompletionUsage } from './chat-api'
 import ActionMenu, { type ActionMenuItem } from '../../shared/ui/ActionMenu'
-import Button from '../../shared/ui/Button'
+import Button, { IconButton } from '../../shared/ui/Button'
 import Checkbox from '../../shared/ui/Checkbox'
 import Disclosure from '../../shared/ui/Disclosure'
 import ExpandableTextInput, { type ExpandableTextInputDictationTarget } from '../../shared/ui/ExpandableTextInput'
@@ -1331,7 +1331,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onO
     return <article className="message user" key={message.id}>
       {editingId === message.id ? <InlineMessageEdit value={editingValue} onChange={setEditingValue} onCancel={() => setEditingId('')} onSave={() => { void saveEdit(message, false) }} onSaveAndRegenerate={() => { void saveEdit(message, true) }} /> : <>
         <div className="bubble chat-markdown-bubble"><MarkdownMessage onArticleLink={onOpenArticle} content={message.content} /></div>
-        <div className="message-tools"><Button className="chat-icon-action" size="small" variant="ghost" aria-label={copiedMessageId === message.id ? 'Copied message' : 'Copy message'} title={copiedMessageId === message.id ? 'Copied' : 'Copy'} leadingIcon={copiedMessageId === message.id ? <Check /> : <Copy />} onClick={() => { void copyMessage(message) }} /><Button className="chat-icon-action" size="small" variant="ghost" aria-label="Edit message" disabled={generating || Boolean(summaryProposalId)} title={summaryProposalId ? 'Stop summary generation before changing history' : generating ? 'Stop the current response before editing history' : 'Edit'} leadingIcon={<Pencil />} onClick={() => beginEdit(message)} /><Button className="chat-icon-action" size="small" variant="ghost" aria-label="Delete message and following messages" disabled={generating || Boolean(summaryProposalId)} title={summaryProposalId ? 'Stop summary generation before changing history' : generating ? 'Stop the current response before deleting history' : 'Delete'} leadingIcon={<Trash2 />} onClick={() => { void deleteFrom(message) }} /></div>
+        <div className="message-tools"><IconButton className="chat-icon-action" variant="ghost" aria-label={copiedMessageId === message.id ? 'Copied message' : 'Copy message'} title={copiedMessageId === message.id ? 'Copied' : 'Copy'} onClick={() => { void copyMessage(message) }}>{copiedMessageId === message.id ? <Check /> : <Copy />}</IconButton><IconButton className="chat-icon-action" variant="ghost" aria-label="Edit message" disabled={generating || Boolean(summaryProposalId)} title={summaryProposalId ? 'Stop summary generation before changing history' : generating ? 'Stop the current response before editing history' : 'Edit'} onClick={() => beginEdit(message)}><Pencil /></IconButton><IconButton className="chat-icon-action" variant="ghost" aria-label="Delete message and following messages" disabled={generating || Boolean(summaryProposalId)} title={summaryProposalId ? 'Stop summary generation before changing history' : generating ? 'Stop the current response before deleting history' : 'Delete'} onClick={() => { void deleteFrom(message) }}><Trash2 /></IconButton></div>
       </>}
     </article>
   }
@@ -1376,12 +1376,12 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onO
           {waitingForApproval && <p className="chat-approval-wait">The agent is paused. Approve or reject the action above; it will continue with the actual result.</p>}
           {last.continuation && !last.continuedAt && messages.at(-1)?.id === last.id && !waitingForApproval && <Button className="chat-continue" disabled={generating} onClick={() => { void continueResponse(last) }}>Continue</Button>}
           <div className="message-tools chat-answer-tools">
-            <Button className="chat-icon-action" size="small" variant="ghost" aria-label={copiedMessageId === last.id ? 'Copied answer' : 'Copy answer'} title={copiedMessageId === last.id ? 'Copied' : 'Copy'} leadingIcon={copiedMessageId === last.id ? <Check /> : <Copy />} disabled={!prose} onClick={() => { void copyMessage({ ...last, content: prose }) }} />
-            {answerMessages.length === 1 && <Button className="chat-icon-action" size="small" variant="ghost" aria-label="Edit answer" title="Edit" leadingIcon={<Pencil />} disabled={generating || Boolean(summaryProposalId)} onClick={() => beginEdit(last)} />}
-            <Button className="chat-icon-action" size="small" variant="ghost" aria-label="Fork from answer" title="Fork" leadingIcon={<GitFork />} onClick={() => { void fork(last) }} />
-            <Button className="chat-icon-action" size="small" variant="ghost" aria-label="Read answer aloud" title="Read aloud" leadingIcon={<Volume2 />} disabled={!prose} onClick={() => { void readAloud({ ...last, content: prose }) }} />
-            <Button className="chat-icon-action" size="small" variant="ghost" aria-label="Regenerate answer" title="Regenerate" leadingIcon={<RefreshCw />} disabled={generating || Boolean(summaryProposalId)} onClick={() => { void regenerate(first) }} />
-            <Button className="chat-icon-action" size="small" variant="ghost" aria-label="Delete answer and following messages" title="Delete" leadingIcon={<Trash2 />} disabled={generating || Boolean(summaryProposalId)} onClick={() => { void deleteFrom(first) }} />
+            <IconButton className="chat-icon-action" variant="ghost" aria-label={copiedMessageId === last.id ? 'Copied answer' : 'Copy answer'} title={copiedMessageId === last.id ? 'Copied' : 'Copy'} disabled={!prose} onClick={() => { void copyMessage({ ...last, content: prose }) }}>{copiedMessageId === last.id ? <Check /> : <Copy />}</IconButton>
+            {answerMessages.length === 1 && <IconButton className="chat-icon-action" variant="ghost" aria-label="Edit answer" title="Edit" disabled={generating || Boolean(summaryProposalId)} onClick={() => beginEdit(last)}><Pencil /></IconButton>}
+            <IconButton className="chat-icon-action" variant="ghost" aria-label="Fork from answer" title="Fork" onClick={() => { void fork(last) }}><GitFork /></IconButton>
+            <IconButton className="chat-icon-action" variant="ghost" aria-label="Read answer aloud" title="Read aloud" disabled={!prose} onClick={() => { void readAloud({ ...last, content: prose }) }}><Volume2 /></IconButton>
+            <IconButton className="chat-icon-action" variant="ghost" aria-label="Regenerate answer" title="Regenerate" disabled={generating || Boolean(summaryProposalId)} onClick={() => { void regenerate(first) }}><RefreshCw /></IconButton>
+            <IconButton className="chat-icon-action" variant="ghost" aria-label="Delete answer and following messages" title="Delete" disabled={generating || Boolean(summaryProposalId)} onClick={() => { void deleteFrom(first) }}><Trash2 /></IconButton>
           </div>
         </>}
       </div>
@@ -1452,7 +1452,7 @@ export function ChatView({ bookId, chatId, bookPromptValues, currentSceneId, onO
 
     {promptOpen && <div className="chat-prompt-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setPromptOpen(false) }}>
       <section className="chat-prompt-dialog" role="dialog" aria-modal="true" aria-labelledby="chat-prompt-title">
-        <header><div><small>Current chat</small><h2 id="chat-prompt-title">Request composition</h2></div><Button className="chat-icon-action" size="small" variant="ghost" onClick={() => setPromptOpen(false)} aria-label="Close request composition" leadingIcon={<X />} /></header>
+        <header><div><small>Current chat</small><h2 id="chat-prompt-title">Request composition</h2></div><IconButton className="chat-icon-action" variant="ghost" onClick={() => setPromptOpen(false)} aria-label="Close request composition"><X /></IconButton></header>
         <div className="chat-composition-editor">
           <PromptPresetControls scope="chat" composition={compositionDraft} arcDefault={defaultChatPromptComposition} onApply={setCompositionDraft} />
           <h3>System prompt</h3>
@@ -1497,7 +1497,7 @@ function ChatPredefinedMessages({ messages, previewValues, onChange }: { message
           <Input label="Name" value={message.name ?? ''} onChange={(event) => update(message.id, { name: event.target.value })} placeholder="Optional label" />
           <Select label="Role" value={message.role} onChange={(event) => update(message.id, { role: event.target.value as PredefinedMessage['role'] })}><option value="system">System</option><option value="user">User</option><option value="assistant">Assistant</option></Select>
           <Checkbox className="story-message-enabled" label="Enabled" checked={message.enabled} onChange={(event) => update(message.id, { enabled: event.target.checked })} />
-          <div className="story-message-actions"><Button className="chat-icon-action" size="small" variant="ghost" disabled={index === 0} onClick={() => move(index, -1)} aria-label={`Move ${message.name || 'message'} up`} leadingIcon={<ArrowUp />} /><Button className="chat-icon-action" size="small" variant="ghost" disabled={index === messages.length - 1} onClick={() => move(index, 1)} aria-label={`Move ${message.name || 'message'} down`} leadingIcon={<ArrowDown />} /><Button className="chat-icon-action" size="small" variant="ghost" onClick={() => onChange(messages.filter((candidate) => candidate.id !== message.id))} aria-label={`Delete ${message.name || 'message'}`} leadingIcon={<Trash2 />} /></div>
+          <div className="story-message-actions"><IconButton className="chat-icon-action" variant="ghost" disabled={index === 0} onClick={() => move(index, -1)} aria-label={`Move ${message.name || 'message'} up`}><ArrowUp /></IconButton><IconButton className="chat-icon-action" variant="ghost" disabled={index === messages.length - 1} onClick={() => move(index, 1)} aria-label={`Move ${message.name || 'message'} down`}><ArrowDown /></IconButton><IconButton className="chat-icon-action" variant="ghost" onClick={() => onChange(messages.filter((candidate) => candidate.id !== message.id))} aria-label={`Delete ${message.name || 'message'}`}><Trash2 /></IconButton></div>
         </div>
         <PromptTemplateEditor value={message.template} diagnostics={diagnostics} ariaLabel={`${message.name || `Chat message ${index + 1}`} template`} onChange={(template) => update(message.id, { template })} />
         <small>{message.enabled ? `Predefined ${message.role} configuration · not conversation history` : 'Omitted while disabled'}</small>
@@ -1653,8 +1653,8 @@ function ChatGenerateButton({ sttState, generating, thinking, onGenerate, onStop
     const recording = sttState.status === 'recording' || sttState.status === 'recording-live'
     return <div className="chat-dictation-controls" role="status" aria-live="polite">
       <span><Mic aria-hidden="true" />{recording ? 'Listening…' : sttState.status === 'requesting-permission' ? 'Connecting…' : 'Transcribing…'}</span>
-      {recording && <button type="button" onClick={stopSttSession} aria-label="Finish message dictation"><Square aria-hidden="true" /></button>}
-      <button type="button" onClick={cancelSttSession} aria-label="Cancel message dictation"><X aria-hidden="true" /></button>
+      {recording && <IconButton type="button" onClick={stopSttSession} aria-label="Finish message dictation"><Square aria-hidden="true" /></IconButton>}
+      <IconButton type="button" onClick={cancelSttSession} aria-label="Cancel message dictation"><X aria-hidden="true" /></IconButton>
     </div>
   }
 
@@ -1756,7 +1756,7 @@ export function ChatSidebar({ ownerKind = 'book', bookId, activeChatId, onOpen, 
     {characterSetup && <CharacterChatSetup bookId={bookId} currentSceneId={currentSceneId} caret={caret} onClose={() => setCharacterSetup(false)} onOpen={onOpen} />}
     <SearchField className="chat-sidebar-search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1) }} placeholder="Search chats" aria-label="Search chats" />
     <div className="chat-sidebar-list">{visible.map((chat) => <ChatSidebarRow key={chat.id} chat={chat} selected={activeChatId === chat.id} onOpen={() => { if (chat.bookId === bookIdRef.current) onOpen(chat.id) }} onRename={() => { void rename(chat) }} onDelete={() => { void remove(chat) }} />)}{!visible.length && <p className="content-empty">{query ? 'No matching chats.' : 'No chats yet.'}</p>}</div>
-    {pagination.totalPages > 1 && <nav className="chat-sidebar-pagination" aria-label="Chat list pages"><Button className="chat-icon-action" size="small" variant="ghost" disabled={pagination.page === 1} aria-label="Previous chat page" leadingIcon={<ChevronLeft />} onClick={() => setPage(current => Math.max(1, current - 1))} /><span>Page {pagination.page} of {pagination.totalPages}<small>{pagination.from}–{pagination.to} of {pagination.totalItems} chats</small></span><Button className="chat-icon-action" size="small" variant="ghost" disabled={pagination.page === pagination.totalPages} aria-label="Next chat page" leadingIcon={<ChevronRight />} onClick={() => setPage(current => Math.min(pagination.totalPages, current + 1))} /></nav>}
+    {pagination.totalPages > 1 && <nav className="chat-sidebar-pagination" aria-label="Chat list pages"><IconButton className="chat-icon-action" variant="ghost" disabled={pagination.page === 1} aria-label="Previous chat page" onClick={() => setPage(current => Math.max(1, current - 1))}><ChevronLeft /></IconButton><span>Page {pagination.page} of {pagination.totalPages}<small>{pagination.from}–{pagination.to} of {pagination.totalItems} chats</small></span><IconButton className="chat-icon-action" variant="ghost" disabled={pagination.page === pagination.totalPages} aria-label="Next chat page" onClick={() => setPage(current => Math.min(pagination.totalPages, current + 1))}><ChevronRight /></IconButton></nav>}
   </section>
 }
 

@@ -7,7 +7,7 @@
 
 :is(.codex-dashboard, .codex-templates, .codex-timeline, .lore-types-manager, .series-source-editor, .series-codex-manager) :is(.arc-input, .arc-select) { border-radius: var(--radius); }
 
-.codex-icon-action.arc-button { width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 0; }
+
 
 .codex-dashboard > .arc-panel-header + .codex-dashboard-management { margin-top: -.65rem; }
 .codex-dashboard-management { margin-bottom: 14px; display: grid; gap: 8px; }

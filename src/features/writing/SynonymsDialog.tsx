@@ -1,10 +1,11 @@
+import { X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { generateSynonyms, synonymContext, type SynonymCandidate } from './synonyms'
 import type { QuickToolCapture } from './quick-tools'
 import { protectedRanges } from '../editor/document-projection.ts'
 import type { RewriteRequestPreview } from './ProseRewriteDialog'
-import Button from '../../shared/ui/Button'
+import Button, { IconButton } from '../../shared/ui/Button'
 import Input from '../../shared/ui/Input'
 
 export default function SynonymsDialog({ capture, apply, close }: { capture: QuickToolCapture; apply: (text: string) => boolean; close: () => void }) {
@@ -37,7 +38,7 @@ export default function SynonymsDialog({ capture, apply, close }: { capture: Qui
     if (event.key === 'Escape') { controller.current?.abort(); close() }
     if (event.key === 'Tab') { const items = Array.from(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)') ?? []); const first = items[0], last = items.at(-1); if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() } }
   }}>
-    <header><h2 id="synonyms-title">Synonyms for “{context.selected}”</h2><Button variant="ghost" style={{ width: 44, height: 44, padding: 0, borderRadius: 'var(--radius)' }} aria-label="Close synonyms" onClick={() => { controller.current?.abort(); close() }}>×</Button></header>
+    <header><h2 id="synonyms-title">Synonyms for “{context.selected}”</h2><IconButton variant="ghost" aria-label="Close synonyms" onClick={() => { controller.current?.abort(); close() }}><X aria-hidden="true" /></IconButton></header>
     <p>Each generation sends a new request to your Support model.</p>
     <div className="synonym-candidates" role="group" aria-label="Synonym candidates">{candidates.map((candidate) => <button key={candidate.text} type="button" disabled={running} aria-pressed={replacement === candidate.text} onClick={() => setReplacement(candidate.text)}><strong>{candidate.text}</strong>{candidate.note && <small>{candidate.note}</small>}</button>)}</div>
     <Input label="Replacement" value={replacement} onChange={(event) => setReplacement(event.target.value)} placeholder="Choose a candidate or adjust it here" />

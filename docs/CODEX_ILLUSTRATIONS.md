@@ -22,7 +22,7 @@ Image actions open in a bottom sheet on phones and a centered dialog on larger s
 
 ## Mobile interaction details
 
-- Title thumbnails are 64 pixels; illustration actions have at least 48-pixel touch targets and form inputs use 16-pixel text.
+- Title thumbnails are 64 pixels; icon-only illustration utilities use the shared 30-pixel visible/hit box on every device, while labeled actions retain their natural control size. Form inputs use 16-pixel text.
 - Sheets and the viewer use native modal focus handling, explicit close buttons, Escape dismissal, and background scroll locking. Controls respect safe-area insets.
 - Sheet height follows the visual viewport as the software keyboard opens. Headers and Save/Done footers stay outside the scrolling content.
 - Description drafts are saved immediately in session storage, with an in-memory fallback. Dismissing a sheet preserves the draft. Saving clears it; cropping carries an unfinished description forward to the updated image record. Replacing the picture clears the old picture's draft.

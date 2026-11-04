@@ -23,6 +23,10 @@
 .arc-button:disabled { opacity: .48; cursor: not-allowed; }
 .arc-button__icon { width: 17px; height: 17px; display: grid; place-items: center; }
 .arc-button__icon > svg { width: 100%; height: 100%; }
+.arc-button.arc-icon-button { box-sizing: border-box; width: var(--icon-button-size); height: var(--icon-button-size); min-width: var(--icon-button-size); min-height: var(--icon-button-size); flex: 0 0 auto; padding: 0; gap: 0; border-radius: var(--radius); }
+.arc-icon-button__content { display: contents; }
+.arc-icon-button svg { width: 17px; height: 17px; flex: none; pointer-events: none; }
+.arc-icon-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .arc-button__spinner { width: 15px; height: 15px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: arc-button-spin .7s linear infinite; }
 
 .arc-field { min-width: 0; display: grid; gap: var(--field-gap); color: var(--soft); }
@@ -79,25 +83,11 @@
 .arc-card__body { margin-top: var(--field-stack-gap); }
 .arc-card > .arc-card__body:first-child { margin-top: 0; }
 
-.arc-panel-header { min-width: 0; margin-bottom: 20px; display: grid; gap: 12px; }
+.arc-panel-header { min-width: 0; min-height: var(--shell-header-height); margin-bottom: 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
 .arc-panel-header__copy { min-width: 0; }
 .arc-panel-header__copy small { display: block; color: var(--accent); font-size: 10px; letter-spacing: .15em; text-transform: uppercase; }
-.arc-panel-header__copy h2 { margin: 4px 0 0; font: 500 27px/1.12 var(--serif); overflow-wrap: anywhere; }
+.arc-panel-header__copy h2 { margin: 2px 0 0; font: 500 22px/1.15 var(--serif); overflow-wrap: anywhere; }
 .arc-panel-header__actions { min-width: 0; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
-.arc-panel-header__actions .arc-button { min-height: 44px; }
-.arc-panel-header__actions .arc-button:empty,
-.arc-panel-header__actions .arc-button:has(> .arc-button__icon:only-child) { width: 44px; min-width: 44px; padding: 0; }
 
 @keyframes arc-button-spin { to { transform: rotate(360deg); } }
-@media (max-width: 720px) {
-  .arc-panel-header__actions { justify-content: flex-start; }
-  .arc-choice { min-height: 58px; padding: 10px 11px; border-color: var(--line); background: color-mix(in srgb, var(--surface-2) 52%, transparent); align-items: center; }
-  .arc-choice:has(input:checked) { border-color: color-mix(in srgb, var(--accent) 42%, var(--line)); background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
-  .arc-choice > input:is([type="checkbox"],[type="radio"]) { width: 22px; height: 22px; min-width: 22px; min-height: 22px; max-width: 22px; max-height: 22px; margin-top: 0; flex-basis: 22px; }
-  .arc-choice > input[type="checkbox"]::after { font-size: 14px; }
-  .arc-choice > input[type="radio"]::after { width: 10px; height: 10px; }
-  .arc-choice strong { font-size: 12px; }
-  .arc-choice small { margin-top: 4px; font-size: 10px; }
-  .arc-radio-group > div { gap: 7px; }
-}
 @media (prefers-reduced-motion: reduce) { .arc-button__spinner { animation-duration: 1.5s; } }

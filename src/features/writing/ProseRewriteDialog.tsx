@@ -1,7 +1,8 @@
+import { X } from 'lucide-react'
 import type { NormalizedAssembledRequest } from '../../shared/ai/prompt-composition'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import Button from '../../shared/ui/Button'
+import Button, { IconButton } from '../../shared/ui/Button'
 import ExpandableTextInput from '../../shared/ui/ExpandableTextInput'
 import { protectedRanges } from '../editor/document-projection.ts'
 
@@ -46,7 +47,7 @@ export default function ProseRewriteDialog({ title, original, instruction: initi
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
     }
   }}>
-    <header><h2 id="prose-rewrite-title">{title}</h2><Button variant="ghost" style={{ width: 44, height: 44, padding: 0, borderRadius: 'var(--radius)' }} onClick={() => { controller.current?.abort(); close() }} aria-label="Close rewrite preview">×</Button></header>
+    <header><h2 id="prose-rewrite-title">{title}</h2><IconButton variant="ghost" onClick={() => { controller.current?.abort(); close() }} aria-label="Close rewrite preview"><X aria-hidden="true" /></IconButton></header>
     <p>Review the replacement before applying it to this passage.</p>
     <label>{instructionLabel}<ExpandableTextInput value={instruction} onChange={setInstruction} readOnly={instructionReadOnly || running} aria-label="Rewrite instruction" dialogTitle="Rewrite instruction" /></label>
     {examples.length > 0 && <div className="quick-tool-examples" aria-label="Instruction examples">{examples.map((example) => <button key={example} type="button" disabled={running} onClick={() => setInstruction(example)}>{example}</button>)}</div>}

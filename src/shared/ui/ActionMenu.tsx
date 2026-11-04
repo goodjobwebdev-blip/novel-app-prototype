@@ -1,3 +1,4 @@
+import { IconButton } from './Button'
 import { useId, useLayoutEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { MoreHorizontal } from 'lucide-react'
@@ -51,9 +52,9 @@ export default function ActionMenu({ title, open, onToggle, onClose, actions }: 
     }
   }, [open, onClose])
   return <>
-    <button ref={trigger} className="arc-action-menu__trigger" type="button" aria-label={`Actions for ${title}`} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined} onClick={onToggle} onKeyDown={event => {
+    <IconButton ref={trigger} className="arc-action-menu__trigger" type="button" aria-label={`Actions for ${title}`} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined} onClick={onToggle} onKeyDown={event => {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); if (!open) onToggle() }
-    }}><MoreHorizontal aria-hidden="true" /><span>Actions</span></button>
+    }}><MoreHorizontal aria-hidden="true" /></IconButton>
     {open && createPortal(<div ref={menu} id={id} className="arc-action-menu__popover" role="menu" tabIndex={-1} aria-label={`Actions for ${title}`} onKeyDown={event => {
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeAndFocus(); return }
       if (event.key === 'Tab') { closeAndFocus(); return }

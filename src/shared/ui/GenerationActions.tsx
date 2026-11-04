@@ -1,3 +1,4 @@
+import { IconButton } from './Button'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { Check, Ellipsis, Play, X } from 'lucide-react'
 
@@ -68,7 +69,7 @@ export default function GenerationActions({ label, onGenerate, actions, menuOnly
     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) close()
   }}>
     {open && <div className="generation-action-popover" id={panelId} role="group" aria-label={`${label} actions`}>
-      <div className="generation-action-heading"><span>Quick actions</span><button type="button" onClick={() => close(true)} aria-label="Close quick actions"><X aria-hidden="true" /></button></div>
+      <div className="generation-action-heading"><span>Quick actions</span><IconButton type="button" onClick={() => close(true)} aria-label="Close quick actions"><X aria-hidden="true" /></IconButton></div>
       <div className="generation-action-list">
         {actions.map((action) => <button key={action.id} type="button"
           className={`generation-action-row ${selected === action.id ? 'just-selected' : ''}`}
@@ -87,7 +88,7 @@ export default function GenerationActions({ label, onGenerate, actions, menuOnly
         </button>)}
       </div>
     </div>}
-    {!menuOnly && <button ref={menuRef} type="button" className="generation-more" aria-label={`Open ${label} actions`} aria-expanded={open} aria-controls={open ? panelId : undefined} onClick={() => open ? close(true) : focusFirstAction(menuRef.current)}><Ellipsis aria-hidden="true" /></button>}
+    {!menuOnly && <IconButton ref={menuRef} type="button" className="generation-more" aria-label={`Open ${label} actions`} aria-expanded={open} aria-controls={open ? panelId : undefined} onClick={() => open ? close(true) : focusFirstAction(menuRef.current)}><Ellipsis aria-hidden="true" /></IconButton>}
     <button ref={primaryRef} type="button" className={`play generation-primary ${pressing ? 'pressing' : ''}`} aria-label={open ? 'Close quick actions' : label}
       aria-expanded={open} aria-controls={open ? panelId : undefined}
       aria-description="Hold or press Arrow Up for quick actions."

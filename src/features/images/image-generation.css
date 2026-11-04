@@ -48,21 +48,22 @@
 }
 .image-workspace-header {
   display: grid;
-  grid-template-columns: minmax(48px, auto) minmax(0, 1fr) minmax(48px, auto);
+  grid-template-columns: var(--icon-button-size) minmax(0, 1fr) var(--icon-button-size);
   align-items: center;
   gap: 8px;
-  padding: max(8px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left));
+  height: var(--shell-header-height);
+  padding: var(--shell-header-top) var(--shell-header-inset) 9px;
   border-bottom: 1px solid var(--line);
   background: var(--canvas);
 }
 .image-workspace-header > div { min-width: 0; text-align: center; }
-.image-workspace-header h1 { font-size: 25px; }
-.image-workspace-header p { margin: 1px 0 0; overflow: hidden; color: var(--soft); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.image-workspace-header > button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding-inline: 10px; border-color: transparent; background: transparent; }
+.image-workspace-header h1 { margin: 0; font-size: 17px; line-height: 18px; }
+.image-workspace-header p { margin: 2px 0 0; overflow: hidden; color: var(--soft); font-size: 10px; line-height: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.image-workspace-header > button { border-color: transparent; background: transparent; }
 .image-workspace-header > button:first-child { justify-self: start; }
 .image-workspace-header > button:last-child { justify-self: end; }
 .image-workspace-header svg { width: 20px; height: 20px; flex: none; }
-.image-workspace-header button span { font-size: 13px; }
+
 .image-tabs-wrap { min-width:0; padding:8px max(12px,env(safe-area-inset-right)) 0 max(12px,env(safe-area-inset-left)); }
 .image-tabs-wrap > .arc-tabs { width:100%; }
 .image-model-options button[aria-pressed=true] { border-color: var(--accent); background: var(--surface-2); }
@@ -229,11 +230,11 @@
 .image-source-list li { position: relative; display: grid; min-width: 0; gap: 4px; padding: 6px; border: 1px solid var(--line); border-radius: var(--radius); }
 .image-source-list img { width: 100%; aspect-ratio: 1; border-radius: 6px; object-fit: cover; }
 .image-source-list span { overflow: hidden; color: var(--soft); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.image-source-list button { position: absolute; top: 8px; right: 8px; width: 44px; height: 44px; min-height: 44px; padding: 0; border-radius: var(--radius); }
+.image-source-list button { position: absolute; top: 8px; right: 8px; border-radius: var(--radius); }
 .image-video-player { display: block; width: 100%; max-height: min(70dvh, 900px); background: #000; object-fit: contain; }
 .image-video-badge { position: absolute; left: 8px; bottom: 8px; padding: 3px 7px; border-radius: 999px; background: rgb(0 0 0 / .72); color: white; font-size: 12px; }
 @media (max-width: 520px) {
-  .image-workspace-header button span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
 
   .image-codex-action { align-items: stretch; flex-direction: column; }
   .image-codex-action > button { width: 100%; }
@@ -248,8 +249,8 @@
 .media-prompt-editor .media-prompt-field { display: grid; min-width: 0; gap: .35rem; margin: 0; }
 .media-prompt-editor .media-prompt-field > span { color: var(--soft); font-size: 13px; font-weight: 600; }
 .media-prompt-editor .media-prompt-field .expandable-text-input { min-width: 0; }
-.media-prompt-editor .media-enhancement-controls { display: grid; grid-template-columns: minmax(0, 1fr) 48px; align-items: end; gap: 8px; }
-.media-prompt-editor .media-enhance-action { width: 48px; min-width: 48px; height: 48px; min-height: 48px; padding: 0; align-self: end; }
+.media-prompt-editor .media-enhancement-controls { display: grid; grid-template-columns: minmax(0, 1fr) var(--icon-button-size); align-items: end; gap: 8px; }
+.media-prompt-editor .media-enhance-action { align-self: end; }
 .media-prompt-editor .media-enhance-action svg { width: 20px; height: 20px; }
 
 .media-prompt-editor [role=status] { margin: 0; color: var(--soft); font-size: 13px; overflow-wrap: anywhere; }

@@ -58,7 +58,7 @@ test('shared density and surface tokens govern settings without changing manuscr
   const root = dom.window.getComputedStyle(document.documentElement)
   assert.notEqual(root.getPropertyValue('--field-gap').trim(), '', 'Shared field-gap token is defined')
   assert.notEqual(root.getPropertyValue('--card-padding').trim(), '', 'Shared card-padding token is defined')
-  assert.notEqual(root.getPropertyValue('--touch-target').trim(), '', 'Touch target remains separate from spacing')
+
   for (const selector of ['.book-profile-row', '.profile-linked-warning', '.profile-save-bar']) {
     assert.equal(dom.window.getComputedStyle(document.querySelector(selector)).borderRadius, 'var(--radius)', `${selector} uses ordinary surface geometry`)
   }

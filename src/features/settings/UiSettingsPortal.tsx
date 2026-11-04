@@ -18,7 +18,7 @@ import {
   type UiTypography,
 } from './ui-settings'
 
-import Button from '../../shared/ui/Button'
+import Button, { IconButton } from '../../shared/ui/Button'
 import Checkbox from '../../shared/ui/Checkbox'
 import Input from '../../shared/ui/Input'
 import ThemeChoice from '../../shared/ui/ThemeChoice'
@@ -124,7 +124,7 @@ function ThemeOption({ name, palette, active, custom, onSelect, onDuplicate, onD
     accent={palette.accent}
     selected={active}
     onSelect={onSelect}
-    actions={<><Button className="ui-theme-copy-action" size="small" variant="ghost" leadingIcon={<Copy />} onClick={onDuplicate} aria-label={`Copy ${name} to customize`} title="Copy to customize">Copy</Button>{custom && onDelete && <Button className="ui-icon-action" size="small" variant="danger" leadingIcon={<Trash2 />} onClick={onDelete} aria-label={`Delete ${name}`} title="Delete theme" />}</>}
+    actions={<><Button className="ui-theme-copy-action" size="small" variant="ghost" leadingIcon={<Copy />} onClick={onDuplicate} aria-label={`Copy ${name} to customize`} title="Copy to customize">Copy</Button>{custom && onDelete && <IconButton className="ui-icon-action" variant="danger" onClick={onDelete} aria-label={`Delete ${name}`} title="Delete theme"><Trash2 /></IconButton>}</>}
   />
 }
 
