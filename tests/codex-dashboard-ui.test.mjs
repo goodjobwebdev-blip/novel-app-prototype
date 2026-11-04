@@ -191,7 +191,7 @@ test('Codex Actions stays within a narrow viewport and flips above low triggers'
   }
   try {
     await act(async () => root.render(h(Harness)))
-    await click('Actions')
+    await click('Actions for Alice')
     const panel = document.querySelector('[role="menu"]')
     assert.ok(parseFloat(panel.style.top) < 350, 'Low trigger should open above')
     assert.ok(parseFloat(panel.style.left) >= 8)
