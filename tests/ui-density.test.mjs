@@ -70,7 +70,7 @@ test('ordinary controls keep shared density in panel headers and legacy feature 
   for (const selector of ['.arc-panel-header__actions .arc-button', '.appearance-field select', '.chat-predefined .arc-input', '.chat-predefined .arc-select', '.world-workspace-panel select', '.arc-disclosure > summary', '.arc-segmented-control__option', '.arc-search-field', '.speech-key-row button', '.speed-presets button']) {
     assert.equal(getComputedStyle(document.querySelector(selector)).minHeight, 'var(--control-height)', `${selector} must inherit desktop/touch density instead of a feature-specific fixed minimum`)
   }
-  assert.equal(getComputedStyle(document.querySelector('.arc-search-field input')).minHeight, '0', 'Embedded search inputs must not add another control height')
+  assert.equal(Number.parseFloat(getComputedStyle(document.querySelector('.arc-search-field input')).minHeight), 0, 'Embedded search inputs must not add another control height')
 })
 
 test('shared density and surface tokens govern settings without changing manuscript typography', async t => {
