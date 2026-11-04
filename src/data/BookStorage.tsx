@@ -6,6 +6,7 @@ import { importBookArchiveBlob } from './book-import'
 import { formatBytes, imageStorageError } from '../features/images/illustration-image'
 import BookSyncControls from '../features/sync/BookSyncControls'
 import { IMAGE_CHANGED } from '../features/codex/CodexIllustration'
+import Button from '../shared/ui/Button'
 
 export function BookBackupImport({ onImported }: { onImported: (bookId: string) => Promise<void> }) {
   const input = useRef<HTMLInputElement>(null)
@@ -22,7 +23,7 @@ export function BookBackupImport({ onImported }: { onImported: (bookId: string) 
     } catch (error) { setError(imageStorageError(error)) }
     finally { working.current = false; setBusy(false) }
   }
-  return <div className="book-backup-import"><input hidden ref={input} type="file" accept=".arcbook" aria-label="Import book backup file" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void restore(file) }} /><button type="button" disabled={busy} onClick={() => input.current?.click()}><FileUp size={17} aria-hidden="true" />{busy ? 'Importing…' : 'Import book backup'}</button>{error && <p className="illustration-error" role="alert">{error}</p>}</div>
+  return <div className="book-backup-import"><input hidden ref={input} type="file" accept=".arcbook" aria-label="Import book backup file" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void restore(file) }} /><Button loading={busy} leadingIcon={<FileUp />} onClick={() => input.current?.click()}>{busy ? 'Importing…' : 'Import book backup'}</Button>{error && <p className="illustration-error" role="alert">{error}</p>}</div>
 }
 
 export default function BookStorage({ bookId, title, beforeExport, onImported }: { bookId: string; title: string; beforeExport: () => Promise<void>; onImported: (bookId: string) => Promise<void> }) {
