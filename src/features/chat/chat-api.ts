@@ -149,6 +149,9 @@ function hasUsage(usage: ChatCompletionUsage) {
 
 type StreamDiagnostics = {
   stage: string
+  source?: string
+  errorType?: unknown
+  errorCode?: unknown
   status?: number
   lastFragmentAt?: number
   lastNetworkAt?: number
@@ -174,8 +177,12 @@ export async function streamChatCompletion(
     // Only known tool names are safe to display; never include streamed arguments/content.
     const names = [...diagnostics.toolNames.values()].map(name => request.tools?.some(tool => tool.function.name === name) ? name : 'unknown tool')
     const message = error instanceof Error ? error.message : 'Chat generation stopped unexpectedly.'
+    const field = (value: unknown) => typeof value === 'string'
+      ? JSON.stringify((request.apiKey ? value.split(request.apiKey).join('[redacted]') : value).slice(0, 120))
+      : typeof value === 'number' && Number.isFinite(value) ? String(value) : 'not provided'
     const detail = [
       `Round: ${request.diagnosticRound}; Stage: ${diagnostics.stage}; HTTP: ${diagnostics.status ?? 'none'}`,
+      `Error source: ${diagnostics.source ?? 'request transport'}; Error type: ${field(diagnostics.errorType ?? (error instanceof Error ? error.name : undefined))}; Error code: ${field(diagnostics.errorCode)}`,
       `Tool: ${names.join(', ') || 'not received'}; Tool arguments received: ${diagnostics.argumentsReceived ? 'yes' : 'no'}`,
       `Request duration: ${seconds(now - startedAt)}; Last fragment before error: ${diagnostics.lastFragmentAt === undefined ? 'none' : `${seconds(now - diagnostics.lastFragmentAt)} ago`}`,
       `Gap before last network chunk: ${diagnostics.networkGap === undefined ? 'none' : seconds(diagnostics.networkGap)}`,
@@ -236,6 +243,11 @@ async function streamChatCompletionRequest(
   diagnostics.stage = 'HTTP response'
   if (!response.ok) {
     const payload = await readCompletionError(response, signal)
+    diagnostics.source = 'provider HTTP'
+    const value = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
+    const detail = value.error && typeof value.error === 'object' ? value.error as Record<string, unknown> : value
+    diagnostics.errorType = detail.type
+    diagnostics.errorCode = detail.code
     throw new Error(errorMessage(response.status, payload, request.apiKey))
   }
   if (!response.body) throw new Error('The provider returned an empty streaming response.')
@@ -265,6 +277,13 @@ async function streamChatCompletionRequest(
 
   const consumeLine = (line: string) => {
     const trimmed = line.trim()
+    const providerError = (payload?: unknown) => {
+      diagnostics.source = 'provider stream'
+      const value = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
+      const detail = value.error && typeof value.error === 'object' ? value.error as Record<string, unknown> : value
+      diagnostics.errorType = detail.type
+      diagnostics.errorCode = detail.code
+    }
     if (request.requireComplete && /^event:\s*error$/i.test(trimmed)) throw new Error('The provider returned a streaming error.')
     if (request.validateChatResponse && trimmed.startsWith('event:')) {
       streamingError = /^event:\s*error$/i.test(trimmed)
@@ -274,14 +293,17 @@ async function streamChatCompletionRequest(
     const data = trimmed.slice(5).trim()
     if (!data) return false
     if (data === '[DONE]') {
+      if (streamingError) providerError()
       if (streamingError) throw new Error('The provider returned a streaming error.')
       done = true
       return true
     }
     const payload = JSON.parse(data) as unknown
+    if (streamingError) providerError(payload)
     if ((request.requireComplete || request.validateChatResponse) && payload && typeof payload === 'object') {
       const value = payload as Record<string, unknown>
       if (streamingError || value.error != null || value.type === 'error' || value.object === 'error') {
+        providerError(payload)
         if (request.requireComplete) throw new Error('The provider returned a streaming error.')
         throw new Error(errorMessage(response.status, payload, request.apiKey, 'The provider returned a streaming error.'))
       }
@@ -305,11 +327,18 @@ async function streamChatCompletionRequest(
   }
 
   diagnostics.stage = 'receiving stream'
-  await consumeCompletionStream(response.body, signal, consumeLine, onResponse, () => {
+  diagnostics.source = 'stream read'
+  await consumeCompletionStream(response.body, signal, line => {
+    diagnostics.source = 'stream parsing'
+    const done = consumeLine(line)
+    diagnostics.source = 'stream read'
+    return done
+  }, onResponse, () => {
     const now = Date.now()
     diagnostics.networkGap = diagnostics.lastNetworkAt === undefined ? undefined : now - diagnostics.lastNetworkAt
     diagnostics.lastNetworkAt = now
   })
+  diagnostics.source = streamingError ? 'provider stream' : 'response validation'
 
   if (request.requireComplete && !done && finishReason !== 'stop') throw new Error('The provider did not complete the response.')
   if (request.validateChatResponse) {
