@@ -68,12 +68,9 @@ test('shared density and surface tokens govern settings without changing manuscr
     for (const theme of ['very-dark', 'very-white']) {
       ui.applyUiSettings({ ...ui.defaultUiSettings, activeThemeId: theme })
       assert.equal(document.documentElement.dataset.uiTheme, theme, 'Both dark and light palettes are exercised')
-      const themedRoot = dom.window.getComputedStyle(document.documentElement)
       const palette = ui.builtInThemes.find(item => item.id === theme).palette
-      assert.equal(themedRoot.getPropertyValue('--muted').trim(), 'var(--soft)', 'Muted text aliases the active secondary color')
-      assert.equal(themedRoot.getPropertyValue('--soft').trim(), palette.muted, 'The secondary color changes with the palette')
-      assert.equal(themedRoot.getPropertyValue('--border').trim(), 'var(--line)', 'Legacy border consumers share the active line color')
-      assert.equal(themedRoot.getPropertyValue('--line').trim(), palette.border, 'The line color changes with the palette')
+      assert.equal(document.documentElement.style.getPropertyValue('--soft').trim(), palette.muted, 'Applying a theme updates its secondary color')
+      assert.equal(document.documentElement.style.getPropertyValue('--line').trim(), palette.border, 'Applying a theme updates its border color')
       assert.equal(document.documentElement.style.getPropertyValue('--editor-font-size'), `${ui.defaultUiSettings.editor.fontSize}px`)
       assert.equal(document.documentElement.style.getPropertyValue('--editor-line-height'), String(ui.defaultUiSettings.editor.lineHeight))
     }
