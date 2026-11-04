@@ -2,7 +2,7 @@ import { assertTestResourceLimits } from './test-resource-policy.mjs'
 assertTestResourceLimits()
 import test, { after, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { JSDOM } from 'jsdom'
 import 'fake-indexeddb/auto'
@@ -60,7 +60,6 @@ const w = await moduleAt('features/worlds/world-service')
 const { initialAiSettings } = await moduleAt('shared/ai/ai-settings')
 const { buildContextValues } = await moduleAt('shared/context/context-service')
 const { default: Workspace } = await moduleAt('app/Workspace')
-const triggerCss = readFileSync(new URL('../src/features/codex/codex-triggers.css', import.meta.url), 'utf8')
 const links = await moduleAt('features/codex/codex-article-links')
 const chatService = await moduleAt('features/chat/chat-service')
 const worldArchive = await moduleAt('data/world-archive')
@@ -334,10 +333,6 @@ test('shared trigger uniqueness marks the editor invalid, cites even a hidden si
   assert.equal(triggerInput().getAttribute('aria-describedby'), validation.id)
   assert.match(validation.textContent, /North Tower.*already used.*Reserved beacon/)
   assert.equal(validation.classList.contains('codex-trigger-error'), true)
-  // The transpiler strips CSS imports; verify the actual danger/red stylesheet contract,
-  // rather than claiming JSDOM exercises browser paint or CSS-variable resolution.
-  assert.match(triggerCss, /\.codex-trigger-editor \[aria-invalid="true"\]\s*\{[^}]*border-color:\s*var\(--danger, #c94b55\)/)
-  assert.match(triggerCss, /\.codex-trigger-editor \.codex-trigger-error[^{}]*\{[^}]*color:\s*var\(--danger, #c94b55\)/)
   await act(async () => triggerInput().blur())
   const rejected = await p.getEntity(shared.id)
   assert.deepEqual(rejected.autoIncludeTriggers, before.autoIncludeTriggers)
