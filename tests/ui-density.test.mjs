@@ -49,6 +49,30 @@ test('shared fields own their spacing and descriptions inside legacy settings', 
   }
 })
 
+test('ordinary controls keep shared density in panel headers and legacy feature forms', async t => {
+  const dom = await styledDom(t, `
+    <header class="arc-panel-header"><div class="arc-panel-header__actions"><button class="arc-button arc-button--medium">Save changes</button></div></header>
+    <label class="appearance-field"><select><option>Appearance</option></select></label>
+    <div class="chat-predefined"><input class="arc-input"><select class="arc-select"><option>Role</option></select></div>
+    <div class="world-workspace-panel"><select><option>World</option></select></div>
+    <details class="arc-disclosure"><summary>Advanced settings</summary></details>
+    <div class="arc-segmented-control"><button class="arc-segmented-control__option">Default</button></div>
+    <div class="arc-search-field"><input aria-label="Search"></div>
+    <div class="speech-key-row"><button>Load voices</button></div>
+    <div class="speed-presets"><button>Normal</button></div>
+  `)
+  const { document, getComputedStyle } = dom.window
+  for (const path of ['src/shared/ui/disclosure.css', 'src/shared/ui/segmented-control.css', 'src/shared/ui/searchable-select.css', 'src/features/chat/chat.css', 'src/features/worlds/worlds.css', 'src/features/speech/tts.css']) {
+    const style = document.createElement('style')
+    style.textContent = await readFile(new URL(`../${path}`, import.meta.url), 'utf8')
+    document.head.append(style)
+  }
+  for (const selector of ['.arc-panel-header__actions .arc-button', '.appearance-field select', '.chat-predefined .arc-input', '.chat-predefined .arc-select', '.world-workspace-panel select', '.arc-disclosure > summary', '.arc-segmented-control__option', '.arc-search-field', '.speech-key-row button', '.speed-presets button']) {
+    assert.equal(getComputedStyle(document.querySelector(selector)).minHeight, 'var(--control-height)', `${selector} must inherit desktop/touch density instead of a feature-specific fixed minimum`)
+  }
+  assert.equal(getComputedStyle(document.querySelector('.arc-search-field input')).minHeight, '0', 'Embedded search inputs must not add another control height')
+})
+
 test('shared density and surface tokens govern settings without changing manuscript typography', async t => {
   const dom = await styledDom(t, '<section class="book-profile-row"></section><p class="profile-linked-warning"></p><div class="profile-save-bar"></div>')
   const { document } = dom.window
