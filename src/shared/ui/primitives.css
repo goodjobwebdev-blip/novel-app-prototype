@@ -86,7 +86,7 @@
 .arc-panel-header__actions { min-width: 0; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
 .arc-panel-header__actions .arc-button { min-height: var(--control-height); }
 .arc-panel-header__actions .arc-button:empty,
-.arc-panel-header__actions .arc-button:has(> .arc-button__icon:only-child) { width: 44px; min-width: 44px; padding: 0; }
+.arc-panel-header__actions .arc-button:has(> .arc-button__icon:only-child) { width: var(--control-height); min-width: var(--control-height); height: var(--control-height); padding: 0; }
 
 @keyframes arc-button-spin { to { transform: rotate(360deg); } }
 @media (max-width: 720px) {

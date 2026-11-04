@@ -24,9 +24,11 @@ This document tracks the app-wide migration to the shared components in `src/sha
 `src/shared/ui/density.css` owns UI spacing independently of theme palettes and manuscript typography:
 
 - Base spacing: `--space-1/2/3/4/6/8` = `4/8/12/16/24/32px`.
-- Use `--field-gap` for label/control/help spacing (4px desktop, 6px on narrow/coarse-pointer screens), `--control-gap` for related controls, and `--field-stack-gap` for stacked fields.
+- Use `--field-gap` for label/control/help spacing (4px desktop, 6px on narrow/coarse-pointer screens), `--control-gap` (6px) for related controls, and `--field-stack-gap` (8px) for stacked fields.
 - Use `--card-padding`, `--group-gap`, `--section-gap`, and `--page-padding` for nested surfaces and page geometry. Default card padding is 12px; changing touch size must not inflate surrounding whitespace.
-- Shared small/medium/large controls use 32/36/44px desktop minimum heights. Narrow/coarse-pointer screens use 44/44/48px; `--touch-target` remains 44px. Content can make a control taller.
+- Shared small/medium/large controls use 28/32/36px desktop minimum heights. All three use 44px on narrow/coarse-pointer screens; `--touch-target` remains 44px. Content can make a control taller: never clip multi-line metadata to the minimum.
+- Ordinary control padding uses `--control-padding-y/x` (4/10px); small/large buttons use 8/12px horizontally. Shared selects reserve icon width plus `--control-gap` for the arrow. Form group/section gaps are 12/20px; desktop page padding is 24px. Manuscript typography, editor/composer geometry, and media previews remain independent.
+- Feature styles must not force larger fixed heights onto ordinary shared controls. Keep icon-only header actions square using the responsive control-height token; do not shrink specialized generation/stop/accept controls mechanically.
 - Shared fields own their child margins and supporting typography; legacy `label > span` rules must exclude shared fields and choices.
 - `--muted` aliases `--soft` and `--border` aliases `--line`, so older semantic-token consumers follow the selected palette.
 - Settings puts profile type, selection, Duplicate, and Actions in one responsive toolbar. Shared/default/usage metadata and collapsed help follow it. Linked-book impact is explained in help at rest and shown as a banner for dirty, linked profiles; explicit Save/Discard and save confirmation remain unchanged.
