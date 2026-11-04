@@ -15,7 +15,7 @@
 .profile-header-main > .arc-field { flex: 2 1 220px; margin: 0; }
 .profile-header-main > .settings-profile-type { flex: 1 1 160px; }
 .profile-header-main .arc-select { min-width: 0; max-width: 100%; }
-.profile-header-main > .arc-button:not(.arc-icon-button) { flex-shrink: 0; min-height: var(--control-height); }
+.profile-header-main > .arc-button:not(.arc-icon-button) { flex-shrink: 0; }
 .profile-header-main .arc-action-menu__trigger { flex-shrink: 0; border-color: color-mix(in srgb, var(--ink) 22%, var(--line)); background: color-mix(in srgb, var(--surface-2) 82%, transparent); }
 .profile-header-meta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1) var(--control-gap); min-width: 0; }
 .profile-scope-badge, .profile-default-badge { display: inline-flex; align-items: center; max-width: 100%; padding: 3px 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); color: var(--soft); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
@@ -25,7 +25,7 @@
 .profile-library-controls > .profile-help, .profile-header-meta > p { margin: 0; }
 .profile-management-fields { display: flex; align-items: end; flex-wrap: wrap; gap: var(--control-gap); min-width: 0; padding-top: 12px; border-top: 1px solid var(--line); }
 .profile-management-fields > .arc-field { flex: 1 1 240px; margin: 0; }
-.profile-management-fields > .arc-button { flex-shrink: 0; min-height: var(--control-height); }
+.profile-management-fields > .arc-button { flex-shrink: 0; }
 .profile-header-main > .arc-button, .profile-management-fields > .arc-button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .profile-origin-note { margin: 0; padding: 8px 12px; border-inline-start: 2px solid var(--accent); color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .profile-copy-notice { margin: 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: var(--radius); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); color: var(--ink); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
@@ -45,7 +45,7 @@
 .profile-save-bar > span { flex: 1; color: var(--muted); font-size: 12px; }
 .text-provider-controls { display: flex; align-items: start; flex-wrap: wrap; gap: 12px; min-width: 0; }
 .text-provider-controls > .arc-field { flex: 1 1 280px; }
-.text-provider-controls > .arc-button { flex-shrink: 0; min-height: var(--control-height); margin-top: calc(16px + var(--field-gap)); }
+.text-provider-controls > .arc-button { flex-shrink: 0; margin-top: calc(16px + var(--field-gap)); }
 .text-provider-controls + .status { margin-bottom: 18px; }
 .book-profile-rows { display: grid; gap: var(--field-stack-gap); }
 .book-profile-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2) var(--space-3); align-items: end; padding: var(--card-padding); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }

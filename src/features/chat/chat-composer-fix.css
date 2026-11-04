@@ -111,9 +111,7 @@
 .functional-chat-composer .chat-system-prompt-button {
   width: auto;
   height: auto;
-  min-height: 44px;
   margin: 0;
-  padding: 0 .75rem;
   border-radius: var(--radius);
   display: inline-flex;
   align-items: center;
@@ -191,10 +189,6 @@
   }
 
   .functional-chat-composer .chat-system-prompt-button {
-    width: 44px;
-    height: 44px;
-    min-height: 44px;
-    padding: 0;
     border-radius: var(--radius);
   }
 

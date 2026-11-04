@@ -421,10 +421,11 @@ select {
   text-align: center;
 }
 
-.ui-duplicate-active {
-  min-height: 42px;
+.ui-duplicate-active:not(.arc-button) {
+  box-sizing: border-box;
+  min-height: var(--control-height);
   margin-top: 18px;
-  padding: 0 13px;
+  padding: 0 var(--space-3);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: color-mix(in srgb, var(--surface-2) 72%, transparent);
@@ -432,6 +433,8 @@ select {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  font-size: 12px;
+  line-height: 1;
   cursor: pointer;
 }
 
@@ -578,7 +581,7 @@ select {
   .ui-color-grid { grid-template-columns: 1fr; }
 
   .ui-custom-themes > header { align-items: flex-start; }
-  .ui-custom-themes > header .ui-create-theme { padding: 0 10px; }
+
 }
 
 /* Appearance controls keep a consistent shape across themes and viewport sizes. */

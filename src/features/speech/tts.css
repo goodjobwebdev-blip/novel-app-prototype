@@ -15,8 +15,8 @@
 .tts-status-actions .tts-playback-toggle { border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); background: color-mix(in srgb, var(--surface-2) 78%, var(--accent) 8%); color: var(--accent-bright); }
 .tts-status-actions .tts-stop { border-color: color-mix(in srgb, var(--danger) 32%, var(--line)); background: color-mix(in srgb, var(--surface-2) 86%, var(--danger) 6%); color: var(--danger); }
 .tts-status-actions .tts-stop:hover { border-color: color-mix(in srgb, var(--danger) 58%, var(--line)); background: color-mix(in srgb, var(--surface-2) 76%, var(--danger) 13%); color: color-mix(in srgb, var(--danger) 82%, white); }
-.tts-playback-timeline { min-width: 0; padding-top: 9px; border-top: 1px solid var(--line); display: grid; grid-template-columns: 40px 40px minmax(72px,1fr) 40px 40px; align-items: center; gap: 7px; }
-.tts-playback-timeline button { appearance: none; width: 40px; height: 40px; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb, var(--surface-2) 82%, transparent); color: var(--soft); display: inline-flex; align-items: center; justify-content: center; gap: 1px; cursor: pointer; }
+.tts-playback-timeline { min-width: 0; padding-top: 9px; border-top: 1px solid var(--line); display: grid; grid-template-columns: var(--control-height) 40px minmax(72px,1fr) 40px var(--control-height); align-items: center; gap: 7px; }
+.tts-playback-timeline button:not(.arc-button) { box-sizing: border-box; appearance: none; width: var(--control-height); height: var(--control-height); min-height: var(--control-height); padding: 0; font-size: 12px; line-height: 1; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb, var(--surface-2) 82%, transparent); color: var(--soft); display: inline-flex; align-items: center; justify-content: center; gap: 1px; cursor: pointer; }
 .tts-playback-timeline button:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 38%, var(--line)); color: var(--accent-bright); }
 .tts-playback-timeline button:disabled { opacity: .38; cursor: default; }
 .tts-playback-timeline button svg { width: 15px; height: 15px; }
@@ -34,7 +34,7 @@
 
 .speech-key-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: stretch; }
 .speech-key-row input { min-width: 0; }
-.speech-key-row button { appearance: none; min-height: 46px; max-width: 240px; padding: 0 13px; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb, var(--surface-2) 82%, transparent); color: var(--soft); font-size: 11px; line-height: 1.3; cursor: pointer; }
+.speech-key-row button:not(.arc-button) { box-sizing: border-box; align-self: center; appearance: none; min-height: var(--control-height); max-width: 240px; padding: 0 var(--space-3); border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb, var(--surface-2) 82%, transparent); color: var(--soft); font-size: 12px; line-height: 1; cursor: pointer; }
 .speech-key-row button:hover { border-color: rgba(198,168,107,.38); background: rgba(198,168,107,.09); color: var(--accent-bright); }
 .speech-model-search { min-height: 46px; padding: 0 12px; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb, var(--surface-2) 82%, transparent); display: flex; align-items: center; gap: 9px; }
 .speech-model-search:focus-within { border-color: rgba(198,168,107,.45); box-shadow: 0 0 0 3px rgba(198,168,107,.07); }
@@ -66,8 +66,7 @@
   .tts-status { bottom: max(10px, env(safe-area-inset-bottom)); }
   .tts-player { top: calc(max(14px, env(safe-area-inset-top)) + 58px); bottom: auto; }
   .tts-status-copy small { white-space: normal; }
-  .tts-playback-timeline { grid-template-columns: 44px 44px minmax(54px,1fr) 44px 44px; gap: 5px; }
-  .tts-playback-timeline button { width: 44px; height: 44px; }
+  .tts-playback-timeline { grid-template-columns: var(--control-height) 44px minmax(54px,1fr) 44px var(--control-height); gap: 5px; }
 }
 
 .stt-settings-card { gap: 12px; }

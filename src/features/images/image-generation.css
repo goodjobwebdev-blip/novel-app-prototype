@@ -6,7 +6,19 @@
 .image-ui h1 { margin: 0; font: 500 32px/1.15 var(--serif); }
 .image-ui h2 { margin: 20px 0 12px; font-size: 20px; }
 .image-ui h3 { font-size: 17px; }
-.image-ui button:not(.arc-button):not(.arc-searchable-select__trigger):not(.arc-searchable-select__option):not(.arc-segmented-control__option):not(.expandable-text-trigger):not(.image-job-toggle):not([role=tab]),
+.image-ui button:not(.arc-button):not(.arc-searchable-select__trigger):not(.arc-searchable-select__option):not(.arc-segmented-control__option):not(.expandable-text-trigger):not(.image-job-toggle):not(.image-result-preview):not(.image-source-library button):not([role=tab]) {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: var(--control-height);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font: 12px/1 var(--input-font-family, Inter, sans-serif);
+}
+.image-ui .image-result-preview,
+.image-ui .image-source-library button,
 .image-ui select:not(.arc-select),
 .image-ui input:not([type=checkbox]):not([type=radio]):not(.arc-input):not(.arc-search-field input),
 .image-ui textarea,
@@ -86,7 +98,7 @@
 .image-generation-summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; margin: 6px 0; color: var(--soft); font-size: 13px; }
 .image-model-summary strong { color: var(--ink); }
 .image-generate-actions { display: grid; gap: 8px; margin-top: 14px; }
-.image-ui .image-primary-action { width: 100%; min-height: 56px; border-color: var(--accent); background: var(--accent); color: var(--deep); font-weight: 700; }
+.image-ui .image-primary-action { width: 100%; border-color: var(--accent); background: var(--accent); color: var(--deep); font-weight: 700; }
 .image-queue-status { min-height: 24px; margin: 6px 0 0; color: var(--accent); font-weight: 600; }
 .image-search { display: flex; align-items: center; gap: 8px; margin: 12px 0; }
 .image-search input { width: 100%; }
@@ -135,9 +147,9 @@
 .image-gallery-grid > article > p { margin: 8px 4px 2px; }
 .image-gallery-grid > article > small { display: block; margin: 0 4px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .image-viewer-actions { display: flex; flex: none; align-items: stretch; flex-wrap: wrap; gap: 8px; padding-top: 10px; }
-.image-download { display: inline-flex; min-height: 48px; align-items: center; gap: 8px; padding: 8px 12px; color: var(--accent); }
+.image-download { box-sizing: border-box; display: inline-flex; min-height: var(--control-height); align-self: end; align-items: center; gap: 8px; padding: 0 var(--space-3); color: var(--accent); font-size: 12px; line-height: 1; }
 .image-gallery-viewer-actions { display: flex; min-width: min(100%, 360px); flex: 1; align-items: end; flex-wrap: wrap; gap: 8px; }
-.image-gallery-viewer-actions > button { min-height: 48px; }
+
 .image-codex-action { display: flex; min-width: min(100%, 320px); flex: 1; align-items: end; gap: 8px; }
 .image-codex-action label { display: grid; min-width: 160px; flex: 1; gap: 4px; }
 .image-codex-action select { width: 100%; }
@@ -185,8 +197,7 @@
 .image-favorite-defaults { display: grid; grid-template-columns: 1fr; align-items: start; column-gap: 12px; margin-top: 8px; }
 .image-favorite-defaults > label { min-width: 0; font-size: 14px; }
 .image-favorite-actions { display: flex; align-items: stretch; flex-direction: column; gap: 8px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
-.image-ui .image-favorite-actions a { display: inline-flex; min-height: 48px; align-items: center; justify-content: center; margin: 0; color: var(--accent); font-size: 13px; }
-.image-ui .image-favorite-actions button { font-size: 14px; }
+.image-ui .image-favorite-actions a { box-sizing: border-box; display: inline-flex; min-height: var(--control-height); align-items: center; justify-content: center; margin: 0; padding: 0 var(--space-3); color: var(--accent); font-size: 12px; line-height: 1; }
 
 .image-settings-status { margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--soft); display: flex; align-items: center; gap: 7px; font-size: 12px; }
 .image-settings-status > i { width: 5px; height: 5px; flex: none; border-radius: 50%; background: var(--accent); }

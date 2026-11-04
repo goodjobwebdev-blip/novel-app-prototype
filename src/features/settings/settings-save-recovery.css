@@ -35,14 +35,17 @@
   gap: 8px;
 }
 
-.settings-save-recovery button {
+.settings-save-recovery button:not(.arc-button) {
+  box-sizing: border-box;
+  min-height: var(--control-height);
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.05);
   color: inherit;
-  padding: 8px 11px;
+  padding: 0 var(--space-3);
   font: inherit;
-  font-size: 0.82rem;
+  font-size: 12px;
+  line-height: 1;
   cursor: pointer;
 }
 

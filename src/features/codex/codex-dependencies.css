@@ -37,7 +37,7 @@
 .codex-dependency-open small,.codex-needed-by-row small { opacity: .62; }
 .codex-dependency-label { min-width: 0; }
 .codex-dependency-include { grid-column: 1 / 2; }
-.codex-dependency-row > .arc-button--danger { grid-column: 2 / 3; justify-self: end; align-self: end; min-height: 44px; }
+.codex-dependency-row > .arc-button--danger { grid-column: 2 / 3; justify-self: end; align-self: end; }
 .codex-dependency-add { position: relative; }
 .codex-dependency-picker {
   position: absolute;
