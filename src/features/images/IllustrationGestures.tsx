@@ -1,3 +1,4 @@
+import { IconButton } from '../../shared/ui/Button'
 import { useEffect, useRef, useState, type PointerEvent } from 'react'
 import { Minus, Plus, RotateCcw } from 'lucide-react'
 import { centeredImageView, imageFrame, moveImage, pinchChange, type ImageView, type Point, type Size } from './image-gestures'
@@ -56,6 +57,6 @@ export default function IllustrationGestures({ src, alt, image, value, onChange,
       <img src={src} alt={alt} draggable={false} style={{ width: frame.width, height: frame.height, transform: `translate(-50%, -50%) translate(${frame.panX}px, ${frame.panY}px) scale(${value.zoom})` }} />
       {crop && <span className="image-crop-grid" aria-hidden="true" />}
     </div>
-    <div className="image-zoom-controls"><button type="button" disabled={disabled || value.zoom <= 1} onClick={() => zoom(-.25)} aria-label="Zoom out"><Minus aria-hidden="true" /></button><output aria-label="Zoom level">{Math.round(value.zoom * 100)}%</output><button type="button" disabled={disabled || value.zoom >= 4} onClick={() => zoom(.25)} aria-label="Zoom in"><Plus aria-hidden="true" /></button><button type="button" disabled={disabled} onClick={() => update({ ...centeredImageView })}><RotateCcw aria-hidden="true" />Reset</button></div>
+    <div className="image-zoom-controls"><IconButton type="button" disabled={disabled || value.zoom <= 1} onClick={() => zoom(-.25)} aria-label="Zoom out"><Minus aria-hidden="true" /></IconButton><output aria-label="Zoom level">{Math.round(value.zoom * 100)}%</output><IconButton type="button" disabled={disabled || value.zoom >= 4} onClick={() => zoom(.25)} aria-label="Zoom in"><Plus aria-hidden="true" /></IconButton><button type="button" disabled={disabled} onClick={() => update({ ...centeredImageView })}><RotateCcw aria-hidden="true" />Reset</button></div>
   </div>
 }

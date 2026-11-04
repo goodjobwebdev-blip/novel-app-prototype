@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { CloudUpload, X } from 'lucide-react'
-import Button from '../../shared/ui/Button'
+import Button, { IconButton } from '../../shared/ui/Button'
 import type { BookEntity } from '../../data/persistence'
 import { enableBookSync, syncBookNow } from './sync-service'
 import { listSyncLinks } from './sync-persistence'
@@ -63,7 +63,7 @@ export default function LocalBookSync({ books, beforeSync, onConfigure, onRemote
   return <div className="local-book-sync">
     <Button leadingIcon={<CloudUpload />} onClick={() => { void show() }}>Send books to cloud</Button>
     {open && <div className="sync-dialog-backdrop" role="presentation"><section className="sync-dialog" role="dialog" aria-modal="true" aria-labelledby="local-cloud-books-title">
-      <header><div><small>Self-hosted sync</small><h2 id="local-cloud-books-title">Send books to cloud</h2></div><Button className="sync-icon-button" variant="ghost" onClick={() => setOpen(false)} aria-label="Close local books" leadingIcon={<X />} /></header>
+      <header><div><small>Self-hosted sync</small><h2 id="local-cloud-books-title">Send books to cloud</h2></div><IconButton className="sync-icon-button" variant="ghost" onClick={() => setOpen(false)} aria-label="Close local books"><X /></IconButton></header>
       <p className="sync-dialog-help">Choose a local book for its first upload, or manually sync one that is already connected.</p>
       {busy === 'list' ? <p role="status">Loading local books…</p> : !books.length ? <p>No local books are available.</p> : <ul>{books.map(book => {
         const isConnected = connected.has(book.id)

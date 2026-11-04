@@ -34,10 +34,10 @@
 .arc-resource-row__copy small { margin-top: 3px; color: var(--faint); font-size: 9px; }
 .arc-resource-row__actions { padding-right: 5px; display: flex; align-items: center; gap: 2px; }
 .arc-resource-row__actions > button:not(.arc-button):not(.arc-action-menu__trigger) {
-  width: 34px;
-  height: 34px;
-  min-width: 34px;
-  min-height: 34px;
+  width: var(--icon-button-size);
+  height: var(--icon-button-size);
+  min-width: var(--icon-button-size);
+  min-height: var(--icon-button-size);
   padding: 0;
   border: 0;
   border-radius: var(--radius);
@@ -51,6 +51,3 @@
 .arc-resource-row__actions > button:not(.arc-button):not(.arc-action-menu__trigger) svg { width: 13px; height: 13px; }
 .arc-resource-row__actions > button.danger { color: var(--danger); }
 .arc-resource-row__actions .arc-action-menu__trigger { border-color: color-mix(in srgb,var(--ink) 22%,var(--line)); background: color-mix(in srgb,var(--surface-2) 82%,transparent); }
-@media (max-width:720px) {
-  .arc-resource-row__actions > button:not(.arc-button):not(.arc-action-menu__trigger) { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
-}

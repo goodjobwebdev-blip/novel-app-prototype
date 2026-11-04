@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import ExpandableTextInput, { type ExpandableTextInputDictationTarget } from '../../shared/ui/ExpandableTextInput'
-import Button from '../../shared/ui/Button'
+import { IconButton } from '../../shared/ui/Button'
 import Disclosure from '../../shared/ui/Disclosure'
 import { Sparkles, Square } from 'lucide-react'
 import { loadAiSettings } from '../../shared/ai/ai-settings'
@@ -108,7 +108,7 @@ export default function MediaPromptEditor({ value, onChange, capability, bookId 
     <Disclosure title="Enhancement">
       <div className="media-enhancement-controls">
         <label className="media-prompt-field"><span>Guidance (optional)</span><ExpandableTextInput maxLength={32000} aria-label="Enhancement guidance" dialogTitle="Enhancement guidance" onOpenChange={open => { expandedEditorOpen.current = open }} value={draft.enhancementGuidance ?? ''} onChange={enhancementGuidance => change({ enhancementGuidance })} placeholder="How should the prompt be improved?" /></label>
-        <Button className="media-enhance-action" aria-label={busy ? 'Stop enhancement' : 'Enhance'} title={busy ? 'Stop enhancement' : 'Enhance prompt'} disabled={!busy && !draft.prompt.trim()} onClick={() => { if (busy) owner.current?.abort(); else void enhance() }}>{busy ? <Square size={18} aria-hidden="true" /> : <Sparkles size={20} aria-hidden="true" />}</Button>
+        <IconButton variant="secondary" className="media-enhance-action" aria-label={busy ? 'Stop enhancement' : 'Enhance'} title={busy ? 'Stop enhancement' : 'Enhance prompt'} disabled={!busy && !draft.prompt.trim()} onClick={() => { if (busy) owner.current?.abort(); else void enhance() }}>{busy ? <Square size={18} aria-hidden="true" /> : <Sparkles size={20} aria-hidden="true" />}</IconButton>
       </div>
     </Disclosure>
     {status && <p role="status">{status}</p>}

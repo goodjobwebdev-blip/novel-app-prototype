@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { BookOpen, Bot, BrainCircuit, ChevronDown, FileQuestion, House, ImagePlus, LayoutGrid, List, MessageCircle, Mic, Minus, Palette, Plus, Redo2, RefreshCw, Search, SlidersHorizontal, Sparkles, Trash2, Undo2, Volume2, Zap } from 'lucide-react'
 import { builtInThemes, defaultUiSettings, loadUiSettings, saveUiSettings, UI_SETTINGS_EVENT, type UiSettings, type UiTypography } from '../../features/settings/ui-settings'
 import ActionMenu, { type ActionMenuItem } from './ActionMenu'
-import Button from './Button'
+import Button, { IconButton } from './Button'
 import Card from './Card'
 import Checkbox from './Checkbox'
 import Choice from './Choice'
@@ -37,9 +37,9 @@ function PatternActions({ title }: { title: string }) {
 
 function OutlinePatternRow({ eyebrow, title, expanded, selected = false }: { eyebrow: string; title: string; expanded?: boolean; selected?: boolean }) {
   return <div className={`ui-kit-outline-row ${selected ? 'selected' : ''}`}>
-    {expanded === undefined ? <span className="ui-kit-outline-leaf-node" aria-hidden="true" /> : <button className="ui-kit-outline-toggle" type="button" aria-label={`${expanded ? 'Collapse' : 'Expand'} ${title}`}><span aria-hidden="true">{expanded ? <Minus /> : <Plus />}</span></button>}
+    {expanded === undefined ? <span className="ui-kit-outline-leaf-node" aria-hidden="true" /> : <IconButton className="ui-kit-outline-toggle" type="button" aria-label={`${expanded ? 'Collapse' : 'Expand'} ${title}`}>{expanded ? <Minus /> : <Plus />}</IconButton>}
     <button className="ui-kit-outline-open" type="button"><small>{eyebrow}</small><strong>{title}</strong></button>
-    <Button className="ui-kit-pattern-icon-action" size="small" variant="secondary" aria-label={`Open summary for ${title}`} leadingIcon={<FileQuestion />} />
+    <IconButton className="ui-kit-pattern-icon-action" variant="secondary" aria-label={`Open summary for ${title}`}><FileQuestion /></IconButton>
     <PatternActions title={title} />
   </div>
 }
@@ -163,9 +163,16 @@ export default function UiKitScreen({ onHome }: { onHome: () => void }) {
             <Button loading>Loading</Button>
             <Button disabled>Disabled</Button>
           </div>
+          <div className="ui-kit-row" role="group" aria-label="Compact icon buttons">
+            <IconButton aria-label="Add item"><Plus /></IconButton>
+            <IconButton variant="secondary" aria-label="Edit settings"><SlidersHorizontal /></IconButton>
+            <IconButton variant="danger" aria-label="Delete item"><Trash2 /></IconButton>
+            <IconButton loading aria-label="Saving item"><RefreshCw /></IconButton>
+            <IconButton disabled aria-label="Unavailable action"><Plus /></IconButton>
+          </div>
           <div className="ui-kit-panel-header-example">
             <PanelHeader eyebrow="Reference" title="Panel header" actions={<><Button size="small" variant="secondary" leadingIcon={<Plus />}>New</Button><Button size="small" variant="secondary" leadingIcon={<SlidersHorizontal />}>Manage</Button></>} />
-            <p>Panel actions use one right-aligned row beneath the heading. The same pattern is used by Outline, Notes, Codex, and Chat sidebars.</p>
+            <p>Panel actions share a compact row with the heading. The same pattern is used by Outline, Notes, Codex, and Chat sidebars.</p>
           </div>
         </Card>
       </section>

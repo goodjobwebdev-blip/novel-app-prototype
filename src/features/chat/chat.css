@@ -71,13 +71,12 @@
 .chat-sidebar-pagination .arc-button { font-size: .72rem; }
 .chat-sidebar-pagination > span { min-width: 0; display: grid; justify-items: center; gap: .15rem; color: var(--soft); font-size: .72rem; text-align: center; }
 .chat-sidebar-pagination small { color: var(--muted); font-size: .65rem; white-space: nowrap; }
-.chat-icon-action.arc-button { width: 34px; height: 34px; min-width: 34px; min-height: 34px; padding: 0; border-radius: var(--radius); }
-.functional-chat .message .message-tools .chat-icon-action { width: 34px; min-width: 34px; min-height: 34px; padding: 0; }
+
 .chat-prompt-dialog header .chat-icon-action { flex: none; }
 .chat-predefined > header .arc-button { border-radius: var(--radius); }
 .chat-predefined > article { border-radius: var(--radius); }
 .chat-predefined .arc-input,.chat-predefined .arc-select { min-height: 44px; }
-.story-message-actions .chat-icon-action { width: 34px; height: 34px; min-width: 34px; min-height: 34px; padding: 0; border-radius: var(--radius); }
+
 
 @media (max-width: 720px) {
   .functional-chat { padding-bottom: 10.5rem; }
@@ -87,10 +86,7 @@
   .chat-model-selector select { max-width: 62vw; }
   .chat-model-status { width: 100%; max-width: none; }
   .chat-generate-actions span { display: none; }
-  .chat-icon-action.arc-button,
-  .functional-chat .message .message-tools .chat-icon-action,
-  .story-message-actions .chat-icon-action { width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 0; }
-  .chat-sidebar-pagination .arc-button { min-height: 44px; }
+
 }
 
 .chat-document-edits { display: grid; gap: .65rem; margin-top: .65rem; }
@@ -198,7 +194,7 @@
 .chat-continue.arc-button { margin-top: .7rem; min-height: 44px; }
 .functional-chat .messages, .functional-chat .message, .chat-markdown { max-width: 100%; min-width: 0; }
 .chat-markdown pre, .chat-markdown .markdown-table-scroll { box-sizing: border-box; width: 100%; }
-.chat-answer-tools button { min-height: 40px; background: transparent; border: 0; color: var(--soft); }
+.chat-answer-tools button:not(.arc-icon-button) { min-height: 40px; background: transparent; border: 0; color: var(--soft); }
 .chat-follow-output { background: var(--canvas); color: var(--ink); }
 
 .chat-proposal-draft { padding: .65rem .8rem; }
@@ -238,7 +234,7 @@
 
 .chat-skills p, .chat-skills small { font-size: 12px; color: var(--muted); }
 .chat-skills li { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
-.chat-skills li span { flex: 1; }
+.chat-skills li > span { flex: 1; }
 .chat-skills label { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
 .chat-skills article { padding: 10px; border: 1px solid var(--border); margin: 8px 0; border-radius: var(--radius); }
 .note-roles { display: flex; align-items: center; gap: 16px; }

@@ -370,9 +370,7 @@
   position: absolute;
   top: 50%;
   right: 9px;
-  width: 36px;
-  height: 36px;
-  padding: 0;
+
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: rgba(20, 18, 17, 0.72);
@@ -451,9 +449,6 @@
 
 .expandable-text-dialog header button {
   flex: none;
-  width: 40px;
-  height: 40px;
-  padding: 0;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: rgba(255, 255, 255, 0.04);
@@ -486,7 +481,7 @@
   gap: 9px;
 }
 
-.expandable-text-dialog footer button {
+.expandable-text-dialog footer button:not(.arc-icon-button) {
   min-height: 44px;
   padding: 0 18px;
   border-radius: var(--radius);
@@ -546,9 +541,6 @@
 }
 
 .expandable-dictation-status button {
-  width: 44px;
-  min-width: 44px;
-  padding: 0;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.04);
   color: var(--ink);

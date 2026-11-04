@@ -2,12 +2,13 @@ import { assertTestResourceLimits } from './test-resource-policy.mjs'
 assertTestResourceLimits()
 import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
-import ts from 'typescript'
+import { transpileSourceTree } from './transpile-source-tree.mjs'
 import { JSDOM } from 'jsdom'
 
 const dom = new JSDOM('<html><body><div id="root"></div></body></html>', { url: 'https://arc.test/' })
+after(() => dom.window.close())
 for (const key of ['window', 'document', 'HTMLElement', 'HTMLTextAreaElement', 'Event']) globalThis[key] = dom.window[key]
 // Native dialog lifecycle is supplied by the browser; JSDOM needs these hooks.
 dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true }
@@ -20,13 +21,10 @@ const React = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { act } = React
 const directory = mkdtempSync(new URL('../node_modules/.expandable-input-test-', import.meta.url))
-const source = readFileSync(new URL('../src/shared/ui/ExpandableTextInput.tsx', import.meta.url), 'utf8')
-const compiled = ts.transpileModule(source, {
-  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022, jsx: ts.JsxEmit.ReactJSX },
-}).outputText
-writeFileSync(`${directory}/ExpandableTextInput.mjs`, compiled)
-const { default: ExpandableTextInput } = await import(pathToFileURL(`${directory}/ExpandableTextInput.mjs`))
-after(() => { dom.window.close(); rmSync(directory, { recursive: true, force: true }) })
+after(() => rmSync(directory, { recursive: true, force: true }))
+// Compile real shared dependencies too; the expanded editor now reuses IconButton.
+transpileSourceTree(directory)
+const { default: ExpandableTextInput } = await import(pathToFileURL(`${directory}/shared/ui/ExpandableTextInput.mjs`))
 
 const button = (name) => [...document.querySelectorAll('button')].find((item) => item.textContent.trim() === name || item.getAttribute('aria-label') === name)
 async function click(name) {

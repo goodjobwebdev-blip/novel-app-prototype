@@ -11,8 +11,9 @@ This document tracks the app-wide migration to the shared components in `src/sha
 - Named actions use `Button`; standard fields use `Input`, `Select`, `Checkbox`, and `RadioGroup`.
 - Choices that change a value within the current view use `SegmentedControl`; panel navigation uses `Tabs`. Rich checkbox/radio rows use `Choice`, while `Checkbox` stays simple.
 - User-facing settings accordions use `Disclosure`, with a right-aligned chevron and shared header/body geometry.
-- Utility, close, expand, send, stop, and submenu icon actions are square.
-- Touch targets are at least `44px` on mobile.
+- Icon-only utility actions use `IconButton` from `Button.tsx`: one 30px square border box on desktop, mobile, and coarse-pointer devices. The actual clickable area equals the visible button; do not add invisible hit-area expansion or a separate mobile minimum.
+- Native button semantics, accessible names, tooltips, focus indication, keyboard activation, disabled/loading states, and existing cancellation shortcuts must survive icon migrations.
+- Primary generation Send/Generate/Stop controls keep their visible composer geometry; they are not ordinary utility actions.
 - Header actions use a lightweight transparent treatment.
 - Circles are reserved for radio controls, avatars, status dots, and loaders.
 - Pills remain valid when the shape communicates tag, chip, or status semantics.
@@ -24,9 +25,10 @@ This document tracks the app-wide migration to the shared components in `src/sha
 `src/shared/ui/density.css` owns UI spacing independently of theme palettes and manuscript typography:
 
 - Base spacing: `--space-1/2/3/4/6/8` = `4/8/12/16/24/32px`.
-- Use `--field-gap` for label/control/help spacing (4px desktop, 6px on narrow/coarse-pointer screens), `--control-gap` for related controls, and `--field-stack-gap` for stacked fields.
+- Use `--field-gap` for label/control/help spacing (4px on every device), `--control-gap` for related controls, and `--field-stack-gap` for stacked fields.
 - Use `--card-padding`, `--group-gap`, `--section-gap`, and `--page-padding` for nested surfaces and page geometry. Default card padding is 12px; changing touch size must not inflate surrounding whitespace.
-- Shared small/medium/large controls use 32/36/44px desktop minimum heights. Narrow/coarse-pointer screens use 44/44/48px; `--touch-target` remains 44px. Content can make a control taller.
+- Shared small/medium/large text controls use 32/36/44px minimum heights on every device. Icon-only utility controls use `--icon-button-size` (30px). Content can make text controls taller; narrow screens reflow layouts rather than inflating controls.
+- Workspace, embedded settings, and book/World menus share shell header inset, top safe-area offset, 50px default header height, and 44px navigation rows. Leading settings close and trailing workspace close occupy their respective opener's viewport slot. Feature panel headers use the same compact title/actions composition; long titles and action groups may wrap naturally.
 - Shared fields own their child margins and supporting typography; legacy `label > span` rules must exclude shared fields and choices.
 - `--muted` aliases `--soft` and `--border` aliases `--line`, so older semantic-token consumers follow the selected palette.
 - Settings puts profile type, selection, Duplicate, and Actions in one responsive toolbar. Shared/default/usage metadata and collapsed help follow it. Linked-book impact is explained in help at rest and shown as a banner for dirty, linked profiles; explicit Save/Discard and save confirmation remain unchanged.
@@ -38,7 +40,7 @@ This document tracks the app-wide migration to the shared components in `src/sha
 - [x] Migrate standard book metadata fields in `src/app/Workspace.tsx`.
 - [x] Standardize search fields in Notes, Book Settings, and dependency pickers.
 - [ ] Replace the duplicate workspace toast shell with shared `Toast` (blocked on severity/title mapping).
-- [x] Make model favorites, outline actions, content-row actions, and summary actions square and touch-safe.
+- [x] Reuse compact square icon actions for model favorites, outline actions, content-row actions, and summary actions.
 - [x] Normalize ordinary settings cards and grouped surfaces to `--radius`.
 
 ## Chat

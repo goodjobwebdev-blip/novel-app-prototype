@@ -1,3 +1,4 @@
+import { IconButton } from './Button'
 import {
   forwardRef,
   useEffect,
@@ -243,9 +244,9 @@ const ExpandableTextInput = forwardRef<HTMLTextAreaElement, ExpandableTextInputP
         onChange={(event) => onChange(event.target.value)}
         aria-label={ariaLabel}
       />
-      <button className="expandable-text-trigger" type="button" onClick={openDialog} aria-label={`Expand ${ariaLabel}`} title={`Expand ${ariaLabel}`}>
+      <IconButton className="expandable-text-trigger" type="button" onClick={openDialog} aria-label={`Expand ${ariaLabel}`} title={`Expand ${ariaLabel}`}>
         <Expand aria-hidden="true" />
-      </button>
+      </IconButton>
     </div>
     {open && createPortal(
       <dialog
@@ -265,17 +266,17 @@ const ExpandableTextInput = forwardRef<HTMLTextAreaElement, ExpandableTextInputP
         <section ref={dialogRef} className="expandable-text-dialog">
           <header>
             <h2 id={titleId}>{dialogTitle}</h2>
-            <button type="button" onClick={closeDialog} aria-label="Close expanded editor" title="Close expanded editor">
+            <IconButton type="button" onClick={closeDialog} aria-label="Close expanded editor" title="Close expanded editor">
               <X aria-hidden="true" />
-            </button>
+            </IconButton>
           </header>
           <textarea ref={expandedRef} value={draft} onChange={(event) => setDraft(event.target.value)} aria-label={`Expanded ${ariaLabel}`} placeholder={textareaProps.placeholder} maxLength={textareaProps.maxLength} readOnly={textareaProps.readOnly || expandedDictation} disabled={textareaProps.disabled} spellCheck={textareaProps.spellCheck} />
           {error && <p className="expandable-dictation-error" role="alert">{error}</p>}
           <footer>
             {onDictate && (expandedDictation ? <div className="expandable-dictation-status" role="status" aria-live="polite">
               <span><Mic aria-hidden="true" />{dictationLabel()}</span>
-              {recording && <button className="expandable-dictation-stop" type="button" onClick={stopExpandedDictation} aria-label="Stop dictation"><Square aria-hidden="true" fill="currentColor" /></button>}
-              {dictationActive && <button ref={cancelDictationRef} className="expandable-dictation-cancel" type="button" onClick={cancelExpandedDictation} aria-label="Cancel dictation"><X aria-hidden="true" /></button>}
+              {recording && <IconButton className="expandable-dictation-stop" type="button" onClick={stopExpandedDictation} aria-label="Stop dictation"><Square aria-hidden="true" fill="currentColor" /></IconButton>}
+              {dictationActive && <IconButton ref={cancelDictationRef} className="expandable-dictation-cancel" type="button" onClick={cancelExpandedDictation} aria-label="Cancel dictation"><X aria-hidden="true" /></IconButton>}
             </div> : <button className="expandable-dictation-start" type="button" onClick={() => { void startExpandedDictation() }} disabled={dictationDisabled || textareaProps.disabled || textareaProps.readOnly}><Mic aria-hidden="true" /> Dictation</button>)}
             <button className="expandable-text-apply" type="button" onClick={applyDraft} disabled={expandedDictation}>Apply</button>
           </footer>

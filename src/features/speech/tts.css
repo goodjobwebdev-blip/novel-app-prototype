@@ -7,7 +7,7 @@
 .tts-status-copy strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tts-status-copy small { opacity: .68; }
 .tts-status-actions { display: flex; align-items: center; gap: 7px; }
-.tts-status-actions button { appearance: none; width: 40px; height: 40px; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb, var(--surface-2) 88%, transparent); color: var(--soft); box-shadow: none; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: color .16s ease, border-color .16s ease, background-color .16s ease, transform .16s ease; -webkit-tap-highlight-color: transparent; }
+.tts-status-actions button { appearance: none; border: 1px solid var(--line); border-radius: var(--radius); background: color-mix(in srgb, var(--surface-2) 88%, transparent); color: var(--soft); box-shadow: none; cursor: pointer; transition: color .16s ease, border-color .16s ease, background-color .16s ease, transform .16s ease; -webkit-tap-highlight-color: transparent; }
 .tts-status-actions button svg { width: 18px; height: 18px; stroke-width: 2; }
 .tts-status-actions button:hover { border-color: color-mix(in srgb, var(--accent) 38%, var(--line)); background: color-mix(in srgb, var(--surface-2) 72%, var(--accent) 10%); color: var(--accent-bright); }
 .tts-status-actions button:active { transform: scale(.94); }
@@ -66,7 +66,6 @@
   .tts-status { bottom: max(10px, env(safe-area-inset-bottom)); }
   .tts-player { top: calc(max(14px, env(safe-area-inset-top)) + 58px); bottom: auto; }
   .tts-status-copy small { white-space: normal; }
-  .tts-status-actions button { width: 44px; height: 44px; border-radius: var(--radius); }
   .tts-playback-timeline { grid-template-columns: 44px 44px minmax(54px,1fr) 44px 44px; gap: 5px; }
   .tts-playback-timeline button { width: 44px; height: 44px; }
 }

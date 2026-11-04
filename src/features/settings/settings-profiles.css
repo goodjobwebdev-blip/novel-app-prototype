@@ -15,8 +15,8 @@
 .profile-header-main > .arc-field { flex: 2 1 220px; margin: 0; }
 .profile-header-main > .settings-profile-type { flex: 1 1 160px; }
 .profile-header-main .arc-select { min-width: 0; max-width: 100%; }
-.profile-header-main > .arc-button, .profile-header-main .arc-action-menu__trigger { flex-shrink: 0; min-height: var(--control-height); }
-.profile-header-main .arc-action-menu__trigger { width: var(--control-height); min-width: var(--control-height); height: var(--control-height); border-color: color-mix(in srgb, var(--ink) 22%, var(--line)); background: color-mix(in srgb, var(--surface-2) 82%, transparent); }
+.profile-header-main > .arc-button:not(.arc-icon-button) { flex-shrink: 0; min-height: var(--control-height); }
+.profile-header-main .arc-action-menu__trigger { flex-shrink: 0; border-color: color-mix(in srgb, var(--ink) 22%, var(--line)); background: color-mix(in srgb, var(--surface-2) 82%, transparent); }
 .profile-header-meta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1) var(--control-gap); min-width: 0; }
 .profile-scope-badge, .profile-default-badge { display: inline-flex; align-items: center; max-width: 100%; padding: 3px 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); color: var(--soft); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 .profile-default-badge { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); background: color-mix(in srgb, var(--accent) 9%, var(--surface)); color: var(--ink); }
@@ -63,7 +63,7 @@
 .settings-return-link:disabled { opacity: .5; cursor: default; }
 .profile-leave-dialog { position: fixed; z-index: 1000; top: 20%; left: 50%; transform: translateX(-50%); width: min(620px, calc(100vw - 32px)); padding: 24px; display: grid; gap: 20px; background: var(--surface); border: 1px solid var(--accent); border-radius: var(--overlay-radius); box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--canvas) 80%, transparent); }
 .profile-leave-dialog .profile-actions { justify-content: flex-end; }
-@media (pointer: coarse) { .ai-settings-shell .settings-rail nav button { min-height: var(--touch-target); } }
+
 @media (max-width: 700px) {
   .text-provider-controls > .arc-field { flex-basis: 100%; }
   .text-provider-controls > .arc-button { margin-top: 0; }

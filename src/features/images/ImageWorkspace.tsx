@@ -1,7 +1,7 @@
 import { selectedMediaPrompt } from './media-prompt'
 import { useState } from 'react'
 import { ArrowLeft, Search, Settings } from 'lucide-react'
-import Button from '../../shared/ui/Button'
+import Button, { IconButton } from '../../shared/ui/Button'
 import Input from '../../shared/ui/Input'
 import Select from '../../shared/ui/Select'
 import Tabs from '../../shared/ui/Tabs'
@@ -159,9 +159,9 @@ export default function ImageWorkspace({ bookId, bookTitle, state, onStateChange
   const selectTab = (tab: ImageWorkspaceTab) => onStateChange({ ...state, tab })
   return <main className="image-ui image-workspace">
     <header className="image-workspace-header">
-      <button type="button" onClick={onBack} aria-label="Back"><ArrowLeft aria-hidden="true" /><span>Back</span></button>
+      <IconButton onClick={onBack} aria-label="Back"><ArrowLeft aria-hidden="true" /></IconButton>
       <div><h1 id="page-title">Images</h1>{bookTitle && <p>{bookTitle}</p>}</div>
-      <button type="button" disabled={!onSettings} onClick={() => onSettings?.(generationTask(state.draft).endsWith('video') ? 'video' : 'image')} aria-label="Image settings"><Settings aria-hidden="true" /><span>Settings</span></button>
+      <IconButton disabled={!onSettings} onClick={() => onSettings?.(generationTask(state.draft).endsWith('video') ? 'video' : 'image')} aria-label="Image settings"><Settings aria-hidden="true" /></IconButton>
     </header>
     {storageError && <p role="alert">{storageError}</p>}
     <div className="image-tabs-wrap"><Tabs label="Image workspace" value={state.tab} onChange={selectTab} items={[

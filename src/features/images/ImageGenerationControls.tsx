@@ -1,3 +1,4 @@
+import { IconButton } from '../../shared/ui/Button'
 import MediaPromptEditor from './MediaPromptEditor'
 import { useEffect, useRef, useState } from 'react'
 import { ArrowRight, Image, Type, Video, X } from 'lucide-react'
@@ -24,7 +25,7 @@ export function ImageModelPicker({ models, value, onChange, disabled = false }: 
 }
 function SourcePreview({ source, onRemove }: { source: GenerationSource; onRemove: () => void }) {
   const url = useImageUrl(source.data)
-  return <li>{url && <img src={url} alt="" />}<span>{source.name || 'Source image'}</span><button type="button" onClick={onRemove} aria-label={`Remove ${source.name || 'source image'}`}><X size={16} /></button></li>
+  return <li>{url && <img src={url} alt="" />}<span>{source.name || 'Source image'}</span><IconButton type="button" onClick={onRemove} aria-label={`Remove ${source.name || 'source image'}`}><X size={16} /></IconButton></li>
 }
 async function sourceFromBlob(blob: Blob, id: string, name?: string): Promise<GenerationSource> {
   await assertImageFile(blob)

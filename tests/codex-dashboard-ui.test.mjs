@@ -53,7 +53,7 @@ const { ChatView } = await moduleAt('features/chat/ChatFeature')
 const { normalizeChatRoundLimit, validateChatRoundLimit } = await moduleAt('features/chat/chat-round-limit')
 after(async () => { (await p.database()).close(); dom.window.close(); rmSync(directory, { recursive: true, force: true }) })
 const h = React.createElement
-const button = text => [...document.querySelectorAll('button')].find(item => item.textContent.trim() === text)
+const button = text => [...document.querySelectorAll('button')].find(item => item.textContent.trim() === text || item.getAttribute('aria-label') === text)
 async function click(text) { assert.ok(button(text), `Missing ${text}: ${document.body.textContent}`); await act(async () => button(text).click()) }
 async function settle(predicate) { for (let i = 0; i < 500 && !predicate(); i++) await act(async () => new Promise(resolve => setTimeout(resolve, 10))); assert.ok(predicate(), document.body.textContent) }
 async function send() {
@@ -191,7 +191,7 @@ test('Codex Actions stays within a narrow viewport and flips above low triggers'
   }
   try {
     await act(async () => root.render(h(Harness)))
-    await click('Actions')
+    await click('Actions for Alice')
     const panel = document.querySelector('[role="menu"]')
     assert.ok(parseFloat(panel.style.top) < 350, 'Low trigger should open above')
     assert.ok(parseFloat(panel.style.left) >= 8)

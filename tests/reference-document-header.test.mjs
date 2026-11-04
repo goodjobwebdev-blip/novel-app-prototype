@@ -26,7 +26,7 @@ test('reference headers preserve breadcrumbs and the Codex type label', () => {
 })
 
 for (const type of ['scene', 'note', 'codexEntry']) {
-  test(`${type} keeps toolbar, breadcrumbs and title compact without shrinking controls`, t => {
+  test(`${type} keeps breadcrumbs and title compact`, t => {
     const reference = type !== 'scene'
     const dom = new JSDOM(`<header class="floating-controls"><button>Workspace</button></header><article class="story-editor ${reference ? 'story-editor--reference' : ''}"><p class="document-path">Document path</p>${reference ? '<div class="document-titlebar"><div><h1>Title</h1></div></div>' : '<h1 class="scene-title">Title</h1>'}</article>`)
     t.after(() => dom.window.close())
@@ -37,14 +37,8 @@ for (const type of ['scene', 'note', 'codexEntry']) {
       dom.window.document.head.append(style)
     }
     const { document, getComputedStyle } = dom.window
-    const editor = getComputedStyle(document.querySelector('.story-editor'))
-    // JSDOM cannot resolve clamp() in the toolbar inset or editor padding shorthand.
-    const css = readFileSync(new URL('../src/app/styles.css', import.meta.url), 'utf8')
-    const toolbarTop = Number(css.match(/\.floating-controls \{[^}]*inset:(\d+)px/)[1])
-    const editorTop = Number.parseFloat(editor.paddingTop) || Number(css.match(/\.story-editor \{[^}]*padding:(\d+)px/)[1])
-    const button = getComputedStyle(document.querySelector('.floating-controls button'))
-    assert.equal(button.height, '44px', 'Keep accessible toolbar targets')
-    assert.equal(editorTop - toolbarTop - Number.parseFloat(button.height), 12, 'Breadcrumbs sit 12px below toolbar')
+    // Actual toolbar/menu geometry is verified in a browser: JSDOM cannot resolve
+    // the shared safe-area and size tokens. Do not retain the superseded 44px policy.
     const path = getComputedStyle(document.querySelector('.document-path'))
     assert.equal(path.marginTop, '0px')
     assert.equal(path.marginBottom, '12px')

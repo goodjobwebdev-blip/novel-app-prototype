@@ -17,19 +17,15 @@
   --control-height-small: 32px;
   --control-height: 36px;
   --control-height-large: 44px;
-  --touch-target: 44px;
+  --icon-button-size: 30px;
+  --shell-header-top: max(10px, env(safe-area-inset-top));
+  --shell-header-inset: clamp(14px, 4vw, 32px);
+  --shell-header-height: calc(var(--shell-header-top) + var(--icon-button-size) + 10px);
+  --shell-nav-height: 44px;
 }
 
 @media (min-width: 760px) {
   :root { --page-padding: var(--space-8); }
 }
 
-/* Touch size is not a reason to inflate card padding or inter-field gaps. */
-@media (max-width: 720px), (pointer: coarse) {
-  :root {
-    --field-gap: 6px;
-    --control-height-small: var(--touch-target);
-    --control-height: var(--touch-target);
-    --control-height-large: 48px;
-  }
-}
+/* Control geometry is device-independent; responsive layout may still reflow. */

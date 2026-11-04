@@ -1,7 +1,8 @@
+import { X } from 'lucide-react'
 import { passageMarkers } from '../writing/scene-beats'
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
-import Button from '../../shared/ui/Button'
+import Button, { IconButton } from '../../shared/ui/Button'
 import ExpandableTextInput from '../../shared/ui/ExpandableTextInput'
 import Input from '../../shared/ui/Input'
 import Select from '../../shared/ui/Select'
@@ -60,7 +61,7 @@ export default function EditorBlocks({ bookId, editor, disabled, editRequest, in
   return <>
     {error && !draft && <p role="alert">{error}</p>}
     {draft && createPortal(<div className="editor-block-backdrop"><section ref={dialog} role="dialog" aria-modal="true" aria-labelledby="editor-block-title" className="editor-block-dialog" onKeyDown={(event) => { if (event.key === 'Escape' && !busy) setDraft(null); if (event.key === 'Tab') { const controls = Array.from(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)') ?? []); const first = controls[0], last = controls.at(-1); if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() } } }}>
-      <header><h2 id="editor-block-title">{draft.existing ? 'Edit' : 'Insert'} {draft.block.type === 'image' ? 'image' : draft.block.type === 'beat' ? 'scene beat' : 'private comment'}</h2><Button className="editor-block-close" size="small" variant="ghost" disabled={busy} onClick={() => setDraft(null)} aria-label="Close block editor">×</Button></header>
+      <header><h2 id="editor-block-title">{draft.existing ? 'Edit' : 'Insert'} {draft.block.type === 'image' ? 'image' : draft.block.type === 'beat' ? 'scene beat' : 'private comment'}</h2><IconButton className="editor-block-close" variant="ghost" disabled={busy} onClick={() => setDraft(null)} aria-label="Close block editor"><X aria-hidden="true" /></IconButton></header>
       <p>{draft.block.type === 'beat' ? 'Planning visible to Chat. Used as the instruction when generating this beat, and excluded from manuscript context and read aloud.' : 'This block stays in your book and backups. It is excluded from AI requests and read aloud.'}</p>
       {draft.block.type !== 'image' ? <ExpandableTextInput autoFocus value={draft.block.text || ''} onChange={(text) => patch({ text })} aria-label={draft.block.type === 'beat' ? 'Scene beat' : 'Private comment'} dialogTitle={draft.block.type === 'beat' ? 'Edit scene beat' : 'Edit private comment'} /> : <>
         <Select label="Saved image" value={draft.block.assetId || ''} disabled={busy} onChange={async (event) => {

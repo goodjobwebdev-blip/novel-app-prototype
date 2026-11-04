@@ -48,5 +48,4 @@
 
 .arc-theme-choice__swatch > b { width: 13px; height: 13px; border-radius: 50%; }
 .arc-theme-choice__actions { padding: 4px 5px 4px 0; display: flex; align-items: center; gap: 2px; }
-.arc-theme-choice__actions .arc-button { min-height: 44px; }
-.arc-theme-choice__actions .ui-icon-action { width: 44px; min-width: 44px; height: 44px; padding: 0; }
+.arc-theme-choice__actions .arc-button:not(.arc-icon-button) { min-height: 44px; }

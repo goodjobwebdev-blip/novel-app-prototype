@@ -1,7 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
-import Button from '../../shared/ui/Button'
+import { IconButton } from '../../shared/ui/Button'
 
 /** Native modal focus handling, with a viewport that follows the phone keyboard. */
 export default function IllustrationModal({ title, onClose, children, footer, fullScreen = false }: {
@@ -36,7 +36,7 @@ export default function IllustrationModal({ title, onClose, children, footer, fu
   return createPortal(<dialog ref={dialog} className={`image-modal ${fullScreen ? 'image-modal-full' : 'image-modal-sheet'}`} aria-label={title}
     onCancel={(event) => { event.preventDefault(); onClose() }} onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
     <section className="image-modal-panel">
-      <header className="image-modal-header"><h2>{title}</h2><Button className="image-modal-close" variant="secondary" onClick={onClose} aria-label={`Close ${title.toLowerCase()}`} leadingIcon={<X aria-hidden="true" />} /></header>
+      <header className="image-modal-header"><h2>{title}</h2><IconButton className="image-modal-close" variant="secondary" onClick={onClose} aria-label={`Close ${title.toLowerCase()}`}><X aria-hidden="true" /></IconButton></header>
       <div className="image-modal-content">{children}</div>
       {footer && <footer className="image-modal-footer">{footer}</footer>}
     </section>

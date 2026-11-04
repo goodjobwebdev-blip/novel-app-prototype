@@ -6,7 +6,7 @@ import { centeredImageView, type ImageView } from '../images/image-gestures'
 import { clearDescriptionDraft, readDescriptionDraft, saveDescriptionDraft } from '../images/illustration-drafts'
 import IllustrationModal from '../images/IllustrationModal'
 import IllustrationGestures from '../images/IllustrationGestures'
-import Button from '../../shared/ui/Button'
+import Button, { IconButton } from '../../shared/ui/Button'
 import '../images/illustrations.css'
 
 export const IMAGE_CHANGED = 'arc-illustrations-changed'
@@ -140,7 +140,7 @@ export default function CodexIllustration({ entry, readOnly, actions, children }
     </div>
     <div className="codex-identity-actions document-title-actions">
       {!image && !readOnly && <Button className="image-add" size="small" variant="secondary" disabled={busy || loading || Boolean(loadError)} onClick={() => open('actions')} leadingIcon={<ImagePlus aria-hidden="true" />}>Add image</Button>}
-      {image && !readOnly && <Button className="codex-image-menu" size="small" variant="secondary" disabled={busy} onClick={() => open('actions')} aria-label={`Image actions for ${entry.title}`} aria-haspopup="dialog" leadingIcon={<MoreHorizontal aria-hidden="true" />} />}
+      {image && !readOnly && <IconButton className="codex-image-menu" variant="secondary" disabled={busy} onClick={() => open('actions')} aria-label={`Image actions for ${entry.title}`} aria-haspopup="dialog"><MoreHorizontal aria-hidden="true" /></IconButton>}
       {actions}
     </div>
     {!readOnly && <input ref={input} hidden type="file" accept="image/png,image/jpeg,image/webp" aria-label="Upload Codex illustration" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void upload(file) }} />}
