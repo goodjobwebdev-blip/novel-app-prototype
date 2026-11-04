@@ -8,20 +8,22 @@
   --space-8: 32px;
 
   --field-gap: var(--space-1);
-  --control-gap: var(--space-2);
-  --field-stack-gap: var(--space-3);
+  --control-gap: 6px;
+  --control-padding-x: 10px;
+  --control-padding-y: 4px;
+  --field-stack-gap: var(--space-2);
   --card-padding: var(--space-3);
-  --group-gap: var(--space-4);
-  --section-gap: var(--space-6);
+  --group-gap: var(--space-3);
+  --section-gap: 20px;
   --page-padding: var(--space-4);
-  --control-height-small: 32px;
-  --control-height: 36px;
-  --control-height-large: 44px;
+  --control-height-small: 28px;
+  --control-height: 32px;
+  --control-height-large: 36px;
   --touch-target: 44px;
 }
 
 @media (min-width: 760px) {
-  :root { --page-padding: var(--space-8); }
+  :root { --page-padding: var(--space-6); }
 }
 
 /* Touch size is not a reason to inflate card padding or inter-field gaps. */
@@ -30,6 +32,6 @@
     --field-gap: 6px;
     --control-height-small: var(--touch-target);
     --control-height: var(--touch-target);
-    --control-height-large: 48px;
+    --control-height-large: var(--touch-target);
   }
 }

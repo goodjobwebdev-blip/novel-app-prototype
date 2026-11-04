@@ -13,8 +13,8 @@
 .image-modal .image-search input,
 .image-modal .image-gallery-viewer-actions select {
   min-width: 0;
-  min-height: 48px;
-  padding: 10px 12px;
+  min-height: var(--control-height);
+  padding: var(--control-padding-y) var(--control-padding-x);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface);
@@ -85,7 +85,7 @@
 .image-generation-summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; margin: 6px 0; color: var(--soft); font-size: 13px; }
 .image-model-summary strong { color: var(--ink); }
 .image-generate-actions { display: grid; gap: 8px; margin-top: 14px; }
-.image-ui .image-primary-action { width: 100%; min-height: 56px; border-color: var(--accent); background: var(--accent); color: var(--deep); font-weight: 700; }
+.image-ui .image-primary-action { width: 100%; min-height: var(--control-height-large); border-color: var(--accent); background: var(--accent); color: var(--deep); font-weight: 700; }
 .image-queue-status { min-height: 24px; margin: 6px 0 0; color: var(--accent); font-weight: 600; }
 .image-search { display: flex; align-items: center; gap: 8px; margin: 12px 0; }
 .image-search input { width: 100%; }

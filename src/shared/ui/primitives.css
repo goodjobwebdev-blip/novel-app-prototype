@@ -8,13 +8,13 @@
   gap: var(--control-gap);
   color: var(--ink);
   font-weight: 650;
-  line-height: 1;
+  line-height: 1.25;
   white-space: nowrap;
   cursor: pointer;
 }
-.arc-button--small { min-height: var(--control-height-small); padding: 0 var(--space-3); font-size: 11px; }
-.arc-button--medium { min-height: var(--control-height); padding: 0 var(--space-3); font-size: 12px; }
-.arc-button--large { min-height: var(--control-height-large); padding: 0 var(--space-4); font-size: 13px; }
+.arc-button--small { min-height: var(--control-height-small); padding: var(--control-padding-y) var(--space-2); font-size: 11px; }
+.arc-button--medium { min-height: var(--control-height); padding: var(--control-padding-y) var(--control-padding-x); font-size: 12px; }
+.arc-button--large { min-height: var(--control-height-large); padding: var(--control-padding-y) var(--space-3); font-size: 13px; }
 .arc-button--primary { border-color: color-mix(in srgb, var(--accent-bright) 75%, var(--accent)); background: var(--accent); color: var(--on-accent, #191711); }
 .arc-button--secondary { border-color: color-mix(in srgb, var(--ink) 28%, var(--line)); background: color-mix(in srgb, var(--surface-2) 82%, transparent); color: var(--ink); }
 .arc-button--ghost { border-color: transparent; background: transparent; color: var(--soft); }
@@ -29,9 +29,9 @@
 .arc-field > span, .arc-field > small, .arc-choice > span { margin: 0; }
 .arc-field__label { display: block; font-size: 12px; font-weight: 600; }
 .arc-input-wrap { position: relative; min-width: 0; display: flex; align-items: center; }
-.arc-input { width: 100%; min-height: var(--control-height); padding: var(--space-1) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius); outline: none; background: color-mix(in srgb, var(--surface-2) 82%, transparent); color: var(--ink); }
-.arc-input-wrap:has(.arc-input__icon) .arc-input { padding-left: 39px; }
-.arc-input__icon { position: absolute; z-index: 1; left: 12px; width: 16px; height: 16px; color: var(--faint); pointer-events: none; }
+.arc-input { width: 100%; min-height: var(--control-height); padding: var(--control-padding-y) var(--control-padding-x); border: 1px solid var(--line); border-radius: var(--radius); outline: none; background: color-mix(in srgb, var(--surface-2) 82%, transparent); color: var(--ink); }
+.arc-input-wrap:has(.arc-input__icon) .arc-input { padding-left: calc(var(--control-padding-x) + 16px + var(--control-gap)); }
+.arc-input__icon { position: absolute; z-index: 1; left: var(--control-padding-x); width: 16px; height: 16px; color: var(--faint); pointer-events: none; }
 .arc-input__icon > svg { width: 100%; height: 100%; }
 .arc-input::placeholder { color: var(--faint); }
 .arc-input:focus-visible { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 13%, transparent); }
@@ -41,12 +41,12 @@
 .arc-field__error { color: var(--danger); }
 .arc-field--error .arc-input { border-color: color-mix(in srgb, var(--danger) 60%, var(--line)); }
 .arc-select-wrap { position: relative; min-width: 0; display: flex; align-items: center; }
-.arc-select { width: 100%; min-height: var(--control-height); padding: var(--space-1) 38px var(--space-1) var(--space-3); appearance: none; border: 1px solid color-mix(in srgb, var(--ink) 28%, var(--line)); border-radius: var(--radius); outline: none; background: color-mix(in srgb, var(--surface-2) 82%, transparent); color: var(--ink); cursor: pointer; }
-.arc-select-wrap > svg { position: absolute; right: 12px; width: 16px; height: 16px; color: var(--faint); pointer-events: none; }
+.arc-select { width: 100%; min-height: var(--control-height); padding: var(--control-padding-y) calc(var(--control-padding-x) + 16px + var(--control-gap)) var(--control-padding-y) var(--control-padding-x); appearance: none; border: 1px solid color-mix(in srgb, var(--ink) 28%, var(--line)); border-radius: var(--radius); outline: none; background: color-mix(in srgb, var(--surface-2) 82%, transparent); color: var(--ink); cursor: pointer; }
+.arc-select-wrap > svg { position: absolute; right: var(--control-padding-x); width: 16px; height: 16px; color: var(--faint); pointer-events: none; }
 .arc-select:focus-visible { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 13%, transparent); }
 .arc-select:disabled { opacity: .55; cursor: not-allowed; }
 .arc-field--error .arc-select { border-color: color-mix(in srgb, var(--danger) 60%, var(--line)); }
-.arc-choice { min-width: 0; min-height: 44px; padding: 8px 9px; border: 1px solid transparent; border-radius: var(--radius); color: var(--soft); display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.arc-choice { min-width: 0; min-height: var(--control-height); padding: var(--control-padding-y) var(--space-2); border: 1px solid transparent; border-radius: var(--radius); color: var(--soft); display: flex; align-items: flex-start; gap: var(--control-gap); cursor: pointer; }
 .arc-choice:hover { border-color: var(--line); background: color-mix(in srgb, var(--surface-2) 64%, transparent); }
 .arc-choice > input:is([type="checkbox"],[type="radio"]) { width: 18px; height: 18px; min-width: 18px; min-height: 18px; max-width: 18px; max-height: 18px; margin: 1px 0 0; flex: 0 0 18px; aspect-ratio: 1; appearance: none; border: 1px solid color-mix(in srgb, var(--ink) 32%, var(--line)); background: color-mix(in srgb, var(--surface-2) 82%, transparent); display: grid; place-items: center; cursor: pointer; }
 .arc-choice > input[type="checkbox"] { border-radius: var(--radius); }
@@ -79,19 +79,19 @@
 .arc-card__body { margin-top: var(--field-stack-gap); }
 .arc-card > .arc-card__body:first-child { margin-top: 0; }
 
-.arc-panel-header { min-width: 0; margin-bottom: 20px; display: grid; gap: 12px; }
+.arc-panel-header { min-width: 0; margin-bottom: var(--group-gap); display: grid; gap: var(--field-stack-gap); }
 .arc-panel-header__copy { min-width: 0; }
 .arc-panel-header__copy small { display: block; color: var(--accent); font-size: 10px; letter-spacing: .15em; text-transform: uppercase; }
 .arc-panel-header__copy h2 { margin: 4px 0 0; font: 500 27px/1.12 var(--serif); overflow-wrap: anywhere; }
 .arc-panel-header__actions { min-width: 0; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
-.arc-panel-header__actions .arc-button { min-height: 44px; }
+.arc-panel-header__actions .arc-button { min-height: var(--control-height); }
 .arc-panel-header__actions .arc-button:empty,
 .arc-panel-header__actions .arc-button:has(> .arc-button__icon:only-child) { width: 44px; min-width: 44px; padding: 0; }
 
 @keyframes arc-button-spin { to { transform: rotate(360deg); } }
 @media (max-width: 720px) {
   .arc-panel-header__actions { justify-content: flex-start; }
-  .arc-choice { min-height: 58px; padding: 10px 11px; border-color: var(--line); background: color-mix(in srgb, var(--surface-2) 52%, transparent); align-items: center; }
+  .arc-choice { min-height: var(--control-height); padding: var(--control-padding-y) var(--space-2); border-color: var(--line); background: color-mix(in srgb, var(--surface-2) 52%, transparent); align-items: center; }
   .arc-choice:has(input:checked) { border-color: color-mix(in srgb, var(--accent) 42%, var(--line)); background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
   .arc-choice > input:is([type="checkbox"],[type="radio"]) { width: 22px; height: 22px; min-width: 22px; min-height: 22px; max-width: 22px; max-height: 22px; margin-top: 0; flex-basis: 22px; }
   .arc-choice > input[type="checkbox"]::after { font-size: 14px; }
