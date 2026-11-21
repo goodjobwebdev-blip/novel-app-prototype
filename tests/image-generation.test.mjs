@@ -309,6 +309,30 @@ test('Pruna submits an aspect ratio, persists async predictions, and decodes out
   }
 })
 
+test('Pruna catalog ratios resolve, appear in model instructions, and reach the provider unchanged', async () => {
+  for (const model of s.prunaImageModels.filter(model => model.sizeMode === 'aspect_ratio')) {
+    const favorite = s.imageFavorite(model, [])
+    const settings = { keys: {}, favorites: [favorite], defaultAlias: favorite.alias }
+    for (const [index, ratio] of model.ratios.entries()) {
+      const size = model.sizes[index]
+      assert.equal(s.imageRatio(size, model), ratio, `${model.id}/${size.value} label`)
+      const spec = s.resolveImageSpec('A gate', favorite.alias, undefined, ratio, settings, model.tasks[0], model.tasks[0] === 'image-to-image' ? [{ id: 'source', mime: 'image/png', data: png, width: 1, height: 1 }] : [])
+      assert.equal(spec.size.value, size.value)
+      assert.ok(s.imageModelInstructions(settings).includes(`"ratio":"${ratio}"`))
+      await providers.generateProviderImage({ ...spec, id: 'ratio-test', status: 'running', createdAt: 1 }, prunaCredentials(), new AbortController().signal, async () => {}, async (url, init) => {
+        if (url.endsWith('/v1/files')) return response({ urls: { get: '/v1/files/uploaded' } })
+        if (url.endsWith('/v1/predictions')) {
+          assert.equal(JSON.parse(init.body).input.aspect_ratio, ratio, `${model.id} request`)
+          return response({ status: 'complete', generation_url: '/v1/predictions/delivery/ratio-test' })
+        }
+        return new Response(png)
+      })
+    }
+  }
+  // Other providers use the actual pixel ratio, not Pruna's nominal presets.
+  assert.equal(s.imageRatio(s.imageSize('1344x768')), '7:4')
+})
+
 test('Pruna submits dimensions for Z-Image Turbo and decodes synchronous generation URL arrays', async () => {
   const calls = []
   const result = await providers.generateProviderImage(job('pruna', { model: 'z-image-turbo', size: s.imageSize('1344x768') }), prunaCredentials('pruna-key'), new AbortController().signal, async () => assert.fail('A synchronous result has no prediction to persist.'), async (url, init) => {
