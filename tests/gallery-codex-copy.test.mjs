@@ -15,6 +15,9 @@ for (const key of ['window', 'document', 'localStorage', 'HTMLElement', 'Event',
 Object.defineProperty(globalThis, 'navigator', { value: dom.window.navigator, configurable: true })
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 window.confirm = () => true
+// JSDOM has no native modal implementation; keep the real gallery/viewer tree.
+dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true }
+dom.window.HTMLDialogElement.prototype.close = function () { this.open = false }
 const { createRoot } = await import('react-dom/client')
 const compiled = await build({
   stdin: { contents: `export * as p from './src/data/persistence.ts'; export { initialAiSettings } from './src/shared/ai/ai-settings.ts'; export * as store from './src/features/images/image-store.ts'; export { default as EditorBlocks } from './src/features/editor/EditorBlocks.tsx'; export { ImageGalleryView, createImageWorkspaceState } from './src/features/images/ImageWorkspace.tsx'; export { default as ImagePanel } from './src/features/images/ImagePanel.tsx';`, resolveDir: fileURLToPath(new URL('../', import.meta.url)), loader: 'tsx' },
