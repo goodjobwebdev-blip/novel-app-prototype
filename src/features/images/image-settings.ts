@@ -11,7 +11,13 @@ export const generationTaskNames: Record<GenerationTask, string> = {
   'text-to-video': 'Text to video',
   'image-to-video': 'Image to video',
 }
-export function imageRatio(size: Pick<ImageSize, 'width' | 'height'>) {
+export function imageRatio(size: Pick<ImageSize, 'width' | 'height'>, model?: Pick<ImageModel, 'provider' | 'id'>) {
+  if (model?.provider === 'pruna') {
+    const contract = prunaImageModels.find(candidate => candidate.id === model.id)
+    const index = contract?.sizes.findIndex(candidate => candidate.width === size.width && candidate.height === size.height) ?? -1
+    const ratio = contract?.ratios?.[index]
+    if (ratio) return ratio
+  }
   const gcd = (a: number, b: number): number => b ? gcd(b, a % b) : a
   const divisor = gcd(size.width, size.height)
   return `${size.width / divisor}:${size.height / divisor}`
@@ -140,13 +146,13 @@ export function resolveImageSpec(prompt: string, alias?: string, size?: string, 
   const enabled = model.sizes.filter((candidate) => model.enabledSizes.includes(candidate.value))
   const explicit = size ? imageSize(size)?.value : undefined
   if (size && !explicit) throw new Error('Use a size such as 1024x1024.')
-  const chosen = explicit ? enabled.find((candidate) => candidate.value === explicit) : ratio ? enabled.find((candidate) => imageRatio(candidate) === ratio) : enabled.find((candidate) => candidate.value === model.defaultSize)
-  if (!chosen || (ratio && imageRatio(chosen) !== ratio)) throw new Error('That size or ratio is not enabled for the selected model.')
+  const chosen = explicit ? enabled.find((candidate) => candidate.value === explicit) : ratio ? enabled.find((candidate) => imageRatio(candidate, model) === ratio) : enabled.find((candidate) => candidate.value === model.defaultSize)
+  if (!chosen || (ratio && imageRatio(chosen, model) !== ratio)) throw new Error('That size or ratio is not enabled for the selected model.')
   const isVideo = task.endsWith('video')
   const cleanVideo: VideoGenerationOptions | undefined = isVideo ? {
     resolution: model.videoResolutions?.includes(video.resolution ?? '') ? video.resolution : model.videoResolutions?.[0],
     duration: model.videoDurations?.includes(video.duration ?? -1) ? video.duration : model.videoDurations?.[0] ?? 5,
-    aspectRatio: model.aspectRatios?.includes(video.aspectRatio ?? '') ? video.aspectRatio : model.aspectRatios?.[0] ?? imageRatio(chosen),
+    aspectRatio: model.aspectRatios?.includes(video.aspectRatio ?? '') ? video.aspectRatio : model.aspectRatios?.[0] ?? imageRatio(chosen, model),
     ...(Number.isFinite(video.fps) ? { fps: Math.round(video.fps!) } : {}),
     ...(Number.isFinite(video.numFrames) ? { numFrames: Math.round(video.numFrames!) } : {}),
     ...(Number.isFinite(video.seed) ? { seed: Math.round(video.seed!) } : {}),
@@ -164,6 +170,6 @@ export function imageFavorite(model: ImageModel, used: FavoriteImageModel[]): Fa
   return { ...model, tasks: normalizedTasks(model), alias, enabledSizes: model.sizes.map((size) => size.value), defaultSize, ...(model.provider === 'leonardo' ? { leonardoOptions: leonardoDefaults(model.id) } : {}), ...(model.provider === 'openai' ? { quality: /^gpt-image-2\.5-/.test(model.id) ? 'auto' : 'low', moderation: 'low' } : {}) }
 }
 export function imageModelInstructions(settings: ImageSettings = loadImageSettings()) {
-  return `\n\nVisual generation proposals never contact a provider or incur a charge. The user must press Generate to approve the shown draft and queue a request. Use only configured favorite aliases and supported tasks. If none exist, ask the user to configure Image and Video profiles in global Settings. Favorites: ${JSON.stringify(settings.favorites.map((favorite) => ({ alias: favorite.alias, tasks: modelTasks(favorite), maxSourceImages: favorite.maxSourceImages ?? 0, sizes: favorite.sizes.filter((size) => favorite.enabledSizes.includes(size.value)).map((size) => ({ size: size.value, ratio: imageRatio(size) })), defaultSize: favorite.defaultSize })))} `
+  return `\n\nVisual generation proposals never contact a provider or incur a charge. The user must press Generate to approve the shown draft and queue a request. Use only configured favorite aliases and supported tasks. If none exist, ask the user to configure Image and Video profiles in global Settings. Favorites: ${JSON.stringify(settings.favorites.map((favorite) => ({ alias: favorite.alias, tasks: modelTasks(favorite), maxSourceImages: favorite.maxSourceImages ?? 0, sizes: favorite.sizes.filter((size) => favorite.enabledSizes.includes(size.value)).map((size) => ({ size: size.value, ratio: imageRatio(size, favorite) })), defaultSize: favorite.defaultSize })))} `
 }
 export { generationTask }

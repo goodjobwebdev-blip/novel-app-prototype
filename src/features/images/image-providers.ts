@@ -215,7 +215,7 @@ async function nano(job: ImageJob, key: string, signal: AbortSignal, onSubmitted
   }
 }
 function prunaInput(job: ImageJob, uploaded: string[]) {
-  const task = generationTask(job), ratio = job.video?.aspectRatio ?? imageRatio(job.size), seed = job.video?.seed
+  const task = generationTask(job), ratio = job.video?.aspectRatio ?? imageRatio(job.size, { provider: job.provider, id: job.model }), seed = job.video?.seed
   if (job.model === 'p-image-edit') return { prompt: job.prompt, images: uploaded, aspect_ratio: ratio, turbo: true, disable_safety_checker: true, ...(seed !== undefined ? { seed } : {}) }
   if (job.model === 'qwen-image-edit-plus') return { prompt: job.prompt, image: uploaded, aspect_ratio: ratio, go_fast: true, output_format: 'webp', output_quality: 95, disable_safety_checker: true, ...(seed !== undefined ? { seed } : {}) }
   if (job.model === 'wan-i2v') return { prompt: job.prompt, image: uploaded[0], resolution: job.video?.resolution ?? '480p', num_frames: job.video?.numFrames ?? 81, frames_per_second: job.video?.fps ?? 16, go_fast: true, ...(seed !== undefined ? { seed } : {}) }
@@ -223,7 +223,7 @@ function prunaInput(job: ImageJob, uploaded: string[]) {
   if (job.model === 'wan-t2v') return { prompt: job.prompt, resolution: job.video?.resolution ?? '480p', num_frames: job.video?.numFrames ?? 81, frames_per_second: job.video?.fps ?? 16, aspect_ratio: ratio, ...(seed !== undefined ? { seed } : {}) }
   const model = prunaImageModels.find((candidate) => candidate.id === job.model)
   if (!model || !modelTasks(model).includes(task)) throw new Error(`Unsupported Pruna task or model: ${task}/${job.model}`)
-  return model.sizeMode === 'dimensions' ? { prompt: job.prompt, width: job.size.width, height: job.size.height } : { prompt: job.prompt, aspect_ratio: imageRatio(job.size) }
+  return model.sizeMode === 'dimensions' ? { prompt: job.prompt, width: job.size.width, height: job.size.height } : { prompt: job.prompt, aspect_ratio: imageRatio(job.size, { provider: job.provider, id: job.model }) }
 }
 async function pruna(job: ImageJob, key: string, gatewayUrl: string, signal: AbortSignal, onSubmitted: (id: string) => Promise<void>, fetcher: typeof fetch, pause: (ms: number) => Promise<void>) {
   const model = prunaImageModels.find((candidate) => candidate.id === job.model)
