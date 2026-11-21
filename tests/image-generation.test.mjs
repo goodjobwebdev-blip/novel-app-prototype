@@ -112,6 +112,27 @@ test('favorites validate aliases and dimensions; ratio resolves an enabled size 
   assert.throws(() => s.validateImageSettings(settings), /unique/)
 })
 
+for (const reference of ['manuscript', 'snapshot', 'checkpoint']) {
+  test(`gallery deletion refuses an image referenced by a ${reference} without breaking backup`, async () => {
+    await clearJobs()
+    const { book, scene } = await p.createBook(initialAiSettings, 'Referenced image')
+    const db = await p.database()
+    const id = 'protected-' + reference
+    const { encodeDocumentBlock } = await import('../src/features/editor/document-projection.ts')
+    const content = encodeDocumentBlock({ id: 'image-block', type: 'image', assetId: id })
+    await db.table('galleryImages').add({ ...output, id, bookId: book.id, prompt: 'Referenced', kept: true, createdAt: Date.now() })
+    if (reference === 'manuscript') await p.saveDocumentContent(scene.id, content)
+    else if (reference === 'snapshot') await db.table('snapshots').add({ id: 'snapshot-' + id, entityId: scene.id, entityType: 'scene', content, createdAt: Date.now(), reason: 'manual' })
+    else await db.table('entities').update(scene.id, { checkpoints: [{ id: 'checkpoint-' + id, content, createdAt: Date.now() }] })
+    await db.table('imageJobs').add({ ...job('openai'), id: 'job-' + id, bookId: book.id, status: 'completed', assetId: id, decision: 'kept' })
+    assert.ok((await p.readBookArchive(book.id)).galleryImages.some(asset => asset.id === id))
+    await assert.rejects(store.deleteGalleryImage(id), /used|referenced|manuscript|snapshot|checkpoint/i)
+    assert.equal((await store.getGalleryImage(id)).image.size, png.size)
+    assert.equal((await db.table('imageJobs').get('job-' + id)).assetId, id)
+    assert.ok((await p.readBookArchive(book.id)).galleryImages.some(asset => asset.id === id))
+  })
+}
+
 test('proposal and acceptance never generate; origin and approval are enforced', async () => {
   await clearJobs()
   const f = await fixture()
@@ -307,6 +328,30 @@ test('Pruna submits an aspect ratio, persists async predictions, and decodes out
     assert.equal(result.image.size, png.size)
     assert.equal(result.cost, 0.005)
   }
+})
+
+test('Pruna catalog ratios resolve, appear in model instructions, and reach the provider unchanged', async () => {
+  for (const model of s.prunaImageModels.filter(model => model.sizeMode === 'aspect_ratio')) {
+    const favorite = s.imageFavorite(model, [])
+    const settings = { keys: {}, favorites: [favorite], defaultAlias: favorite.alias }
+    for (const [index, ratio] of model.ratios.entries()) {
+      const size = model.sizes[index]
+      assert.equal(s.imageRatio(size, model), ratio, `${model.id}/${size.value} label`)
+      const spec = s.resolveImageSpec('A gate', favorite.alias, undefined, ratio, settings, model.tasks[0], model.tasks[0] === 'image-to-image' ? [{ id: 'source', mime: 'image/png', data: png, width: 1, height: 1 }] : [])
+      assert.equal(spec.size.value, size.value)
+      assert.ok(s.imageModelInstructions(settings).includes(`"ratio":"${ratio}"`))
+      await providers.generateProviderImage({ ...spec, id: 'ratio-test', status: 'running', createdAt: 1 }, prunaCredentials(), new AbortController().signal, async () => {}, async (url, init) => {
+        if (url.endsWith('/v1/files')) return response({ urls: { get: '/v1/files/uploaded' } })
+        if (url.endsWith('/v1/predictions')) {
+          assert.equal(JSON.parse(init.body).input.aspect_ratio, ratio, `${model.id} request`)
+          return response({ status: 'complete', generation_url: '/v1/predictions/delivery/ratio-test' })
+        }
+        return new Response(png)
+      })
+    }
+  }
+  // Other providers use the actual pixel ratio, not Pruna's nominal presets.
+  assert.equal(s.imageRatio(s.imageSize('1344x768')), '7:4')
 })
 
 test('Pruna submits dimensions for Z-Image Turbo and decodes synchronous generation URL arrays', async () => {

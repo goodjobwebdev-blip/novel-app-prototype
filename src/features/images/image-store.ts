@@ -1,4 +1,5 @@
 import { selectedMediaPrompt } from './media-prompt'
+import { documentBlocks } from '../editor/document-projection'
 import { KeyedAsyncQueue } from '../../shared/utils/keyed-async-queue'
 import type { MediaGenerationDraft } from './image-generation-types'
 import { database, getEntity, type ArcEntity, type Illustration } from '../../data/persistence'
@@ -18,7 +19,9 @@ export async function listGalleryImages(bookId?: string): Promise<GalleryImage[]
   const db = await database()
   const generated: GalleryImage[] = await db.table('galleryImages').toArray()
   const uploads: Illustration[] = await db.table('illustrations').toArray()
-  return [...generated.filter((a) => a.kept), ...uploads.map((a): GalleryImage => ({ id: `codex:${a.id}`, entryId: a.entryId, illustrationId: a.id, bookId: a.bookId, prompt: a.caption, image: a.image, thumbnail: a.thumbnail, width: a.width, height: a.height, createdAt: a.createdAt, kept: true }))]
+  // Gallery records are independent assets, including older editor copies that
+  // accidentally retained the live Codex illustration's identity fields.
+  return [...generated.filter((a) => a.kept).map(({ entryId: _entryId, illustrationId: _illustrationId, ...asset }) => asset), ...uploads.map((a): GalleryImage => ({ id: `codex:${a.id}`, entryId: a.entryId, illustrationId: a.id, bookId: a.bookId, prompt: a.caption, image: a.image, thumbnail: a.thumbnail, width: a.width, height: a.height, createdAt: a.createdAt, kept: true }))]
     .filter((a) => !bookId || a.bookId === bookId).sort((a, b) => b.createdAt - a.createdAt)
 }
 export type ImageJobOrigin = { bookId?: string; chatId?: string; messageId?: string; proposalId?: string; submissionId?: string }
@@ -197,7 +200,12 @@ export async function clearImageQueue(ids: string[]) {
 }
 export async function deleteGalleryImage(id: string) {
   const db = await database()
-  await db.transaction('rw', db.table('galleryImages'), db.table('imageJobs'), async () => {
+  await db.transaction('rw', db.table('galleryImages'), db.table('imageJobs'), db.table('entities'), db.table('snapshots'), async () => {
+    // Check durable references under the same lock as deletion, including history.
+    const references = (content: string | undefined) => documentBlocks(content ?? '').some(item => item.block.assetId === id)
+    const entity = await db.table('entities').filter((entry: ArcEntity) => references(entry.content) || (Array.isArray(entry.checkpoints) && entry.checkpoints.some(checkpoint => references(checkpoint.content)))).first()
+    const snapshot = await db.table('snapshots').filter((snapshot: { content?: string }) => references(snapshot.content)).first()
+    if (entity || snapshot) throw new Error('This image is used in a document, snapshot, or checkpoint. Remove those references before deleting it.')
     await db.table('galleryImages').delete(id)
     await db.table('imageJobs').filter((j: ImageJob) => j.assetId === id).modify({ decision: 'discarded', assetId: undefined })
   })

@@ -102,7 +102,7 @@ export default function ImageGenerationControls({ value, onChange, disabled = fa
       <ImageModelPicker value={value.alias} models={compatible} onChange={chooseModel} disabled={disabled} />
       {!isVideo && <Select label="Size" value={value.size} disabled={disabled} onChange={event => onChange({ ...value, size: event.target.value })}>
         {!favorite?.enabledSizes.includes(value.size) && <option value={value.size} disabled>{value.size || 'Choose size'} — unavailable</option>}
-        {favorite?.sizes.filter(size => favorite.enabledSizes.includes(size.value)).map(size => <option key={size.value} value={size.value}>{imageRatio(size)} · {size.width} × {size.height}</option>)}
+        {favorite?.sizes.filter(size => favorite.enabledSizes.includes(size.value)).map(size => <option key={size.value} value={size.value}>{imageRatio(size, favorite)} · {size.width} × {size.height}</option>)}
       </Select>}
       {isVideo && <>
         <Select label="Resolution" value={value.resolution ?? favorite?.videoResolutions?.[0] ?? ''} disabled={disabled} onChange={event => onChange({ ...value, resolution: event.target.value })}>{(favorite?.videoResolutions ?? []).map(resolution => <option key={resolution} value={resolution}>{resolution}</option>)}</Select>
