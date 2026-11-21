@@ -112,6 +112,27 @@ test('favorites validate aliases and dimensions; ratio resolves an enabled size 
   assert.throws(() => s.validateImageSettings(settings), /unique/)
 })
 
+for (const reference of ['manuscript', 'snapshot', 'checkpoint']) {
+  test(`gallery deletion refuses an image referenced by a ${reference} without breaking backup`, async () => {
+    await clearJobs()
+    const { book, scene } = await p.createBook(initialAiSettings, 'Referenced image')
+    const db = await p.database()
+    const id = 'protected-' + reference
+    const { encodeDocumentBlock } = await import('../src/features/editor/document-projection.ts')
+    const content = encodeDocumentBlock({ id: 'image-block', type: 'image', assetId: id })
+    await db.table('galleryImages').add({ ...output, id, bookId: book.id, prompt: 'Referenced', kept: true, createdAt: Date.now() })
+    if (reference === 'manuscript') await p.saveDocumentContent(scene.id, content)
+    else if (reference === 'snapshot') await db.table('snapshots').add({ id: 'snapshot-' + id, entityId: scene.id, entityType: 'scene', content, createdAt: Date.now(), reason: 'manual' })
+    else await db.table('entities').update(scene.id, { checkpoints: [{ id: 'checkpoint-' + id, content, createdAt: Date.now() }] })
+    await db.table('imageJobs').add({ ...job('openai'), id: 'job-' + id, bookId: book.id, status: 'completed', assetId: id, decision: 'kept' })
+    assert.ok((await p.readBookArchive(book.id)).galleryImages.some(asset => asset.id === id))
+    await assert.rejects(store.deleteGalleryImage(id), /used|referenced|manuscript|snapshot|checkpoint/i)
+    assert.equal((await store.getGalleryImage(id)).image.size, png.size)
+    assert.equal((await db.table('imageJobs').get('job-' + id)).assetId, id)
+    assert.ok((await p.readBookArchive(book.id)).galleryImages.some(asset => asset.id === id))
+  })
+}
+
 test('proposal and acceptance never generate; origin and approval are enforced', async () => {
   await clearJobs()
   const f = await fixture()
