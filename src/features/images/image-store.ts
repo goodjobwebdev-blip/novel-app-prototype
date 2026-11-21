@@ -1,4 +1,5 @@
 import { selectedMediaPrompt } from './media-prompt'
+import { documentBlocks } from '../editor/document-projection'
 import { KeyedAsyncQueue } from '../../shared/utils/keyed-async-queue'
 import type { MediaGenerationDraft } from './image-generation-types'
 import { database, getEntity, type ArcEntity, type Illustration } from '../../data/persistence'
@@ -197,7 +198,12 @@ export async function clearImageQueue(ids: string[]) {
 }
 export async function deleteGalleryImage(id: string) {
   const db = await database()
-  await db.transaction('rw', db.table('galleryImages'), db.table('imageJobs'), async () => {
+  await db.transaction('rw', db.table('galleryImages'), db.table('imageJobs'), db.table('entities'), db.table('snapshots'), async () => {
+    // Check durable references under the same lock as deletion, including history.
+    const references = (content: string | undefined) => documentBlocks(content ?? '').some(item => item.block.assetId === id)
+    const entity = await db.table('entities').filter((entry: ArcEntity) => references(entry.content) || (Array.isArray(entry.checkpoints) && entry.checkpoints.some(checkpoint => references(checkpoint.content)))).first()
+    const snapshot = await db.table('snapshots').filter((snapshot: { content?: string }) => references(snapshot.content)).first()
+    if (entity || snapshot) throw new Error('This image is used in a document, snapshot, or checkpoint. Remove those references before deleting it.')
     await db.table('galleryImages').delete(id)
     await db.table('imageJobs').filter((j: ImageJob) => j.assetId === id).modify({ decision: 'discarded', assetId: undefined })
   })
