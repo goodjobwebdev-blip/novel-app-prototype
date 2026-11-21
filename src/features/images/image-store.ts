@@ -19,7 +19,9 @@ export async function listGalleryImages(bookId?: string): Promise<GalleryImage[]
   const db = await database()
   const generated: GalleryImage[] = await db.table('galleryImages').toArray()
   const uploads: Illustration[] = await db.table('illustrations').toArray()
-  return [...generated.filter((a) => a.kept), ...uploads.map((a): GalleryImage => ({ id: `codex:${a.id}`, entryId: a.entryId, illustrationId: a.id, bookId: a.bookId, prompt: a.caption, image: a.image, thumbnail: a.thumbnail, width: a.width, height: a.height, createdAt: a.createdAt, kept: true }))]
+  // Gallery records are independent assets, including older editor copies that
+  // accidentally retained the live Codex illustration's identity fields.
+  return [...generated.filter((a) => a.kept).map(({ entryId: _entryId, illustrationId: _illustrationId, ...asset }) => asset), ...uploads.map((a): GalleryImage => ({ id: `codex:${a.id}`, entryId: a.entryId, illustrationId: a.id, bookId: a.bookId, prompt: a.caption, image: a.image, thumbnail: a.thumbnail, width: a.width, height: a.height, createdAt: a.createdAt, kept: true }))]
     .filter((a) => !bookId || a.bookId === bookId).sort((a, b) => b.createdAt - a.createdAt)
 }
 export type ImageJobOrigin = { bookId?: string; chatId?: string; messageId?: string; proposalId?: string; submissionId?: string }

@@ -70,7 +70,8 @@ export default function EditorBlocks({ bookId, editor, disabled, editRequest, in
           if (!asset.id.startsWith('codex:')) { patch({ assetId: asset.id }); return }
           setBusy(true); setError('')
           try {
-            const copy = { ...asset, id: imageId('editor-image'), bookId, prompt: 'Editor image', kept: true, createdAt: Date.now() }
+            const { entryId: _entryId, illustrationId: _illustrationId, ...pixels } = asset
+            const copy = { ...pixels, id: imageId('editor-image'), bookId, prompt: 'Editor image', kept: true, createdAt: Date.now() }
             await (await database()).table('galleryImages').add(copy)
             setImages((items) => [copy, ...items]); patch({ assetId: copy.id }); notifyImageStore()
           } catch (e) { setError(e instanceof Error ? e.message : 'Could not save image.') } finally { setBusy(false) }

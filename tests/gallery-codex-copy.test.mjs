@@ -14,6 +14,7 @@ after(() => dom.window.close())
 for (const key of ['window', 'document', 'localStorage', 'HTMLElement', 'Event', 'CustomEvent']) globalThis[key] = dom.window[key]
 Object.defineProperty(globalThis, 'navigator', { value: dom.window.navigator, configurable: true })
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
+globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} }
 window.confirm = () => true
 // JSDOM has no native modal implementation; keep the real gallery/viewer tree.
 dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true }
