@@ -2638,7 +2638,7 @@ export default function Workspace() {
 
       {screen === 'editor' ? <article className={`story-editor ${isReferenceDocument ? 'story-editor--reference' : ''}`}>
         {pageLabel && <small className="page-number">{pageLabel}</small>}<p className="document-path">{documentPath || 'No document selected'}</p>
-        {activeDocument?.type === 'scene' && currentBook && <><CodexEntryTitle key={activeDocument.id} kind="scene" headingClassName="scene-title" title={activeDocument.title} readOnly={false} disabled={generationActive || articleIssue?.documentId === activeDocument.id} onSave={title => saveDocumentTitle(activeDocument, title)} /><SceneWritingSettings key={activeDocument.id} scene={activeDocument} book={toBookPromptValues(currentBook, seriesList)} disabled={generationActive} onSave={async (patch, before) => {
+        {activeDocument?.type === 'scene' && currentBook && <><CodexEntryTitle key={`title-${activeDocument.id}`} kind="scene" headingClassName="scene-title" title={activeDocument.title} readOnly={false} disabled={generationActive || articleIssue?.documentId === activeDocument.id} onSave={title => saveDocumentTitle(activeDocument, title)} /><SceneWritingSettings key={activeDocument.id} scene={activeDocument} book={toBookPromptValues(currentBook, seriesList)} disabled={generationActive} onSave={async (patch, before) => {
           const id = activeDocument.id
           await applyChatManagementChange(currentBook.id, id, { kind: 'scene_metadata', patch, before })
           if (activeDocumentIdRef.current === id) setActiveDocument((current) => current?.id === id ? { ...current, ...patch } : current)
