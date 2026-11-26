@@ -48,7 +48,7 @@ async function settle(predicate) {
 async function click(element) { assert.ok(element, 'The navigation control exists'); await act(async () => element.click()) }
 const button = label => document.querySelector(`button[aria-label="${label}"]`)
 
-test('switching notes and returning to a scene never leaves duplicate note controls behind', async t => {
+test('scene and note titles edit inline without duplicate controls or sibling keys', async t => {
   await p.ensurePrototypeSeed('demo')
   const { book } = await p.createBook(initialAiSettings, 'Switching test book')
   await p.createNote(book.id, 'First note')
@@ -63,6 +63,41 @@ test('switching notes and returning to a scene never leaves duplicate note contr
     await settle(bookButton)
     await click(bookButton())
     await settle(() => button('Open book workspace'))
+    async function renameTitle(entity, label, selector) {
+      const titleControl = () => document.querySelector(`${selector} button`)
+      assert.ok(titleControl(), `${label} title is directly editable`)
+      const originalContent = (await p.getEntity(entity.id)).content
+      const input = () => document.querySelector(`input[aria-label="${label}"]`)
+      const type = async value => act(async () => {
+        Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set.call(input(), value)
+        input().dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+      })
+      const key = async value => act(async () => input().dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: value, bubbles: true })))
+      await click(titleControl())
+      assert.ok(document.activeElement === input(), 'Title input receives focus')
+      assert.equal(input().value, entity.title)
+      await type('   ')
+      await key('Enter')
+      assert.equal(input().getAttribute('aria-invalid'), 'true', 'Blank titles remain editable')
+      assert.equal((await p.getEntity(entity.id)).title, entity.title)
+      await type('Cancelled title')
+      await key('Escape')
+      assert.equal(input(), null)
+      assert.equal(titleControl().textContent, entity.title)
+      await click(titleControl())
+      await type(`  ${entity.title} renamed  `)
+      await key('Enter')
+      await settle(() => titleControl()?.textContent === `${entity.title} renamed`)
+      assert.equal((await p.getEntity(entity.id)).title, `${entity.title} renamed`)
+      await click(titleControl())
+      await type(`${entity.title} final`)
+      await act(async () => input().blur())
+      await settle(() => titleControl()?.textContent === `${entity.title} final`)
+      const saved = await p.getEntity(entity.id)
+      assert.equal(saved.title, `${entity.title} final`)
+      assert.equal(saved.content, originalContent, 'Renaming does not change the document body')
+      assert.equal(document.querySelector('.document-path').textContent.includes(saved.title), true)
+    }
     for (const title of ['First note', 'Second note', 'First note']) {
       await click(button('Open book workspace'))
       await click([...document.querySelectorAll('.book-panel nav button')].find(item => item.textContent === 'notes'))
@@ -75,6 +110,15 @@ test('switching notes and returning to a scene never leaves duplicate note contr
     await click(button('Return to Scene'))
     await settle(() => document.querySelector('.scene-title'))
     assert.equal(document.querySelectorAll('.note-roles').length, 0, 'Scene has no stale note controls')
+    const entities = await p.listEntitiesByBook(book.id)
+    const scene = entities.find(entity => entity.type === 'scene' && entity.title === document.querySelector('.scene-title').textContent)
+    await renameTitle(scene, 'Scene title', '.scene-title')
+    await click(button('Open book workspace'))
+    await click([...document.querySelectorAll('.book-panel nav button')].find(item => item.textContent === 'notes'))
+    await click([...document.querySelectorAll('.notes-panel .arc-resource-row__open')].find(item => item.textContent.includes('First note')))
+    await settle(() => document.querySelector('.document-titlebar h1')?.textContent === 'First note')
+    await renameTitle(entities.find(entity => entity.type === 'note' && entity.title === 'First note'), 'Note title', '.document-titlebar h1')
+    assert.equal([...document.querySelectorAll('.document-title-actions button')].some(item => item.textContent === 'Rename'), false, 'Note title replaces the separate Rename button')
     assert.ok(!errors.some(message => /same key/.test(message)), 'Sibling components have distinct identities')
   } finally {
     console.error = originalError

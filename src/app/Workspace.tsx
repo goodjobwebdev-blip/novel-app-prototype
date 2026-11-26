@@ -1486,13 +1486,15 @@ export default function Workspace() {
     }
   }
 
-  async function saveCodexTitle(entity: CodexEntryEntity, title: string) {
+  async function saveDocumentTitle(entity: StructuralEntity | NoteEntity | CodexEntryEntity, title: string) {
     if (articleIssueRef.current?.documentId === entity.id) throw new Error('Resolve the article save issue before renaming.')
-    if (isCodexEntryArchived(entity)) throw new Error('Restore this entry before renaming.')
+    if (entity.type === 'codexEntry' && isCodexEntryArchived(entity)) throw new Error('Restore this entry before renaming.')
     await documentSaveQueueRef.current.run(entity.id, async () => {
       if (articleIssueRef.current?.documentId === entity.id) throw new Error('Resolve the article save issue before renaming.')
-      const updated = await renameEntity(entity.id, title) as CodexEntryEntity
-      setCodexEntries(entries => entries.map(entry => entry.id === updated.id ? updated : entry))
+      const updated = await renameEntity(entity.id, title) as StructuralEntity | NoteEntity | CodexEntryEntity
+      if (updated.type === 'scene') setOutlineEntities(entries => entries.map(entry => entry.id === updated.id ? updated : entry))
+      else if (updated.type === 'note') setNotes(entries => entries.map(entry => entry.id === updated.id ? updated : entry))
+      else if (updated.type === 'codexEntry') setCodexEntries(entries => entries.map(entry => entry.id === updated.id ? updated : entry))
       applyIfStillCurrent(entity.id, () => activeDocumentIdRef.current, () => { acceptArticleMetadata(updated); setActiveDocument(updated) })
     })
   }
@@ -2636,7 +2638,7 @@ export default function Workspace() {
 
       {screen === 'editor' ? <article className={`story-editor ${isReferenceDocument ? 'story-editor--reference' : ''}`}>
         {pageLabel && <small className="page-number">{pageLabel}</small>}<p className="document-path">{documentPath || 'No document selected'}</p>
-        {activeDocument?.type === 'scene' && currentBook && <><h1 className="scene-title">{activeDocument.title}</h1><SceneWritingSettings key={activeDocument.id} scene={activeDocument} book={toBookPromptValues(currentBook, seriesList)} disabled={generationActive} onSave={async (patch, before) => {
+        {activeDocument?.type === 'scene' && currentBook && <><CodexEntryTitle key={`title-${activeDocument.id}`} kind="scene" headingClassName="scene-title" title={activeDocument.title} readOnly={false} disabled={generationActive || articleIssue?.documentId === activeDocument.id} onSave={title => saveDocumentTitle(activeDocument, title)} /><SceneWritingSettings key={activeDocument.id} scene={activeDocument} book={toBookPromptValues(currentBook, seriesList)} disabled={generationActive} onSave={async (patch, before) => {
           const id = activeDocument.id
           await applyChatManagementChange(currentBook.id, id, { kind: 'scene_metadata', patch, before })
           if (activeDocumentIdRef.current === id) setActiveDocument((current) => current?.id === id ? { ...current, ...patch } : current)
@@ -2646,7 +2648,7 @@ export default function Workspace() {
             {activeCodexArchived && <Button size="small" variant="secondary" leadingIcon={<ArchiveRestore />} onClick={() => { void restoreCodex(activeDocument) }}>Restore</Button>}
             {!activeCodexArchived && <IconButton className="document-icon-action autotitle-trigger" variant="secondary" onClick={() => { void startAutotitle(activeDocument) }} aria-label={`Rename ${activeDocument.title} with AI`} title="Rename with AI"><WandSparkles /></IconButton>}
             <SummaryIcon state={summaryStates[activeDocument.id] ?? 'missing'} kind="codex" onOpen={() => { void openSummary(activeDocument) }} />
-          </>}><small>{activeCodexArchived ? `Archived · ${activeDocument.category}` : activeDocument.category}</small><CodexEntryTitle key={activeDocument.id} title={activeDocument.title} readOnly={activeCodexArchived} disabled={generationActive || articleIssue?.documentId === activeDocument.id} onSave={title => saveCodexTitle(activeDocument, title)} /></CodexIllustration> : <><div><small>Note</small><h1>{activeDocument.title}</h1></div><div className="document-title-actions"><IconButton className="document-icon-action autotitle-trigger" variant="secondary" onClick={() => { void startAutotitle(activeDocument) }} aria-label={`Autotitle ${activeDocument.title}`} title="Autotitle"><WandSparkles /></IconButton><Button size="small" variant="secondary" leadingIcon={<Pencil />} onClick={() => { void renameContentEntity(activeDocument) }}>Rename</Button></div></>}
+          </>}><small>{activeCodexArchived ? `Archived · ${activeDocument.category}` : activeDocument.category}</small><CodexEntryTitle key={activeDocument.id} title={activeDocument.title} readOnly={activeCodexArchived} disabled={generationActive || articleIssue?.documentId === activeDocument.id} onSave={title => saveDocumentTitle(activeDocument, title)} /></CodexIllustration> : <><div><small>Note</small><CodexEntryTitle key={activeDocument.id} kind="note" title={activeDocument.title} readOnly={false} disabled={generationActive || articleIssue?.documentId === activeDocument.id} onSave={title => saveDocumentTitle(activeDocument, title)} /></div><div className="document-title-actions"><IconButton className="document-icon-action autotitle-trigger" variant="secondary" onClick={() => { void startAutotitle(activeDocument) }} aria-label={`Autotitle ${activeDocument.title}`} title="Autotitle"><WandSparkles /></IconButton></div></>}
         </div>}
         {activeDocument?.type === 'codexEntry' && !isWorldWorkspace && <RoleplayParticipant entry={activeDocument} bookId={currentBook?.id} disabled={generationActive} onBeforeChange={beforeWorldCodexChange} onRefresh={refreshWorldCodexWorkspace} onStart={() => { void beforeWorldCodexChange().then(() => setCharacterSetupEntry(activeDocument.id)).catch(error => showToast(error.message)) }} />}
         {activeDocument?.type === 'codexEntry' && currentBook?.type === 'book' && <CodexTimeline key={`timeline-${activeDocument.id}`} bookId={currentBook.id} entry={activeDocument} currentSceneId={activeSceneId || undefined} disabled={generationActive} onBeforeChange={beforeWorldCodexChange} onRefresh={refreshWorldCodexWorkspace} onViewChange={nonBaseline => setTimelineView({ entryId: activeDocument.id, nonBaseline })} />}
